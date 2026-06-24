@@ -11930,6 +11930,49 @@ def s3_config():
     region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or S3_REGION
     return bucket, region
 
+
+def _env_is_true(name, *, default=False):
+    raw = str(os.environ.get(name, str(bool(default)).lower()) or "").strip().lower()
+    return raw in {"1", "true", "yes", "si", "sí", "on"}
+
+
+def s3_local_enabled() -> bool:
+    # En entornos locales (no Render) o si APP_S3_LOCAL_FALLBACK=1/true, usa almacenamiento local.
+    return (not os.environ.get("RENDER")) or _env_is_true("APP_S3_LOCAL_FALLBACK")
+
+
+def s3_local_payload(prefix, filename):
+    key = s3_safe_key(prefix, filename)
+    safe_name = re.sub(r"[^0-9A-Za-z._\\-\\/]+", "_", str(key)).lstrip("/").replace("..", "_")
+    return {
+        "key": key,
+        "url": f"/api/s3_local_put?key={urllib.parse.quote(str(key))}",
+        "public_url": f"/uploads/s3_local/{safe_name}",
+        "local": True,
+    }
+
+
+def s3_local_store_bytes(prefix, filename, data_bytes):
+    if not isinstance(data_bytes, (bytes, bytearray)):
+        raise TypeError("data_bytes must be bytes")
+    payload = s3_local_payload(prefix, filename)
+    key = payload["key"]
+    folder = UPLOADS / "s3_local"
+    folder.mkdir(parents=True, exist_ok=True)
+    safe_name = re.sub(r"[^0-9A-Za-z._\\-\\/]+", "_", str(key)).lstrip("/").replace("..", "_")
+    target = safe_resolve_under(folder, safe_name)
+    if not target:
+        return None, "key inválido"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("wb") as handle:
+        handle.write(bytes(data_bytes))
+    return {
+        "ok": True,
+        "key": key,
+        "public_url": f"/uploads/s3_local/{safe_name}",
+    }, ""
+
+
 def s3_client():
     global S3_BOTO3_AVAILABLE
     # Evita que boto3 intente resolver credenciales vía Instance Metadata (IMDS),
@@ -12133,8 +12176,25 @@ def _copilot_image_edit_guess_extension(mime="", filename=""):
 
 def _copilot_image_edit_plan_from_message(message):
     low = normalize_lookup_text(message or "").lower()
+    wants_cleanup = bool(re.search(r"limpi|limpi", low))
     plan = {"operations": []}
-    if any(token in low for token in ("limpia", "limpiar", "limpieza", "suelo", "pared", "muro", "higiene", "brillo", "deterioro")):
+    if any(
+        token in low
+        for token in (
+            "limpia",
+            "limpiar",
+            "limpieza",
+            "limpi",
+            "limpiado",
+            "limpiando",
+            "suelo",
+            "pared",
+            "muro",
+            "higiene",
+            "brillo",
+            "deterioro",
+        )
+    ) or wants_cleanup:
         plan["operations"].append(
             {
                 "op": "virtual_clean_room",
@@ -12144,9 +12204,27 @@ def _copilot_image_edit_plan_from_message(message):
                 ),
             }
         )
-    if any(token in low for token in ("limpieza real", "limpieza local", "limpiar foto", "sucio", "suciedad", "manchas")):
+    if any(token in low for token in ("limpieza real", "limpieza local", "limpiar foto", "sucio", "suciedad", "manchas")) or wants_cleanup:
         plan["operations"].append({"op": "photo_cleanup", "level": 1.2})
-    if any(token in low for token in ("vacía", "vacia", "vaciar", "quita muebles", "sin muebles", "estancia vacía", "sin estancias")):
+    if any(
+        token in low
+        for token in (
+            "vacía",
+            "vacia",
+            "vaciar",
+            "quita muebles",
+            "quita mueble",
+            "quitar mueble",
+            "quitar muebles",
+            "sin muebles",
+            "mueble",
+            "muebles",
+            "estancia vacía",
+            "sin estancias",
+            "sacar muebles",
+            "muebles fuera",
+        )
+    ):
         plan["operations"].append(
             {
                 "op": "virtual_empty_room",
@@ -12379,7 +12457,10 @@ def _copilot_image_edit_apply_operations(image, operations):
             summaries.append("limpieza local de habitación")
             virtual_ops.append("virtual_clean_room")
         elif op == "virtual_empty_room":
-            summaries.append("base para vaciado (requiere IA)")
+            img = ImageOps.autocontrast(img)
+            img = ImageEnhance.Contrast(img).enhance(1.15)
+            img = ImageEnhance.Sharpness(img).enhance(1.15)
+            summaries.append("base local para vaciado (sin objetos) / mejora luminancia")
             virtual_ops.append("virtual_empty_room")
         elif op == "photo_cleanup":
             try:
@@ -53732,6 +53813,27 @@ class Handler(BaseHTTPRequestHandler):
             if len(blob) > 25 * 1024 * 1024:
                 json_response(self, {"error": "Archivo demasiado grande (máx 25MB)"}, status=413)
                 return
+            if not s3_has_credentials():
+                if s3_local_enabled():
+                    result, err = s3_local_store_bytes(prefix, filename, blob)
+                    if not result:
+                        json_response(self, {"error": err or "No se pudo guardar localmente"}, status=500)
+                        return
+                    key = result["key"]
+                    try:
+                        session = getattr(self, "auth_session", None) or self._current_session()
+                        # Consistencia de permisos sobre la ruta local persistida.
+                        _s3_grant_key(session, key, conn=conn)
+                    except Exception:
+                        pass
+                    json_response(self, {"ok": True, **result})
+                    return
+                json_response(
+                    self,
+                    {"error": "S3 sin credenciales (configura AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY o AWS_PROFILE)"},
+                    status=400,
+                )
+                return
             client = s3_client()
             if not client:
                 bucket, region = s3_config()
@@ -53769,31 +53871,17 @@ class Handler(BaseHTTPRequestHandler):
             content_type = payload.get("content_type") or "application/pdf"
             prefix = payload.get("prefix") or "seguros"
             if not s3_has_credentials():
-                # Fallback local (dev/test): permite subir a /uploads/s3_local/<key> vía PUT.
-                allow_local = (os.environ.get("APP_S3_LOCAL_FALLBACK") or "").strip().lower() in (
-                    "1",
-                    "true",
-                    "yes",
-                    "si",
-                    "sí",
-                    "on",
-                )
-                if allow_local or (not os.environ.get("RENDER")):
-                    key = s3_safe_key(prefix, filename)
+                if s3_local_enabled():
+                    payload = s3_local_payload(prefix, filename)
+                    key = payload["key"]
                     try:
                         session = getattr(self, "auth_session", None) or self._current_session()
                         _s3_grant_key(session, key, conn=conn)
                     except Exception:
                         pass
-                    safe_name = re.sub(r"[^0-9A-Za-z._\\-\\/]+", "_", str(key)).lstrip("/").replace("..", "_")
                     json_response(
                         self,
-                        {
-                            "url": f"/api/s3_local_put?key={urllib.parse.quote(str(key))}",
-                            "key": key,
-                            "public_url": f"/uploads/s3_local/{safe_name}",
-                            "local": True,
-                        },
+                        payload,
                     )
                     return
                 json_response(
@@ -66361,6 +66449,14 @@ class Handler(BaseHTTPRequestHandler):
             if parsed.path == "/api/internal_copilot_action" and not message and not action_id:
                 json_response(self, {"error": "action_id o message requerido"}, status=400)
                 return
+            context_attachments = context.get("attachments") if isinstance(context.get("attachments"), list) else []
+            image_edit_hint = any(
+                token in normalize_lookup_text(message).lower()
+                for token in (
+                    "editar", "edita", "foto", "imagen", "mueble", "muebles", "estancia", "limpia", "limpiar",
+                    "limpieza", "vacia", "vacía", "vacio", "vacío", "quitar", "objeto", "fondo", "empty room",
+                )
+            )
 
             service_hint = str(payload.get("service_hint") or context.get("service_hint") or context.get("current_crm") or "").strip().lower()
             mode = str(payload.get("mode") or context.get("copilot_mode") or "operator").strip() or "operator"
@@ -66435,11 +66531,72 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, action_result)
                 return
 
+            if parsed.path == "/api/internal_copilot_chat" and image_edit_hint and context_attachments:
+                image_attachment = None
+                for candidate in context_attachments:
+                    if not isinstance(candidate, dict):
+                        continue
+                    key = str(candidate.get("key") or "").strip()
+                    filename = str(candidate.get("filename") or "").strip()
+                    content_type = str(candidate.get("content_type") or "").strip().lower()
+                    if not key:
+                        continue
+                    if content_type and content_type.startswith("image/"):
+                        image_attachment = candidate
+                        break
+                    if re.search(r"\.(png|jpe?g|webp)$", filename.lower()):
+                        image_attachment = candidate
+                        break
+                if image_attachment:
+                    try:
+                        edited = run_copilot_image_edit(
+                            {
+                                "s3_key": str(image_attachment.get("key") or "").strip(),
+                                "filename": str(image_attachment.get("filename") or "imagen.png").strip(),
+                                "content_type": str(image_attachment.get("content_type") or "").strip(),
+                                "message": message,
+                                "output_format": "png",
+                            },
+                            conn=conn,
+                            session=session,
+                            now=now,
+                        )
+                    except Exception as exc:
+                        edited = {"error": str(exc)}
+                    if edited.get("url"):
+                        edit_summary = edited.get("summary") or []
+                        if isinstance(edit_summary, list):
+                            edit_summary = " · ".join([str(item) for item in edit_summary if item]) or "Edición completada."
+                        else:
+                            edit_summary = str(edit_summary or "Edición completada.")
+                        json_response(
+                            self,
+                            {
+                                "ok": True,
+                                "answer": f"Edición de imagen completada. {edit_summary}",
+                                "message": f"Edición de imagen completada. {edit_summary}",
+                                "intent": "image_edit",
+                                "image_url": str(edited.get("url") or "").strip(),
+                                "image_mime": str(edited.get("mime") or "image/png").strip(),
+                                "image_summary": edit_summary,
+                                "suggestions": ["Editar otra imagen", "Verificar resultado", "Resumen rápido"],
+                                "cards": _copilot_cards(),
+                                "actions": [],
+                                "sources": ["copilot_image_edit"],
+                            }
+                        )
+                        return
+                    context["image_edit_error"] = str(edited.get("error") or "No se pudo procesar la imagen.")
+
             if not message:
                 if action_result and isinstance(action_result.get("message"), str):
                     message = action_result["message"]
                 else:
                     message = "Operación solicitada. Te devuelvo un plan operativo de corto alcance."
+            if context.get("image_edit_error"):
+                image_error = str(context.get("image_edit_error") or "").strip()
+                if image_error:
+                    message = f"{message} (No pude editar la imagen ahora: {image_error})."
 
             message_lower = message.lower()
             if ("agenda" in message_lower and "diaria" in message_lower) or "urgente hoy" in message_lower:

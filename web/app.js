@@ -13814,6 +13814,7 @@ const submitInternalCopilotQuery = async ({ message, attachments = [], statusEl 
         });
         state.currentWorkspaceInternalCopilotMessages = history.slice(-20);
         renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages);
+        return true;
       }
     }
 
