@@ -13323,6 +13323,9 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
     <div class="crm-mini-list">
       ${rows.slice(-10).map((row, index) => {
         const role = String(row.role || "assistant").trim();
+        const imageResultUrl = String(row.image_url || row.image_result_url || row.result_image || row.url || "").trim();
+        const imageResultMime = String(row.image_mime || row.mime || "").trim().toLowerCase();
+        const imageResultSummary = String(row.image_summary || "").trim();
         const cards = Array.isArray(row.cards) ? row.cards : [];
         const actions = Array.isArray(row.actions) ? row.actions : [];
         const suggestions = Array.isArray(row.suggestions) ? row.suggestions : [];
@@ -13333,6 +13336,15 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
               <strong>${role === "user" ? "Tú" : "Copilot interno"}</strong>
               ${row.intent ? `<div class="muted">${escapeHtml(String(row.intent || ""))}</div>` : ""}
               <p class="muted" style="margin:6px 0 0">${escapeHtml(String(row.message || ""))}</p>
+              ${imageResultUrl && (imageResultMime.startsWith("image/") || imageResultUrl.startsWith("http") || imageResultUrl.startsWith("/uploads/")) ? `
+                <div class="muted" style="margin-top:8px">
+                  <a href="${escapeHtml(imageResultUrl)}" target="_blank" rel="noreferrer">${escapeHtml("Ver imagen editada")}</a>
+                  ${imageResultSummary ? ` · ${escapeHtml(imageResultSummary)}` : ""}
+                </div>
+                <div style="margin-top:8px">
+                  <img src="${escapeHtml(imageResultUrl)}" alt="Resultado de edición" style="max-width:100%;max-height:220px;border-radius:8px;display:block;border:1px solid #dbe4d8" />
+                </div>
+              ` : ""}
               ${cards.length ? `
                 <div class="workspace-summary-list" style="margin-top:8px">
                   ${cards.slice(0, 3).map((card) => `
@@ -13679,6 +13691,11 @@ const submitInternalCopilotQuery = async ({ message, attachments = [], statusEl 
     if (statusEl) statusEl.textContent = "Escribe una consulta.";
     return false;
   }
+
+  const intentText = normalizeSimple(trimmedMessage).toLowerCase();
+  const imageEditIntent = /\b(edita|editar|foto|imagen|mueble|muebles|estancia|limpia|limpiar|limpieza|vacía|vacia|vacío|vacio|oculta|quitar|objeto|fondo)\b/.test(intentText);
+  const normalizedMessage = String(message || "").trim();
+
   const params = new URLSearchParams(window.location.search || "");
   const payload = {
     workspace_id: workspaceId,
@@ -13692,11 +13709,15 @@ const submitInternalCopilotQuery = async ({ message, attachments = [], statusEl 
   state.currentWorkspaceInternalCopilotMessages = history;
   renderWorkspaceInternalCopilotFeed(history);
   if (statusEl) statusEl.textContent = "Consultando...";
+
   try {
     const uploadedItems = [];
-    for (const attachmentFile of Array.from(attachments || []).filter((file) => file instanceof File && file.size > 0)) {
+    const uploadedImageItems = [];
+    const filesToUpload = Array.from(attachments || []).filter((file) => file instanceof File && file.size > 0);
+
+    for (const attachmentFile of filesToUpload) {
       let prefix = "copilot";
-      const lowerMsg = normalizeSimple(trimmedMessage).toLowerCase();
+      const lowerMsg = intentText;
       const serviceHint = String(params.get("crm") || "").trim().toLowerCase();
       const fileName = normalizeSimple(String(attachmentFile.name || "")).toLowerCase();
       if (lowerMsg.includes("renta") || fileName.includes("renta")) prefix = "rentas";
@@ -13708,21 +13729,103 @@ const submitInternalCopilotQuery = async ({ message, attachments = [], statusEl 
       else if (serviceHint === "financiaciones" || serviceHint === "fin") prefix = "hipotecas";
       const uploaded = await uploadFileToS3(attachmentFile, prefix, statusEl);
       if (uploaded?.key || uploaded?.public_url) {
-        uploadedItems.push({
+        const uploadedItem = {
           key: String(uploaded.key || "").trim(),
           public_url: String(uploaded.public_url || "").trim(),
           filename: String(attachmentFile.name || "").trim(),
           content_type: String(attachmentFile.type || "").trim(),
           size: Number(attachmentFile.size || 0),
-        });
+        };
+        uploadedItems.push(uploadedItem);
+        const isImageAttachment = String(uploadedItem.content_type || "").startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(uploadedItem.filename || "");
+        if (isImageAttachment) {
+          uploadedImageItems.push(uploadedItem);
+          uploadedItem._source_file = attachmentFile;
+        }
       }
     }
+
+    if (imageEditIntent && uploadedImageItems.length) {
+      const imageSource = uploadedImageItems[0];
+      if (statusEl) statusEl.textContent = "Editando imagen...";
+
+      const applyImageEditResponse = (edited, fallbackMessage = "Se ha aplicado la mejora solicitada.") => {
+        const imageSummary = Array.isArray(edited.summary) ? edited.summary.join(" · ") : "";
+        history.push({
+          role: "assistant",
+          message: `Edición de imagen completada. ${imageSummary || fallbackMessage}`,
+          intent: "image_edit",
+          image_url: String(edited.url || "").trim(),
+          image_mime: String(edited.mime || "image/png").trim(),
+          image_summary: imageSummary,
+          suggestions: ["Editar otra foto", "Probar con otra foto", "Resumen rápido"],
+          cards: [],
+          actions: [],
+          sources: ["copilot_image_edit"],
+        });
+        state.currentWorkspaceInternalCopilotMessages = history.slice(-20);
+        renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages);
+        if (typeof clear === "function") clear();
+        if (statusEl) statusEl.textContent = "Listo.";
+      };
+
+      try {
+        const editPayload = {
+          s3_key: imageSource.key,
+          filename: imageSource.filename,
+          content_type: imageSource.content_type,
+          message: normalizedMessage,
+          output_format: "png",
+        };
+        const edited = await apiPost("/api/copilot_image_edit", editPayload);
+        if (!edited || !edited.url) {
+          throw new Error("La edición no devolvió URL.");
+        }
+        applyImageEditResponse(edited);
+        return true;
+      } catch (imageEditError) {
+        if (imageSource._source_file) {
+          try {
+            const filePayload = await readFileAsDataUrl(imageSource._source_file);
+            const edited = await apiPost("/api/copilot_image_edit", {
+              file_base64: filePayload,
+              filename: imageSource.filename,
+              content_type: imageSource.content_type || imageSource._source_file.type || "image/jpeg",
+              message: normalizedMessage,
+              output_format: "png",
+            });
+            if (edited && edited.url) {
+              applyImageEditResponse(edited, "Edición completada usando carga directa de imagen.");
+              return true;
+            }
+          } catch (imageEditBase64Error) {
+            imageEditError = imageEditBase64Error;
+          }
+        }
+        if (statusEl) statusEl.textContent = `No se pudo editar la imagen: ${String(imageEditError?.message || "Error").trim()}`;
+        history.push({
+          role: "assistant",
+          message: `No pude editar la imagen automáticamente: ${String(imageEditError?.message || "Reintento de análisis en el chat interno.")}`,
+          intent: "image_edit_error",
+          suggestions: ["Inténtalo de nuevo con otro formato", "Usar 'Editor de fotos (Verifika²)'"],
+          cards: [],
+          actions: [],
+          sources: ["copilot_image_edit", "internal_copilot_chat"],
+        });
+        state.currentWorkspaceInternalCopilotMessages = history.slice(-20);
+        renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages);
+      }
+    }
+
     if (uploadedItems.length) payload.context.attachments = uploadedItems;
     const data = await apiPost("/api/internal_copilot_chat", payload);
     history.push({
       role: "assistant",
       message: String(data?.answer || "").trim(),
       intent: String(data?.intent || "").trim(),
+      image_url: String(data?.image_url || data?.url || data?.result_image || "").trim(),
+      image_mime: String(data?.image_mime || data?.mime || "").trim(),
+      image_summary: String(data?.image_summary || "").trim(),
       suggestions: Array.isArray(data?.suggestions) ? data.suggestions : [],
       cards: Array.isArray(data?.cards) ? data.cards : [],
       actions: Array.isArray(data?.actions) ? data.actions : [],
@@ -14027,6 +14130,36 @@ const syncPersistentInternalCopilotWidget = () => {
   if (status) {
     status.textContent = currentGlobalCopilotScopeLabel();
   }
+  const meta = document.querySelector("header .meta");
+  const hasFloatingHeader = !!(meta && meta.offsetParent);
+  if (hasFloatingHeader) {
+    if (meta && toggle.parentElement !== meta) {
+      meta.appendChild(toggle);
+    }
+    toggle.classList.add("global-internal-copilot-toggle", "global-internal-copilot-toggle--docked");
+    toggle.classList.remove("global-internal-copilot-toggle--floating");
+    toggle.style.position = "";
+    toggle.style.right = "";
+    toggle.style.top = "";
+    toggle.style.zIndex = "";
+    toggle.style.boxShadow = "";
+    const rect = toggle.getBoundingClientRect();
+    panel.style.right = "18px";
+    panel.style.top = `${Math.max(64, Math.ceil((rect.bottom || 64) + 10))}px`;
+  } else {
+    if (toggle.parentElement !== document.body) {
+      document.body.appendChild(toggle);
+    }
+    toggle.classList.add("global-internal-copilot-toggle", "global-internal-copilot-toggle--floating");
+    toggle.classList.remove("global-internal-copilot-toggle--docked");
+    toggle.style.position = "fixed";
+    toggle.style.right = "18px";
+    toggle.style.top = "18px";
+    toggle.style.zIndex = "2147483000";
+    toggle.style.boxShadow = "0 10px 24px rgba(15,23,42,.18)";
+    panel.style.top = "72px";
+    panel.style.right = "18px";
+  }
   syncPersistentInternalCopilotAvailability();
   renderGlobalInternalCopilotPanels();
 };
@@ -14040,7 +14173,7 @@ const ensurePersistentInternalCopilotWidget = () => {
   const root = document.createElement("div");
   root.id = "globalInternalCopilotWidget";
   root.innerHTML = `
-    <button type="button" id="globalInternalCopilotToggle" class="secondary" style="position:fixed;right:18px;top:118px;z-index:2147483000;box-shadow:0 10px 24px rgba(15,23,42,.18);display:inline-flex;align-items:center;justify-content:center">${buildInternalCopilotToggleLabel(false)}</button>
+    <button type="button" id="globalInternalCopilotToggle" class="secondary global-internal-copilot-toggle">${buildInternalCopilotToggleLabel(false)}</button>
     <div id="globalInternalCopilotPanel" class="hidden" style="position:fixed;right:18px;top:162px;width:min(448px,calc(100vw - 24px));height:min(calc(100vh - 180px),720px);overflow:hidden;z-index:2147482999;background:linear-gradient(180deg,#f6f9f3 0%,#ffffff 14%);border:1px solid #dbe4d8;border-radius:16px;box-shadow:0 22px 52px rgba(15,23,42,.18);display:flex;flex-direction:column">
       <div style="padding:14px 14px 10px;border-bottom:1px solid #e5ece2;background:linear-gradient(135deg,#173b30 0%,#65744c 56%,#b4943b 100%);color:#fff">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
