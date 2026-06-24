@@ -2,6 +2,15 @@
 // Subimos el timeout para evitar falsos "Servidor no disponible" al arrancar.
 try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
+const INTERNAL_COPILOT_BRAND_NAME = "Verifika²";
+const INTERNAL_COPILOT_ICON_URL = "/assets/verifika2/verifika2_mark.svg";
+
+const buildInternalCopilotToggleLabel = (isOpen) => `
+  <span style="display:inline-flex;align-items:center;gap:8px;justify-content:center">
+    <img src="${INTERNAL_COPILOT_ICON_URL}" alt="" aria-hidden="true" style="width:13px;height:13px;display:block;border-radius:999px;background:#fff;padding:1px" />
+    ${isOpen ? "Cerrar" : "Abrir"} ${INTERNAL_COPILOT_BRAND_NAME}
+  </span>
+`;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
 const APP_SW_VERSION = "v363";
@@ -14013,7 +14022,7 @@ const syncPersistentInternalCopilotWidget = () => {
   if (!panel || !toggle) return;
   const isOpen = Boolean(state.persistentInternalCopilotOpen);
   panel.classList.toggle("hidden", !isOpen);
-  toggle.textContent = isOpen ? "Cerrar asistente" : "Abrir asistente";
+  toggle.innerHTML = buildInternalCopilotToggleLabel(isOpen);
   toggle.setAttribute("aria-expanded", isOpen ? "true" : "false");
   if (status) {
     status.textContent = currentGlobalCopilotScopeLabel();
@@ -14031,12 +14040,12 @@ const ensurePersistentInternalCopilotWidget = () => {
   const root = document.createElement("div");
   root.id = "globalInternalCopilotWidget";
   root.innerHTML = `
-    <button type="button" id="globalInternalCopilotToggle" class="secondary" style="position:fixed;right:18px;top:118px;z-index:2147483000;box-shadow:0 10px 24px rgba(15,23,42,.18)">Abrir asistente</button>
+    <button type="button" id="globalInternalCopilotToggle" class="secondary" style="position:fixed;right:18px;top:118px;z-index:2147483000;box-shadow:0 10px 24px rgba(15,23,42,.18);display:inline-flex;align-items:center;justify-content:center">${buildInternalCopilotToggleLabel(false)}</button>
     <div id="globalInternalCopilotPanel" class="hidden" style="position:fixed;right:18px;top:162px;width:min(448px,calc(100vw - 24px));height:min(calc(100vh - 180px),720px);overflow:hidden;z-index:2147482999;background:linear-gradient(180deg,#f6f9f3 0%,#ffffff 14%);border:1px solid #dbe4d8;border-radius:16px;box-shadow:0 22px 52px rgba(15,23,42,.18);display:flex;flex-direction:column">
       <div style="padding:14px 14px 10px;border-bottom:1px solid #e5ece2;background:linear-gradient(135deg,#173b30 0%,#65744c 56%,#b4943b 100%);color:#fff">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px">
           <div>
-            <strong style="display:block;font-size:17px;letter-spacing:0">Asistente</strong>
+            <strong style="display:block;font-size:17px;letter-spacing:0">${INTERNAL_COPILOT_BRAND_NAME}</strong>
             <div id="globalInternalCopilotScope" style="margin-top:4px;color:rgba(255,255,255,.82);font-size:13px">Sin workspace activo</div>
           </div>
           <span style="font-size:12px;padding:5px 9px;border-radius:999px;background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.18)">En línea</span>

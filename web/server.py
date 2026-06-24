@@ -66449,7 +66449,7 @@ class Handler(BaseHTTPRequestHandler):
             elif any(token in message_lower for token in ("error", "fall", "no funciona", "problema", "averia")):
                 answer = "Veo una incidencia. Reviso acceso, contexto y aplico verificación del workflow antes de proponer corrección."
             elif any(token in message_lower for token in ("foto", "imagen", "editar")):
-                answer = "Para edición de imagen, usa la sección 'Editor de fotos (Ollana)' en Copilot Inmobiliario."
+                answer = "Para edición de imagen, usa la sección 'Editor de fotos (Verifika²)' en Copilot Inmobiliario."
             elif any(token in message_lower for token in ("modo", "supervisor", "legal", "fiscal", "laboral", "direccion")):
                 answer = "Cambio de perspectiva activado: te paso recomendaciones de riesgo y operación para ese modo."
             else:
