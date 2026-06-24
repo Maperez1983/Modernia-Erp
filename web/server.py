@@ -12167,11 +12167,34 @@ def _copilot_image_edit_guess_extension(mime="", filename=""):
     name = str(filename or "").strip().lower()
     if mime_text == "image/png" or name.endswith(".png"):
         return "png"
+    if mime_text in {"image/jpeg", "image/jpg"} or name.endswith((".jpg", ".jpeg")):
+        return "jpg"
     if mime_text in {"image/webp"} or name.endswith(".webp"):
         return "webp"
+    if mime_text in {"image/gif"} or name.endswith(".gif"):
+        return "gif"
     if mime_text == "application/pdf" or name.endswith(".pdf"):
         return "pdf"
     return "jpg"
+
+
+def _copilot_image_edit_is_image_file(filename="", content_type=""):
+    content = str(content_type or "").strip().lower()
+    if content.startswith("image/"):
+        return True
+    name = str(filename or "").strip().lower()
+    return name.endswith(
+        (
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+            ".gif",
+            ".bmp",
+            ".tif",
+            ".tiff",
+        )
+    )
 
 
 def _copilot_image_edit_plan_from_message(message):
@@ -12645,10 +12668,7 @@ def run_copilot_image_edit(payload, *, conn=None, session=None, now=None):
     }
     raw_bytes, mime, _hint = decode_document_payload(source_payload, conn=conn, session=session)
     source_name = str(source_payload.get("filename") or "imagen").strip() or "imagen"
-    if not (
-        str(mime or "").startswith("image/")
-        or source_name.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
-    ):
+    if not _copilot_image_edit_is_image_file(filename=source_name, content_type=mime):
         raise ValueError("El editor de fotos solo admite imágenes por ahora.")
     try:
         image = Image.open(BytesIO(raw_bytes))
@@ -66541,10 +66561,7 @@ class Handler(BaseHTTPRequestHandler):
                     content_type = str(candidate.get("content_type") or "").strip().lower()
                     if not key:
                         continue
-                    if content_type and content_type.startswith("image/"):
-                        image_attachment = candidate
-                        break
-                    if re.search(r"\.(png|jpe?g|webp)$", filename.lower()):
+                    if _copilot_image_edit_is_image_file(filename=filename, content_type=content_type):
                         image_attachment = candidate
                         break
                 if image_attachment:
@@ -66578,6 +66595,7 @@ class Handler(BaseHTTPRequestHandler):
                                 "intent": "image_edit",
                                 "image_url": str(edited.get("url") or "").strip(),
                                 "image_mime": str(edited.get("mime") or "image/png").strip(),
+                                "image_filename": str(edited.get("filename") or "").strip(),
                                 "image_summary": edit_summary,
                                 "suggestions": ["Editar otra imagen", "Verificar resultado", "Resumen rápido"],
                                 "cards": _copilot_cards(),

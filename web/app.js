@@ -456,12 +456,24 @@ const guessMimeType = (file) => {
   if (name.endsWith(".png")) return "image/png";
   if (name.endsWith(".webp")) return "image/webp";
   if (name.endsWith(".gif")) return "image/gif";
+  if (name.endsWith(".bmp")) return "image/bmp";
+  if (name.endsWith(".tif") || name.endsWith(".tiff")) return "image/tiff";
   if (name.endsWith(".svg")) return "image/svg+xml";
   if (name.endsWith(".doc")) return "application/msword";
   if (name.endsWith(".docx")) return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   if (name.endsWith(".xls")) return "application/vnd.ms-excel";
   if (name.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
   return "application/octet-stream";
+};
+
+const looksLikeImageAttachment = (file) => {
+  const contentType = String(file?.content_type || file?.type || "").trim().toLowerCase();
+  if (contentType && contentType.startsWith("image/")) {
+    return true;
+  }
+  const filename = String(file?.filename || file?.name || "").trim().toLowerCase();
+  if (!filename) return false;
+  return /\.(png|jpe?g|webp|gif|bmp|tif|tiff)$/.test(filename);
 };
 
 const isCompressibleImage = (file) => {
@@ -12384,7 +12396,7 @@ const renderWorkspaceCopilotHub = () => {
         </label>
         <label class="span-2">
           Adjunto
-          <input type="file" name="attachment" multiple accept=".pdf,image/*,.png,.jpg,.jpeg,.webp" />
+          <input type="file" name="attachment" multiple accept=".pdf,image/*,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff" />
         </label>
         <div class="form-actions span-2">
           <button type="submit">Preguntar</button>
@@ -13326,6 +13338,13 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
         const imageResultUrl = String(row.image_url || row.image_result_url || row.result_image || row.url || "").trim();
         const imageResultMime = String(row.image_mime || row.mime || "").trim().toLowerCase();
         const imageResultSummary = String(row.image_summary || "").trim();
+        const imageDownloadName = String(row.image_filename || "").trim()
+          || imageResultUrl
+            .split(/[?#]/)[0]
+            .split("/")
+            .pop()
+            .trim()
+          || "resultado-copilot.jpg";
         const cards = Array.isArray(row.cards) ? row.cards : [];
         const actions = Array.isArray(row.actions) ? row.actions : [];
         const suggestions = Array.isArray(row.suggestions) ? row.suggestions : [];
@@ -13339,6 +13358,7 @@ const renderWorkspaceInternalCopilotFeed = (messages = []) => {
               ${imageResultUrl && (imageResultMime.startsWith("image/") || imageResultUrl.startsWith("http") || imageResultUrl.startsWith("/uploads/")) ? `
                 <div class="muted" style="margin-top:8px">
                   <a href="${escapeHtml(imageResultUrl)}" target="_blank" rel="noreferrer">${escapeHtml("Ver imagen editada")}</a>
+                  · <a href="${escapeHtml(imageResultUrl)}" download="${escapeHtml(imageDownloadName)}" target="_blank" rel="noreferrer">Descargar</a>
                   ${imageResultSummary ? ` · ${escapeHtml(imageResultSummary)}` : ""}
                 </div>
                 <div style="margin-top:8px">
@@ -13692,6 +13712,27 @@ const submitInternalCopilotQuery = async ({ message, attachments = [], statusEl 
     return false;
   }
 
+  const extractCopilotAnswer = (payload = {}) => {
+    const normalized = [
+      payload?.answer,
+      payload?.message,
+      payload?.text,
+      payload?.output,
+      payload?.disclaimer,
+      payload?.detail,
+      payload?.result?.answer,
+      payload?.result?.message,
+      payload?.result?.text,
+    ];
+    for (const candidate of normalized) {
+      const value = String(candidate || "").trim();
+      if (value) {
+        return value;
+      }
+    }
+    return "";
+  };
+
   const intentText = normalizeSimple(trimmedMessage).toLowerCase();
   const imageEditIntent = /\b(edita|editar|foto|imagen|mueble|muebles|estancia|limpia|limpiar|limpieza|vacía|vacia|vacío|vacio|oculta|quitar|objeto|fondo)\b/.test(intentText);
   const normalizedMessage = String(message || "").trim();
@@ -13733,11 +13774,11 @@ const submitInternalCopilotQuery = async ({ message, attachments = [], statusEl 
           key: String(uploaded.key || "").trim(),
           public_url: String(uploaded.public_url || "").trim(),
           filename: String(attachmentFile.name || "").trim(),
-          content_type: String(attachmentFile.type || "").trim(),
+          content_type: String(guessMimeType(attachmentFile)).trim(),
           size: Number(attachmentFile.size || 0),
         };
         uploadedItems.push(uploadedItem);
-        const isImageAttachment = String(uploadedItem.content_type || "").startsWith("image/") || /\.(png|jpe?g|webp)$/i.test(uploadedItem.filename || "");
+        const isImageAttachment = looksLikeImageAttachment(uploadedItem);
         if (isImageAttachment) {
           uploadedImageItems.push(uploadedItem);
           uploadedItem._source_file = attachmentFile;
@@ -13757,6 +13798,7 @@ const submitInternalCopilotQuery = async ({ message, attachments = [], statusEl 
           intent: "image_edit",
           image_url: String(edited.url || "").trim(),
           image_mime: String(edited.mime || "image/png").trim(),
+          image_filename: String(edited.filename || "").trim(),
           image_summary: imageSummary,
           suggestions: ["Editar otra foto", "Probar con otra foto", "Resumen rápido"],
           cards: [],
@@ -13820,12 +13862,21 @@ const submitInternalCopilotQuery = async ({ message, attachments = [], statusEl 
 
     if (uploadedItems.length) payload.context.attachments = uploadedItems;
     const data = await apiPost("/api/internal_copilot_chat", payload);
+    if (data?.ok === false) {
+      const backendError = String(data?.error || data?.detail || data?.message || "Respuesta rechazada por el servidor.").trim();
+      throw new Error(backendError);
+    }
+    if (data?.error) {
+      throw new Error(String(data.error).trim() || "Respuesta vacía del asistente.");
+    }
+    const assistantMessage = extractCopilotAnswer(data);
     history.push({
       role: "assistant",
-      message: String(data?.answer || "").trim(),
+      message: assistantMessage || "No se pudo generar una respuesta con ese contexto.",
       intent: String(data?.intent || "").trim(),
       image_url: String(data?.image_url || data?.url || data?.result_image || "").trim(),
       image_mime: String(data?.image_mime || data?.mime || "").trim(),
+      image_filename: String(data?.image_filename || "").trim(),
       image_summary: String(data?.image_summary || "").trim(),
       suggestions: Array.isArray(data?.suggestions) ? data.suggestions : [],
       cards: Array.isArray(data?.cards) ? data.cards : [],
@@ -13839,6 +13890,17 @@ const submitInternalCopilotQuery = async ({ message, attachments = [], statusEl 
     return true;
   } catch (error) {
     if (statusEl) statusEl.textContent = "Error en la consulta.";
+    history.push({
+      role: "assistant",
+      message: `No se pudo completar la consulta: ${String(error?.message || "Error desconocido").trim()}`,
+      intent: "copilot_error",
+      suggestions: ["Reintentar", "Comprobar conexión"],
+      cards: [],
+      actions: [],
+      sources: ["internal_copilot_chat"],
+    });
+    state.currentWorkspaceInternalCopilotMessages = history.slice(-20);
+    renderWorkspaceInternalCopilotFeed(state.currentWorkspaceInternalCopilotMessages);
     setUiToast("No se pudo consultar el chat interno", String(error?.message || "Error desconocido"));
     return false;
   }
@@ -14205,7 +14267,7 @@ const ensurePersistentInternalCopilotWidget = () => {
             <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
               <label style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid #dbe4d8;border-radius:999px;background:#fff;color:#365243;cursor:pointer">
                 <span>Adjuntar</span>
-                <input type="file" name="attachment" multiple accept=".pdf,image/*,.png,.jpg,.jpeg,.webp" style="display:none" />
+                <input type="file" name="attachment" multiple accept=".pdf,image/*,.png,.jpg,.jpeg,.webp,.gif,.bmp,.tif,.tiff" style="display:none" />
               </label>
               <div style="display:flex;align-items:center;gap:8px;margin-left:auto">
                 <span id="globalInternalCopilotStatus" class="muted"></span>
@@ -76189,6 +76251,13 @@ const renderImageEditResult = (data, target) => {
     return;
   }
   const href = String(data.url || "").trim();
+  const filename = String(data.filename || "").trim()
+    || href
+      .split(/[?#]/)[0]
+      .split("/")
+      .pop()
+      .trim()
+    || "resultado-copilot.jpg";
   const size = data.size || {};
   const w = String(size.width || "");
   const h = String(size.height || "");
@@ -76196,12 +76265,18 @@ const renderImageEditResult = (data, target) => {
   const disclosure = data.disclosure_message
     ? `<div class='crm-focus-link'><strong>Nota</strong><span>${escapeHtml(String(data.disclosure_message))}</span></div>`
     : "";
+  const isImageResult = href && (String(data.mime || "").startsWith("image/") || /\.(jpg|jpeg|png|webp|gif|bmp|tif|tiff)$/i.test(href));
   const formatText = href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${escapeHtml(href)}</a>` : "-";
+  const safeName = escapeHtml(filename);
   target.innerHTML = `
     <div class="crm-focus-link"><strong>Resultado</strong><span>${formatText}</span></div>
+    <div class="crm-focus-link"><strong>Descarga</strong><span><a href="${escapeHtml(href)}" download="${safeName}" target="_blank" rel="noreferrer">Descargar imagen editada</a> (elige dónde guardar)</span></div>
     <div class="crm-focus-link"><strong>Operaciones</strong><span>${escapeHtml(ops || "Autoconfigurado")}</span></div>
     <div class="crm-focus-link"><strong>Tamaño</strong><span>${w} x ${h}</span></div>
     ${disclosure}
+    ${isImageResult ? `
+      <div class="crm-focus-link"><strong>Vista previa</strong><span><img src="${escapeHtml(href)}" alt="Vista previa" style="max-width:100%;max-height:320px;border-radius:8px;display:block;margin-top:8px;border:1px solid #dbe4d8" /></span></div>
+    ` : ""}
   `;
 };
 
@@ -76215,7 +76290,7 @@ if (copilotImageEditForm) {
       return;
     }
     const file = copilotImageEditFile.files[0];
-    if (!file.type.startsWith("image/")) {
+    if (!looksLikeImageAttachment(file)) {
       if (copilotImageEditStatus) {
         copilotImageEditStatus.textContent = "El archivo debe ser una imagen.";
       }
@@ -76235,6 +76310,7 @@ if (copilotImageEditForm) {
       const payload = {
         file_base64: filePayload,
         filename: file.name,
+        content_type: guessMimeType(file),
       };
       const quickOp = copilotImageEditQuickOp ? copilotImageEditQuickOp.value : "";
       const quickPayload = buildImageEditPayloadFromQuick(quickOp);
@@ -76276,17 +76352,6 @@ if (copilotImageEditForm) {
         copilotImageEditStatus.textContent = "Edición generada.";
       }
       renderImageEditResult(data, copilotImageEditResult);
-      if (copilotImageEditResult && data?.url && (data?.mime || "").startsWith("image/")) {
-        const img = document.createElement("img");
-        img.src = data.url;
-        img.alt = "Resultado de edición";
-        img.style.maxWidth = "100%";
-        img.style.maxHeight = "320px";
-        img.style.borderRadius = "8px";
-        img.style.marginTop = "8px";
-        img.style.display = "block";
-        copilotImageEditResult.appendChild(img);
-      }
     } catch (error) {
       if (copilotImageEditStatus) {
         copilotImageEditStatus.textContent = error?.message || "No se pudo editar la imagen.";

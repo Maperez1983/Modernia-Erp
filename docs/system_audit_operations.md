@@ -111,6 +111,35 @@ python3 scripts/render_env_sync.py \
 Este script primero lee las variables actuales y luego hace merge. Evita el error
 de pisar toda la configuracion con un `PUT` parcial.
 
+### Guardia anti-desaparición de secretos
+
+Para detectar si faltan variables críticas de AWS en Render:
+
+```bash
+python3 scripts/render_env_drift_guard.py \
+  --api-key "$RENDER_API_KEY" \
+  --service-id "$RENDER_WEB_SERVICE_ID" \
+  --json
+```
+
+Si la salida es `status: failed`, significa que hay faltantes.
+
+Para auto-restaurar automáticamente usando valores que ya tengas exportados en tu shell:
+
+```bash
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_REGION=...
+export AWS_S3_BUCKET=...
+python3 scripts/render_env_drift_guard.py \
+  --api-key "$RENDER_API_KEY" \
+  --service-id "$RENDER_WEB_SERVICE_ID" \
+  --remediate
+```
+
+Esto permite dejar la operación en cron/CI y evitar pérdidas accidentales por
+actualizaciones de entorno.
+
 La cuarentena operativa publica:
 
 - `APP_EMERGENCY_MODE=off|read_only|quarantine`
