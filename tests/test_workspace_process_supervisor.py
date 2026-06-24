@@ -3003,13 +3003,14 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         reply = server.build_workspace_internal_copilot_reply(
             self.conn,
             "ws1",
-            "resume el impacto legal de este cambio",
+            "qué hago ahora en legal",
             empresa_id="e1",
             actor={"id": "u1", "usuario": "QA", "rol": "Lectura", "servicio": "Seguros"},
             context={"copilot_mode": "legal", "current_crm": "gestoria"},
         )
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["mode"], "legal")
+        self.assertTrue(any(str(card.get("title") or "") == "Legal senior" for card in (reply.get("cards") or [])))
 
     def test_internal_copilot_reply_mode_fiscal(self):
         self.conn.execute(
@@ -3056,6 +3057,7 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["mode"], "fiscal")
         self.assertTrue(any(str(card.get("title") or "") == "Fiscal-contable" for card in (reply.get("cards") or [])))
+        self.assertTrue(any(str(card.get("title") or "") == "Fiscal-contable" for card in (reply.get("cards") or [])))
 
     def test_internal_copilot_reply_mode_laboral(self):
         self.conn.execute(
@@ -3078,6 +3080,15 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["mode"], "laboral")
         self.assertTrue(any(str(card.get("title") or "") == "Laboral/RRHH" for card in (reply.get("cards") or [])))
+        self.assertTrue(any(str(card.get("title") or "") == "Laboral/RRHH" for card in (reply.get("cards") or [])))
+
+    def test_internal_copilot_agent_mode_appendix_exposes_expert_rules(self):
+        legal_text = server._workspace_internal_copilot_agent_mode_appendix("legal", "gestoria")
+        fiscal_text = server._workspace_internal_copilot_agent_mode_appendix("fiscal", "gestoria")
+        laboral_text = server._workspace_internal_copilot_agent_mode_appendix("laboral", "rrhh")
+        self.assertIn("Legal senior", legal_text)
+        self.assertIn("Fiscal-contable", fiscal_text)
+        self.assertIn("Laboral/RRHH", laboral_text)
 
     def test_internal_copilot_run_operator_sequence(self):
         self.conn.execute(

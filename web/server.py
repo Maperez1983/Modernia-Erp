@@ -44724,6 +44724,171 @@ def _workspace_internal_copilot_collect_laboral_snapshot(conn, workspace_id, *, 
     return snapshot
 
 
+def _workspace_internal_copilot_expert_profile(mode="", domain=""):
+    mode_key = normalize_lookup_text(mode or "").lower()
+    domain_key = _workspace_internal_copilot_normalize_domain(domain or "")
+    profiles = {
+        "legal": {
+            "title": "Legal senior",
+            "summary": "Riesgo, impacto normativo, documentos afectados y siguiente decisión defendible.",
+            "priorities": [
+                "priorizar impacto legal y contractual real",
+                "aterrizar cambios normativos en tareas y flujos",
+                "identificar documentos, cláusulas y workflows afectados",
+                "escalar cuando falte base documental o el riesgo sea alto",
+            ],
+            "checklist": [
+                "Identificar norma o novedad concreta",
+                "Medir impacto operativo en CRM/documentos",
+                "Señalar riesgo y urgencia",
+                "Proponer acción y revisión humana si toca",
+            ],
+            "risk_rules": [
+                "no afirmar validez jurídica definitiva sin base suficiente",
+                "no cerrar cambios de alto impacto sin revisión humana",
+                "distinguir borrador, recomendación y decisión final",
+            ],
+            "default_domain": domain_key or "gestoria",
+        },
+        "fiscal": {
+            "title": "Fiscal-contable",
+            "summary": "Conciliación, vencimientos, trazabilidad entre factura, asiento, modelo y dashboard.",
+            "priorities": [
+                "priorizar vencimientos y cierres próximos",
+                "cruzar facturas, asientos, modelos y dashboards",
+                "detectar incoherencias económicas y contables",
+                "dejar el siguiente bloque de corrección más rentable",
+            ],
+            "checklist": [
+                "Comprobar modelos y próximos vencimientos",
+                "Revisar facturas sin asiento o descuadres",
+                "Confirmar consistencia con dashboard y detalle",
+                "Cerrar o escalar el siguiente bloque contable",
+            ],
+            "risk_rules": [
+                "no dar por conciliado un bloque con trazabilidad incompleta",
+                "escalar si el descuadre afecta a reporting o cierre",
+                "priorizar evidencia contable sobre texto libre",
+            ],
+            "default_domain": "gestoria",
+        },
+        "laboral": {
+            "title": "Laboral/RRHH",
+            "summary": "Cumplimiento documental por persona, caducidades, ausencias y trazabilidad laboral.",
+            "priorities": [
+                "priorizar caducidades y huecos documentales por trabajador",
+                "vigilar ausencias y gastos con estado abierto",
+                "detectar incumplimientos operativos de RRHH",
+                "convertir riesgo laboral en tarea concreta",
+            ],
+            "checklist": [
+                "Revisar documentos caducados o próximos a caducar",
+                "Cruzar ausencias, gastos y estados abiertos",
+                "Señalar empleado o expediente afectado",
+                "Crear tarea de cumplimiento o revalidación",
+            ],
+            "risk_rules": [
+                "no marcar cumplimiento si faltan documentos base",
+                "escalar si la incidencia afecta a persona concreta y plazo corto",
+                "priorizar trazabilidad y evidencia documental",
+            ],
+            "default_domain": "rrhh",
+        },
+    }
+    return dict(profiles.get(mode_key) or {})
+
+
+def _workspace_internal_copilot_expert_card(mode="", domain=""):
+    profile = _workspace_internal_copilot_expert_profile(mode, domain)
+    if not profile:
+        return {}
+    return {
+        "title": profile.get("title") or "Perfil experto",
+        "summary": (
+            f"{str(profile.get('summary') or '').strip()}\n"
+            f"Prioridades: {' | '.join(list(profile.get('priorities') or [])[:3])}\n"
+            f"Checklist: {' | '.join(list(profile.get('checklist') or [])[:3])}"
+        )[:500],
+        "priority": "media",
+        "impact_area": normalize_lookup_text(mode or "").lower() or "copilot",
+    }
+
+
+def _workspace_internal_copilot_specialized_memory_summary(conn, workspace_id, *, actor=None, mode="", domain="", limit=6):
+    mode_key = normalize_lookup_text(mode or "").lower()
+    domain_key = _workspace_internal_copilot_normalize_domain(domain or "")
+    rows = _workspace_internal_copilot_recent_memory(conn, workspace_id, actor=actor, limit=max(6, int(limit or 6)))
+    relevant = []
+    for row in rows:
+        meta = row.get("meta") if isinstance(row.get("meta"), dict) else _safe_json_object(row.get("meta_json") or {})
+        row_domain = _workspace_internal_copilot_normalize_domain(meta.get("domain") or "")
+        if domain_key and row_domain and row_domain != domain_key:
+            continue
+        relevant.append({"row": dict(row), "meta": meta})
+    if not relevant:
+        return {}
+    decisions = [item for item in relevant if str(item["row"].get("memory_type") or "").strip() == "decision"]
+    tasks = [item for item in relevant if str(item["row"].get("memory_type") or "").strip() in {"task_followup", "close_loop", "escalation", "mode_switch"}]
+    resolved = sum(int(item["meta"].get("resolved") or 0) for item in decisions)
+    updated = sum(int(item["meta"].get("updated") or 0) for item in decisions)
+    return {
+        "title": f"Memoria {mode_key or 'operativa'}",
+        "summary": (
+            f"Decisiones recientes {len(decisions)} · actualizados {updated} · resueltos {resolved}"
+            + (f" · hitos {len(tasks)}" if tasks else "")
+        ),
+        "priority": "media",
+        "impact_area": mode_key or "copilot",
+    }
+
+
+def _workspace_internal_copilot_legal_briefing_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
+    area = _workspace_internal_copilot_legal_area_for_context((context or {}).get("current_crm") or "", context)
+    try:
+        candidates = _workspace_internal_copilot_legal_radar_candidates(conn, area=area, limit=5)
+    except Exception:
+        candidates = []
+    expert = _workspace_internal_copilot_expert_card("legal", area)
+    memory_card = _workspace_internal_copilot_specialized_memory_summary(conn, workspace_id, actor=actor, mode="legal", domain=area, limit=6)
+    cards = [card for card in [expert, memory_card] if card]
+    if candidates:
+        top = candidates[0]
+        cards.append(
+            {
+                "title": "Impacto legal prioritario",
+                "summary": (
+                    f"{str(top.get('title') or '').strip()} · {str(top.get('summary') or '').strip()}\n"
+                    f"Documentos: {', '.join(list(top.get('affected_documents') or [])[:4]) or '-'}\n"
+                    f"Flujos: {', '.join(list(top.get('affected_workflows') or [])[:4]) or '-'}"
+                )[:500],
+                "priority": str(top.get("priority") or "media").strip() or "media",
+                "impact_area": "legal",
+            }
+        )
+    else:
+        cards.append(
+            {
+                "title": "Radar legal",
+                "summary": "No veo novedades legales pendientes críticas ahora mismo en este ámbito.",
+                "priority": "media",
+                "impact_area": "legal",
+            }
+        )
+    return {
+        "ok": True,
+        "intent": "briefing",
+        "mode": "legal",
+        "answer": "He preparado un briefing legal senior con riesgo, impacto operativo y trabajo normativo pendiente.",
+        "cards": cards[:8],
+        "actions": [
+            {"id": "promote_legal_updates_to_tasks", "label": "Crear tareas legales", "requires_confirmation": True, "confirm_text": "Se crearán tareas a partir del radar legal pendiente para este ámbito.", "payload": {"area": area}},
+            {"id": "copilot_work_center", "label": "Abrir centro de trabajo", "payload": {"domain": area, "copilot_mode": "legal"}},
+        ],
+        "suggestions": ["Radar legal", "Crear tareas legales", "Arquitectura de la inteligencia verifika2"],
+        "sources": ["legal_radar_items", "workspace_memory"],
+    }
+
+
 def _workspace_internal_copilot_fiscal_briefing_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
     pending_cards, _, pending_sources = _workspace_internal_copilot_collect_domain_pending(
         conn,
@@ -44734,7 +44899,10 @@ def _workspace_internal_copilot_fiscal_briefing_reply(conn, workspace_id, *, emp
     )
     snapshot = _workspace_internal_copilot_collect_fiscal_snapshot(conn, empresa_id=empresa_id)
     economics = _workspace_internal_copilot_collect_economic_brief(conn, empresa_id=empresa_id)
-    cards = [
+    cards = [card for card in [
+        _workspace_internal_copilot_expert_card("fiscal", "gestoria"),
+        _workspace_internal_copilot_specialized_memory_summary(conn, workspace_id, actor=actor, mode="fiscal", domain="gestoria", limit=6),
+    ] if card] + [
         {
             "title": "Fiscal-contable",
             "summary": (
@@ -44793,7 +44961,10 @@ def _workspace_internal_copilot_laboral_briefing_reply(conn, workspace_id, *, em
         legal_candidates = _workspace_internal_copilot_legal_radar_candidates(conn, area="rrhh", limit=3)
     except Exception:
         legal_candidates = []
-    cards = [
+    cards = [card for card in [
+        _workspace_internal_copilot_expert_card("laboral", "rrhh"),
+        _workspace_internal_copilot_specialized_memory_summary(conn, workspace_id, actor=actor, mode="laboral", domain="rrhh", limit=6),
+    ] if card] + [
         {
             "title": "Laboral/RRHH",
             "summary": (
@@ -44857,6 +45028,18 @@ def _workspace_internal_copilot_agent_system_text():
         "Evita relleno, tono comercial o explicaciones largas. "
         "No reescribas acciones existentes del sistema; mejóralas con mejor criterio, plan y prioridades. "
         "Debes sonar como un operador embebido en Verifika2, no como un chatbot externo."
+    )
+
+
+def _workspace_internal_copilot_agent_mode_appendix(mode="", domain=""):
+    profile = _workspace_internal_copilot_expert_profile(mode, domain)
+    if not profile:
+        return ""
+    return (
+        f" Estás trabajando en modo {str(profile.get('title') or mode).strip()}. "
+        f"Prioridades: {'; '.join(list(profile.get('priorities') or [])[:4])}. "
+        f"Checklist mínimo: {'; '.join(list(profile.get('checklist') or [])[:4])}. "
+        f"Límites: {'; '.join(list(profile.get('risk_rules') or [])[:4])}."
     )
 
 
@@ -44928,7 +45111,11 @@ def _workspace_internal_copilot_refine_reply_with_ollama(response, *, workspace_
         timeout=45,
         retries=1,
         model=str(os.environ.get("OLLAMA_COPILOT_MODEL") or os.environ.get("OLLAMA_AUDIT_MODEL") or "").strip() or None,
-        system_text=_workspace_internal_copilot_agent_system_text() + " Responde SOLO en JSON válido.",
+        system_text=(
+            _workspace_internal_copilot_agent_system_text()
+            + _workspace_internal_copilot_agent_mode_appendix(str(refined.get("mode") or "").strip(), str(context_map.get("current_crm") or service_hint or "").strip())
+            + " Responde SOLO en JSON válido."
+        ),
     )
     if err or not parsed:
         return refined
@@ -46023,6 +46210,8 @@ def _workspace_internal_copilot_briefing_reply(conn, workspace_id, message, *, e
     mode = _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=(context or {}).get("service_hint") or "", context=context, message=message)
     if mode == "direccion":
         return _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, empresa_id=empresa_id, actor=actor, context=context)
+    if mode == "legal":
+        return _workspace_internal_copilot_legal_briefing_reply(conn, workspace_id, empresa_id=empresa_id, actor=actor, context=context)
     if mode == "fiscal":
         return _workspace_internal_copilot_fiscal_briefing_reply(conn, workspace_id, empresa_id=empresa_id, actor=actor, context=context)
     if mode == "laboral":
