@@ -41818,7 +41818,572 @@ def _workspace_internal_copilot_snooze_task(conn, workspace_id, task_id, *, due_
         WHERE id = ? AND workspace_id = ?
         """,
         (str(due_at or "").strip() or None, now, str(task_id or "").strip(), str(workspace_id or "").strip()),
+        )
+
+
+def _workspace_internal_copilot_is_search_like(message):
+    low = normalize_lookup_text(message or "").lower()
+    return any(
+        token in low
+        for token in (
+            "busca",
+            "buscar",
+            "encuentra",
+            "localiza",
+            "revisa",
+            "mira",
+            "que facturas",
+            "qué facturas",
+            "que modelos",
+            "qué modelos",
+            "que documentos",
+            "qué documentos",
+            "que novedades",
+            "qué novedades",
+            "que gastos",
+            "qué gastos",
+            "que ausencias",
+            "qué ausencias",
+        )
     )
+
+
+def _workspace_internal_copilot_extract_search_term(message):
+    raw = str(message or "").strip()
+    if not raw:
+        return ""
+    extracted = _workspace_internal_copilot_extract_client_query(raw) or {}
+    term = str(extracted.get("query") or "").strip()
+    if term:
+        return term
+    cleaned = normalize_lookup_text(raw)
+    cleaned = re.sub(
+        r"\b(busca|buscar|encuentra|localiza|revisa|mira|que|qué|las|los|la|el|de|del|en|por|para|fiscal|laboral|legal|rrhh|contable|senior|experta|experto)\b",
+        " ",
+        cleaned,
+        flags=re.I,
+    )
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    generic = {
+        "factura", "facturas", "asiento", "asientos", "modelo", "modelos", "documento", "documentos",
+        "novedad", "novedades", "abierta", "abiertas", "abierto", "abiertos", "caducado", "caducados",
+        "caducada", "caducadas", "gasto", "gastos", "ausencia", "ausencias", "fiscal", "legal", "laboral",
+        "rrhh", "contable", "pendiente", "pendientes", "sin",
+    }
+    tokens = [item for item in re.split(r"\W+", cleaned.lower()) if item and item not in generic]
+    if not tokens:
+        return ""
+    with_digits = [item for item in tokens if any(ch.isdigit() for ch in item)]
+    chosen = with_digits[:2] if with_digits else tokens[:2]
+    return " ".join(chosen)[:80]
+
+
+def _workspace_internal_copilot_has_explicit_specialist_mode(message, context=None, mode=""):
+    mode_key = normalize_lookup_text(mode or "").lower()
+    if mode_key not in {"fiscal", "laboral", "legal"}:
+        return False
+    ctx_mode = normalize_lookup_text((dict(context or {}).get("copilot_mode") or "")).lower()
+    if ctx_mode == mode_key:
+        return True
+    low = normalize_lookup_text(message or "").lower()
+    role_tokens = {
+        "fiscal": ("modo fiscal", "fiscal senior", "fiscal-contable", "contable senior"),
+        "laboral": ("modo laboral", "laboral senior", "laboral rrhh"),
+        "legal": ("legal", "abogado", "normativo", "juridico", "jurídico"),
+    }
+    return any(token in low for token in role_tokens.get(mode_key, ()))
+
+
+def _workspace_internal_copilot_specialist_fiscal_search(conn, workspace_id, empresa_id, message, *, limit=6):
+    company = str(empresa_id or "").strip()
+    low = normalize_lookup_text(message or "").lower()
+    term = _workspace_internal_copilot_extract_search_term(message)
+    like = f"%{term.lower()}%"
+    factura_cols = {str(item or "").strip().lower() for item in (table_columns(conn, "gestoria_facturas") or set()) if str(item or "").strip()}
+    estado_expr = "COALESCE(f.estado_asiento, '')" if "estado_asiento" in factura_cols else "''"
+    want_facturas = any(token in low for token in ("factura", "asiento", "contable", "dashboard"))
+    want_modelos = any(token in low for token in ("modelo", "tribut", "vencim", "iva", "irpf"))
+    want_rentas = any(token in low for token in ("renta", "alquiler", "documento"))
+    if not any((want_facturas, want_modelos, want_rentas)):
+        want_facturas = want_modelos = want_rentas = True
+    cards = []
+    evidence = []
+    if want_facturas and company:
+        where = ["COALESCE(f.empresa_id, '') = ?"]
+        params = [company]
+        if "sin asiento" in low or "pendiente" in low:
+            where.append(f"LOWER({estado_expr}) IN ('', 'pendiente', 'sin_asiento')")
+        if term:
+            where.append("(LOWER(COALESCE(f.numero, '')) LIKE ? OR LOWER(COALESCE(c.nombre, '')) LIKE ? OR LOWER(COALESCE(c.nif, '')) LIKE ?)")
+            params.extend([like, like, like])
+        rows = conn.execute(
+            f"""
+            SELECT f.id, COALESCE(f.numero,'') AS numero, COALESCE(f.fecha_emision,'') AS fecha_emision,
+                   COALESCE(f.total, 0) AS total, {estado_expr} AS estado_asiento,
+                   COALESCE(c.nombre,'') AS cliente_nombre
+            FROM gestoria_facturas f
+            LEFT JOIN clientes c ON c.id = f.cliente_id
+            WHERE {' AND '.join(where)}
+            ORDER BY COALESCE(f.fecha_emision, f.updated_at) DESC
+            LIMIT ?
+            """,
+            (*params, max(1, int(limit or 6))),
+        ).fetchall()
+        evidence.append(f"facturas {len(rows)}")
+        for row in rows[:3]:
+            cards.append(
+                {
+                    "title": f"Factura {str(row_value(row, 'numero') or row_value(row, 'id') or 'sin número').strip()}",
+                    "summary": (
+                        f"{str(row_value(row, 'cliente_nombre') or 'sin cliente').strip()} · "
+                        f"{str(row_value(row, 'fecha_emision') or '').strip()} · "
+                        f"{format_export_money(row_value(row, 'total') or 0)} € · "
+                        f"asiento {str(row_value(row, 'estado_asiento') or 'pendiente').strip() or 'pendiente'}"
+                    )[:500],
+                    "priority": "alta" if normalize_lookup_text(row_value(row, "estado_asiento") or "").lower() in {"", "pendiente", "sin_asiento"} else "media",
+                    "impact_area": "economico",
+                    "entity": {"factura_id": str(row_value(row, "id") or "").strip()},
+                }
+            )
+    if want_modelos and company:
+        where = ["COALESCE(c.empresa_id, '') = ?"]
+        params = [company]
+        if term:
+            where.append("(LOWER(COALESCE(m.modelo, '')) LIKE ? OR LOWER(COALESCE(c.nombre, '')) LIKE ? OR LOWER(COALESCE(m.notas, '')) LIKE ?)")
+            params.extend([like, like, like])
+        if "proximo" in low or "próximo" in low or "venc" in low:
+            where.append("COALESCE(m.proxima_fecha, '') <> ''")
+        rows = conn.execute(
+            f"""
+            SELECT m.id, COALESCE(m.modelo,'') AS modelo, COALESCE(m.proxima_fecha,'') AS proxima_fecha,
+                   COALESCE(m.estado,'') AS estado, COALESCE(c.nombre,'') AS cliente_nombre
+            FROM gestoria_modelos m
+            JOIN clientes c ON c.id = m.cliente_id
+            WHERE {' AND '.join(where)}
+            ORDER BY COALESCE(m.proxima_fecha, m.updated_at) ASC
+            LIMIT ?
+            """,
+            (*params, max(1, int(limit or 6))),
+        ).fetchall()
+        evidence.append(f"modelos {len(rows)}")
+        for row in rows[:3]:
+            cards.append(
+                {
+                    "title": f"Modelo {str(row_value(row, 'modelo') or row_value(row, 'id') or 'fiscal').strip()}",
+                    "summary": (
+                        f"{str(row_value(row, 'cliente_nombre') or 'sin cliente').strip()} · "
+                        f"próxima {str(row_value(row, 'proxima_fecha') or '-').strip()} · "
+                        f"estado {str(row_value(row, 'estado') or 'pendiente').strip() or 'pendiente'}"
+                    )[:500],
+                    "priority": "alta" if normalize_lookup_text(row_value(row, "estado") or "").lower() != "presentado" else "media",
+                    "impact_area": "fiscal",
+                    "entity": {"modelo_id": str(row_value(row, "id") or "").strip()},
+                }
+            )
+    if want_rentas and company:
+        rows = conn.execute(
+            """
+            SELECT c.id, COALESCE(c.nombre,'') AS cliente_nombre,
+                   COALESCE(g.doc_key,'') AS doc_key, COALESCE(g.doc_url,'') AS doc_url,
+                   COALESCE(g.renta_detalles,'') AS renta_detalles
+            FROM cliente_gestoria g
+            JOIN clientes c ON c.id = g.cliente_id
+            WHERE COALESCE(g.empresa_id, '') = ?
+            ORDER BY COALESCE(g.updated_at, g.created_at) DESC
+            LIMIT ?
+            """,
+            (company, max(3, int(limit or 6))),
+        ).fetchall()
+        matched = []
+        for row in rows or []:
+            hay_doc = bool(str(row_value(row, "doc_key") or "").strip() or str(row_value(row, "doc_url") or "").strip())
+            details = str(row_value(row, "renta_detalles") or "").strip()
+            if "sin documento" in low and hay_doc:
+                continue
+            if term and term.lower() not in normalize_lookup_text(" ".join([str(row_value(row, "cliente_nombre") or ""), details])).lower():
+                continue
+            matched.append(row)
+        evidence.append(f"rentas {len(matched)}")
+        for row in matched[:2]:
+            cards.append(
+                {
+                    "title": f"Renta {str(row_value(row, 'cliente_nombre') or row_value(row, 'id') or 'cliente').strip()}",
+                    "summary": (
+                        "Documento vinculado"
+                        if (str(row_value(row, "doc_key") or "").strip() or str(row_value(row, "doc_url") or "").strip())
+                        else "Sin documento vinculado"
+                    ),
+                    "priority": "alta" if not (str(row_value(row, "doc_key") or "").strip() or str(row_value(row, "doc_url") or "").strip()) else "media",
+                    "impact_area": "gestoria",
+                    "entity": {"cliente_id": str(row_value(row, "id") or "").strip()},
+                }
+            )
+    if not cards:
+        return {}
+    return {
+        "answer": "He cruzado evidencia fiscal-contable relevante del CRM para esa búsqueda.",
+        "cards": [
+            {
+                "title": "Evidencia experta fiscal",
+                "summary": " · ".join(evidence) or "Sin evidencia estructurada",
+                "priority": "media",
+                "impact_area": "fiscal",
+            },
+            *cards[:6],
+        ],
+        "sources": ["gestoria_facturas", "gestoria_modelos", "cliente_gestoria"],
+        "suggestions": ["Revisión fiscal experta", "Crear seguimiento fiscal", "Revisar fiscal-contable"],
+        "actions": [
+            {"id": "review_fiscal_expert", "label": "Revisión fiscal experta", "payload": {"domain": "gestoria", "copilot_mode": "fiscal"}},
+            {"id": "create_fiscal_expert_tasks", "label": "Crear seguimiento fiscal", "requires_confirmation": True, "confirm_text": "Se crearán tareas expertas de seguimiento fiscal-contable.", "payload": {"domain": "gestoria", "copilot_mode": "fiscal"}},
+        ],
+    }
+
+
+def _workspace_internal_copilot_specialist_laboral_search(conn, workspace_id, empresa_id, message, *, limit=6):
+    workspace_text = str(workspace_id or "").strip()
+    company = str(empresa_id or "").strip()
+    low = normalize_lookup_text(message or "").lower()
+    term = _workspace_internal_copilot_extract_search_term(message).lower()
+    docs = []
+    ausencias = []
+    gastos = []
+    doc_where = ["d.workspace_id = ?"]
+    doc_params = [workspace_text]
+    if company:
+        doc_where.append("COALESCE(d.empresa_id, '') = ?")
+        doc_params.append(company)
+    try:
+        docs = [
+            dict(row)
+            for row in
+            conn.execute(
+                f"""
+                SELECT d.*, COALESCE(p.nombre, '') AS persona_nombre
+                FROM workspace_rrhh_documentos d
+                LEFT JOIN workspace_registro_personal p ON p.workspace_id = d.workspace_id AND p.id = d.persona_id
+                WHERE {' AND '.join(doc_where)}
+                ORDER BY COALESCE(d.fecha_caducidad, d.updated_at) ASC
+                LIMIT ?
+                """,
+                (*doc_params, max(12, int(limit or 6) * 2)),
+            ).fetchall()
+        ]
+    except Exception:
+        docs = []
+    aus_where = ["a.workspace_id = ?"]
+    aus_params = [workspace_text]
+    if company:
+        aus_where.append("COALESCE(a.empresa_id, '') = ?")
+        aus_params.append(company)
+    try:
+        ausencias = [
+            dict(row)
+            for row in
+            conn.execute(
+                f"""
+                SELECT a.*, COALESCE(p.nombre, '') AS persona_nombre
+                FROM workspace_rrhh_ausencias a
+                LEFT JOIN workspace_registro_personal p ON p.workspace_id = a.workspace_id AND p.id = a.persona_id
+                WHERE {' AND '.join(aus_where)}
+                ORDER BY COALESCE(a.fecha_inicio, a.updated_at) DESC
+                LIMIT ?
+                """,
+                (*aus_params, max(12, int(limit or 6) * 2)),
+            ).fetchall()
+        ]
+    except Exception:
+        ausencias = []
+    gasto_where = ["g.workspace_id = ?"]
+    gasto_params = [workspace_text]
+    if company:
+        gasto_where.append("COALESCE(g.empresa_id, '') = ?")
+        gasto_params.append(company)
+    try:
+        gastos = [
+            dict(row)
+            for row in
+            conn.execute(
+                f"""
+                SELECT g.*, COALESCE(p.nombre, '') AS persona_nombre
+                FROM workspace_rrhh_gastos g
+                LEFT JOIN workspace_registro_personal p ON p.workspace_id = g.workspace_id AND p.id = g.persona_id
+                WHERE {' AND '.join(gasto_where)}
+                ORDER BY COALESCE(g.fecha, g.updated_at) DESC
+                LIMIT ?
+                """,
+                (*gasto_params, max(12, int(limit or 6) * 2)),
+            ).fetchall()
+        ]
+    except Exception:
+        gastos = []
+    want_docs = any(token in low for token in ("document", "caduc", "rrhh"))
+    want_ausencias = any(token in low for token in ("ausenc", "vacacion", "permiso"))
+    want_gastos = any(token in low for token in ("gasto", "ticket", "proveedor"))
+    if not any((want_docs, want_ausencias, want_gastos)):
+        want_docs = want_ausencias = want_gastos = True
+    cards = []
+    evidence = []
+    if want_docs:
+        matched = []
+        for row in docs:
+            hay_term = not term or term in normalize_lookup_text(" ".join([str(row.get("persona_nombre") or ""), str(row.get("nombre") or ""), str(row.get("tipo") or ""), str(row.get("estado") or "")])).lower()
+            if not hay_term:
+                continue
+            if "caduc" in low and not (str(row.get("fecha_caducidad") or "").strip() and normalize_lookup_text(row.get("estado") or "").lower() not in {"archivado", "baja", "caducado resuelto"}):
+                continue
+            matched.append(row)
+        evidence.append(f"documentos {len(matched)}")
+        for row in matched[:3]:
+            cards.append(
+                {
+                    "title": f"{str(row.get('tipo') or 'Documento').strip()} · {str(row.get('persona_nombre') or row.get('persona_id') or '').strip()}",
+                    "summary": (
+                        f"{str(row.get('nombre') or '').strip()} · "
+                        f"caduca {str(row.get('fecha_caducidad') or '-').strip()} · "
+                        f"estado {str(row.get('estado') or 'Activo').strip()}"
+                    )[:500],
+                    "priority": "alta" if str(row.get("fecha_caducidad") or "").strip() else "media",
+                    "impact_area": "laboral",
+                    "entity": {"documento_id": str(row.get("id") or "").strip(), "persona_id": str(row.get("persona_id") or "").strip()},
+                }
+            )
+    if want_ausencias:
+        matched = []
+        for row in ausencias:
+            hay_term = not term or term in normalize_lookup_text(" ".join([str(row.get("persona_nombre") or ""), str(row.get("tipo") or ""), str(row.get("motivo") or ""), str(row.get("estado") or "")])).lower()
+            if not hay_term:
+                continue
+            if "abiert" in low and normalize_lookup_text(row.get("estado") or "").lower() not in {"pendiente", "abierta", "solicitada"}:
+                continue
+            matched.append(row)
+        evidence.append(f"ausencias {len(matched)}")
+        for row in matched[:2]:
+            cards.append(
+                {
+                    "title": f"Ausencia · {str(row.get('persona_nombre') or row.get('persona_id') or '').strip()}",
+                    "summary": (
+                        f"{str(row.get('tipo') or '').strip()} · "
+                        f"{str(row.get('fecha_inicio') or '').strip()} a {str(row.get('fecha_fin') or '').strip()} · "
+                        f"estado {str(row.get('estado') or '').strip()}"
+                    )[:500],
+                    "priority": "alta" if normalize_lookup_text(row.get("estado") or "").lower() in {"pendiente", "abierta", "solicitada"} else "media",
+                    "impact_area": "laboral",
+                    "entity": {"ausencia_id": str(row.get("id") or "").strip(), "persona_id": str(row.get("persona_id") or "").strip()},
+                }
+            )
+    if want_gastos:
+        matched = []
+        for row in gastos:
+            hay_term = not term or term in normalize_lookup_text(" ".join([str(row.get("persona_nombre") or ""), str(row.get("concepto") or ""), str(row.get("proveedor") or ""), str(row.get("estado") or "")])).lower()
+            if not hay_term:
+                continue
+            if "pendient" in low and normalize_lookup_text(row.get("estado") or "").lower() not in {"pendiente", "abierto", "abierta"}:
+                continue
+            matched.append(row)
+        evidence.append(f"gastos {len(matched)}")
+        for row in matched[:2]:
+            cards.append(
+                {
+                    "title": f"Gasto · {str(row.get('persona_nombre') or row.get('persona_id') or '').strip()}",
+                    "summary": (
+                        f"{str(row.get('concepto') or row.get('proveedor') or 'sin concepto').strip()} · "
+                        f"{format_export_money(row.get('importe') or 0)} € · "
+                        f"estado {str(row.get('estado') or '').strip()}"
+                    )[:500],
+                    "priority": "alta" if normalize_lookup_text(row.get("estado") or "").lower() in {"pendiente", "abierto", "abierta"} else "media",
+                    "impact_area": "laboral",
+                    "entity": {"gasto_id": str(row.get("id") or "").strip(), "persona_id": str(row.get("persona_id") or "").strip()},
+                }
+            )
+    if not cards:
+        return {}
+    return {
+        "answer": "He cruzado evidencia laboral/RRHH relevante del CRM para esa búsqueda.",
+        "cards": [
+            {
+                "title": "Evidencia experta laboral",
+                "summary": " · ".join(evidence) or "Sin evidencia estructurada",
+                "priority": "media",
+                "impact_area": "laboral",
+            },
+            *cards[:6],
+        ],
+        "sources": ["workspace_rrhh_documentos", "workspace_rrhh_ausencias", "workspace_rrhh_gastos"],
+        "suggestions": ["Revisión laboral experta", "Crear seguimiento laboral", "Revisar RRHH"],
+        "actions": [
+            {"id": "review_laboral_expert", "label": "Revisión laboral experta", "payload": {"domain": "rrhh", "copilot_mode": "laboral"}},
+            {"id": "create_laboral_expert_tasks", "label": "Crear seguimiento laboral", "requires_confirmation": True, "confirm_text": "Se crearán tareas expertas de cumplimiento laboral/RRHH.", "payload": {"domain": "rrhh", "copilot_mode": "laboral"}},
+        ],
+    }
+
+
+def _workspace_internal_copilot_specialist_legal_search(conn, workspace_id, empresa_id, message, *, actor=None, context=None, limit=6):
+    area = _workspace_internal_copilot_legal_area_for_context((context or {}).get("current_crm") or "", context)
+    term = _workspace_internal_copilot_extract_search_term(message)
+    low = normalize_lookup_text(message or "").lower()
+    docs = []
+    candidates = []
+    library_cols = {str(item or "").strip().lower() for item in (table_columns(conn, "legal_library_documents") or set()) if str(item or "").strip()}
+    if library_cols:
+        where = []
+        params = []
+        if "area" in library_cols:
+            where.append("area = ?")
+            params.append(area)
+        if term:
+            like = f"%{normalize_lookup_text(term).lower()}%"
+            parts = []
+            for col in ("title", "url", "content_text", "topic_key"):
+                if col in library_cols:
+                    parts.append(f"LOWER(COALESCE({col}, '')) LIKE ?")
+                    params.append(like)
+            if parts:
+                where.append("(" + " OR ".join(parts) + ")")
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        try:
+            docs = [
+                {
+                    "title": str(row_value(row, "title") or "").strip(),
+                    "url": str(row_value(row, "url") or "").strip(),
+                    "source": str(row_value(row, "source") or "").strip(),
+                    "snippet": str(row_value(row, "content_text") or "").strip()[:600],
+                    "topic_key": str(row_value(row, "topic_key") or "").strip(),
+                }
+                for row in conn.execute(
+                    f"SELECT * FROM legal_library_documents {clause} ORDER BY COALESCE(updated_at, fetched_at) DESC LIMIT ?",
+                    (*params, max(4, int(limit or 6))),
+                ).fetchall()
+            ]
+        except Exception:
+            docs = []
+    radar_cols = {str(item or "").strip().lower() for item in (table_columns(conn, "legal_radar_items") or set()) if str(item or "").strip()}
+    if radar_cols:
+        where = []
+        params = []
+        if "area" in radar_cols:
+            where.append("area = ?")
+            params.append(area)
+        if "estado" in radar_cols:
+            where.append("LOWER(COALESCE(estado, '')) <> 'aplicado'")
+        if term:
+            like = f"%{normalize_lookup_text(term).lower()}%"
+            parts = []
+            for col in ("titulo", "resumen", "accion_recomendada", "topic_key", "affected_documents", "affected_workflows"):
+                if col in radar_cols:
+                    parts.append(f"LOWER(COALESCE({col}, '')) LIKE ?")
+                    params.append(like)
+            if parts:
+                where.append("(" + " OR ".join(parts) + ")")
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        try:
+            for row in conn.execute(
+                f"SELECT * FROM legal_radar_items {clause} ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ?",
+                (*params, max(4, int(limit or 6))),
+            ).fetchall():
+                candidates.append(
+                    {
+                        "title": str(row_value(row, "titulo") or "Novedad legal").strip(),
+                        "summary": str(row_value(row, "resumen") or row_value(row, "accion_recomendada") or "").strip(),
+                        "priority": "alta" if normalize_lookup_text(row_value(row, "impacto") or "").lower() in {"alto", "alta"} else "media",
+                        "affected_documents": _safe_json_loads(row_value(row, "affected_documents") or "[]", []),
+                        "affected_workflows": _safe_json_loads(row_value(row, "affected_workflows") or "[]", []),
+                    }
+                )
+        except Exception:
+            candidates = []
+    if term:
+        term_low = normalize_lookup_text(term).lower()
+        candidates = [
+            item for item in candidates
+            if term_low in normalize_lookup_text(" ".join([
+                str(item.get("title") or ""),
+                str(item.get("summary") or ""),
+                " ".join(list(item.get("affected_documents") or [])),
+                " ".join(list(item.get("affected_workflows") or [])),
+            ])).lower()
+        ]
+    cards = []
+    evidence = [f"radar {len(candidates)}", f"biblioteca {len(docs)}"]
+    for item in candidates[:3]:
+        cards.append(
+            {
+                "title": str(item.get("title") or "Novedad legal").strip()[:220],
+                "summary": (
+                    f"{str(item.get('summary') or '').strip()}\n"
+                    f"Documentos: {', '.join(list(item.get('affected_documents') or [])[:3]) or '-'} · "
+                    f"Flujos: {', '.join(list(item.get('affected_workflows') or [])[:3]) or '-'}"
+                )[:500],
+                "priority": str(item.get("priority") or "media").strip() or "media",
+                "impact_area": "legal",
+            }
+        )
+    for item in docs[:3]:
+        cards.append(
+            {
+                "title": str(item.get("title") or item.get("topic_key") or "Documento legal").strip()[:220],
+                "summary": (
+                    f"{str(item.get('source') or 'biblioteca legal').strip()} · "
+                    f"{str(item.get('snippet') or '').strip()}"
+                )[:500],
+                "priority": "media",
+                "impact_area": "legal",
+                "entity": {"url": str(item.get("url") or "").strip(), "topic_key": str(item.get("topic_key") or "").strip()},
+            }
+        )
+    if not cards and "plantilla" in low:
+        cards.append(
+            {
+                "title": "Plantillas legales",
+                "summary": "No he encontrado plantillas internas específicas para esa búsqueda en este ámbito legal.",
+                "priority": "media",
+                "impact_area": "legal",
+            }
+        )
+    if not cards:
+        return {}
+    return {
+        "answer": "He cruzado radar y biblioteca legal interna para esa búsqueda.",
+        "cards": [
+            {
+                "title": "Evidencia experta legal",
+                "summary": " · ".join(evidence) or "Sin evidencia estructurada",
+                "priority": "media",
+                "impact_area": "legal",
+            },
+            *cards[:6],
+        ],
+        "sources": ["legal_radar_items", "legal_library_documents"],
+        "suggestions": ["Revisión legal experta", "Crear seguimiento legal", "Crear tareas legales"],
+        "actions": [
+            {"id": "review_legal_expert", "label": "Revisión legal experta", "payload": {"area": area, "copilot_mode": "legal"}},
+            {"id": "create_legal_expert_tasks", "label": "Crear seguimiento legal", "requires_confirmation": True, "confirm_text": "Se crearán tareas expertas de seguimiento legal para este ámbito.", "payload": {"area": area, "copilot_mode": "legal"}},
+        ],
+    }
+
+
+def _workspace_internal_copilot_specialist_search_reply(conn, workspace_id, message, *, empresa_id="", actor=None, context=None, mode=""):
+    mode_key = normalize_lookup_text(mode or "").lower()
+    if mode_key not in {"fiscal", "laboral", "legal"}:
+        return None
+    if not _workspace_internal_copilot_is_search_like(message):
+        return None
+    if not _workspace_internal_copilot_has_explicit_specialist_mode(message, context=context, mode=mode_key):
+        return None
+    if mode_key == "fiscal":
+        result = _workspace_internal_copilot_specialist_fiscal_search(conn, workspace_id, empresa_id, message, limit=6)
+    elif mode_key == "laboral":
+        result = _workspace_internal_copilot_specialist_laboral_search(conn, workspace_id, empresa_id, message, limit=6)
+    else:
+        result = _workspace_internal_copilot_specialist_legal_search(conn, workspace_id, empresa_id, message, actor=actor, context=context, limit=6)
+    if not result:
+        return None
+    return {
+        "ok": True,
+        "intent": "specialist_search",
+        "mode": mode_key,
+        **result,
+    }
 
 
 def _workspace_internal_copilot_semantic_search(conn, workspace_id, empresa_id, message, *, limit=8):
@@ -49381,6 +49946,18 @@ def build_workspace_internal_copilot_reply(conn, workspace_id, message, *, empre
     )
     if briefing_reply:
         response.update(briefing_reply)
+        return _finish(response)
+    specialist_search_reply = _workspace_internal_copilot_specialist_search_reply(
+        conn,
+        workspace_text,
+        message_text,
+        empresa_id=company_text,
+        actor=actor,
+        context=context or {},
+        mode=response.get("mode") or "",
+    )
+    if specialist_search_reply:
+        response.update(specialist_search_reply)
         return _finish(response)
     action_reply = _workspace_internal_copilot_build_action_reply(
         conn,

@@ -2464,6 +2464,155 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(reply["intent"], "semantic_search")
         self.assertTrue(reply["cards"])
 
+    def test_internal_copilot_specialist_search_fiscal_reply(self):
+        server.ensure_column(self.conn, "gestoria_facturas", "estado_asiento", "estado_asiento TEXT")
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gestoria_modelos (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              modelo TEXT,
+              proxima_fecha TEXT,
+              estado TEXT,
+              notas TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_facturas (
+              id, empresa_id, cliente_id, numero, fecha_emision, total, estado_asiento, created_at, updated_at
+            ) VALUES (
+              'fac-spec-1', 'e1', 'c1', 'F-900', '2026-06-19', 220.0, 'pendiente', 'now', 'now'
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_modelos (
+              id, cliente_id, modelo, proxima_fecha, estado, created_at, updated_at
+            ) VALUES (
+              'mod-spec-1', 'c1', '303', '2026-06-30', 'Pendiente', 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "busca facturas sin asiento",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            context={"copilot_mode": "fiscal"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "specialist_search")
+        self.assertEqual(reply["mode"], "fiscal")
+        self.assertIn("gestoria_facturas", reply["sources"])
+        self.assertTrue(any(str(card.get("title") or "") == "Evidencia experta fiscal" for card in (reply.get("cards") or [])))
+
+    def test_internal_copilot_specialist_search_laboral_reply(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_rrhh_documentos (
+              id, workspace_id, empresa_id, persona_id, tipo, nombre, fecha_emision, fecha_caducidad, permanente, estado, notas, created_at, updated_at
+            ) VALUES (
+              'doc-spec-1', 'ws1', 'e1', 'p1', 'DNI', 'dni-juan.pdf', '2026-01-01', '2026-06-01', 0, 'Activo', '', 'now', 'now'
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_rrhh_ausencias (
+              id, workspace_id, empresa_id, persona_id, tipo, fecha_inicio, fecha_fin, estado, created_at, updated_at
+            ) VALUES (
+              'aus-spec-1', 'ws1', 'e1', 'p1', 'Vacaciones', '2026-06-20', '2026-06-22', 'Pendiente', 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "busca ausencias abiertas",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            context={"copilot_mode": "laboral"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "specialist_search")
+        self.assertEqual(reply["mode"], "laboral")
+        self.assertIn("workspace_rrhh_ausencias", reply["sources"])
+        self.assertTrue(any(str(card.get("title") or "") == "Evidencia experta laboral" for card in (reply.get("cards") or [])))
+
+    def test_internal_copilot_specialist_search_legal_reply(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS legal_library_documents (
+              id TEXT PRIMARY KEY,
+              area TEXT,
+              topic_key TEXT,
+              title TEXT,
+              url TEXT,
+              source TEXT,
+              fetched_at TEXT,
+              updated_at TEXT,
+              content_text TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS legal_radar_items (
+              id TEXT PRIMARY KEY,
+              area TEXT,
+              topic_key TEXT,
+              titulo TEXT,
+              url TEXT,
+              resumen TEXT,
+              accion_recomendada TEXT,
+              affected_documents TEXT,
+              affected_workflows TEXT,
+              impacto TEXT,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO legal_library_documents (
+              id, area, topic_key, title, url, source, fetched_at, updated_at, content_text
+            ) VALUES (
+              'lib-spec-1', 'gestoria', 'modelos_tributarios', 'Checklist modelo 303', 'https://ejemplo.local/303', 'interno', 'now', 'now', 'Checklist fiscal del modelo 303 y vencimientos.'
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO legal_radar_items (
+              id, area, topic_key, titulo, url, resumen, accion_recomendada, affected_documents, affected_workflows, impacto, estado, created_at, updated_at
+            ) VALUES (
+              'rad-spec-1', 'gestoria', 'modelos_tributarios', 'Cambio en modelo 303', 'https://ejemplo.local/radar-303', 'Nuevo criterio sobre presentación del 303', 'Revisar checklist fiscal', '["Checklist fiscal"]', '["Campañas fiscales"]', 'alto', 'pendiente', 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "busca novedades del modelo 303",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            context={"copilot_mode": "legal", "current_crm": "gestoria"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["intent"], "specialist_search")
+        self.assertEqual(reply["mode"], "legal")
+        self.assertIn("legal_library_documents", reply["sources"])
+        self.assertIn("legal_radar_items", reply["sources"])
+        self.assertTrue(any(str(card.get("title") or "") == "Evidencia experta legal" for card in (reply.get("cards") or [])))
+
     def test_internal_copilot_document_reply_from_attachment(self):
         server._workspace_internal_copilot_preview_factura = lambda conn, attachment, actor=None: {
             "numero": "FAC-1",
