@@ -13729,7 +13729,7 @@ const getCurrentWorkspaceAutoAgendaMessage = () => {
 const renderGlobalInternalCopilotPanels = () => {
   const widget = document.getElementById("globalInternalCopilotWidget");
   if (!widget) return;
-  const mode = ["operator", "supervisor", "direccion", "legal"].includes(String(state.persistentInternalCopilotMode || "").trim())
+  const mode = ["operator", "supervisor", "direccion", "legal", "fiscal", "laboral"].includes(String(state.persistentInternalCopilotMode || "").trim())
     ? String(state.persistentInternalCopilotMode || "").trim()
     : "operator";
   const tab = ["chat", "incidencias", "hoy"].includes(String(state.persistentInternalCopilotTab || "").trim())
@@ -13820,7 +13820,7 @@ const renderGlobalInternalCopilotPanels = () => {
 };
 
 const setPersistentInternalCopilotMode = async (mode = "operator", { rePrime = false } = {}) => {
-  const normalized = ["operator", "supervisor", "direccion", "legal"].includes(String(mode || "").trim())
+  const normalized = ["operator", "supervisor", "direccion", "legal", "fiscal", "laboral"].includes(String(mode || "").trim())
     ? String(mode || "").trim()
     : "operator";
   state.persistentInternalCopilotMode = normalized;
@@ -14087,6 +14087,8 @@ const ensurePersistentInternalCopilotWidget = () => {
               <button type="button" class="secondary ghost" data-global-copilot-mode="supervisor" style="border-radius:999px">Supervisar</button>
               <button type="button" class="secondary ghost" data-global-copilot-mode="direccion" style="border-radius:999px">Dirección</button>
               <button type="button" class="secondary ghost" data-global-copilot-mode="legal" style="border-radius:999px">Legal</button>
+              <button type="button" class="secondary ghost" data-global-copilot-mode="fiscal" style="border-radius:999px">Fiscal</button>
+              <button type="button" class="secondary ghost" data-global-copilot-mode="laboral" style="border-radius:999px">Laboral</button>
             </div>
           </div>
         </details>

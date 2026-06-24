@@ -166,6 +166,8 @@ class FrontendSmokeTests(unittest.TestCase):
         self.assertIn("mode_switch", app_js)
         self.assertIn("setPersistentInternalCopilotMode", app_js)
         self.assertIn("persistentInternalCopilotMode", app_js)
+        self.assertIn('data-global-copilot-mode="fiscal"', app_js)
+        self.assertIn('data-global-copilot-mode="laboral"', app_js)
         self.assertIn("start_review_queue", app_js)
         self.assertIn("continue_review_queue", app_js)
         self.assertIn("revalidate_current_and_continue", app_js)

@@ -3011,6 +3011,74 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(reply["ok"])
         self.assertEqual(reply["mode"], "legal")
 
+    def test_internal_copilot_reply_mode_fiscal(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gestoria_facturas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              numero TEXT,
+              fecha_emision TEXT,
+              total REAL,
+              cliente_id TEXT,
+              estado_asiento TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gestoria_modelos (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              modelo TEXT,
+              periodicidad TEXT,
+              proxima_fecha TEXT,
+              responsable TEXT,
+              estado TEXT,
+              notas TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        self.conn.execute("INSERT INTO gestoria_facturas (id, empresa_id, numero, fecha_emision, total, cliente_id, created_at, updated_at) VALUES ('fac-fiscal-1','e1','F-10','2026-06-19',1200,'c1','now','now')")
+        self.conn.execute("INSERT INTO gestoria_modelos (id, cliente_id, modelo, periodicidad, proxima_fecha, responsable, estado, notas, created_at, updated_at) VALUES ('mod-fiscal-1','c1','111','trimestral','2026-06-30','QA','Pendiente','', 'now','now')")
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "qué hago ahora con fiscal y contabilidad",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA", "rol": "Fiscalista", "servicio": "Gestoría"},
+            context={"copilot_mode": "fiscal", "current_crm": "gestoria"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["mode"], "fiscal")
+        self.assertTrue(any(str(card.get("title") or "") == "Fiscal-contable" for card in (reply.get("cards") or [])))
+
+    def test_internal_copilot_reply_mode_laboral(self):
+        self.conn.execute(
+            """
+            INSERT INTO workspace_rrhh_documentos (
+              id, workspace_id, empresa_id, persona_id, tipo, nombre, fecha_emision, fecha_caducidad, permanente, estado, notas, created_at, updated_at
+            ) VALUES (
+              'doc-lab-1', 'ws1', 'e1', 'p1', 'Contrato', 'Contrato base', '2026-01-01', '2026-06-01', 0, 'Activo', '', 'now', 'now'
+            )
+            """
+        )
+        reply = server.build_workspace_internal_copilot_reply(
+            self.conn,
+            "ws1",
+            "qué hago ahora con rrhh y laboral",
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA", "rol": "RRHH", "servicio": "RRHH"},
+            context={"copilot_mode": "laboral", "current_crm": "rrhh"},
+        )
+        self.assertTrue(reply["ok"])
+        self.assertEqual(reply["mode"], "laboral")
+        self.assertTrue(any(str(card.get("title") or "") == "Laboral/RRHH" for card in (reply.get("cards") or [])))
+
     def test_internal_copilot_run_operator_sequence(self):
         self.conn.execute(
             """
@@ -3138,6 +3206,28 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertTrue(any("Asistente hoy" == str(card.get("title") or "") for card in (result.get("cards") or [])))
         self.assertTrue(any("Aprendizaje del asistente" == str(card.get("title") or "") for card in (result.get("cards") or [])))
         self.assertTrue(any("Estrategias dominantes" == str(card.get("title") or "") for card in (result.get("cards") or [])))
+
+    def test_internal_copilot_set_copilot_mode_accepts_fiscal_and_laboral(self):
+        fiscal = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "set_copilot_mode",
+            {"mode": "fiscal", "domain": "gestoria"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T08:45:00Z",
+        )
+        laboral = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "set_copilot_mode",
+            {"mode": "laboral", "domain": "rrhh"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T08:46:00Z",
+        )
+        self.assertEqual((fiscal.get("mode_switch") or {}).get("mode"), "fiscal")
+        self.assertEqual((laboral.get("mode_switch") or {}).get("mode"), "laboral")
 
     def test_internal_copilot_promote_legal_updates_to_tasks(self):
         self.conn.execute(

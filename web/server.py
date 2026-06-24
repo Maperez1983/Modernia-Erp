@@ -44418,14 +44418,20 @@ def _workspace_internal_copilot_resolve_mode(actor=None, service_hint="", contex
     actor_map = actor if isinstance(actor, dict) else {}
     context_map = context if isinstance(context, dict) else {}
     explicit = normalize_lookup_text(context_map.get("copilot_mode") or "").lower()
-    if explicit in {"operator", "supervisor", "direccion", "legal"}:
+    if explicit in {"operator", "supervisor", "direccion", "legal", "fiscal", "laboral"}:
         return explicit
     text = normalize_lookup_text(message or "").lower()
     service_text = normalize_lookup_text(service_hint or context_map.get("service_hint") or "").lower()
     role_text = normalize_lookup_text(actor_map.get("rol") or "").lower()
     user_service = normalize_lookup_text(actor_map.get("servicio") or "").lower()
+    fiscal_tokens = ("fiscal", "contable", "contabilidad", "impuesto", "impuestos", "iva", "irpf", "modelo", "asiento", "asientos", "concili")
+    laboral_tokens = ("laboral", "rrhh", "nomina", "nómina", "trabajador", "empleado", "vacaciones", "ausencia", "caducidad documental", "convenio")
     if any(token in text for token in ("legal", "normativa", "boe", "laboral", "ley", "consulta legal")) or service_text == "legal":
         return "legal"
+    if any(token in text for token in fiscal_tokens) or any(token in role_text for token in ("fiscal", "contable", "contabilidad")):
+        return "fiscal"
+    if any(token in text for token in laboral_tokens) or service_text == "rrhh" or any(token in role_text for token in ("laboral", "rrhh", "recursos humanos")):
+        return "laboral"
     if any(token in role_text for token in ("direccion", "direct", "gerencia", "control")) or any(token in user_service for token in ("direccion", "control")):
         return "direccion"
     if any(token in role_text for token in ("admin", "administrador", "super")) or any(token in user_service for token in ("administracion", "administración")):
@@ -44585,6 +44591,253 @@ def _workspace_internal_copilot_collect_economic_brief(conn, *, empresa_id=""):
     except Exception:
         pass
     return summary
+
+
+def _workspace_internal_copilot_collect_fiscal_snapshot(conn, *, empresa_id=""):
+    company = str(empresa_id or "").strip()
+    snapshot = {
+        "modelos_total": 0,
+        "modelos_pendientes": 0,
+        "modelos_proximos": 0,
+        "facturas_total": 0,
+        "facturas_sin_asiento": 0,
+        "rentas_sin_documento": 0,
+    }
+    if not company:
+        return snapshot
+    try:
+        row = conn.execute(
+            """
+            SELECT
+              COUNT(*) AS total_count,
+              SUM(CASE WHEN LOWER(COALESCE(m.estado, '')) <> 'presentado' THEN 1 ELSE 0 END) AS pending_count,
+              SUM(CASE
+                    WHEN LOWER(COALESCE(m.estado, '')) <> 'presentado'
+                     AND COALESCE(m.proxima_fecha, '') <> ''
+                     AND DATE(m.proxima_fecha) <= DATE('now', '+30 day')
+                    THEN 1 ELSE 0
+                  END) AS upcoming_count
+            FROM gestoria_modelos m
+            JOIN clientes c ON c.id = m.cliente_id
+            WHERE COALESCE(c.empresa_id, '') = ?
+            """,
+            (company,),
+        ).fetchone()
+        snapshot["modelos_total"] = int(row_value(row, "total_count") or 0) if row else 0
+        snapshot["modelos_pendientes"] = int(row_value(row, "pending_count") or 0) if row else 0
+        snapshot["modelos_proximos"] = int(row_value(row, "upcoming_count") or 0) if row else 0
+    except Exception:
+        pass
+    try:
+        row = conn.execute(
+            """
+            SELECT
+              COUNT(*) AS total_count,
+              SUM(CASE WHEN LOWER(COALESCE(f.estado_asiento, '')) IN ('', 'pendiente', 'sin_asiento') THEN 1 ELSE 0 END) AS without_asiento
+            FROM gestoria_facturas f
+            WHERE COALESCE(f.empresa_id, '') = ?
+            """,
+            (company,),
+        ).fetchone()
+        snapshot["facturas_total"] = int(row_value(row, "total_count") or 0) if row else 0
+        snapshot["facturas_sin_asiento"] = int(row_value(row, "without_asiento") or 0) if row else 0
+    except Exception:
+        pass
+    try:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS total_count
+            FROM cliente_gestoria g
+            WHERE COALESCE(g.empresa_id, '') = ?
+              AND (COALESCE(g.doc_key, '') = '' AND COALESCE(g.doc_url, '') = '')
+            """,
+            (company,),
+        ).fetchone()
+        snapshot["rentas_sin_documento"] = int(row_value(row, "total_count") or 0) if row else 0
+    except Exception:
+        pass
+    return snapshot
+
+
+def _workspace_internal_copilot_collect_laboral_snapshot(conn, workspace_id, *, empresa_id=""):
+    workspace_text = str(workspace_id or "").strip()
+    company = str(empresa_id or "").strip()
+    snapshot = {
+        "documentos_total": 0,
+        "documentos_caducados": 0,
+        "ausencias_abiertas": 0,
+        "gastos_pendientes": 0,
+    }
+    where = ["COALESCE(workspace_id, '') = ?"]
+    values = [workspace_text]
+    if company:
+        where.append("COALESCE(empresa_id, '') = ?")
+        values.append(company)
+    where_clause = " AND ".join(where)
+    try:
+        row = conn.execute(
+            f"""
+            SELECT
+              COUNT(*) AS total_count,
+              SUM(CASE
+                    WHEN COALESCE(permanente, 0) = 0
+                     AND COALESCE(fecha_caducidad, '') <> ''
+                     AND DATE(fecha_caducidad) < DATE('now')
+                     AND LOWER(COALESCE(estado, 'activo')) NOT IN ('archivado', 'baja', 'caducado resuelto')
+                    THEN 1 ELSE 0
+                  END) AS expired_count
+            FROM workspace_rrhh_documentos
+            WHERE {where_clause}
+            """,
+            values,
+        ).fetchone()
+        snapshot["documentos_total"] = int(row_value(row, "total_count") or 0) if row else 0
+        snapshot["documentos_caducados"] = int(row_value(row, "expired_count") or 0) if row else 0
+    except Exception:
+        pass
+    try:
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*) AS total_count
+            FROM workspace_rrhh_ausencias
+            WHERE {where_clause}
+              AND LOWER(COALESCE(estado, 'pendiente')) IN ('pendiente', 'abierta', 'solicitada')
+            """,
+            values,
+        ).fetchone()
+        snapshot["ausencias_abiertas"] = int(row_value(row, "total_count") or 0) if row else 0
+    except Exception:
+        pass
+    try:
+        row = conn.execute(
+            f"""
+            SELECT COUNT(*) AS total_count
+            FROM workspace_rrhh_gastos
+            WHERE {where_clause}
+              AND LOWER(COALESCE(estado, 'pendiente')) IN ('pendiente', 'abierto', 'abierta')
+            """,
+            values,
+        ).fetchone()
+        snapshot["gastos_pendientes"] = int(row_value(row, "total_count") or 0) if row else 0
+    except Exception:
+        pass
+    return snapshot
+
+
+def _workspace_internal_copilot_fiscal_briefing_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
+    pending_cards, _, pending_sources = _workspace_internal_copilot_collect_domain_pending(
+        conn,
+        str(workspace_id or "").strip(),
+        empresa_id=str(empresa_id or "").strip(),
+        domain="gestoria",
+        context=context if isinstance(context, dict) else {},
+    )
+    snapshot = _workspace_internal_copilot_collect_fiscal_snapshot(conn, empresa_id=empresa_id)
+    economics = _workspace_internal_copilot_collect_economic_brief(conn, empresa_id=empresa_id)
+    cards = [
+        {
+            "title": "Fiscal-contable",
+            "summary": (
+                f"Modelos pendientes {snapshot['modelos_pendientes']} · próximos 30 días {snapshot['modelos_proximos']} · "
+                f"facturas sin asiento {snapshot['facturas_sin_asiento']} · rentas sin documento {snapshot['rentas_sin_documento']}"
+            ),
+            "priority": "alta" if (snapshot["facturas_sin_asiento"] or snapshot["modelos_proximos"]) else "media",
+            "impact_area": "economico",
+        },
+        {
+            "title": "Carga fiscal",
+            "summary": (
+                f"Modelos {snapshot['modelos_total']} totales · "
+                f"facturas {snapshot['facturas_total']} · "
+                f"volumen facturado {format_export_money(economics['facturas_total'])} €"
+            ),
+            "priority": "media",
+            "impact_area": "fiscal",
+        },
+        {
+            "title": "Conciliación contable",
+            "summary": (
+                f"Asientos pendientes {snapshot['facturas_sin_asiento']} · "
+                f"prioridad sobre cierres y trazabilidad contable"
+            ),
+            "priority": "media",
+            "impact_area": "contable",
+        },
+    ]
+    return {
+        "ok": True,
+        "intent": "briefing",
+        "mode": "fiscal",
+        "answer": "He preparado un briefing fiscal-contable con vencimientos, conciliación y carga documental de gestoría.",
+        "cards": cards + [dict(item) for item in pending_cards[:6]],
+        "actions": [
+            {"id": "autorreview_domain", "label": "Revisar fiscal-contable", "payload": {"domain": "gestoria"}},
+            {"id": "close_loop_safe", "label": "Resolver bloque contable", "requires_confirmation": True, "confirm_text": "Se lanzarán correcciones seguras sobre gestoría y contabilidad visible.", "payload": {"scope": "today", "crm": "gestoria", "copilot_mode": "fiscal"}},
+            {"id": "copilot_work_center", "label": "Abrir centro de trabajo", "payload": {"domain": "gestoria", "copilot_mode": "fiscal"}},
+        ],
+        "suggestions": ["Revisar fiscal-contable", "Qué facturas siguen sin asiento", "Qué dashboards no cuadran contra el detalle real"],
+        "sources": list(dict.fromkeys(["gestoria_modelos", "gestoria_facturas", "cliente_gestoria", *pending_sources]))[:8],
+    }
+
+
+def _workspace_internal_copilot_laboral_briefing_reply(conn, workspace_id, *, empresa_id="", actor=None, context=None):
+    pending_cards, _, pending_sources = _workspace_internal_copilot_collect_domain_pending(
+        conn,
+        str(workspace_id or "").strip(),
+        empresa_id=str(empresa_id or "").strip(),
+        domain="rrhh",
+        context=context if isinstance(context, dict) else {},
+    )
+    snapshot = _workspace_internal_copilot_collect_laboral_snapshot(conn, workspace_id, empresa_id=empresa_id)
+    try:
+        legal_candidates = _workspace_internal_copilot_legal_radar_candidates(conn, area="rrhh", limit=3)
+    except Exception:
+        legal_candidates = []
+    cards = [
+        {
+            "title": "Laboral/RRHH",
+            "summary": (
+                f"Documentos caducados {snapshot['documentos_caducados']} · "
+                f"ausencias abiertas {snapshot['ausencias_abiertas']} · "
+                f"gastos pendientes {snapshot['gastos_pendientes']}"
+            ),
+            "priority": "alta" if (snapshot["documentos_caducados"] or snapshot["ausencias_abiertas"]) else "media",
+            "impact_area": "laboral",
+        },
+        {
+            "title": "Cumplimiento documental",
+            "summary": (
+                f"Documentos RRHH {snapshot['documentos_total']} · "
+                f"caducidades activas {snapshot['documentos_caducados']}"
+            ),
+            "priority": "media",
+            "impact_area": "rrhh",
+        },
+    ]
+    if legal_candidates:
+        top = legal_candidates[0]
+        cards.append(
+            {
+                "title": "Riesgo laboral reciente",
+                "summary": str(top.get("summary") or top.get("title") or "Radar legal RRHH").strip()[:500],
+                "priority": str(top.get("priority") or "media").strip() or "media",
+                "impact_area": "legal",
+            }
+        )
+    return {
+        "ok": True,
+        "intent": "briefing",
+        "mode": "laboral",
+        "answer": "He preparado un briefing laboral/RRHH con caducidades, pendientes operativos y foco de cumplimiento.",
+        "cards": cards + [dict(item) for item in pending_cards[:6]],
+        "actions": [
+            {"id": "autorreview_domain", "label": "Revisar RRHH", "payload": {"domain": "rrhh"}},
+            {"id": "promote_legal_updates_to_tasks", "label": "Crear tareas laborales", "requires_confirmation": True, "confirm_text": "Se crearán tareas a partir del radar legal RRHH pendiente.", "payload": {"area": "rrhh"}},
+            {"id": "close_loop_safe", "label": "Resolver bloque RRHH", "requires_confirmation": True, "confirm_text": "Se lanzarán correcciones seguras y revalidación sobre RRHH.", "payload": {"scope": "today", "crm": "rrhh", "copilot_mode": "laboral"}},
+        ],
+        "suggestions": ["Revisar RRHH", "Revisa documentos RRHH caducados", "Crear tareas laborales"],
+        "sources": list(dict.fromkeys(["workspace_rrhh_documentos", "workspace_rrhh_ausencias", "workspace_rrhh_gastos", *pending_sources, "legal_radar_items"]))[:8],
+    }
 
 
 def _workspace_internal_copilot_agent_enabled():
@@ -45770,6 +46023,10 @@ def _workspace_internal_copilot_briefing_reply(conn, workspace_id, message, *, e
     mode = _workspace_internal_copilot_resolve_mode(actor=actor, service_hint=(context or {}).get("service_hint") or "", context=context, message=message)
     if mode == "direccion":
         return _workspace_internal_copilot_director_briefing_reply(conn, workspace_id, empresa_id=empresa_id, actor=actor, context=context)
+    if mode == "fiscal":
+        return _workspace_internal_copilot_fiscal_briefing_reply(conn, workspace_id, empresa_id=empresa_id, actor=actor, context=context)
+    if mode == "laboral":
+        return _workspace_internal_copilot_laboral_briefing_reply(conn, workspace_id, empresa_id=empresa_id, actor=actor, context=context)
     cards = []
     if tasks:
         for task in tasks[:3]:
@@ -45821,6 +46078,8 @@ def _workspace_internal_copilot_briefing_reply(conn, workspace_id, message, *, e
         "supervisor": ["Bandeja unificada", "Resolver todo lo seguro", "Revalidar procesos"],
         "direccion": ["Bandeja unificada", "Analizar productividad", "Radar legal"],
         "legal": ["Radar legal", "Agenda diaria", "Ver incidencias"],
+        "fiscal": ["Revisar fiscal-contable", "Qué facturas siguen sin asiento", "Qué dashboards no cuadran contra el detalle real"],
+        "laboral": ["Revisar RRHH", "Revisa documentos RRHH caducados", "Crear tareas laborales"],
     }
     return {
         "ok": True,
@@ -48532,6 +48791,34 @@ def _workspace_internal_copilot_prime_reply(conn, workspace_id, *, empresa_id=""
                 "payload": {"area": _workspace_internal_copilot_legal_area_for_context(current_crm, context_map)},
             },
         )
+    if mode == "fiscal":
+        actions.insert(
+            0,
+            {
+                "id": "autorreview_domain",
+                "label": "Revisar fiscal-contable",
+                "payload": {"domain": "gestoria", "copilot_mode": "fiscal"},
+            },
+        )
+    if mode == "laboral":
+        actions.insert(
+            0,
+            {
+                "id": "autorreview_domain",
+                "label": "Revisar RRHH",
+                "payload": {"domain": "rrhh", "copilot_mode": "laboral"},
+            },
+        )
+        actions.insert(
+            1,
+            {
+                "id": "promote_legal_updates_to_tasks",
+                "label": "Crear tareas laborales",
+                "requires_confirmation": True,
+                "confirm_text": "Se crearán tareas de cumplimiento laboral a partir del radar legal RRHH.",
+                "payload": {"area": "rrhh"},
+            },
+        )
     if mode == "direccion":
         actions.insert(
             0,
@@ -50277,7 +50564,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
         }
     if action_text == "set_copilot_mode":
         target_mode = str(payload.get("mode") or "").strip().lower() or "operator"
-        if target_mode not in {"operator", "supervisor", "direccion", "legal"}:
+        if target_mode not in {"operator", "supervisor", "direccion", "legal", "fiscal", "laboral"}:
             target_mode = "operator"
         reason = str(payload.get("reason") or "").strip()
         domain = _workspace_internal_copilot_normalize_domain(payload.get("domain") or "")
@@ -50288,7 +50575,7 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             memory_type="mode_switch",
             title=f"Cambio de modo a {target_mode}",
             content=reason or f"El asistente cambió el modo a {target_mode}.",
-            priority="alta" if target_mode in {"supervisor", "legal"} else "media",
+            priority="alta" if target_mode in {"supervisor", "legal", "fiscal", "laboral"} else "media",
             meta={"mode": target_mode, "domain": domain, "reason": reason},
             now=now,
         )
