@@ -64,6 +64,7 @@ except Exception:  # pragma: no cover
     BooleanObject = None
 try:
     from .auth_security import hash_password as runtime_hash_password
+    from .auth_security import PBKDF2_SHA256
     from .auth_security import needs_password_rehash
     from .auth_security import verify_password as runtime_verify_password
     from .schema_support import apply_schema_file, ensure_column, table_columns
@@ -74,6 +75,7 @@ try:
     from .seguros_state import normalize_seguro_estado_value as runtime_normalize_seguro_estado_value
 except ImportError:
     from auth_security import hash_password as runtime_hash_password
+    from auth_security import PBKDF2_SHA256
     from auth_security import needs_password_rehash
     from auth_security import verify_password as runtime_verify_password
     from schema_support import apply_schema_file, ensure_column, table_columns
