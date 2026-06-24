@@ -8,7 +8,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-							    <link rel="stylesheet" href="styles.css?v=269" />
+							    <link rel="stylesheet" href="styles.css?v=272" />
 	    <link rel="manifest" href="manifest.webmanifest?v=17" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -4340,6 +4340,14 @@
                         Inmueble (opcional)
                         <select id="crmAgendaInmueble" name="inmueble_id"></select>
                       </label>
+                      <label class="hidden" data-propuesta-field>
+                        Precio propuesto
+                        <input name="importe_propuesta" type="number" step="0.01" inputmode="decimal" />
+                      </label>
+                      <label class="hidden" data-propuesta-field>
+                        Entrega de arras
+                        <input name="entrega_2" type="number" step="0.01" inputmode="decimal" />
+                      </label>
                       <label class="span-2">
                         Notas
                         <textarea name="notas" rows="3"></textarea>
@@ -4481,6 +4489,63 @@
 	                    <div class="muted">Pega una URL oficial y consulta el contenido en tiempo real.</div>
 	                  </div>
 	                </div>
+                  <div class="form-card">
+                    <div class="section-head">
+                      <div>
+                        <h3>Editor de fotos (Ollana)</h3>
+                        <p class="muted">
+                          Limpieza de estancias, quita fondo, vaciado virtual y ajustes básicos de imagen.
+                          Las imágenes editadas se guardan y quedan trazables desde el histórico de archivos.
+                        </p>
+                      </div>
+                    </div>
+                    <form id="copilotImageEditForm" class="form-grid">
+                      <label class="span-2">
+                        Imagen a editar
+                        <input id="copilotImageEditFile" name="image" type="file" accept="image/*" />
+                      </label>
+                      <label>
+                        Operación rápida
+                        <select id="copilotImageEditQuickOp">
+                          <option value="">Automática (según instrucción)</option>
+                          <option value="virtual_clean_room">Escena limpia y limpia (IA)</option>
+                          <option value="virtual_empty_room">Quitar muebles / vaciar estancia (IA)</option>
+                          <option value="photo_cleanup">Limpieza local avanzada</option>
+                          <option value="remove_background">Quitar fondo</option>
+                          <option value="autocontrast">Autocontraste</option>
+                          <option value="enhance_ocr">Mejorar legibilidad OCR</option>
+                        </select>
+                      </label>
+                      <label>
+                        Nivel de limpieza (solo local)
+                        <input id="copilotImageEditLevel" name="level" type="number" min="0.8" max="2" step="0.1" value="1.2" />
+                      </label>
+                      <label class="span-2">
+                        Instrucción (opcional)
+                        <textarea id="copilotImageEditMessage" rows="3" placeholder="Ej. limpia la foto y mejora iluminación, quita ruido en paredes sin cambiar la geometría."></textarea>
+                      </label>
+                      <label class="span-2">
+                        Plan JSON personalizado (opcional)
+                        <textarea id="copilotImageEditPlan" rows="3" placeholder='{"operations":[{"op":"photo_cleanup","level":1.2}]}'></textarea>
+                      </label>
+                      <label>
+                        Formato de salida
+                        <select id="copilotImageEditOutputFormat">
+                          <option value="">Automático</option>
+                          <option value="png">PNG</option>
+                          <option value="jpg">JPG</option>
+                          <option value="webp">WEBP</option>
+                        </select>
+                      </label>
+                      <div class="form-actions span-2">
+                        <button type="submit" id="copilotImageEditBtn" class="secondary">Editar imagen</button>
+                        <span id="copilotImageEditStatus" class="muted"></span>
+                      </div>
+                    </form>
+                    <div id="copilotImageEditResult" class="crm-focus-list">
+                      <div class="muted">Sube una imagen y ejecuta una edición para obtener el resultado.</div>
+                    </div>
+                  </div>
 	                <div class="crm-summary-grid">
 	                  <div class="form-card">
 	                    <div class="section-head">
@@ -4956,6 +5021,14 @@
                       <option>Cerrado negativamente</option>
                       <option>Alquiler</option>
                     </select>
+                  </label>
+                  <label class="hidden" data-propuesta-field>
+                    Precio propuesto
+                    <input name="importe_propuesta" type="number" step="0.01" inputmode="decimal" />
+                  </label>
+                  <label class="hidden" data-propuesta-field>
+                    Entrega de arras
+                    <input name="entrega_2" type="number" step="0.01" inputmode="decimal" />
                   </label>
                   <label class="span-2">
                     Notas

@@ -3643,6 +3643,16 @@ const inmoLegalStatus = document.getElementById("inmoLegalStatus");
 	const copilotWebAskBtn = document.getElementById("copilotWebAskBtn");
 	const copilotWebStatus = document.getElementById("copilotWebStatus");
 	const copilotWebResponse = document.getElementById("copilotWebResponse");
+	const copilotImageEditForm = document.getElementById("copilotImageEditForm");
+	const copilotImageEditFile = document.getElementById("copilotImageEditFile");
+	const copilotImageEditQuickOp = document.getElementById("copilotImageEditQuickOp");
+	const copilotImageEditLevel = document.getElementById("copilotImageEditLevel");
+	const copilotImageEditMessage = document.getElementById("copilotImageEditMessage");
+	const copilotImageEditPlan = document.getElementById("copilotImageEditPlan");
+	const copilotImageEditOutputFormat = document.getElementById("copilotImageEditOutputFormat");
+	const copilotImageEditBtn = document.getElementById("copilotImageEditBtn");
+	const copilotImageEditStatus = document.getElementById("copilotImageEditStatus");
+	const copilotImageEditResult = document.getElementById("copilotImageEditResult");
 	const legalRadarForm = document.getElementById("legalRadarForm");
 	const legalRadarArea = document.getElementById("legalRadarArea");
 	const legalRadarStatus = document.getElementById("legalRadarStatus");
@@ -75987,6 +75997,164 @@ if (copilotWebForm) {
       if (copilotWebResponse) copilotWebResponse.innerHTML = "<div class='muted'>No se pudo consultar la web.</div>";
     } finally {
       if (copilotWebAskBtn) copilotWebAskBtn.disabled = false;
+    }
+  });
+}
+
+const buildImageEditPayloadFromQuick = (quickOp) => {
+  const op = String(quickOp || "").trim();
+  if (!op) {
+    return null;
+  }
+  if (op === "photo_cleanup") {
+    const level = Number.parseFloat(String(copilotImageEditLevel?.value || "").trim());
+    return {
+      plan: {
+        operations: [
+          {
+            op: "photo_cleanup",
+            level: Number.isFinite(level) ? Math.max(0.8, Math.min(2, level)) : 1.2,
+          },
+        ],
+      },
+    };
+  }
+  if (op === "virtual_clean_room") {
+    return { plan: { operations: [{ op: "virtual_clean_room" }] } };
+  }
+  if (op === "virtual_empty_room") {
+    return { plan: { operations: [{ op: "virtual_empty_room" }] } };
+  }
+  if (op === "remove_background") {
+    return { plan: { operations: [{ op: "remove_background" }] } };
+  }
+  if (op === "enhance_ocr") {
+    return { plan: { operations: [{ op: "enhance_ocr" }] } };
+  }
+  if (op === "autocontrast") {
+    return { plan: { operations: [{ op: "autocontrast" }] } };
+  }
+  return null;
+};
+
+const renderImageEditResult = (data, target) => {
+  if (!target) {
+    return;
+  }
+  if (!data || data.error) {
+    target.innerHTML = `<div class="muted">No se pudo generar la edición.</div>`;
+    return;
+  }
+  const href = String(data.url || "").trim();
+  const size = data.size || {};
+  const w = String(size.width || "");
+  const h = String(size.height || "");
+  const ops = Array.isArray(data.summary) ? data.summary.join(" · ") : "Edición aplicada";
+  const disclosure = data.disclosure_message
+    ? `<div class='crm-focus-link'><strong>Nota</strong><span>${escapeHtml(String(data.disclosure_message))}</span></div>`
+    : "";
+  const formatText = href ? `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${escapeHtml(href)}</a>` : "-";
+  target.innerHTML = `
+    <div class="crm-focus-link"><strong>Resultado</strong><span>${formatText}</span></div>
+    <div class="crm-focus-link"><strong>Operaciones</strong><span>${escapeHtml(ops || "Autoconfigurado")}</span></div>
+    <div class="crm-focus-link"><strong>Tamaño</strong><span>${w} x ${h}</span></div>
+    ${disclosure}
+  `;
+};
+
+if (copilotImageEditForm) {
+  copilotImageEditForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!copilotImageEditFile || !copilotImageEditFile.files || !copilotImageEditFile.files[0]) {
+      if (copilotImageEditStatus) {
+        copilotImageEditStatus.textContent = "Selecciona una imagen.";
+      }
+      return;
+    }
+    const file = copilotImageEditFile.files[0];
+    if (!file.type.startsWith("image/")) {
+      if (copilotImageEditStatus) {
+        copilotImageEditStatus.textContent = "El archivo debe ser una imagen.";
+      }
+      return;
+    }
+    if (copilotImageEditStatus) {
+      copilotImageEditStatus.textContent = "Procesando...";
+    }
+    if (copilotImageEditBtn) {
+      copilotImageEditBtn.disabled = true;
+    }
+    if (copilotImageEditResult) {
+      copilotImageEditResult.innerHTML = "<div class='muted'>Procesando...</div>";
+    }
+    try {
+      const filePayload = await readFileAsDataUrl(file);
+      const payload = {
+        file_base64: filePayload,
+        filename: file.name,
+      };
+      const quickOp = copilotImageEditQuickOp ? copilotImageEditQuickOp.value : "";
+      const quickPayload = buildImageEditPayloadFromQuick(quickOp);
+      if (quickPayload) {
+        payload.plan = quickPayload.plan;
+      }
+      const message = String(copilotImageEditMessage?.value || "").trim();
+      if (message) {
+        payload.message = message;
+      }
+      const outputFormat = String(copilotImageEditOutputFormat?.value || "").trim();
+      if (outputFormat) {
+        payload.output_format = outputFormat;
+      }
+      const customPlanText = String(copilotImageEditPlan?.value || "").trim();
+      if (customPlanText) {
+        try {
+          const customPlan = JSON.parse(customPlanText);
+          if (customPlan && Array.isArray(customPlan.operations)) {
+            payload.plan = customPlan;
+          } else {
+            throw new Error("El plan debe tener \"operations\".");
+          }
+        } catch (error) {
+          throw new Error(`Plan JSON inválido: ${error?.message || "error"}`);
+        }
+      }
+      const response = await fetch("/api/copilot_image_edit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(payload),
+      });
+      const data = await response.json();
+      if (!response.ok || data?.error) {
+        throw new Error(data?.error || `HTTP ${response.status}`);
+      }
+      if (copilotImageEditStatus) {
+        copilotImageEditStatus.textContent = "Edición generada.";
+      }
+      renderImageEditResult(data, copilotImageEditResult);
+      if (copilotImageEditResult && data?.url && (data?.mime || "").startsWith("image/")) {
+        const img = document.createElement("img");
+        img.src = data.url;
+        img.alt = "Resultado de edición";
+        img.style.maxWidth = "100%";
+        img.style.maxHeight = "320px";
+        img.style.borderRadius = "8px";
+        img.style.marginTop = "8px";
+        img.style.display = "block";
+        copilotImageEditResult.appendChild(img);
+      }
+    } catch (error) {
+      if (copilotImageEditStatus) {
+        copilotImageEditStatus.textContent = error?.message || "No se pudo editar la imagen.";
+      }
+      if (copilotImageEditResult) {
+        renderImageEditResult({ error: true }, copilotImageEditResult);
+      }
+    } finally {
+      if (copilotImageEditBtn) {
+        copilotImageEditBtn.disabled = false;
+      }
     }
   });
 }
