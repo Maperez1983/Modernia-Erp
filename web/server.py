@@ -44930,6 +44930,107 @@ def _workspace_internal_copilot_specialist_recommendation(mode="", *, snapshot=N
     return {}
 
 
+def _workspace_internal_copilot_specialist_dictamen(mode="", *, snapshot=None, legal_candidates=None):
+    mode_key = normalize_lookup_text(mode or "").lower()
+    snapshot_map = dict(snapshot or {})
+    candidates = list(legal_candidates or [])
+    if mode_key == "fiscal":
+        facts = [
+            f"facturas sin asiento: {int(snapshot_map.get('facturas_sin_asiento') or 0)}",
+            f"modelos próximos: {int(snapshot_map.get('modelos_proximos') or 0)}",
+            f"rentas sin documento: {int(snapshot_map.get('rentas_sin_documento') or 0)}",
+        ]
+        risk = "alto" if (int(snapshot_map.get("facturas_sin_asiento") or 0) + int(snapshot_map.get("modelos_proximos") or 0)) >= 3 else ("medio" if any(int(snapshot_map.get(key) or 0) > 0 for key in ("facturas_sin_asiento", "modelos_proximos", "rentas_sin_documento")) else "bajo")
+        recommendation = (
+            "Cerrar primero asientos pendientes y vencimientos próximos; luego recalcular y reconciliar."
+            if risk != "bajo"
+            else "Mantener vigilancia preventiva y usar la revisión fiscal experta como control periódico."
+        )
+        return {"risk": risk, "facts": facts, "recommendation": recommendation}
+    if mode_key == "laboral":
+        facts = [
+            f"documentos caducados: {int(snapshot_map.get('documentos_caducados') or 0)}",
+            f"ausencias abiertas: {int(snapshot_map.get('ausencias_abiertas') or 0)}",
+            f"gastos pendientes: {int(snapshot_map.get('gastos_pendientes') or 0)}",
+        ]
+        risk = "alto" if (int(snapshot_map.get("documentos_caducados") or 0) + int(snapshot_map.get("ausencias_abiertas") or 0)) >= 2 else ("medio" if any(int(snapshot_map.get(key) or 0) > 0 for key in ("documentos_caducados", "ausencias_abiertas", "gastos_pendientes")) else "bajo")
+        recommendation = (
+            "Atacar primero expedientes por persona con caducidad o ausencia abierta y convertirlo en tarea de cumplimiento."
+            if risk != "bajo"
+            else "Mantener RRHH limpio y usar revisión laboral experta como control de continuidad."
+        )
+        return {"risk": risk, "facts": facts, "recommendation": recommendation}
+    if mode_key == "legal":
+        top = dict(candidates[0] or {}) if candidates else {}
+        facts = [
+            f"novedades pendientes: {len(candidates)}",
+            f"documentos afectados: {len(list(top.get('affected_documents') or [])) if top else 0}",
+            f"flujos afectados: {len(list(top.get('affected_workflows') or [])) if top else 0}",
+        ]
+        risk = str(top.get("priority") or "medio").strip().lower() if top else "bajo"
+        recommendation = (
+            str(top.get("summary") or "").strip()
+            or "Revisar cambio normativo, aterrizar tareas y escalar si afecta a plantilla o workflow crítico."
+        ) if top else "No veo novedad crítica; mantener radar y revisión de plantillas sensibles."
+        return {"risk": risk, "facts": facts, "recommendation": recommendation}
+    return {}
+
+
+def _workspace_internal_copilot_specialist_dictamen_card(mode="", *, snapshot=None, legal_candidates=None):
+    dictamen = _workspace_internal_copilot_specialist_dictamen(mode, snapshot=snapshot, legal_candidates=legal_candidates)
+    if not dictamen:
+        return {}
+    return {
+        "title": "Dictamen operativo",
+        "summary": (
+            f"Riesgo: {str(dictamen.get('risk') or 'medio').strip()} · "
+            f"Evidencia: {' | '.join(list(dictamen.get('facts') or [])[:3])}\n"
+            f"Recomendación: {str(dictamen.get('recommendation') or '').strip()}"
+        )[:500],
+        "priority": "alta" if str(dictamen.get("risk") or "").strip().lower() in {"alto", "alta"} else "media",
+        "impact_area": normalize_lookup_text(mode or "").lower() or "copilot",
+    }
+
+
+def _workspace_internal_copilot_create_specialist_followup_tasks(conn, workspace_id, *, actor=None, mode="", snapshot=None, legal_candidates=None, now=None):
+    mode_key = normalize_lookup_text(mode or "").lower()
+    dictamen = _workspace_internal_copilot_specialist_dictamen(mode_key, snapshot=snapshot, legal_candidates=legal_candidates)
+    if not dictamen:
+        return {"ok": True, "created": 0, "task_ids": []}
+    tasks = []
+    workspace_text = str(workspace_id or "").strip()
+    if mode_key == "fiscal":
+        if int(dict(snapshot or {}).get("facturas_sin_asiento") or 0) > 0:
+            tasks.append(("Revisar facturas sin asiento", "Cerrar bloque contable pendiente y revalidar dashboard.", "alta", "gestoria"))
+        if int(dict(snapshot or {}).get("modelos_proximos") or 0) > 0:
+            tasks.append(("Revisar modelos próximos", "Confirmar soporte documental y vencimientos de modelos próximos.", "alta", "gestoria"))
+    elif mode_key == "laboral":
+        if int(dict(snapshot or {}).get("documentos_caducados") or 0) > 0:
+            tasks.append(("Revisar caducidades RRHH", "Resolver documentos caducados o inminentes por trabajador.", "alta", "rrhh"))
+        if int(dict(snapshot or {}).get("ausencias_abiertas") or 0) > 0:
+            tasks.append(("Cerrar ausencias abiertas", "Revisar ausencias abiertas y dejar estado final trazable.", "media", "rrhh"))
+    elif mode_key == "legal":
+        for item in list(legal_candidates or [])[:2]:
+            tasks.append((f"Aplicar novedad legal: {str(item.get('title') or '').strip()[:80]}", str(item.get("summary") or "").strip() or "Revisar impacto legal y aterrizar cambios.", "alta" if str(item.get("priority") or "").strip() == "alta" else "media", str(item.get("area") or "gestoria").strip()))
+    task_ids = []
+    for title, detail, priority, domain in tasks:
+        task_ids.append(
+            _workspace_internal_copilot_create_task(
+                conn,
+                workspace_text,
+                actor=actor,
+                title=title,
+                detail=detail,
+                priority=priority,
+                due_at=date.today().isoformat(),
+                source=f"{mode_key}_expert",
+                meta={"mode": mode_key, "domain": domain, "dictamen": dictamen},
+                now=now,
+            )
+        )
+    return {"ok": True, "created": len(task_ids), "task_ids": task_ids, "dictamen": dictamen}
+
+
 def _workspace_internal_copilot_specialized_memory_summary(conn, workspace_id, *, actor=None, mode="", domain="", limit=6):
     mode_key = normalize_lookup_text(mode or "").lower()
     domain_key = _workspace_internal_copilot_normalize_domain(domain or "")
@@ -44969,6 +45070,7 @@ def _workspace_internal_copilot_legal_briefing_reply(conn, workspace_id, *, empr
     memory_card = _workspace_internal_copilot_specialized_memory_summary(conn, workspace_id, actor=actor, mode="legal", domain=area, limit=6)
     cards = [card for card in [expert, knowledge_card, memory_card] if card]
     recommendation = _workspace_internal_copilot_specialist_recommendation("legal", legal_candidates=candidates)
+    dictamen_card = _workspace_internal_copilot_specialist_dictamen_card("legal", legal_candidates=candidates)
     if candidates:
         top = candidates[0]
         cards.append(
@@ -44998,6 +45100,7 @@ def _workspace_internal_copilot_legal_briefing_reply(conn, workspace_id, *, empr
         "mode": "legal",
         "answer": "He preparado un briefing legal senior con riesgo, impacto operativo y trabajo normativo pendiente.",
         "cards": [
+            *([dictamen_card] if dictamen_card else []),
             *cards[:8],
             *(
                 [{
@@ -45012,6 +45115,7 @@ def _workspace_internal_copilot_legal_briefing_reply(conn, workspace_id, *, empr
         "actions": [
             {"id": "review_legal_expert", "label": "Revisión legal experta", "payload": {"area": area, "copilot_mode": "legal"}},
             {"id": "promote_legal_updates_to_tasks", "label": "Crear tareas legales", "requires_confirmation": True, "confirm_text": "Se crearán tareas a partir del radar legal pendiente para este ámbito.", "payload": {"area": area}},
+            {"id": "create_legal_expert_tasks", "label": "Crear seguimiento legal", "requires_confirmation": True, "confirm_text": "Se crearán tareas expertas de seguimiento legal para este ámbito.", "payload": {"area": area, "copilot_mode": "legal"}},
             {"id": "copilot_work_center", "label": "Abrir centro de trabajo", "payload": {"domain": area, "copilot_mode": "legal"}},
         ],
         "suggestions": ["Revisión legal experta", "Crear tareas legales", "Radar legal"],
@@ -45064,12 +45168,14 @@ def _workspace_internal_copilot_fiscal_briefing_reply(conn, workspace_id, *, emp
         },
     ]
     recommendation = _workspace_internal_copilot_specialist_recommendation("fiscal", snapshot=snapshot)
+    dictamen_card = _workspace_internal_copilot_specialist_dictamen_card("fiscal", snapshot=snapshot)
     return {
         "ok": True,
         "intent": "briefing",
         "mode": "fiscal",
         "answer": "He preparado un briefing fiscal-contable con vencimientos, conciliación y carga documental de gestoría.",
         "cards": [
+            *([dictamen_card] if dictamen_card else []),
             *cards,
             *(
                 [{
@@ -45084,6 +45190,7 @@ def _workspace_internal_copilot_fiscal_briefing_reply(conn, workspace_id, *, emp
         ],
         "actions": [
             {"id": "review_fiscal_expert", "label": "Revisión fiscal experta", "payload": {"domain": "gestoria", "copilot_mode": "fiscal"}},
+            {"id": "create_fiscal_expert_tasks", "label": "Crear seguimiento fiscal", "requires_confirmation": True, "confirm_text": "Se crearán tareas expertas de seguimiento fiscal-contable.", "payload": {"domain": "gestoria", "copilot_mode": "fiscal"}},
             {"id": "autorreview_domain", "label": "Revisar fiscal-contable", "payload": {"domain": "gestoria"}},
             {"id": "close_loop_safe", "label": "Resolver bloque contable", "requires_confirmation": True, "confirm_text": "Se lanzarán correcciones seguras sobre gestoría y contabilidad visible.", "payload": {"scope": "today", "crm": "gestoria", "copilot_mode": "fiscal"}},
             {"id": "copilot_work_center", "label": "Abrir centro de trabajo", "payload": {"domain": "gestoria", "copilot_mode": "fiscal"}},
@@ -45132,6 +45239,7 @@ def _workspace_internal_copilot_laboral_briefing_reply(conn, workspace_id, *, em
         },
     ]
     recommendation = _workspace_internal_copilot_specialist_recommendation("laboral", snapshot=snapshot)
+    dictamen_card = _workspace_internal_copilot_specialist_dictamen_card("laboral", snapshot=snapshot)
     if legal_candidates:
         top = legal_candidates[0]
         cards.append(
@@ -45148,6 +45256,7 @@ def _workspace_internal_copilot_laboral_briefing_reply(conn, workspace_id, *, em
         "mode": "laboral",
         "answer": "He preparado un briefing laboral/RRHH con caducidades, pendientes operativos y foco de cumplimiento.",
         "cards": [
+            *([dictamen_card] if dictamen_card else []),
             *cards,
             *(
                 [{
@@ -45162,6 +45271,7 @@ def _workspace_internal_copilot_laboral_briefing_reply(conn, workspace_id, *, em
         ],
         "actions": [
             {"id": "review_laboral_expert", "label": "Revisión laboral experta", "payload": {"domain": "rrhh", "copilot_mode": "laboral"}},
+            {"id": "create_laboral_expert_tasks", "label": "Crear seguimiento laboral", "requires_confirmation": True, "confirm_text": "Se crearán tareas expertas de cumplimiento laboral/RRHH.", "payload": {"domain": "rrhh", "copilot_mode": "laboral"}},
             {"id": "autorreview_domain", "label": "Revisar RRHH", "payload": {"domain": "rrhh"}},
             {"id": "promote_legal_updates_to_tasks", "label": "Crear tareas laborales", "requires_confirmation": True, "confirm_text": "Se crearán tareas a partir del radar legal RRHH pendiente.", "payload": {"area": "rrhh"}},
             {"id": "close_loop_safe", "label": "Resolver bloque RRHH", "requires_confirmation": True, "confirm_text": "Se lanzarán correcciones seguras y revalidación sobre RRHH.", "payload": {"scope": "today", "crm": "rrhh", "copilot_mode": "laboral"}},
@@ -50275,6 +50385,29 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             actor=actor,
             context={**dict(payload or {}), "copilot_mode": "legal"},
         ) | {"action_id": action_text, "message": "He ejecutado una revisión legal experta del ámbito actual."}
+    if action_text == "create_legal_expert_tasks":
+        area = _workspace_internal_copilot_legal_area_for_context(str(payload.get("area") or payload.get("crm") or "").strip(), payload)
+        try:
+            candidates = _workspace_internal_copilot_legal_radar_candidates(conn, area=area, limit=4)
+        except Exception:
+            candidates = []
+        created = _workspace_internal_copilot_create_specialist_followup_tasks(
+            conn,
+            workspace_text,
+            actor=actor,
+            mode="legal",
+            legal_candidates=candidates,
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"He creado {int(created.get('created') or 0)} tarea(s) de seguimiento legal experto.",
+            "created": int(created.get("created") or 0),
+            "task_ids": list(created.get("task_ids") or []),
+            "sources": ["workspace_memory", "task_planner", "legal_radar_items"],
+            "suggestions": ["Revisión legal experta", "Crear tareas legales"],
+        }
     if action_text == "review_fiscal_expert":
         return _workspace_internal_copilot_fiscal_briefing_reply(
             conn,
@@ -50283,6 +50416,25 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             actor=actor,
             context={**dict(payload or {}), "copilot_mode": "fiscal"},
         ) | {"action_id": action_text, "message": "He ejecutado una revisión fiscal-contable experta del ámbito actual."}
+    if action_text == "create_fiscal_expert_tasks":
+        snapshot = _workspace_internal_copilot_collect_fiscal_snapshot(conn, empresa_id=empresa_id)
+        created = _workspace_internal_copilot_create_specialist_followup_tasks(
+            conn,
+            workspace_text,
+            actor=actor,
+            mode="fiscal",
+            snapshot=snapshot,
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"He creado {int(created.get('created') or 0)} tarea(s) de seguimiento fiscal-contable.",
+            "created": int(created.get("created") or 0),
+            "task_ids": list(created.get("task_ids") or []),
+            "sources": ["workspace_memory", "task_planner", "gestoria_modelos", "gestoria_facturas"],
+            "suggestions": ["Revisión fiscal experta", "Revisar fiscal-contable"],
+        }
     if action_text == "review_laboral_expert":
         return _workspace_internal_copilot_laboral_briefing_reply(
             conn,
@@ -50291,6 +50443,25 @@ def perform_workspace_internal_copilot_action(conn, workspace_id, action_id, act
             actor=actor,
             context={**dict(payload or {}), "copilot_mode": "laboral"},
         ) | {"action_id": action_text, "message": "He ejecutado una revisión laboral/RRHH experta del ámbito actual."}
+    if action_text == "create_laboral_expert_tasks":
+        snapshot = _workspace_internal_copilot_collect_laboral_snapshot(conn, workspace_text, empresa_id=empresa_id)
+        created = _workspace_internal_copilot_create_specialist_followup_tasks(
+            conn,
+            workspace_text,
+            actor=actor,
+            mode="laboral",
+            snapshot=snapshot,
+            now=now,
+        )
+        return {
+            "ok": True,
+            "action_id": action_text,
+            "message": f"He creado {int(created.get('created') or 0)} tarea(s) de seguimiento laboral/RRHH.",
+            "created": int(created.get("created") or 0),
+            "task_ids": list(created.get("task_ids") or []),
+            "sources": ["workspace_memory", "task_planner", "workspace_rrhh_documentos", "workspace_rrhh_ausencias", "workspace_rrhh_gastos"],
+            "suggestions": ["Revisión laboral experta", "Revisar RRHH"],
+        }
     if action_text == "inspect_current_problem":
         return _workspace_internal_copilot_current_problem_reply(conn, workspace_text, empresa_id=empresa_id, actor=actor, context=payload)
     if action_text == "copilot_web_ask":

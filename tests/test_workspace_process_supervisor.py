@@ -3132,6 +3132,54 @@ class WorkspaceProcessSupervisorTests(unittest.TestCase):
         self.assertEqual(legal["mode"], "legal")
         self.assertTrue(any(str(card.get("title") or "") == "Riesgo y recomendación" for card in (legal.get("cards") or [])))
 
+    def test_internal_copilot_create_specialist_tasks(self):
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS gestoria_facturas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              numero TEXT,
+              fecha_emision TEXT,
+              total REAL,
+              cliente_id TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            )
+            """
+        )
+        self.conn.execute("INSERT INTO gestoria_facturas (id, empresa_id, numero, fecha_emision, total, cliente_id, created_at, updated_at) VALUES ('fac-task-1','e1','F-20','2026-06-19',200,'c1','now','now')")
+        self.conn.execute(
+            """
+            INSERT INTO workspace_rrhh_documentos (
+              id, workspace_id, empresa_id, persona_id, tipo, nombre, fecha_emision, fecha_caducidad, permanente, estado, notas, created_at, updated_at
+            ) VALUES (
+              'doc-task-1', 'ws1', 'e1', 'p1', 'Contrato', 'Contrato base', '2026-01-01', '2026-06-01', 0, 'Activo', '', 'now', 'now'
+            )
+            """
+        )
+        fiscal = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "create_fiscal_expert_tasks",
+            {"copilot_mode": "fiscal"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T08:50:00Z",
+        )
+        laboral = server.perform_workspace_internal_copilot_action(
+            self.conn,
+            "ws1",
+            "create_laboral_expert_tasks",
+            {"copilot_mode": "laboral"},
+            empresa_id="e1",
+            actor={"id": "u1", "usuario": "QA"},
+            now="2026-06-19T08:51:00Z",
+        )
+        self.assertTrue(fiscal["ok"])
+        self.assertGreaterEqual(int(fiscal.get("created") or 0), 0)
+        self.assertTrue(laboral["ok"])
+        self.assertGreaterEqual(int(laboral.get("created") or 0), 1)
+
     def test_internal_copilot_run_operator_sequence(self):
         self.conn.execute(
             """
