@@ -62,3 +62,25 @@ Si en Render ves errores tipo `ModuleNotFoundError` (por ejemplo `No module name
 Start Command (recomendado):
 - Si usas A: `python3 web/server.py --db "$DB_PATH" --host 0.0.0.0`
 - Si usas B: `./.venv/bin/python web/server.py --db "$DB_PATH" --host 0.0.0.0`
+
+## 7) Playwright para Ollana
+
+Si quieres que `ollana.system` navegue y busque con navegador real en producción:
+
+- `playwright` ya queda incluido en `requirements.txt`
+- el servidor puede bootstrappear Chromium en segundo plano
+
+Variables recomendadas en Render:
+
+```bash
+OLLANA_BROWSER_BOOTSTRAP_ENABLED=1
+PLAYWRIGHT_BROWSERS_PATH=/opt/render/project/.playwright-browsers
+```
+
+Si el runtime necesitara instalar también dependencias del sistema para Chromium:
+
+```bash
+OLLANA_BROWSER_INSTALL_DEPS=1
+```
+
+Ese modo es más agresivo y solo conviene activarlo si el bootstrap normal no basta.

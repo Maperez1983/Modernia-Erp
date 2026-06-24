@@ -26,6 +26,7 @@ from web.server import (
     AUTH_SESSIONS_LOCK,
     OLLANA_SYSTEM_STATE,
     describe_ollana_system_session,
+    ensure_ollana_browser_runtime,
     ensure_ollana_system_session,
     ensure_usuarios_schema,
     hash_password,
@@ -140,6 +141,27 @@ class OllanaSystemSessionTests(unittest.TestCase):
             self.assertEqual(captured["env"]["OLLANA_BROWSER_SEARCH_PROVIDER"], "bing")
         finally:
             server_mod.run_subprocess = old_runner
+
+    def test_ensure_ollana_browser_runtime_marks_ready_after_install(self):
+        old_runner = server_mod.run_subprocess
+        old_find_spec = server_mod.importlib.util.find_spec
+        calls = []
+
+        def fake_run_subprocess(cmd, **kwargs):
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        try:
+            server_mod.run_subprocess = fake_run_subprocess
+            server_mod.importlib.util.find_spec = lambda name: object() if name == "playwright" else None
+            result = ensure_ollana_browser_runtime()
+            self.assertTrue(result["ok"])
+            self.assertTrue(any(cmd[:3] == [sys.executable or "python3", "-m", "playwright"] for cmd in calls))
+            status = describe_ollana_system_session(ensure=False, conn=self.conn)
+            self.assertTrue(status["browser_runtime"]["ready"])
+        finally:
+            server_mod.run_subprocess = old_runner
+            server_mod.importlib.util.find_spec = old_find_spec
 
 
 if __name__ == "__main__":

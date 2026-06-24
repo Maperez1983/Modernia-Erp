@@ -25,6 +25,7 @@ import smtplib
 import imaplib
 import email
 import html
+import importlib.util
 import textwrap
 import shlex
 import xml.etree.ElementTree as ET
@@ -877,6 +878,9 @@ OLLANA_SYSTEM_SESSION_LABEL = "ollana_system"
 OLLANA_SYSTEM_WATCHDOG_INTERVAL_SECONDS = max(
     30, min(3600, int(os.environ.get("OLLANA_SYSTEM_WATCHDOG_INTERVAL_SECONDS", "300") or "300"))
 )
+OLLANA_BROWSER_BOOTSTRAP_ENABLED = os.environ.get("OLLANA_BROWSER_BOOTSTRAP_ENABLED", "1").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
+OLLANA_BROWSER_INSTALL_DEPS = os.environ.get("OLLANA_BROWSER_INSTALL_DEPS", "0").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
+OLLANA_BROWSER_PATH = str(os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or (ROOT.parent / ".playwright-browsers")).strip()
 AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/health",
     "/api/build_info",
@@ -923,6 +927,9 @@ OLLANA_SYSTEM_STATE = {
     "last_user_id": "",
     "last_usuario": "",
     "last_expires_at": 0.0,
+    "browser_ready": False,
+    "browser_last_checked_at": 0.0,
+    "browser_last_error": "",
 }
 
 
@@ -11495,7 +11502,58 @@ def _ollana_system_config():
         "enabled": bool(OLLANA_SYSTEM_ENABLED),
         "login": str(OLLANA_SYSTEM_LOGIN or "").strip(),
         "has_password": bool(str(OLLANA_SYSTEM_PASSWORD or "")),
+        "browser_bootstrap_enabled": bool(OLLANA_BROWSER_BOOTSTRAP_ENABLED),
+        "browser_path": str(OLLANA_BROWSER_PATH or "").strip(),
     }
+
+
+def _set_ollana_browser_state(*, ready=False, error=""):
+    with OLLANA_SYSTEM_LOCK:
+        OLLANA_SYSTEM_STATE.update(
+            {
+                "browser_ready": bool(ready),
+                "browser_last_checked_at": time.time(),
+                "browser_last_error": str(error or "").strip(),
+            }
+        )
+
+
+def ensure_ollana_browser_runtime():
+    if not OLLANA_BROWSER_BOOTSTRAP_ENABLED:
+        _set_ollana_browser_state(ready=False, error="bootstrap desactivado")
+        return {"ok": False, "skipped": True, "error": "bootstrap desactivado"}
+    env = dict(os.environ)
+    env["PLAYWRIGHT_BROWSERS_PATH"] = str(OLLANA_BROWSER_PATH or "").strip()
+    root_path = str(ROOT.parent)
+    try:
+        if not importlib.util.find_spec("playwright"):
+            run_subprocess(
+                [sys.executable or "python3", "-m", "pip", "install", "playwright==1.54.0"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=600,
+                cwd=root_path,
+                env=env,
+            )
+        install_cmd = [sys.executable or "python3", "-m", "playwright", "install"]
+        if OLLANA_BROWSER_INSTALL_DEPS:
+            install_cmd.append("--with-deps")
+        install_cmd.append("chromium")
+        run_subprocess(
+            install_cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=900,
+            cwd=root_path,
+            env=env,
+        )
+        _set_ollana_browser_state(ready=True, error="")
+        return {"ok": True, "ready": True, "browser_path": env["PLAYWRIGHT_BROWSERS_PATH"]}
+    except Exception as exc:
+        _set_ollana_browser_state(ready=False, error=f"{type(exc).__name__}: {exc}")
+        return {"ok": False, "ready": False, "error": f"{type(exc).__name__}: {exc}"}
 
 
 def _find_session_in_memory(*, user_id="", session_kind="", session_label=""):
@@ -11602,6 +11660,13 @@ def describe_ollana_system_session(*, ensure=False, conn=None):
         "expires_at": float((session or {}).get("expires_at") or 0.0),
         "session_kind": str((session or {}).get("session_kind") or "").strip(),
         "session_label": str((session or {}).get("session_label") or "").strip(),
+    }
+    status["browser_runtime"] = {
+        "ready": bool(OLLANA_SYSTEM_STATE.get("browser_ready")),
+        "last_checked_at": float(OLLANA_SYSTEM_STATE.get("browser_last_checked_at") or 0.0),
+        "last_error": str(OLLANA_SYSTEM_STATE.get("browser_last_error") or "").strip(),
+        "path": str(OLLANA_BROWSER_PATH or "").strip(),
+        "bootstrap_enabled": bool(OLLANA_BROWSER_BOOTSTRAP_ENABLED),
     }
     return status
 
@@ -11737,6 +11802,21 @@ def start_ollana_system_watchdog(db_path):
     return True
 
 
+def start_ollana_browser_bootstrap():
+    if not OLLANA_BROWSER_BOOTSTRAP_ENABLED:
+        return False
+    with OLLANA_SYSTEM_LOCK:
+        if getattr(Handler, "_ollana_browser_bootstrap_started", False):
+            return True
+        Handler._ollana_browser_bootstrap_started = True
+
+    def _loop():
+        ensure_ollana_browser_runtime()
+
+    threading.Thread(target=_loop, name="ollana-browser-bootstrap", daemon=True).start()
+    return True
+
+
 def run_ollana_browser_review(payload=None):
     data = dict(payload or {})
     config = _ollana_system_config()
@@ -11763,6 +11843,7 @@ def run_ollana_browser_review(payload=None):
     env["OLLANA_BROWSER_TASK"] = task
     env["OLLANA_BROWSER_SEARCH_QUERY"] = search_query
     env["OLLANA_BROWSER_SEARCH_PROVIDER"] = search_provider
+    env["PLAYWRIGHT_BROWSERS_PATH"] = str(OLLANA_BROWSER_PATH or "").strip()
     script_path = ROOT.parent / "scripts" / "ollana_browser_review.py"
     cmd = [sys.executable or "python3", str(script_path), "--json"]
     try:
@@ -101873,6 +101954,10 @@ def main():
         pass
     try:
         start_ollana_system_watchdog(args.db)
+    except Exception:
+        pass
+    try:
+        start_ollana_browser_bootstrap()
     except Exception:
         pass
     # OCR tables también en background (best-effort).
