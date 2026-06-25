@@ -12350,6 +12350,173 @@ def _copilot_image_edit_apply_room_cleanup_cv(image, level=1.2):
     return Image.fromarray(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
 
 
+def _copilot_image_edit_image_delta_ratio(before_image, after_image):
+    cv2, np, err = _copilot_image_edit_load_cv2()
+    if cv2 is None or np is None:
+        raise ValueError(err)
+    before = np.array(before_image.convert("RGB"))
+    after = np.array(after_image.convert("RGB"))
+    if before.shape != after.shape:
+        after = cv2.resize(after, (before.shape[1], before.shape[0]), interpolation=cv2.INTER_LANCZOS4)
+    delta = np.abs(before.astype("int16") - after.astype("int16"))
+    mean_abs = float(np.mean(delta))
+    significant = np.count_nonzero(np.any(delta > 12, axis=2))
+    total = max(1, before.shape[0] * before.shape[1])
+    return {
+        "mean_abs": mean_abs,
+        "significant_ratio": float(significant / total),
+    }
+
+
+def _copilot_image_edit_apply_room_empty_cv(image, level=1.2):
+    cv2, np, err = _copilot_image_edit_load_cv2()
+    if cv2 is None or np is None:
+        raise ValueError(err)
+
+    level = max(0.8, float(level or 1.2))
+    rgb = np.array(image.convert("RGB"))
+    bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
+    h, w = lab.shape[:2]
+
+    # 1) Segmentación de color simple para separar plano de fondo de objetos.
+    sample = lab.reshape((-1, 3)).astype(np.float32)
+    k = 6
+    cv2.setRNGSeed(42)
+    attempts = 10
+    _, labels, centers = cv2.kmeans(
+        sample,
+        k,
+        None,
+        (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 20, 1.0),
+        attempts,
+        cv2.KMEANS_PP_CENTERS,
+    )
+    labels = labels.reshape(h, w)
+    centers = centers.astype(np.float32)
+
+    margin = max(12, int(min(h, w) * 0.05))
+    border_mask = np.zeros((h, w), dtype=np.uint8)
+    border_mask[:margin, :] = 1
+    border_mask[h - margin :, :] = 1
+    border_mask[:, :margin] = 1
+    border_mask[:, w - margin :] = 1
+    border_labels = labels[border_mask.astype(bool)]
+    unique, counts = np.unique(border_labels, return_counts=True)
+    label_frequency = list(zip(unique.tolist(), counts.tolist()))
+    label_frequency.sort(key=lambda item: item[1], reverse=True)
+    background_labels = {int(item[0]) for item in label_frequency[: max(2, int(k * 0.6))]}
+
+    object_mask = np.ones((h, w), dtype=np.uint8) * 255
+    for item in background_labels:
+        object_mask[labels == item] = 0
+
+    # 2) Atenuar objetos extremos (bordes) para evitar borrar techo/suelo completos.
+    object_mask[:margin * 2, :] = 0
+    object_mask[h - margin * 2 :, :] = 0
+    object_mask[:, :margin * 2] = 0
+    object_mask[:, w - margin * 2 :] = 0
+
+    # 3) Refuerzo por textura/contorno: prioriza elementos estructurados (muebles/decoración).
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    lap = cv2.Laplacian(gray, cv2.CV_16S, ksize=3)
+    lap = cv2.convertScaleAbs(lap)
+    _, texture = cv2.threshold(lap, 12, 255, cv2.THRESH_BINARY)
+
+    edges = cv2.Canny(gray, 45, 140)
+    texture = cv2.bitwise_or(texture, edges)
+    texture = cv2.dilate(
+        texture,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)),
+        iterations=1,
+    )
+
+    object_mask = cv2.bitwise_or(object_mask, texture)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    object_mask = cv2.morphologyEx(object_mask, cv2.MORPH_OPEN, kernel)
+    object_mask = cv2.morphologyEx(object_mask, cv2.MORPH_CLOSE, kernel)
+
+    # 4) Conservador en componentes: quita ruido pequeño y regiones absurdamente grandes.
+    num_labels, comps, stats, _ = cv2.connectedComponentsWithStats(object_mask, connectivity=8)
+    keep = np.zeros_like(object_mask)
+    total_pixels = h * w
+    min_area = max(250, int(total_pixels * 0.0004 * level))
+    max_area = int(total_pixels * 0.45)
+    for idx in range(1, num_labels):
+        area = int(stats[idx, cv2.CC_STAT_AREA])
+        if min_area <= area <= max_area:
+            keep[comps == idx] = 255
+
+    # 5) Si el resultado queda insuficiente, amplía máscara a nivel central para no terminar vacío.
+    if np.count_nonzero(keep) < int(total_pixels * 0.008):
+        cx1, cx2 = int(w * 0.15), int(w * 0.85)
+        cy1, cy2 = int(h * 0.16), int(h * 0.84)
+        keep = np.zeros((h, w), dtype=np.uint8)
+        keep[cy1:cy2, cx1:cx2] = 255
+
+    # 6) Inpaint para reemplazar zonas detectadas.
+    mask_dilation_passes = max(2, min(6, int(level * 2.2)))
+    keep = cv2.dilate(
+        keep,
+        cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15)),
+        iterations=mask_dilation_passes,
+    )
+
+    radius = max(6, min(20, int(6 * level)))
+    work = cv2.inpaint(bgr, keep, radius, cv2.INPAINT_TELEA)
+    work = cv2.inpaint(work, keep, max(4, int(radius * 0.75)), cv2.INPAINT_NS)
+    work = cv2.medianBlur(work, 3)
+    work = cv2.bilateralFilter(work, d=7, sigmaColor=32, sigmaSpace=42)
+
+    # Último ajuste de coherencia del resultado.
+    work = cv2.addWeighted(work, 0.9, cv2.GaussianBlur(work, (0, 0), 1.1), 0.1, 0)
+    return Image.fromarray(cv2.cvtColor(work, cv2.COLOR_BGR2RGB))
+
+
+def _copilot_image_edit_reinforce_empty_room_when_needed(
+    original_image,
+    edited_image,
+    operations,
+):
+    has_virtual_empty = any(
+        _normalize_image_edit_op(item.get("op") or "") == "virtual_empty_room"
+        for item in list(operations or [])
+        if isinstance(item, dict)
+    )
+    if not has_virtual_empty:
+        return edited_image, False, None
+
+    level = 1.4
+    for item in list(operations or []):
+        if isinstance(item, dict) and _normalize_image_edit_op(item.get("op") or "") == "virtual_empty_room":
+            try:
+                level = float(item.get("level") or level)
+            except Exception:
+                level = 1.4
+            break
+
+    try:
+        delta = _copilot_image_edit_image_delta_ratio(original_image, edited_image)
+    except Exception:
+        delta = {"mean_abs": 0.0, "significant_ratio": 0.0}
+
+    if delta["mean_abs"] >= 1.8 or delta["significant_ratio"] >= 0.03:
+        return edited_image, False, {"delta": delta, "reinforced": False}
+
+    try:
+        reinforced = _copilot_image_edit_apply_room_empty_cv(
+            edited_image,
+            level=max(1.25, min(2.4, level * 1.2)),
+        )
+        reinforced_delta = _copilot_image_edit_image_delta_ratio(original_image, reinforced)
+        if reinforced_delta["mean_abs"] < 1.0:
+            return edited_image, False, {"delta": delta, "reinforced": False}
+        return reinforced, True, {"delta": delta, "reinforced_delta": reinforced_delta}
+    except Exception:
+        return edited_image, False, {"delta": delta, "reinforced": False}
+
+
 def _copilot_image_edit_apply_remove_background(image):
     try:
         from rembg import remove  # type: ignore
@@ -12482,10 +12649,12 @@ def _copilot_image_edit_apply_operations(image, operations):
             summaries.append("limpieza local de habitación")
             virtual_ops.append("virtual_clean_room")
         elif op == "virtual_empty_room":
-            img = ImageOps.autocontrast(img)
-            img = ImageEnhance.Contrast(img).enhance(1.15)
-            img = ImageEnhance.Sharpness(img).enhance(1.15)
-            summaries.append("base local para vaciado (sin objetos) / mejora luminancia")
+            try:
+                level = float(item.get("level") or 1.25)
+            except Exception:
+                level = 1.25
+            img = _copilot_image_edit_apply_room_empty_cv(img, level=level)
+            summaries.append("vaciado de estancia (inpaint heurístico)")
             virtual_ops.append("virtual_empty_room")
         elif op == "photo_cleanup":
             try:
@@ -12700,6 +12869,19 @@ def run_copilot_image_edit(payload, *, conn=None, session=None, now=None):
                 summaries = ["edición virtual IA"]
                 disclosure_required = True
                 disclosure_message = "Imagen editada con IA con fines de limpieza/staging. Mantener evidencia del original."
+                reinforced, reinforced_applied, reinforcement_info = _copilot_image_edit_reinforce_empty_room_when_needed(
+                    image,
+                    edited,
+                    operations,
+                )
+                if reinforced_applied:
+                    edited = reinforced
+                    source = "openai_virtual_edit_reinforced"
+                    summaries.append("refuerzo local de vaciado")
+                    disclosure_message = (
+                        "La edición IA de vaciado no modificaba suficiente la escena. "
+                        "Se aplicó un refinamiento local de respaldo para quitar objetos detectados."
+                    )
             except Exception as err:
                 ai_error = f"No se pudo abrir la edición de IA: {err}"
                 source = "local_fallback"
