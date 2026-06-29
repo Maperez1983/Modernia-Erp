@@ -44310,6 +44310,7 @@ const saveHipotecaFicha = async (event) => {
         return;
       }
       const createPayload = { ...base };
+      createPayload.force_new = true;
       // Endpoint legacy: crea (o reutiliza) una hipoteca en BDT y nos devuelve el id.
       [
         "cliente",
@@ -87375,7 +87376,7 @@ if (hipotecaForm) {
     fetch("/api/hipotecas", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ ...payload, force_new: true }),
     })
       .then((res) => res.json())
       .then((data) => {

@@ -73044,7 +73044,14 @@ class Handler(BaseHTTPRequestHandler):
             audit("gestoria_modelo", record_id, "eliminar", None, payload.get("usuario"))
         elif parsed.path == "/api/hipotecas":
             # try to update existing encargo/estudio instead of creating duplicates
-            force_new = bool(payload.get("force_new") or payload.get("forceCreateNew") or payload.get("no_reuse"))
+            force_new = bool(
+                parse_boolish(payload.get("force_new"))
+                or parse_boolish(payload.get("forceCreateNew"))
+                or parse_boolish(payload.get("force_create_new"))
+                or parse_boolish(payload.get("no_reuse"))
+            )
+            # En la UI de CRM (ficha nueva), forzamos force_new=1 para evitar arrastre de datos.
+            # Por compatibilidad se permite reutilización por defecto en integraciones que no envíen este flag.
             cliente = str(payload.get("cliente") or "").strip()
             cliente_id = str(payload.get("cliente_id") or "").strip() or None
             fecha_encargo = str(payload.get("fecha_encargo") or "").strip() or None
