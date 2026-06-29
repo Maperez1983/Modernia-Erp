@@ -44063,12 +44063,15 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
   if (meta) meta.textContent = "Cargando ficha...";
   panel.classList.remove("hidden");
   panel.classList.add("open");
-  let found = prefetched;
-  if (!found) {
+  // Preferencia: dato fresco del backend para evitar mostrar filas en caché desactualizadas.
+  let found = null;
+  const fetched = await fetchHipotecaRowById(target);
+  if (fetched) {
+    found = fetched;
+  } else if (prefetched && prefetched.row && prefetched.columns) {
+    found = prefetched;
+  } else {
     found = findHipotecaBdtRowById(target);
-  }
-  if (!found) {
-    found = await fetchHipotecaRowById(target);
   }
   if (!found) return;
   const rowData = hipotecaRowToObject(found.row, found.columns);
@@ -44250,6 +44253,7 @@ const saveHipotecaFicha = async (event) => {
   const status = panel.querySelector("#hipotecaFichaStatus");
   if (status) status.textContent = isDraft ? "Creando hipoteca..." : "Guardando cambios...";
   const empresa = resolveCrmFinEmpresa();
+  const empresaId = resolveLegacyEmpresaId(empresa);
   const base = {
     empresa_id: empresa?.id || "",
     empresa_nombre: empresa?.nombre || resolveCrmFinEmpresaNombre(),
@@ -44360,6 +44364,9 @@ const saveHipotecaFicha = async (event) => {
       timeoutMs: 25000,
     });
     if (status) status.textContent = "Cambios guardados.";
+    if (state.hipotecaBdtCache && state.hipotecaBdtCache.empresaId === empresaId) {
+      state.hipotecaBdtCache.ts = 0;
+    }
     loadHipotecaBdt(true);
     loadFinCrm();
     loadHipotecaDashboard();
