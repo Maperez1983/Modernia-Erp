@@ -12744,12 +12744,18 @@ def _copilot_image_edit_call_openai(payload_operations, raw_bytes, content_type)
     if image_op is None:
         return None, "No hay operación virtual pendiente"
     prompt = _copilot_image_edit_ai_payload_prompt(image_op)
-    model = str(
+    raw_model = str(
         os.environ.get("OPENAI_IMAGE_EDIT_MODEL")
         or os.environ.get("OPENAI_IMAGE_MODEL")
-        or "dall-e-2"
+        or ""
     ).strip()
-    if not model:
+    model_candidates = []
+    if raw_model:
+        model_candidates.append(raw_model)
+    for model_fallback in ("gpt-image-1", "dall-e-3", "dall-e-2"):
+        if model_fallback not in model_candidates:
+            model_candidates.append(model_fallback)
+    if not model_candidates:
         return None, "Modelo de imagen de OpenAI no configurado"
     if not raw_bytes:
         return None, "No hay imagen base para editar"
@@ -12763,65 +12769,100 @@ def _copilot_image_edit_call_openai(payload_operations, raw_bytes, content_type)
             content_type,
         )
     }
-    base_payload = {
-        "model": model,
-        "prompt": prompt,
-        "n": 1,
-    }
-    if model.lower().startswith("dall-e-2"):
-        base_payload["size"] = "1024x1024"
-    response_formats = ("b64_json", "url")
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     headers = {"Authorization": f"Bearer {api_key}"}
     last_error = ""
-    for response_format in response_formats:
-        payload = dict(base_payload)
-        payload["response_format"] = response_format
-        try:
-            res = requests.post(
-                "https://api.openai.com/v1/images/edits",
-                headers=headers,
-                data=payload,
-                files=files,
-                timeout=120,
-            )
-        except Exception as exc:
-            return None, f"Error en llamada OpenAI image edit: {exc}"
-        if res.status_code >= 400:
-            last_error = f"OpenAI image edit HTTP {res.status_code}: {res.text[:400]}"
-            continue
-        try:
-            payload_response = res.json()
-        except Exception as err:
-            last_error = f"Respuesta OpenAI inválida: {err}"
-            continue
-        data = (payload_response or {}).get("data") or []
-        if not data:
-            last_error = (
-                payload_response.get("error", {}).get("message")
-                if isinstance(payload_response, dict)
-                else "Sin resultados de edición"
-            )
-            continue
-        item = data[0]
-        if item.get("b64_json"):
+    for model in model_candidates:
+        base_payload = {
+            "model": model,
+            "prompt": prompt,
+            "n": 1,
+        }
+        if str(model or "").lower().startswith("dall-e-2"):
+            base_payload["size"] = "1024x1024"
+        tries = []
+        attempt_payload = dict(base_payload)
+        attempt_payload["response_format"] = "b64_json"
+        tries.append(("with_response_format", attempt_payload))
+        tries.append(("url_fallback", dict(base_payload)))
+        for try_name, payload in tries:
             try:
-                return base64.b64decode(item["b64_json"]), ""
+                res = requests.post(
+                    "https://api.openai.com/v1/images/edits",
+                    headers=headers,
+                    data=payload,
+                    files=files,
+                    timeout=120,
+                )
+            except Exception as exc:
+                return None, f"Error en llamada OpenAI image edit: {exc}"
+            if res.status_code >= 400:
+                last_error = f"OpenAI image edit HTTP {res.status_code}: {res.text[:400]}"
+                if (
+                    try_name == "with_response_format"
+                    and "Unknown parameter: 'response_format'" in last_error
+                ):
+                    continue
+                if (
+                    try_name == "with_response_format"
+                    and "unknown parameter: 'response_format'" in last_error.lower()
+                ):
+                    continue
+                if "does not exist" in last_error and "param" in last_error:
+                    break
+                if "billing_hard_limit_reached" in last_error:
+                    return None, last_error
+                if "invalid_value" in last_error and "does not exist" in last_error:
+                    break
+                return None, last_error
+            try:
+                payload_response = res.json()
             except Exception as err:
-                last_error = f"No se pudo decodificar b64_json: {err}"
-                continue
-        url = str(item.get("url") or "").strip()
-        if not url:
-            last_error = "Respuesta de OpenAI sin imagen"
-            continue
-        try:
-            image_res = requests.get(url, timeout=120)
-            if image_res.status_code >= 400:
-                last_error = f"No se pudo descargar imagen editada: HTTP {image_res.status_code}"
-                continue
-            return image_res.content, ""
-        except Exception as err:
-            last_error = f"Error descargando imagen editada: {err}"
+                last_error = f"Respuesta OpenAI inválida: {err}"
+                return None, last_error
+            data = (payload_response or {}).get("data") or []
+            if not data:
+                last_error = (
+                    payload_response.get("error", {}).get("message")
+                    if isinstance(payload_response, dict)
+                    else "Sin resultados de edición"
+                )
+                if try_name == "with_response_format" and not data and payload.get("response_format") == "b64_json":
+                    continue
+                return None, last_error
+            item = data[0]
+            if item.get("b64_json"):
+                try:
+                    return base64.b64decode(item["b64_json"]), ""
+                except Exception as err:
+                    last_error = f"No se pudo decodificar b64_json: {err}"
+                    if try_name == "with_response_format":
+                        continue
+                    return None, last_error
+            url = str(item.get("url") or "").strip()
+            if not url:
+                last_error = "Respuesta de OpenAI sin imagen"
+                if try_name == "with_response_format":
+                    continue
+                return None, last_error
+            try:
+                image_res = requests.get(url, timeout=120)
+                if image_res.status_code >= 400:
+                    last_error = f"No se pudo descargar imagen editada: HTTP {image_res.status_code}"
+                    if try_name == "with_response_format":
+                        continue
+                    return None, last_error
+                return image_res.content, ""
+            except Exception as err:
+                last_error = f"Error descargando imagen editada: {err}"
+                if try_name == "with_response_format":
+                    continue
+                return None, last_error
+        if (
+            "does not exist" in last_error.lower()
+            or "invalid_value" in last_error.lower()
+            or "resource_not_found" in last_error.lower()
+        ):
             continue
     return None, last_error
 
@@ -82932,7 +82973,7 @@ class Handler(BaseHTTPRequestHandler):
             firmadas_mes = conn.execute(
                 """
                 SELECT COUNT(*) AS total
-                FROM hipotecas
+                FROM hipotecas h
                 WHERE """
                 + scope_clause
                 + """
@@ -82954,15 +82995,15 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT
                   AVG(
                     CASE
-                      WHEN precio IS NOT NULL AND precio > 0 AND importe_hipoteca IS NOT NULL
-                        THEN (importe_hipoteca * 100.0 / precio)
-                      WHEN porcentaje IS NOT NULL AND porcentaje > 0 AND porcentaje <= 1 THEN porcentaje * 100.0
-                      WHEN porcentaje IS NOT NULL AND porcentaje > 1 THEN porcentaje
+                      WHEN h.precio IS NOT NULL AND h.precio > 0 AND h.importe_hipoteca IS NOT NULL
+                        THEN (h.importe_hipoteca * 100.0 / h.precio)
+                      WHEN h.porcentaje IS NOT NULL AND h.porcentaje > 0 AND h.porcentaje <= 1 THEN h.porcentaje * 100.0
+                      WHEN h.porcentaje IS NOT NULL AND h.porcentaje > 1 THEN h.porcentaje
                       ELSE NULL
                     END
                   ) AS porcentaje_medio,
-                  AVG(COALESCE(comision, 0)) AS comision_media
-                FROM hipotecas
+                  AVG(COALESCE(h.comision, 0)) AS comision_media
+                FROM hipotecas h
                 WHERE """
                 + scope_clause
                 + """

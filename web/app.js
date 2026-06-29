@@ -41427,6 +41427,58 @@ const getHipotecaFirmaTimestamp = (row, columns) => {
   return parseDateToTimestamp(raw);
 };
 
+const buildHipotecaBdtDedupKey = (row, columns = []) => {
+  const idIndex = columns.indexOf("id");
+  const id = idIndex >= 0 ? String(row[idIndex] || "").trim() : "";
+  if (id) return `id:${id}`;
+
+  const normalize = (value) =>
+    String(value || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+
+  const fields = [
+    "cliente",
+    "banco",
+    "oficina",
+    "estado",
+    "asesor",
+    "fecha_encargo",
+    "fecha_firma",
+    "tipo_hipoteca",
+    "precio",
+    "importe_hipoteca",
+    "porcentaje",
+    "entrada",
+    "comision",
+    "anio",
+  ];
+
+  const signature = fields
+    .map((field) => {
+      const index = columns.indexOf(field);
+      return index >= 0 ? normalize(row[index]) : "";
+    })
+    .join("|");
+  if (!signature.replace(/\|/g, "").trim()) {
+    return `signature:${JSON.stringify(row || [])}`;
+  }
+  return `signature:${signature}`;
+};
+
+const dedupeHipotecaBdtRows = (rows = [], columns = []) => {
+  const seen = new Set();
+  const unique = [];
+  (rows || []).forEach((row) => {
+    const key = buildHipotecaBdtDedupKey(row, columns);
+    if (seen.has(key)) return;
+    seen.add(key);
+    unique.push(row);
+  });
+  return unique;
+};
+
 const buildHipotecaBdtSearchHaystack = (row, columns) => {
   const cliente = getHipotecaDisplayName(row, columns) || "";
   const banco = getHipotecaFieldValue(row, columns, ["banco", "entidad", "entidad_financiera"]);
@@ -41485,11 +41537,12 @@ const buildHipotecaBdtSearchHaystack = (row, columns) => {
 };
 
 const filterHipotecaBdtRows = (rows = [], columns = [], queryRaw = "") => {
+  const dedupedRows = dedupeHipotecaBdtRows(rows, columns);
   const q = String(queryRaw || "").trim();
   const normalizedQuery = normalizeLookupText(q);
   const docQuery = q.toUpperCase().replace(/[^0-9A-Z]/g, "");
 
-  const signed = rows.filter((row) => isHipotecaSignedForExport(row, columns));
+  const signed = dedupedRows.filter((row) => isHipotecaSignedForExport(row, columns));
   const signedSorted = signed
     .slice()
     .sort((a, b) => getHipotecaFirmaTimestamp(b, columns) - getHipotecaFirmaTimestamp(a, columns));
@@ -41500,19 +41553,19 @@ const filterHipotecaBdtRows = (rows = [], columns = [], queryRaw = "") => {
       const encargo = getHipotecaFieldValue(row, columns, ["fecha_encargo", "fecha_encargo_cliente", "fecha_encargo_banco"]);
       return parseDateToTimestamp(firma || encargo);
     };
-    const sorted = rows
+    const sorted = dedupedRows
       .slice()
       .sort((a, b) => getSortTimestamp(b) - getSortTimestamp(a));
     return {
       mode: "all",
-      total: rows.length,
+      total: dedupedRows.length,
       signedTotal: signed.length,
       filtered: sorted.slice(0, 200),
-      matchCount: rows.length,
+      matchCount: dedupedRows.length,
     };
   }
 
-  const filtered = rows.filter((row) => {
+  const filtered = dedupedRows.filter((row) => {
     const hay = buildHipotecaBdtSearchHaystack(row, columns);
     if (normalizedQuery && hay.normalizedText.includes(normalizedQuery)) return true;
     if (docQuery && docQuery.length >= 5) {
@@ -41527,7 +41580,7 @@ const filterHipotecaBdtRows = (rows = [], columns = [], queryRaw = "") => {
 
   return {
     mode: "search",
-    total: rows.length,
+    total: dedupedRows.length,
     signedTotal: signed.length,
     filtered: sorted.slice(0, 200),
     matchCount: sorted.length,
@@ -41611,7 +41664,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
   ) {
     const cached = state.hipotecaBdtCache.data || {};
     const columns = cached.columns || [];
-    const rows = cached.rows || [];
+    const rows = dedupeHipotecaBdtRows(cached.rows || [], columns);
     renderHipotecaBdtList({ columns, rows, query: q });
     syncHipotecaExportYears(rows, columns);
     populateHipotecaVincularSelect(rows, columns);
@@ -41627,7 +41680,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
   api(`/api/hipoteca_bdt?${params.toString()}`)
     .then((data) => {
       const columns = data.columns || [];
-      const rows = data.rows || [];
+      const rows = dedupeHipotecaBdtRows(data.rows || [], columns);
       state.hipotecaBdtCache = {
         empresaId,
         q: qApi,
@@ -67752,7 +67805,24 @@ const loadFinHipotecasEstudio = async (empresaId) => {
   if (!finHipotecasEstudioTable || !finHipotecasEstudioInfo || !empresaId) return;
   const params = new URLSearchParams({ empresa_id: empresaId });
   const data = await api(`/api/fin_hipotecas_estudio?${params.toString()}`).catch(() => ({ rows: [] }));
-  const rows = data.rows || [];
+  const rawRows = data.rows || [];
+  const dedupeFinRows = [];
+  const seenFin = new Set();
+  rawRows.forEach((row) => {
+    const id = String(row?.id || "").trim();
+    const key = id ? `id:${id}` : [
+      String(row?.cliente || ""),
+      String(row?.banco || ""),
+      String(row?.oficina || ""),
+      String(row?.fecha_encargo || ""),
+      String(row?.fecha_firma || ""),
+      String(row?.estado || ""),
+    ].join("|").toLowerCase().trim();
+    if (seenFin.has(key)) return;
+    seenFin.add(key);
+    dedupeFinRows.push(row);
+  });
+  const rows = dedupeFinRows;
   state.finHipotecasEstudioRows = rows;
   if (!rows.length) {
     finHipotecasEstudioTable.innerHTML = "<p class='muted'>Sin hipotecas en encargo.</p>";
