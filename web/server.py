@@ -77650,6 +77650,190 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
+        if path == "/api/gestoria_libro_socios":
+            empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
+            sociedad_id = (params.get("sociedad_id", [""])[0] or "").strip()
+            output_format = (params.get("format", [""])[0] or "").strip().lower()
+            include_actas_raw = (params.get("include_actas", ["1"])[0] or "").strip().lower()
+            include_actas = include_actas_raw not in {"0", "false", "no", "off"}
+            if not sociedad_id:
+                json_response(self, {"error": "sociedad_id requerido"}, status=400)
+                return
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+            if not empresa_ids:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                return
+            placeholders = ",".join(["?"] * len(empresa_ids))
+            sociedad_row = conn.execute(
+                f"""
+                SELECT id, denominacion, tipo_social, cif, domicilio_social, provincia, fecha_constitucion,
+                       fecha_escritura, notario, folio, tomo, numero, capital_social, objeto_social,
+                       estado, notas, created_at, updated_at
+                FROM gestoria_sociedades
+                WHERE id = ? AND empresa_id IN ({placeholders})
+                LIMIT 1
+                """,
+                (sociedad_id, *empresa_ids),
+            ).fetchone()
+            if not sociedad_row:
+                json_response(self, {"error": "sociedad no encontrada"}, status=404)
+                return
+            rows_socios = conn.execute(
+                f"""
+                SELECT s.id, s.sociedad_id, COALESCE(gs.denominacion, '') AS sociedad,
+                       s.nombre, s.documento, s.rol, s.porcentaje, s.aportacion, s.domicilio, s.telefono, s.email,
+                       s.created_at, s.updated_at
+                FROM gestoria_socios s
+                LEFT JOIN gestoria_sociedades gs ON gs.id = s.sociedad_id
+                WHERE s.sociedad_id = ? AND s.empresa_id IN ({placeholders})
+                ORDER BY s.created_at DESC
+                """,
+                (sociedad_id, *empresa_ids),
+            ).fetchall()
+            sociedad = dict(sociedad_row)
+            socios = [dict(row) for row in rows_socios]
+
+            def _safe_float(value):
+                try:
+                    return float(value or 0.0)
+                except Exception:
+                    return 0.0
+
+            total_socios = len(socios)
+            total_porcentaje = 0.0
+            total_aportacion = 0.0
+            for socio in socios:
+                total_porcentaje += _safe_float(socio.get("porcentaje"))
+                total_aportacion += _safe_float(socio.get("aportacion"))
+
+            response = {
+                "ok": True,
+                "sociedad": sociedad,
+                "socios": socios,
+                "resumen": {
+                    "total_socios": total_socios,
+                    "porcentaje_total": round(total_porcentaje, 6),
+                    "aportacion_total": round(total_aportacion, 2),
+                },
+                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+
+            if include_actas:
+                actas_rows = conn.execute(
+                    f"""
+                    SELECT a.id, a.titulo, a.tipo_acta, a.numero_acta, a.fecha_acta, a.estado, a.contenido_texto
+                    FROM gestoria_actas a
+                    WHERE a.sociedad_id = ? AND a.empresa_id IN ({placeholders})
+                    ORDER BY a.created_at DESC
+                    LIMIT 20
+                    """,
+                    (sociedad_id, *empresa_ids),
+                ).fetchall()
+                response["actas"] = [dict(row) for row in actas_rows]
+
+            if output_format == "pdf":
+                empresa = conn.execute("SELECT * FROM empresas WHERE id = ? LIMIT 1", (empresa_ids[0],)).fetchone()
+                denominacion = sociedad.get("denominacion") or "-"
+                domicilio = sociedad.get("domicilio_social") or "-"
+                fecha_constitucion = sociedad.get("fecha_constitucion") or "-"
+                fecha_escritura = sociedad.get("fecha_escritura") or "-"
+                try:
+                    capital_text = format_eur(float(sociedad.get("capital_social") or 0.0))
+                except Exception:
+                    capital_text = "0,00 €"
+                body_lines = [
+                    "LIBRO DE SOCIOS · PRIMERA PÁGINA",
+                    "",
+                    f"Fecha de generación: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
+                    f"Sociedad: {denominacion}",
+                    f"CIF/NIF: {sociedad.get('cif') or '-'}",
+                    f"Tipo social: {sociedad.get('tipo_social') or '-'}",
+                    f"Domicilio social: {domicilio}",
+                    f"Provincia: {sociedad.get('provincia') or '-'}",
+                    f"Estado: {sociedad.get('estado') or '-'}",
+                    f"Escritura: {fecha_escritura} · Notario: {sociedad.get('notario') or '-'}",
+                    f"Folio: {sociedad.get('folio') or '-'} · Tomo: {sociedad.get('tomo') or '-'} · Número: {sociedad.get('numero') or '-'}",
+                    f"Constitución: {fecha_constitucion}",
+                    f"Capital social: {capital_text}",
+                    "",
+                    "OBJETO SOCIAL:",
+                    sociedad.get("objeto_social") or "-",
+                    "",
+                    "LISTA DE SOCIOS (extracto para primera página):",
+                ]
+                if not socios:
+                    body_lines.append("Sin socios registrados.")
+                else:
+                    for idx, socio in enumerate(socios, 1):
+                        nombre = socio.get("nombre") or "-"
+                        documento = socio.get("documento") or "-"
+                        rol = socio.get("rol") or "-"
+                        try:
+                            porcentaje = f"{float(socio.get('porcentaje') or 0):.6g}%"
+                        except Exception:
+                            porcentaje = "-"
+                        try:
+                            aportacion = format_eur(float(socio.get('aportacion') or 0.0))
+                        except Exception:
+                            aportacion = "-"
+                        body_lines.extend(
+                            [
+                                f"{idx}. {nombre}",
+                                f"   Documento: {documento} · Rol: {rol}",
+                                f"   Porcentaje: {porcentaje} · Aportación: {aportacion}",
+                                f"   Domicilio: {socio.get('domicilio') or '-'}",
+                                f"   Contacto: {socio.get('telefono') or '-'} · {socio.get('email') or '-'}",
+                                "",
+                            ]
+                        )
+                body_lines.extend(
+                    [
+                        f"TOTAL SOCIOS: {total_socios}",
+                        f"TOTAL PORCENTAJE: {round(total_porcentaje, 6)} %",
+                        f"TOTAL APORTACIÓN: {format_eur(total_aportacion)}",
+                    ]
+                )
+                if include_actas:
+                    body_lines.extend(["", "ÚLTIMAS ACTAS REGISTRADAS:"])
+                    for acta in response.get("actas", [])[:5]:
+                        titulo = acta.get("titulo") or acta.get("tipo_acta") or "Acta"
+                        detalle = acta.get("numero_acta") or ""
+                        fecha = acta.get("fecha_acta") or "-"
+                        estado = acta.get("estado") or "-"
+                        etiq = " - ".join([part for part in [titulo, detalle, fecha, estado] if part])
+                        body_lines.append(f"• {etiq}")
+                        contenido = (acta.get("contenido_texto") or "").strip()
+                        if contenido:
+                            body_lines.append(f"  {contenido}")
+                body_lines.extend(
+                    [
+                        "",
+                        "Nota legal:",
+                        "La primera página se genera como documento informativo para control interno.",
+                        "Las transmisiones, cambios en porcentajes o modificaciones de la estructura societaria",
+                        "deben aprobarse mediante acta y reflejarse en el registro completo del libro.",
+                    ]
+                )
+                safe_sociedad = re.sub(r"[^A-Za-z0-9_-]+", "_", str(sociedad.get("denominacion") or "sociedad")).strip("_")[:50]
+                fecha_token = datetime.now().strftime("%Y%m%d")
+                filename = f"libro_socios_{safe_sociedad or 'sociedad'}_{fecha_token}.pdf"
+                pdf_bytes = build_company_branded_text_document_pdf(
+                    dict(empresa or {}),
+                    "LIBRO DE SOCIOS · PRIMERA PÁGINA",
+                    f"Extracto inicial. Sociedad: {denominacion}",
+                    body_lines,
+                    footer_lines=[
+                        "Documento interno CRM Verifika2 para control legal y operativo.",
+                        "Revisar y aprobar con el despacho o asesoramiento legal antes de firma/inscripción.",
+                    ],
+                    brand_logo_url=(empresa or {}).get("logo_url") if empresa else None,
+                )
+                binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
+                return
+
+            json_response(self, response)
+            return
         if path == "/api/gestoria_actas":
             empresa_id = params.get("empresa_id", [""])[0]
             workspace_id = params.get("workspace_id", [""])[0]

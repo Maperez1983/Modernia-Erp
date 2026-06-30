@@ -5568,6 +5568,10 @@
                   <select id="gestoriaSocioSociedad" name="sociedad_id" required></select>
                 </label>
                 <label>
+                  Cliente relacionado (opcional)
+                  <select id="gestoriaSocioCliente"></select>
+                </label>
+                <label>
                   Nombre
                   <input name="nombre" required />
                 </label>
@@ -5602,6 +5606,11 @@
                 <div class="form-actions span-2">
                   <button type="submit">Guardar socio</button>
                   <span id="gestoriaSocioStatus" class="muted"></span>
+                </div>
+                <div class="form-actions span-2">
+                  <button type="button" id="gestoriaLibroSociosBtn">Generar primera hoja del libro de socios</button>
+                  <a id="gestoriaLibroSociosPdf" class="muted hidden" target="_blank" rel="noopener">Abrir PDF</a>
+                  <span id="gestoriaLibroSociosStatus" class="muted"></span>
                 </div>
               </form>
               <div id="gestoriaSocioTable"></div>

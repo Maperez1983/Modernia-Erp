@@ -1886,6 +1886,7 @@ const state = {
   gestoriaCrmTab: "all",
   gestoriaCrmView: "crm",
   gestoriaSociedadesRows: [],
+  gestoriaClientesRows: [],
   gestoriaSociosRows: [],
   gestoriaActasRows: [],
   gestoriaActaFirmasRows: [],
@@ -2661,9 +2662,13 @@ const gestoriaBdtInfo = document.getElementById("gestoriaBdtInfo");
 	const gestoriaSociedadStatus = document.getElementById("gestoriaSociedadStatus");
 	const gestoriaSociedadTable = document.getElementById("gestoriaSociedadTable");
 	const gestoriaSocioSociedad = document.getElementById("gestoriaSocioSociedad");
+	const gestoriaSocioCliente = document.getElementById("gestoriaSocioCliente");
 	const gestoriaSocioForm = document.getElementById("gestoriaSocioForm");
 	const gestoriaSocioStatus = document.getElementById("gestoriaSocioStatus");
 	const gestoriaSocioTable = document.getElementById("gestoriaSocioTable");
+	const gestoriaLibroSociosBtn = document.getElementById("gestoriaLibroSociosBtn");
+	const gestoriaLibroSociosPdf = document.getElementById("gestoriaLibroSociosPdf");
+	const gestoriaLibroSociosStatus = document.getElementById("gestoriaLibroSociosStatus");
 	const gestoriaActaSociedad = document.getElementById("gestoriaActaSociedad");
 	const gestoriaActaForm = document.getElementById("gestoriaActaForm");
 	const gestoriaActaStatus = document.getElementById("gestoriaActaStatus");
@@ -37951,6 +37956,7 @@ const setGestoriaCrmView = (viewName = "crm") => {
     return;
   }
   if (normalizedView === "alta") {
+    loadGestoriaSocioClientes().catch(() => {});
     loadGestoriaSociedades();
     loadGestoriaSocios();
     loadGestoriaActas();
@@ -66242,6 +66248,62 @@ const normalizeGestoriaBoolean = (value) => {
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "sí" || normalized === "si" || normalized === "on";
 };
 
+const populateGestoriaSocioClienteSelect = (rows = []) => {
+  if (!gestoriaSocioCliente) return;
+  const preserve = String(gestoriaSocioCliente.value || "").trim();
+  gestoriaSocioCliente.innerHTML = "";
+  gestoriaSocioCliente.appendChild(createOption("", "Sin cliente asociado"));
+  (rows || []).forEach((row) => {
+    const nif = (row.nif || row.nif2 || "").toString().trim();
+    const label = `${row.nombre || "Sin nombre"}${nif ? ` · ${nif}` : ""}`;
+    gestoriaSocioCliente.appendChild(createOption(row.id || "", label));
+  });
+  if (preserve && Array.from(gestoriaSocioCliente.options).some((opt) => opt.value === preserve)) {
+    gestoriaSocioCliente.value = preserve;
+  } else {
+    gestoriaSocioCliente.value = "";
+  }
+};
+
+const formatGestoriaSocioClienteAddress = (cliente = {}) => {
+  const parts = [
+    (cliente.direccion || "").toString().trim(),
+    (cliente.codigo_postal || "").toString().trim(),
+    (cliente.localidad || "").toString().trim(),
+    (cliente.poblacion || "").toString().trim(),
+    (cliente.provincia || "").toString().trim(),
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ") : "";
+};
+
+const fillGestoriaSocioFormFromCliente = (clienteId) => {
+  if (!gestoriaSocioForm) return;
+  const cid = String(clienteId || "").trim();
+  const cliente = cid ? state.gestoriaClientesRows.find((it) => String(it.id || "") === cid) : null;
+  const nombreField = gestoriaSocioForm.querySelector('input[name="nombre"]');
+  const documentoField = gestoriaSocioForm.querySelector('input[name="documento"]');
+  const domicilioField = gestoriaSocioForm.querySelector('input[name="domicilio"]');
+  const telefonoField = gestoriaSocioForm.querySelector('input[name="telefono"]');
+  const emailField = gestoriaSocioForm.querySelector('input[name="email"]');
+  if (!cliente) {
+    if (nombreField) nombreField.value = "";
+    if (documentoField) documentoField.value = "";
+    if (domicilioField) domicilioField.value = "";
+    if (telefonoField) telefonoField.value = "";
+    if (emailField) emailField.value = "";
+    return;
+  }
+  if (nombreField) nombreField.value = cliente.nombre || "";
+  if (documentoField) documentoField.value = cliente.nif || "";
+  if (domicilioField) domicilioField.value = formatGestoriaSocioClienteAddress(cliente);
+  if (telefonoField) {
+    telefonoField.value = cliente.telefono || cliente.movil || "";
+  }
+  if (emailField) {
+    emailField.value = cliente.email || "";
+  }
+};
+
 const populateGestoriaSocioSociedadSelect = (rows = [], selectedId = "") => {
   if (!gestoriaSocioSociedad) return;
   const preserve = String(selectedId || gestoriaSocioSociedad.value || "").trim();
@@ -66439,6 +66501,48 @@ const loadGestoriaSocios = async (sociedadId = "") => {
     return rows;
   } catch (_error) {
     gestoriaSocioTable.innerHTML = "<p class='muted'>Error al cargar.</p>";
+    return [];
+  }
+};
+
+const loadGestoriaSocioClientes = async () => {
+  if (!gestoriaSocioCliente) {
+    return [];
+  }
+  const params = buildGestoriaWorkspaceParams({
+    limit: "500",
+    include_id: "1",
+    servicio: "gestoria",
+  });
+  if (!params.get("workspace_id") && !params.get("empresa_id")) {
+    state.gestoriaClientesRows = [];
+    populateGestoriaSocioClienteSelect([]);
+    return [];
+  }
+  try {
+    const data = await api(`/api/clientes?${params.toString()}`);
+    if (data?.error) {
+      state.gestoriaClientesRows = [];
+      populateGestoriaSocioClienteSelect([]);
+      if (gestoriaSocioStatus) {
+        gestoriaSocioStatus.textContent = data.error;
+      }
+      return [];
+    }
+    const columns = Array.isArray(data?.columns) ? data.columns : [];
+    const rows = Array.isArray(data?.rows) ? data.rows.map((row) => buildRowMap(row, columns)) : [];
+    state.gestoriaClientesRows = rows;
+    if (gestoriaSocioStatus) {
+      gestoriaSocioStatus.textContent = "";
+    }
+    populateGestoriaSocioClienteSelect(rows);
+    return rows;
+  } catch (_error) {
+    state.gestoriaClientesRows = [];
+    populateGestoriaSocioClienteSelect([]);
+    if (gestoriaSocioStatus) {
+      gestoriaSocioStatus.textContent = "Error al cargar clientes.";
+    }
     return [];
   }
 };
@@ -84490,6 +84594,57 @@ if (gestoriaAltaForm) {
 if (gestoriaSocioSociedad) {
   gestoriaSocioSociedad.addEventListener("change", () => {
     loadGestoriaSocios(gestoriaSocioSociedad.value || "");
+  });
+}
+
+if (gestoriaSocioCliente) {
+  gestoriaSocioCliente.addEventListener("change", () => {
+    const clienteId = gestoriaSocioCliente.value || "";
+    fillGestoriaSocioFormFromCliente(clienteId);
+  });
+}
+
+if (gestoriaLibroSociosBtn) {
+  gestoriaLibroSociosBtn.addEventListener("click", () => {
+    if (gestoriaLibroSociosStatus) {
+      gestoriaLibroSociosStatus.textContent = "Generando...";
+    }
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (!empresa) {
+      if (gestoriaLibroSociosStatus) {
+        gestoriaLibroSociosStatus.textContent = "Sin workspace.";
+      }
+      return;
+    }
+    const sociedadId = String(gestoriaSocioSociedad?.value || "").trim();
+    if (!sociedadId) {
+      if (gestoriaLibroSociosStatus) {
+        gestoriaLibroSociosStatus.textContent = "Selecciona una sociedad.";
+      }
+      return;
+    }
+    const params = buildGestoriaWorkspaceParams({
+      sociedad_id: sociedadId,
+      format: "pdf",
+    });
+    if (!params.get("workspace_id") && !params.get("empresa_id")) {
+      if (gestoriaLibroSociosStatus) {
+        gestoriaLibroSociosStatus.textContent = "Sin workspace.";
+      }
+      if (gestoriaLibroSociosPdf) {
+        gestoriaLibroSociosPdf.classList.add("hidden");
+      }
+      return;
+    }
+    const href = `/api/gestoria_libro_socios?${params.toString()}`;
+    if (gestoriaLibroSociosPdf) {
+      gestoriaLibroSociosPdf.href = href;
+      gestoriaLibroSociosPdf.classList.remove("hidden");
+    }
+    window.open(href, "_blank", "noopener");
+    if (gestoriaLibroSociosStatus) {
+      gestoriaLibroSociosStatus.textContent = "PDF generado.";
+    }
   });
 }
 
