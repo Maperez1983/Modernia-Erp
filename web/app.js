@@ -1888,6 +1888,7 @@ const state = {
   gestoriaSociedadesRows: [],
   gestoriaClientesRows: [],
   gestoriaSociosRows: [],
+  gestoriaSociosCambiosRows: [],
   gestoriaActasRows: [],
   gestoriaActaFirmasRows: [],
   gestoriaTrabajoTipoTemplateEditingId: "",
@@ -2662,13 +2663,14 @@ const gestoriaBdtInfo = document.getElementById("gestoriaBdtInfo");
 	const gestoriaSociedadStatus = document.getElementById("gestoriaSociedadStatus");
 	const gestoriaSociedadTable = document.getElementById("gestoriaSociedadTable");
 	const gestoriaSocioSociedad = document.getElementById("gestoriaSocioSociedad");
-	const gestoriaSocioCliente = document.getElementById("gestoriaSocioCliente");
 	const gestoriaSocioForm = document.getElementById("gestoriaSocioForm");
 	const gestoriaSocioStatus = document.getElementById("gestoriaSocioStatus");
 	const gestoriaSocioTable = document.getElementById("gestoriaSocioTable");
-	const gestoriaLibroSociosBtn = document.getElementById("gestoriaLibroSociosBtn");
-	const gestoriaLibroSociosPdf = document.getElementById("gestoriaLibroSociosPdf");
-	const gestoriaLibroSociosStatus = document.getElementById("gestoriaLibroSociosStatus");
+	const gestoriaSocioCambioForm = document.getElementById("gestoriaSocioCambioForm");
+	const gestoriaSocioCambioSociedad = document.getElementById("gestoriaSocioCambioSociedad");
+	const gestoriaSocioCambioSocio = document.getElementById("gestoriaSocioCambioSocio");
+	const gestoriaSocioCambioStatus = document.getElementById("gestoriaSocioCambioStatus");
+	const gestoriaSocioCambiosTable = document.getElementById("gestoriaSocioCambiosTable");
 	const gestoriaActaSociedad = document.getElementById("gestoriaActaSociedad");
 	const gestoriaActaForm = document.getElementById("gestoriaActaForm");
 	const gestoriaActaStatus = document.getElementById("gestoriaActaStatus");
@@ -37959,6 +37961,7 @@ const setGestoriaCrmView = (viewName = "crm") => {
     loadGestoriaSocioClientes().catch(() => {});
     loadGestoriaSociedades();
     loadGestoriaSocios();
+    loadGestoriaSociosCambios();
     loadGestoriaActas();
     loadGestoriaActaFirmas();
   }
@@ -66248,62 +66251,6 @@ const normalizeGestoriaBoolean = (value) => {
   return normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "sí" || normalized === "si" || normalized === "on";
 };
 
-const populateGestoriaSocioClienteSelect = (rows = []) => {
-  if (!gestoriaSocioCliente) return;
-  const preserve = String(gestoriaSocioCliente.value || "").trim();
-  gestoriaSocioCliente.innerHTML = "";
-  gestoriaSocioCliente.appendChild(createOption("", "Sin cliente asociado"));
-  (rows || []).forEach((row) => {
-    const nif = (row.nif || row.nif2 || "").toString().trim();
-    const label = `${row.nombre || "Sin nombre"}${nif ? ` · ${nif}` : ""}`;
-    gestoriaSocioCliente.appendChild(createOption(row.id || "", label));
-  });
-  if (preserve && Array.from(gestoriaSocioCliente.options).some((opt) => opt.value === preserve)) {
-    gestoriaSocioCliente.value = preserve;
-  } else {
-    gestoriaSocioCliente.value = "";
-  }
-};
-
-const formatGestoriaSocioClienteAddress = (cliente = {}) => {
-  const parts = [
-    (cliente.direccion || "").toString().trim(),
-    (cliente.codigo_postal || "").toString().trim(),
-    (cliente.localidad || "").toString().trim(),
-    (cliente.poblacion || "").toString().trim(),
-    (cliente.provincia || "").toString().trim(),
-  ].filter(Boolean);
-  return parts.length ? parts.join(", ") : "";
-};
-
-const fillGestoriaSocioFormFromCliente = (clienteId) => {
-  if (!gestoriaSocioForm) return;
-  const cid = String(clienteId || "").trim();
-  const cliente = cid ? state.gestoriaClientesRows.find((it) => String(it.id || "") === cid) : null;
-  const nombreField = gestoriaSocioForm.querySelector('input[name="nombre"]');
-  const documentoField = gestoriaSocioForm.querySelector('input[name="documento"]');
-  const domicilioField = gestoriaSocioForm.querySelector('input[name="domicilio"]');
-  const telefonoField = gestoriaSocioForm.querySelector('input[name="telefono"]');
-  const emailField = gestoriaSocioForm.querySelector('input[name="email"]');
-  if (!cliente) {
-    if (nombreField) nombreField.value = "";
-    if (documentoField) documentoField.value = "";
-    if (domicilioField) domicilioField.value = "";
-    if (telefonoField) telefonoField.value = "";
-    if (emailField) emailField.value = "";
-    return;
-  }
-  if (nombreField) nombreField.value = cliente.nombre || "";
-  if (documentoField) documentoField.value = cliente.nif || "";
-  if (domicilioField) domicilioField.value = formatGestoriaSocioClienteAddress(cliente);
-  if (telefonoField) {
-    telefonoField.value = cliente.telefono || cliente.movil || "";
-  }
-  if (emailField) {
-    emailField.value = cliente.email || "";
-  }
-};
-
 const populateGestoriaSocioSociedadSelect = (rows = [], selectedId = "") => {
   if (!gestoriaSocioSociedad) return;
   const preserve = String(selectedId || gestoriaSocioSociedad.value || "").trim();
@@ -66388,10 +66335,13 @@ const loadGestoriaSociedades = async () => {
     const socSociedadSelected = String(gestoriaSocioSociedad?.value || "").trim();
     const actaSociedadSelected = String(gestoriaActaSociedad?.value || "").trim();
     populateGestoriaSocioSociedadSelect(rows, socSociedadSelected);
+    populateGestoriaSocioCambioSociedadSelect(rows, String(gestoriaSocioCambioSociedad?.value || "").trim());
     populateGestoriaActaSociedadSelect(rows, actaSociedadSelected);
     if (!gestoriaSociedadTable) return rows;
     if (!rows.length) {
       gestoriaSociedadTable.innerHTML = "<p class='muted'>Sin sociedades registradas.</p>";
+      populateGestoriaSocioCambioSociedadSelect([]);
+      populateGestoriaSocioCambioSocioSelect([]);
       return rows;
     }
     const table = document.createElement("table");
@@ -66427,11 +66377,13 @@ const loadGestoriaSociedades = async () => {
     table.appendChild(tbody);
     gestoriaSociedadTable.innerHTML = "";
     gestoriaSociedadTable.appendChild(table);
+    populateGestoriaSocioCambioSociedadSelect(rows, String(gestoriaSocioCambioSociedad?.value || "").trim());
     return rows;
   } catch (_error) {
     if (gestoriaSociedadTable) {
       gestoriaSociedadTable.innerHTML = "<p class='muted'>Error al cargar.</p>";
     }
+    populateGestoriaSocioCambioSociedadSelect([]);
     return [];
   }
 };
@@ -66448,6 +66400,7 @@ const loadGestoriaSocios = async (sociedadId = "") => {
   if (!params.get("workspace_id") && !params.get("empresa_id")) {
     state.gestoriaSociosRows = [];
     gestoriaSocioTable.innerHTML = "<p class='muted'>Sin workspace.</p>";
+    populateGestoriaSocioCambioSocioSelect([]);
     return [];
   }
   gestoriaSocioTable.innerHTML = "<p class='muted'>Cargando...</p>";
@@ -66462,6 +66415,7 @@ const loadGestoriaSocios = async (sociedadId = "") => {
     state.gestoriaSociosRows = rows;
     if (!rows.length) {
       gestoriaSocioTable.innerHTML = "<p class='muted'>Sin socios registrados.</p>";
+      populateGestoriaSocioCambioSocioSelect([]);
       return rows;
     }
     const table = document.createElement("table");
@@ -66498,9 +66452,11 @@ const loadGestoriaSocios = async (sociedadId = "") => {
     table.appendChild(tbody);
     gestoriaSocioTable.innerHTML = "";
     gestoriaSocioTable.appendChild(table);
+    populateGestoriaSocioCambioSocioSelect(rows, String(gestoriaSocioCambioSocio?.value || "").trim());
     return rows;
   } catch (_error) {
     gestoriaSocioTable.innerHTML = "<p class='muted'>Error al cargar.</p>";
+    populateGestoriaSocioCambioSocioSelect([]);
     return [];
   }
 };
@@ -66512,7 +66468,6 @@ const loadGestoriaSocioClientes = async () => {
   const params = buildGestoriaWorkspaceParams({
     limit: "500",
     include_id: "1",
-    servicio: "gestoria",
   });
   if (!params.get("workspace_id") && !params.get("empresa_id")) {
     state.gestoriaClientesRows = [];
@@ -66524,25 +66479,143 @@ const loadGestoriaSocioClientes = async () => {
     if (data?.error) {
       state.gestoriaClientesRows = [];
       populateGestoriaSocioClienteSelect([]);
-      if (gestoriaSocioStatus) {
-        gestoriaSocioStatus.textContent = data.error;
-      }
       return [];
     }
     const columns = Array.isArray(data?.columns) ? data.columns : [];
     const rows = Array.isArray(data?.rows) ? data.rows.map((row) => buildRowMap(row, columns)) : [];
     state.gestoriaClientesRows = rows;
-    if (gestoriaSocioStatus) {
-      gestoriaSocioStatus.textContent = "";
-    }
     populateGestoriaSocioClienteSelect(rows);
     return rows;
   } catch (_error) {
     state.gestoriaClientesRows = [];
     populateGestoriaSocioClienteSelect([]);
-    if (gestoriaSocioStatus) {
-      gestoriaSocioStatus.textContent = "Error al cargar clientes.";
+    return [];
+  }
+};
+
+const populateGestoriaSocioCambioSocioSelect = (rows = [], selectedId = "") => {
+  if (!gestoriaSocioCambioSocio) return;
+  const preserve = String(selectedId || gestoriaSocioCambioSocio.value || "").trim();
+  gestoriaSocioCambioSocio.innerHTML = "";
+  gestoriaSocioCambioSocio.appendChild(createOption("", "Selecciona socio"));
+  (rows || []).forEach((row) => {
+    const porcentaje = row.porcentaje !== undefined && row.porcentaje !== null && String(row.porcentaje).trim() !== ""
+      ? ` · ${row.porcentaje}%`
+      : "";
+    const label = `${row.nombre || "Sin nombre"}${row.documento ? ` · ${row.documento}` : ""}${porcentaje}`;
+    gestoriaSocioCambioSocio.appendChild(createOption(row.id || "", label));
+  });
+  if (preserve && Array.from(gestoriaSocioCambioSocio.options).some((opt) => opt.value === preserve)) {
+    gestoriaSocioCambioSocio.value = preserve;
+  } else {
+    gestoriaSocioCambioSocio.value = "";
+  }
+};
+
+const populateGestoriaSocioCambioSociedadSelect = (rows = [], selectedId = "") => {
+  if (!gestoriaSocioCambioSociedad) return;
+  const preserve = String(selectedId || gestoriaSocioCambioSociedad.value || "").trim();
+  gestoriaSocioCambioSociedad.innerHTML = "";
+  gestoriaSocioCambioSociedad.appendChild(createOption("", "Selecciona sociedad"));
+  (rows || []).forEach((row) => {
+    const label = `${row.denominacion || "Sin nombre"}${row.cif ? ` (${row.cif})` : ""}`;
+    gestoriaSocioCambioSociedad.appendChild(createOption(row.id || "", label));
+  });
+  if (preserve && Array.from(gestoriaSocioCambioSociedad.options).some((opt) => opt.value === preserve)) {
+    gestoriaSocioCambioSociedad.value = preserve;
+  } else {
+    gestoriaSocioCambioSociedad.value = "";
+  }
+};
+
+const fillGestoriaSocioCambioFormFromSocio = (socioId) => {
+  if (!gestoriaSocioCambioForm) return;
+  const cid = String(socioId || "").trim();
+  const socio = cid ? state.gestoriaSociosRows.find((it) => String(it.id || "") === cid) : null;
+  const fields = {
+    nombre: 'input[name="nombre"]',
+    documento: 'input[name="documento"]',
+    rol: 'input[name="rol"]',
+    porcentaje: 'input[name="porcentaje"]',
+    aportacion: 'input[name="aportacion"]',
+    domicilio: 'input[name="domicilio"]',
+    telefono: 'input[name="telefono"]',
+    email: 'input[name="email"]',
+  };
+  Object.entries(fields).forEach(([key, selector]) => {
+    const field = gestoriaSocioCambioForm.querySelector(selector);
+    if (!field) return;
+    field.value = socio ? String(socio[key] || "") : "";
+  });
+  if (!socio && gestoriaSocioCambioStatus) {
+    gestoriaSocioCambioStatus.textContent = "";
+  }
+};
+
+const loadGestoriaSociosCambios = async (sociedadId = "") => {
+  if (!gestoriaSocioCambiosTable) {
+    return [];
+  }
+  const params = buildGestoriaWorkspaceParams({ limit: "500" });
+  const filteredSociedadId = String(sociedadId || "").trim();
+  if (filteredSociedadId) {
+    params.set("sociedad_id", filteredSociedadId);
+  }
+  if (!params.get("workspace_id") && !params.get("empresa_id")) {
+    state.gestoriaSociosCambiosRows = [];
+    gestoriaSocioCambiosTable.innerHTML = "<p class='muted'>Sin workspace.</p>";
+    gestoriaSocioCambioSociedad && populateGestoriaSocioCambioSociedadSelect([]);
+    return [];
+  }
+  gestoriaSocioCambiosTable.innerHTML = "<p class='muted'>Cargando...</p>";
+  try {
+    const data = await api(`/api/gestoria_socios_cambios?${params.toString()}`);
+    if (data?.error) {
+      gestoriaSocioCambiosTable.innerHTML = `<p class='muted'>${data.error}</p>`;
+      state.gestoriaSociosCambiosRows = [];
+      return [];
     }
+    const rows = data.rows || [];
+    state.gestoriaSociosCambiosRows = rows;
+    if (!rows.length) {
+      gestoriaSocioCambiosTable.innerHTML = "<p class='muted'>Sin cambios registrados.</p>";
+      return rows;
+    }
+    const table = document.createElement("table");
+    const thead = document.createElement("thead");
+    const trHead = document.createElement("tr");
+    ["Sociedad", "Socio", "Tipo", "Anterior", "Nuevo", "Acta", "Fecha", "Notas"].forEach((col) => {
+      const th = document.createElement("th");
+      th.textContent = col;
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    rows.forEach((row) => {
+      const tr = document.createElement("tr");
+      [
+        row.sociedad || "",
+        row.socio || "",
+        row.tipo_cambio || "",
+        `${row.porcentaje_anterior ?? ""} / ${row.aportacion_anterior ?? ""}`,
+        `${row.porcentaje_nuevo ?? ""} / ${row.aportacion_nueva ?? ""}`,
+        row.acta || "",
+        row.fecha_cambio || "",
+        row.notas || "",
+      ].forEach((value) => {
+        const td = document.createElement("td");
+        td.textContent = value;
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    gestoriaSocioCambiosTable.innerHTML = "";
+    gestoriaSocioCambiosTable.appendChild(table);
+    return rows;
+  } catch (_error) {
+    gestoriaSocioCambiosTable.innerHTML = "<p class='muted'>Error al cargar.</p>";
     return [];
   }
 };
@@ -84593,58 +84666,31 @@ if (gestoriaAltaForm) {
 
 if (gestoriaSocioSociedad) {
   gestoriaSocioSociedad.addEventListener("change", () => {
-    loadGestoriaSocios(gestoriaSocioSociedad.value || "");
+    const sociedadId = gestoriaSocioSociedad.value || "";
+    if (gestoriaSocioCambioSociedad && gestoriaSocioCambioSociedad.value !== sociedadId) {
+      gestoriaSocioCambioSociedad.value = sociedadId;
+    }
+    loadGestoriaSocios(sociedadId);
+    loadGestoriaSociosCambios(sociedadId);
+    loadGestoriaActas(sociedadId);
   });
 }
 
-if (gestoriaSocioCliente) {
-  gestoriaSocioCliente.addEventListener("change", () => {
-    const clienteId = gestoriaSocioCliente.value || "";
-    fillGestoriaSocioFormFromCliente(clienteId);
+if (gestoriaSocioCambioSociedad) {
+  gestoriaSocioCambioSociedad.addEventListener("change", () => {
+    const sociedadId = gestoriaSocioCambioSociedad.value || "";
+    if (gestoriaSocioSociedad && gestoriaSocioSociedad.value !== sociedadId) {
+      gestoriaSocioSociedad.value = sociedadId;
+    }
+    loadGestoriaSocios(sociedadId);
+    loadGestoriaSociosCambios(sociedadId);
+    loadGestoriaActas(sociedadId);
   });
 }
 
-if (gestoriaLibroSociosBtn) {
-  gestoriaLibroSociosBtn.addEventListener("click", () => {
-    if (gestoriaLibroSociosStatus) {
-      gestoriaLibroSociosStatus.textContent = "Generando...";
-    }
-    const empresa = resolveCrmGestoriaEmpresa();
-    if (!empresa) {
-      if (gestoriaLibroSociosStatus) {
-        gestoriaLibroSociosStatus.textContent = "Sin workspace.";
-      }
-      return;
-    }
-    const sociedadId = String(gestoriaSocioSociedad?.value || "").trim();
-    if (!sociedadId) {
-      if (gestoriaLibroSociosStatus) {
-        gestoriaLibroSociosStatus.textContent = "Selecciona una sociedad.";
-      }
-      return;
-    }
-    const params = buildGestoriaWorkspaceParams({
-      sociedad_id: sociedadId,
-      format: "pdf",
-    });
-    if (!params.get("workspace_id") && !params.get("empresa_id")) {
-      if (gestoriaLibroSociosStatus) {
-        gestoriaLibroSociosStatus.textContent = "Sin workspace.";
-      }
-      if (gestoriaLibroSociosPdf) {
-        gestoriaLibroSociosPdf.classList.add("hidden");
-      }
-      return;
-    }
-    const href = `/api/gestoria_libro_socios?${params.toString()}`;
-    if (gestoriaLibroSociosPdf) {
-      gestoriaLibroSociosPdf.href = href;
-      gestoriaLibroSociosPdf.classList.remove("hidden");
-    }
-    window.open(href, "_blank", "noopener");
-    if (gestoriaLibroSociosStatus) {
-      gestoriaLibroSociosStatus.textContent = "PDF generado.";
-    }
+if (gestoriaSocioCambioSocio) {
+  gestoriaSocioCambioSocio.addEventListener("change", () => {
+    fillGestoriaSocioCambioFormFromSocio(gestoriaSocioCambioSocio.value || "");
   });
 }
 
@@ -84696,6 +84742,7 @@ if (gestoriaSociedadForm) {
       gestoriaSociedadForm.reset();
       loadGestoriaSociedades();
       loadGestoriaSocios();
+      loadGestoriaSociosCambios();
       loadGestoriaActas();
     } catch (error) {
       if (gestoriaSociedadStatus) gestoriaSociedadStatus.textContent = "Error al guardar.";
@@ -84744,8 +84791,60 @@ if (gestoriaSocioForm) {
       if (gestoriaSocioStatus) gestoriaSocioStatus.textContent = "Socio guardado.";
       gestoriaSocioForm.reset();
       loadGestoriaSocios(sociedadId);
+      loadGestoriaSociosCambios(sociedadId);
     } catch (error) {
       if (gestoriaSocioStatus) gestoriaSocioStatus.textContent = "Error al guardar.";
+    }
+  });
+}
+
+if (gestoriaSocioCambioForm) {
+  gestoriaSocioCambioForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (gestoriaSocioCambioStatus) {
+      gestoriaSocioCambioStatus.textContent = "Guardando...";
+    }
+    const empresa = resolveCrmGestoriaEmpresa();
+    if (!empresa) {
+      if (gestoriaSocioCambioStatus) gestoriaSocioCambioStatus.textContent = "Sin workspace.";
+      return;
+    }
+    const formData = new FormData(gestoriaSocioCambioForm);
+    const payload = Object.fromEntries(formData.entries());
+    const sociedadId = String(payload.sociedad_id || "").trim();
+    const socioId = String(payload.socio_id || "").trim();
+    if (!sociedadId) {
+      if (gestoriaSocioCambioStatus) gestoriaSocioCambioStatus.textContent = "Selecciona una sociedad.";
+      return;
+    }
+    if (!socioId) {
+      if (gestoriaSocioCambioStatus) gestoriaSocioCambioStatus.textContent = "Selecciona un socio.";
+      return;
+    }
+    payload.usuario = getCurrentUser();
+    try {
+      const data = await fetch("/api/gestoria_socios_cambios", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then((res) => res.json());
+      if (data?.error) {
+        if (gestoriaSocioCambioStatus) gestoriaSocioCambioStatus.textContent = data.error;
+        return;
+      }
+      if (gestoriaSocioCambioStatus) {
+        gestoriaSocioCambioStatus.textContent = data.acta_id
+          ? "Cambio guardado y acta creada."
+          : "Cambio guardado.";
+      }
+      gestoriaSocioCambioForm.reset();
+      if (gestoriaSocioCambioSociedad) gestoriaSocioCambioSociedad.value = sociedadId;
+      if (gestoriaSocioSociedad) gestoriaSocioSociedad.value = sociedadId;
+      loadGestoriaSocios(sociedadId);
+      loadGestoriaSociosCambios(sociedadId);
+      loadGestoriaActas(sociedadId);
+    } catch (error) {
+      if (gestoriaSocioCambioStatus) gestoriaSocioCambioStatus.textContent = "Error al guardar.";
     }
   });
 }

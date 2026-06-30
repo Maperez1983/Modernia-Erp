@@ -5568,10 +5568,6 @@
                   <select id="gestoriaSocioSociedad" name="sociedad_id" required></select>
                 </label>
                 <label>
-                  Cliente relacionado (opcional)
-                  <select id="gestoriaSocioCliente"></select>
-                </label>
-                <label>
                   Nombre
                   <input name="nombre" required />
                 </label>
@@ -5607,13 +5603,76 @@
                   <button type="submit">Guardar socio</button>
                   <span id="gestoriaSocioStatus" class="muted"></span>
                 </div>
-                <div class="form-actions span-2">
-                  <button type="button" id="gestoriaLibroSociosBtn">Generar primera hoja del libro de socios</button>
-                  <a id="gestoriaLibroSociosPdf" class="muted hidden" target="_blank" rel="noopener">Abrir PDF</a>
-                  <span id="gestoriaLibroSociosStatus" class="muted"></span>
-                </div>
               </form>
               <div id="gestoriaSocioTable"></div>
+            </div>
+            <div class="form-card">
+              <h3>Cambios societarios</h3>
+              <form id="gestoriaSocioCambioForm" class="form-grid">
+                <label>
+                  Sociedad
+                  <select id="gestoriaSocioCambioSociedad" name="sociedad_id" required></select>
+                </label>
+                <label>
+                  Socio afectado
+                  <select id="gestoriaSocioCambioSocio" name="socio_id" required></select>
+                </label>
+                <label>
+                  Tipo de cambio
+                  <select name="tipo_cambio">
+                    <option>Venta de participaciones</option>
+                    <option>Cambio de porcentaje</option>
+                    <option>Cambio de rol</option>
+                    <option>Baja de socio</option>
+                    <option>Modificación de datos</option>
+                  </select>
+                </label>
+                <label>
+                  Fecha del cambio
+                  <input name="fecha_cambio" type="date" />
+                </label>
+                <label>
+                  Nombre
+                  <input name="nombre" />
+                </label>
+                <label>
+                  Documento
+                  <input name="documento" />
+                </label>
+                <label>
+                  Rol
+                  <input name="rol" />
+                </label>
+                <label>
+                  Porcentaje
+                  <input name="porcentaje" />
+                </label>
+                <label>
+                  Aportación
+                  <input name="aportacion" />
+                </label>
+                <label>
+                  Domicilio
+                  <input name="domicilio" />
+                </label>
+                <label>
+                  Teléfono
+                  <input name="telefono" />
+                </label>
+                <label>
+                  Email
+                  <input name="email" type="email" />
+                </label>
+                <label class="span-2">
+                  Notas
+                  <input name="notas" />
+                </label>
+                <div class="form-actions span-2">
+                  <button type="submit">Registrar cambio y crear acta</button>
+                  <span id="gestoriaSocioCambioStatus" class="muted"></span>
+                </div>
+              </form>
+              <div id="gestoriaSocioCambiosTable"></div>
             </div>
             <div class="form-card">
               <h3>Actas</h3>

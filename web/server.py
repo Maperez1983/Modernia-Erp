@@ -33947,6 +33947,29 @@ def ensure_tables(db_path):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS gestoria_socios_cambios (
+          id TEXT PRIMARY KEY,
+          sociedad_id TEXT,
+          empresa_id TEXT,
+          socio_id TEXT,
+          acta_id TEXT,
+          tipo_cambio TEXT,
+          porcentaje_anterior REAL,
+          porcentaje_nuevo REAL,
+          aportacion_anterior REAL,
+          aportacion_nueva REAL,
+          rol_anterior TEXT,
+          rol_nuevo TEXT,
+          fecha_cambio TEXT,
+          notas TEXT,
+          cambio_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS asesoramientos_financiacion (
           id TEXT PRIMARY KEY,
           empresa_id TEXT,
@@ -53549,6 +53572,194 @@ class Handler(BaseHTTPRequestHandler):
             audit("gestoria_socio", socio_id, "guardar", json.dumps(payload), payload.get("usuario"))
             conn.commit()
             json_response(self, {"ok": True, "id": socio_id})
+            return
+        elif parsed.path == "/api/gestoria_socios_cambios":
+            sociedad_id = str(payload.get("sociedad_id") or "").strip()
+            socio_id = str(payload.get("socio_id") or "").strip()
+            if not sociedad_id:
+                json_response(self, {"error": "sociedad_id requerido"}, status=400)
+                return
+            if not socio_id:
+                json_response(self, {"error": "socio_id requerido"}, status=400)
+                return
+            sociedad = conn.execute(
+                """
+                SELECT id, denominacion, empresa_id
+                FROM gestoria_sociedades
+                WHERE id = ? AND empresa_id = ?
+                LIMIT 1
+                """,
+                (sociedad_id, empresa["id"]),
+            ).fetchone()
+            if not sociedad:
+                json_response(self, {"error": "sociedad no encontrada"}, status=404)
+                return
+            socio = conn.execute(
+                """
+                SELECT id, sociedad_id, empresa_id, nombre, documento, rol, porcentaje, aportacion, domicilio, telefono, email
+                FROM gestoria_socios
+                WHERE id = ? AND empresa_id = ? AND sociedad_id = ?
+                LIMIT 1
+                """,
+                (socio_id, empresa["id"], sociedad_id),
+            ).fetchone()
+            if not socio:
+                json_response(self, {"error": "socio no encontrado"}, status=404)
+                return
+            socio_prev = dict(socio)
+            cambio_id = str(payload.get("id") or "").strip() or os.urandom(16).hex()
+            tipo_cambio = str(payload.get("tipo_cambio") or "").strip() or "Cambio societario"
+            fecha_cambio = str(payload.get("fecha_cambio") or "").strip() or datetime.now().date().isoformat()
+
+            def _to_float(value):
+                try:
+                    text = str(value or "").strip().replace("%", "").replace(",", ".")
+                    return float(text) if text else None
+                except Exception:
+                    return None
+
+            updates = []
+            values = []
+            for field in ("nombre", "documento", "rol", "domicilio", "telefono", "email"):
+                if field in payload:
+                    updates.append(f"{field} = ?")
+                    values.append(payload.get(field))
+            porcentaje_nuevo = _to_float(payload.get("porcentaje"))
+            aportacion_nueva = _to_float(payload.get("aportacion"))
+            if payload.get("porcentaje") is not None and str(payload.get("porcentaje")).strip() != "":
+                updates.append("porcentaje = ?")
+                values.append(porcentaje_nuevo)
+            if payload.get("aportacion") is not None and str(payload.get("aportacion")).strip() != "":
+                updates.append("aportacion = ?")
+                values.append(aportacion_nueva)
+            if updates:
+                conn.execute(
+                    f"""
+                    UPDATE gestoria_socios
+                    SET {", ".join(updates)}, updated_at = datetime(?)
+                    WHERE id = ? AND empresa_id = ? AND sociedad_id = ?
+                    """,
+                    (*values, now, socio_id, empresa["id"], sociedad_id),
+                )
+            acta_id = ""
+            if str(payload.get("crear_acta") or "1").strip().lower() not in {"0", "false", "no", "off"}:
+                acta_id = os.urandom(16).hex()
+                socio_nombre = str(payload.get("nombre") or socio_prev.get("nombre") or "").strip() or "Socio"
+                acta_titulo = f"Acuerdo societario · {socio_nombre}"
+                acta_texto = "\n".join(
+                    [
+                        f"Sociedad: {sociedad.get('denominacion') or '-'}",
+                        f"Socio: {socio_prev.get('nombre') or '-'}",
+                        f"Tipo de cambio: {tipo_cambio}",
+                        f"Fecha de cambio: {fecha_cambio}",
+                        f"Porcentaje anterior: {socio_prev.get('porcentaje') or '-'}",
+                        f"Porcentaje nuevo: {payload.get('porcentaje') if str(payload.get('porcentaje') or '').strip() != '' else socio_prev.get('porcentaje') or '-'}",
+                        f"Aportacion anterior: {socio_prev.get('aportacion') or '-'}",
+                        f"Aportacion nueva: {payload.get('aportacion') if str(payload.get('aportacion') or '').strip() != '' else socio_prev.get('aportacion') or '-'}",
+                        f"Rol anterior: {socio_prev.get('rol') or '-'}",
+                        f"Rol nuevo: {payload.get('rol') if str(payload.get('rol') or '').strip() != '' else socio_prev.get('rol') or '-'}",
+                        f"Notas: {str(payload.get('notas') or '').strip() or '-'}",
+                    ]
+                )
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_actas (
+                      id, sociedad_id, empresa_id, titulo, tipo_acta, numero_acta, fecha_acta, estado,
+                      requiere_firma, contenido_json, contenido_texto, firma_hash, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        acta_id,
+                        sociedad_id,
+                        empresa["id"],
+                        acta_titulo,
+                        "Acuerdo societario",
+                        payload.get("numero_acta") or "",
+                        fecha_cambio,
+                        "Borrador",
+                        1,
+                        json.dumps(
+                            {
+                                "sociedad_id": sociedad_id,
+                                "socio_id": socio_id,
+                                "tipo_cambio": tipo_cambio,
+                                "fecha_cambio": fecha_cambio,
+                                "socio_prev": socio_prev,
+                                "socio_nuevo": {
+                                    "nombre": payload.get("nombre") or socio_prev.get("nombre"),
+                                    "documento": payload.get("documento") or socio_prev.get("documento"),
+                                    "rol": payload.get("rol") or socio_prev.get("rol"),
+                                    "porcentaje": porcentaje_nuevo if porcentaje_nuevo is not None else socio_prev.get("porcentaje"),
+                                    "aportacion": aportacion_nueva if aportacion_nueva is not None else socio_prev.get("aportacion"),
+                                    "domicilio": payload.get("domicilio") or socio_prev.get("domicilio"),
+                                    "telefono": payload.get("telefono") or socio_prev.get("telefono"),
+                                    "email": payload.get("email") or socio_prev.get("email"),
+                                },
+                                "notas": payload.get("notas") or "",
+                            },
+                            ensure_ascii=False,
+                        ),
+                        acta_texto,
+                        None,
+                        now,
+                        now,
+                    ),
+                )
+            cambio_json = {
+                "sociedad_id": sociedad_id,
+                "socio_id": socio_id,
+                "tipo_cambio": tipo_cambio,
+                "fecha_cambio": fecha_cambio,
+                "socio_prev": socio_prev,
+                "socio_nuevo": {
+                    "nombre": payload.get("nombre") or socio_prev.get("nombre"),
+                    "documento": payload.get("documento") or socio_prev.get("documento"),
+                    "rol": payload.get("rol") or socio_prev.get("rol"),
+                    "porcentaje": porcentaje_nuevo if porcentaje_nuevo is not None else socio_prev.get("porcentaje"),
+                    "aportacion": aportacion_nueva if aportacion_nueva is not None else socio_prev.get("aportacion"),
+                    "domicilio": payload.get("domicilio") or socio_prev.get("domicilio"),
+                    "telefono": payload.get("telefono") or socio_prev.get("telefono"),
+                    "email": payload.get("email") or socio_prev.get("email"),
+                },
+                "notas": payload.get("notas") or "",
+                "acta_id": acta_id,
+            }
+            conn.execute(
+                """
+                INSERT INTO gestoria_socios_cambios (
+                  id, sociedad_id, empresa_id, socio_id, acta_id, tipo_cambio,
+                  porcentaje_anterior, porcentaje_nuevo, aportacion_anterior, aportacion_nueva,
+                  rol_anterior, rol_nuevo, fecha_cambio, notas, cambio_json,
+                  created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    cambio_id,
+                    sociedad_id,
+                    empresa["id"],
+                    socio_id,
+                    acta_id or None,
+                    tipo_cambio,
+                    socio_prev.get("porcentaje"),
+                    porcentaje_nuevo if porcentaje_nuevo is not None else socio_prev.get("porcentaje"),
+                    socio_prev.get("aportacion"),
+                    aportacion_nueva if aportacion_nueva is not None else socio_prev.get("aportacion"),
+                    socio_prev.get("rol"),
+                    payload.get("rol") or socio_prev.get("rol"),
+                    fecha_cambio,
+                    payload.get("notas") or "",
+                    json.dumps(cambio_json, ensure_ascii=False),
+                    now,
+                    now,
+                ),
+            )
+            audit("gestoria_socio_cambio", cambio_id, "guardar", json.dumps(cambio_json, ensure_ascii=False), payload.get("usuario"))
+            conn.commit()
+            json_response(self, {"ok": True, "id": cambio_id, "acta_id": acta_id})
             return
         elif parsed.path == "/api/gestoria_actas":
             acta_id = str(payload.get("id") or "").strip() or os.urandom(16).hex()
@@ -77650,189 +77861,50 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
-        if path == "/api/gestoria_libro_socios":
+        if path == "/api/gestoria_socios_cambios":
             empresa_id = params.get("empresa_id", [""])[0]
             workspace_id = params.get("workspace_id", [""])[0]
             sociedad_id = (params.get("sociedad_id", [""])[0] or "").strip()
-            output_format = (params.get("format", [""])[0] or "").strip().lower()
-            include_actas_raw = (params.get("include_actas", ["1"])[0] or "").strip().lower()
-            include_actas = include_actas_raw not in {"0", "false", "no", "off"}
-            if not sociedad_id:
-                json_response(self, {"error": "sociedad_id requerido"}, status=400)
-                return
+            socio_id = (params.get("socio_id", [""])[0] or "").strip()
+            limit_raw = (params.get("limit", ["300"])[0] or "300").strip()
+            try:
+                limit = int(limit_raw)
+            except Exception:
+                limit = 300
+            limit = max(1, min(limit, 1000))
             empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             placeholders = ",".join(["?"] * len(empresa_ids))
-            sociedad_row = conn.execute(
+            where = [f"sc.empresa_id IN ({placeholders})"]
+            values = list(empresa_ids)
+            if sociedad_id:
+                where.append("sc.sociedad_id = ?")
+                values.append(sociedad_id)
+            if socio_id:
+                where.append("sc.socio_id = ?")
+                values.append(socio_id)
+            where_clause = " AND ".join(where)
+            rows = conn.execute(
                 f"""
-                SELECT id, denominacion, tipo_social, cif, domicilio_social, provincia, fecha_constitucion,
-                       fecha_escritura, notario, folio, tomo, numero, capital_social, objeto_social,
-                       estado, notas, created_at, updated_at
-                FROM gestoria_sociedades
-                WHERE id = ? AND empresa_id IN ({placeholders})
-                LIMIT 1
+                SELECT sc.id, sc.sociedad_id, COALESCE(gs.denominacion, '') AS sociedad,
+                       sc.socio_id, COALESCE(s.nombre, '') AS socio,
+                       sc.acta_id, COALESCE(a.titulo, '') AS acta,
+                       sc.tipo_cambio, sc.porcentaje_anterior, sc.porcentaje_nuevo,
+                       sc.aportacion_anterior, sc.aportacion_nueva, sc.rol_anterior, sc.rol_nuevo,
+                       sc.fecha_cambio, sc.notas, sc.cambio_json, sc.created_at, sc.updated_at
+                FROM gestoria_socios_cambios sc
+                LEFT JOIN gestoria_sociedades gs ON gs.id = sc.sociedad_id
+                LEFT JOIN gestoria_socios s ON s.id = sc.socio_id
+                LEFT JOIN gestoria_actas a ON a.id = sc.acta_id
+                WHERE {where_clause}
+                ORDER BY sc.created_at DESC
+                LIMIT ?
                 """,
-                (sociedad_id, *empresa_ids),
-            ).fetchone()
-            if not sociedad_row:
-                json_response(self, {"error": "sociedad no encontrada"}, status=404)
-                return
-            rows_socios = conn.execute(
-                f"""
-                SELECT s.id, s.sociedad_id, COALESCE(gs.denominacion, '') AS sociedad,
-                       s.nombre, s.documento, s.rol, s.porcentaje, s.aportacion, s.domicilio, s.telefono, s.email,
-                       s.created_at, s.updated_at
-                FROM gestoria_socios s
-                LEFT JOIN gestoria_sociedades gs ON gs.id = s.sociedad_id
-                WHERE s.sociedad_id = ? AND s.empresa_id IN ({placeholders})
-                ORDER BY s.created_at DESC
-                """,
-                (sociedad_id, *empresa_ids),
+                [*values, limit],
             ).fetchall()
-            sociedad = dict(sociedad_row)
-            socios = [dict(row) for row in rows_socios]
-
-            def _safe_float(value):
-                try:
-                    return float(value or 0.0)
-                except Exception:
-                    return 0.0
-
-            total_socios = len(socios)
-            total_porcentaje = 0.0
-            total_aportacion = 0.0
-            for socio in socios:
-                total_porcentaje += _safe_float(socio.get("porcentaje"))
-                total_aportacion += _safe_float(socio.get("aportacion"))
-
-            response = {
-                "ok": True,
-                "sociedad": sociedad,
-                "socios": socios,
-                "resumen": {
-                    "total_socios": total_socios,
-                    "porcentaje_total": round(total_porcentaje, 6),
-                    "aportacion_total": round(total_aportacion, 2),
-                },
-                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }
-
-            if include_actas:
-                actas_rows = conn.execute(
-                    f"""
-                    SELECT a.id, a.titulo, a.tipo_acta, a.numero_acta, a.fecha_acta, a.estado, a.contenido_texto
-                    FROM gestoria_actas a
-                    WHERE a.sociedad_id = ? AND a.empresa_id IN ({placeholders})
-                    ORDER BY a.created_at DESC
-                    LIMIT 20
-                    """,
-                    (sociedad_id, *empresa_ids),
-                ).fetchall()
-                response["actas"] = [dict(row) for row in actas_rows]
-
-            if output_format == "pdf":
-                empresa = conn.execute("SELECT * FROM empresas WHERE id = ? LIMIT 1", (empresa_ids[0],)).fetchone()
-                denominacion = sociedad.get("denominacion") or "-"
-                domicilio = sociedad.get("domicilio_social") or "-"
-                fecha_constitucion = sociedad.get("fecha_constitucion") or "-"
-                fecha_escritura = sociedad.get("fecha_escritura") or "-"
-                try:
-                    capital_text = format_eur(float(sociedad.get("capital_social") or 0.0))
-                except Exception:
-                    capital_text = "0,00 €"
-                body_lines = [
-                    "LIBRO DE SOCIOS · PRIMERA PÁGINA",
-                    "",
-                    f"Fecha de generación: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
-                    f"Sociedad: {denominacion}",
-                    f"CIF/NIF: {sociedad.get('cif') or '-'}",
-                    f"Tipo social: {sociedad.get('tipo_social') or '-'}",
-                    f"Domicilio social: {domicilio}",
-                    f"Provincia: {sociedad.get('provincia') or '-'}",
-                    f"Estado: {sociedad.get('estado') or '-'}",
-                    f"Escritura: {fecha_escritura} · Notario: {sociedad.get('notario') or '-'}",
-                    f"Folio: {sociedad.get('folio') or '-'} · Tomo: {sociedad.get('tomo') or '-'} · Número: {sociedad.get('numero') or '-'}",
-                    f"Constitución: {fecha_constitucion}",
-                    f"Capital social: {capital_text}",
-                    "",
-                    "OBJETO SOCIAL:",
-                    sociedad.get("objeto_social") or "-",
-                    "",
-                    "LISTA DE SOCIOS (extracto para primera página):",
-                ]
-                if not socios:
-                    body_lines.append("Sin socios registrados.")
-                else:
-                    for idx, socio in enumerate(socios, 1):
-                        nombre = socio.get("nombre") or "-"
-                        documento = socio.get("documento") or "-"
-                        rol = socio.get("rol") or "-"
-                        try:
-                            porcentaje = f"{float(socio.get('porcentaje') or 0):.6g}%"
-                        except Exception:
-                            porcentaje = "-"
-                        try:
-                            aportacion = format_eur(float(socio.get('aportacion') or 0.0))
-                        except Exception:
-                            aportacion = "-"
-                        body_lines.extend(
-                            [
-                                f"{idx}. {nombre}",
-                                f"   Documento: {documento} · Rol: {rol}",
-                                f"   Porcentaje: {porcentaje} · Aportación: {aportacion}",
-                                f"   Domicilio: {socio.get('domicilio') or '-'}",
-                                f"   Contacto: {socio.get('telefono') or '-'} · {socio.get('email') or '-'}",
-                                "",
-                            ]
-                        )
-                body_lines.extend(
-                    [
-                        f"TOTAL SOCIOS: {total_socios}",
-                        f"TOTAL PORCENTAJE: {round(total_porcentaje, 6)} %",
-                        f"TOTAL APORTACIÓN: {format_eur(total_aportacion)}",
-                    ]
-                )
-                if include_actas:
-                    body_lines.extend(["", "ÚLTIMAS ACTAS REGISTRADAS:"])
-                    for acta in response.get("actas", [])[:5]:
-                        titulo = acta.get("titulo") or acta.get("tipo_acta") or "Acta"
-                        detalle = acta.get("numero_acta") or ""
-                        fecha = acta.get("fecha_acta") or "-"
-                        estado = acta.get("estado") or "-"
-                        etiq = " - ".join([part for part in [titulo, detalle, fecha, estado] if part])
-                        body_lines.append(f"• {etiq}")
-                        contenido = (acta.get("contenido_texto") or "").strip()
-                        if contenido:
-                            body_lines.append(f"  {contenido}")
-                body_lines.extend(
-                    [
-                        "",
-                        "Nota legal:",
-                        "La primera página se genera como documento informativo para control interno.",
-                        "Las transmisiones, cambios en porcentajes o modificaciones de la estructura societaria",
-                        "deben aprobarse mediante acta y reflejarse en el registro completo del libro.",
-                    ]
-                )
-                safe_sociedad = re.sub(r"[^A-Za-z0-9_-]+", "_", str(sociedad.get("denominacion") or "sociedad")).strip("_")[:50]
-                fecha_token = datetime.now().strftime("%Y%m%d")
-                filename = f"libro_socios_{safe_sociedad or 'sociedad'}_{fecha_token}.pdf"
-                pdf_bytes = build_company_branded_text_document_pdf(
-                    dict(empresa or {}),
-                    "LIBRO DE SOCIOS · PRIMERA PÁGINA",
-                    f"Extracto inicial. Sociedad: {denominacion}",
-                    body_lines,
-                    footer_lines=[
-                        "Documento interno CRM Verifika2 para control legal y operativo.",
-                        "Revisar y aprobar con el despacho o asesoramiento legal antes de firma/inscripción.",
-                    ],
-                    brand_logo_url=(empresa or {}).get("logo_url") if empresa else None,
-                )
-                binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
-                return
-
-            json_response(self, response)
+            json_response(self, {"rows": [dict(r) for r in rows]})
             return
         if path == "/api/gestoria_actas":
             empresa_id = params.get("empresa_id", [""])[0]
