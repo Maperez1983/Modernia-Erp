@@ -66267,6 +66267,29 @@ const populateGestoriaSocioSociedadSelect = (rows = [], selectedId = "") => {
   }
 };
 
+const guessGestoriaSociedadForCurrentCliente = (rows = []) => {
+  const cliente = state.currentClienteData || {};
+  const clienteNombre = normalizeSimple(cliente.nombre || "");
+  const clienteDoc = normalizeDocumento(cliente.nif || "");
+  if (!Array.isArray(rows) || !rows.length) return "";
+  const exactDoc = clienteDoc
+    ? rows.find((row) => normalizeDocumento(row.cif || "") === clienteDoc)
+    : null;
+  if (exactDoc?.id) return String(exactDoc.id || "").trim();
+  const exactName = clienteNombre
+    ? rows.find((row) => normalizeSimple(row.denominacion || "") === clienteNombre)
+    : null;
+  if (exactName?.id) return String(exactName.id || "").trim();
+  const partialName = clienteNombre
+    ? rows.find((row) => {
+        const denom = normalizeSimple(row.denominacion || "");
+        return denom && (denom.includes(clienteNombre) || clienteNombre.includes(denom));
+      })
+    : null;
+  if (partialName?.id) return String(partialName.id || "").trim();
+  return rows.length === 1 ? String(rows[0]?.id || "").trim() : "";
+};
+
 const populateGestoriaActaSociedadSelect = (rows = [], selectedId = "") => {
   if (!gestoriaActaSociedad) return;
   const preserve = String(selectedId || gestoriaActaSociedad.value || "").trim();
@@ -66334,8 +66357,9 @@ const loadGestoriaSociedades = async () => {
     state.gestoriaSociedadesRows = rows;
     const socSociedadSelected = String(gestoriaSocioSociedad?.value || "").trim();
     const actaSociedadSelected = String(gestoriaActaSociedad?.value || "").trim();
-    populateGestoriaSocioSociedadSelect(rows, socSociedadSelected);
-    populateGestoriaSocioCambioSociedadSelect(rows, String(gestoriaSocioCambioSociedad?.value || "").trim());
+    const clienteSociedadSelected = guessGestoriaSociedadForCurrentCliente(rows) || socSociedadSelected;
+    populateGestoriaSocioSociedadSelect(rows, clienteSociedadSelected);
+    populateGestoriaSocioCambioSociedadSelect(rows, clienteSociedadSelected || String(gestoriaSocioCambioSociedad?.value || "").trim());
     populateGestoriaActaSociedadSelect(rows, actaSociedadSelected);
     if (!gestoriaSociedadTable) return rows;
     if (!rows.length) {
@@ -66378,6 +66402,12 @@ const loadGestoriaSociedades = async () => {
     gestoriaSociedadTable.innerHTML = "";
     gestoriaSociedadTable.appendChild(table);
     populateGestoriaSocioCambioSociedadSelect(rows, String(gestoriaSocioCambioSociedad?.value || "").trim());
+    if (state.currentPage === "cliente" && clienteSociedadSelected) {
+      if (gestoriaSocioSociedad) gestoriaSocioSociedad.value = clienteSociedadSelected;
+      if (gestoriaSocioCambioSociedad) gestoriaSocioCambioSociedad.value = clienteSociedadSelected;
+      loadGestoriaSocios(clienteSociedadSelected);
+      loadGestoriaSociosCambios(clienteSociedadSelected);
+    }
     return rows;
   } catch (_error) {
     if (gestoriaSociedadTable) {
@@ -72637,6 +72667,18 @@ const openClienteDetail = (id) => {
     if (clienteGestoriaForm) {
       clienteGestoriaForm.classList.toggle("hidden", !hasGestoria);
     }
+    if (gestoriaSocioForm) {
+      gestoriaSocioForm.classList.toggle("hidden", !hasGestoria);
+    }
+    if (gestoriaSocioTable) {
+      gestoriaSocioTable.classList.toggle("hidden", !hasGestoria);
+    }
+    if (gestoriaSocioCambioForm) {
+      gestoriaSocioCambioForm.classList.toggle("hidden", !hasGestoria);
+    }
+    if (gestoriaSocioCambiosTable) {
+      gestoriaSocioCambiosTable.classList.toggle("hidden", !hasGestoria);
+    }
     if (clienteProfesionalOperativaBlock) {
       clienteProfesionalOperativaBlock.classList.toggle("hidden", !hasGestoria);
     }
@@ -72651,6 +72693,11 @@ const openClienteDetail = (id) => {
     }
     if (gestoriaClienteAgendaForm) {
       gestoriaClienteAgendaForm.classList.toggle("hidden", !hasGestoria);
+    }
+    if (hasGestoria) {
+      loadGestoriaSocioClientes().catch(() => {});
+      loadGestoriaSociedades();
+      loadGestoriaActas();
     }
 	    if (clienteTabs) {
 	      const relacionesTab = clienteTabs.querySelector('[data-tab="relaciones"]');
