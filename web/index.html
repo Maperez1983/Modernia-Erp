@@ -5369,33 +5369,227 @@
           </div>
         </div>
         <div id="gestoriaCrmViewAlta" class="hidden">
-          <div class="form-card">
-            <h3>Alta Cliente · Gestoría</h3>
-            <p class="muted">El cliente se asigna directamente al servicio de gestoría.</p>
-            <form id="gestoriaAltaForm">
-              <div class="form-grid">
+          <div class="crm-split gestoria-crm-alta-grid">
+            <div class="form-card">
+              <h3>Alta Cliente · Gestoría</h3>
+              <p class="muted">El cliente se asigna directamente al servicio de gestoría.</p>
+              <form id="gestoriaAltaForm">
+                <div class="form-grid">
+                  <label>
+                    Tipo persona
+                    <select name="tipo_persona" id="gestoriaAltaTipoPersona">
+                      <option value="Física">Física</option>
+                      <option value="Jurídica">Jurídica</option>
+                    </select>
+                  </label>
+                  <label data-gestoria-persona="fisica">
+                    Apellido 1
+                    <input name="apellido1" />
+                  </label>
+                  <label data-gestoria-persona="fisica">
+                    Apellido 2
+                    <input name="apellido2" />
+                  </label>
+                  <label>
+                    Nombre / Razón social
+                    <input name="nombre" required />
+                  </label>
+                  <label>
+                    DNI/NIF
+                    <input name="nif" />
+                  </label>
+                  <label>
+                    Teléfono
+                    <input name="telefono" />
+                  </label>
+                  <label>
+                    Email
+                    <input name="email" type="email" />
+                  </label>
+                  <label>
+                    Dirección
+                    <input name="direccion" />
+                  </label>
+                  <label>
+                    Código postal
+                    <input name="codigo_postal" />
+                  </label>
+                  <label>
+                    Población
+                    <input name="poblacion" />
+                  </label>
+                  <label>
+                    Provincia
+                    <input name="provincia" />
+                  </label>
+                  <label class="span-2">
+                    Canal
+                    <select name="procedencia_canal" id="gestoriaAltaCanal">
+                      <option value=""></option>
+                      <option>Oficina</option>
+                      <option>Internet</option>
+                      <option>Cliente referido</option>
+                      <option>Colaborador interno</option>
+                    </select>
+                  </label>
+                  <label class="span-2 hidden" id="gestoriaAltaCanalClienteWrap">
+                    Cliente referido
+                    <select name="procedencia_cliente_id" id="gestoriaAltaCanalCliente"></select>
+                  </label>
+                  <label class="span-2 hidden" id="gestoriaAltaCanalUserWrap">
+                    Colaborador interno
+                    <select name="procedencia_user_id" id="gestoriaAltaCanalUser"></select>
+                  </label>
+                  <label>
+                    Fecha alta
+                    <input name="fecha" type="date" />
+                  </label>
+                  <label>
+                    Tipo servicio
+                    <select name="tipo">
+                      <option>Cuota mensual</option>
+                      <option>Gestión administrativa</option>
+                    </select>
+                  </label>
+                  <label>
+                    Perfil
+                    <select name="perfil">
+                      <option>Autónomo</option>
+                      <option>Empresa</option>
+                      <option>Cliente Renta</option>
+                      <option>Gestiones Administrativas</option>
+                    </select>
+                  </label>
+                  <label>
+                    Cuota
+                    <input name="cuota" />
+                  </label>
+                  <label>
+                    Precio
+                    <input name="precio" type="number" step="0.01" />
+                  </label>
+                  <label>
+                    Estado
+                    <select name="estado">
+                      <option>Alta</option>
+                      <option>Baja</option>
+                    </select>
+                  </label>
+                  <label>
+                    Fecha baja
+                    <input name="fecha_baja" type="date" />
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button type="submit">Guardar y asignar</button>
+                  <span id="gestoriaAltaStatus" class="muted"></span>
+                </div>
+              </form>
+            </div>
+            <div class="form-card">
+              <h3>Sociedades</h3>
+              <form id="gestoriaSociedadForm" class="form-grid">
                 <label>
-                  Tipo persona
-                  <select name="tipo_persona" id="gestoriaAltaTipoPersona">
-                    <option value="Física">Física</option>
-                    <option value="Jurídica">Jurídica</option>
+                  Denominación
+                  <input name="denominacion" required />
+                </label>
+                <label>
+                  Tipo social
+                  <input name="tipo_social" />
+                </label>
+                <label>
+                  CIF
+                  <input name="cif" />
+                </label>
+                <label>
+                  Provincia
+                  <input name="provincia" />
+                </label>
+                <label class="span-2">
+                  Domicilio social
+                  <input name="domicilio_social" />
+                </label>
+                <label>
+                  Fecha constitución
+                  <input name="fecha_constitucion" type="date" />
+                </label>
+                <label>
+                  Fecha escritura
+                  <input name="fecha_escritura" type="date" />
+                </label>
+                <label>
+                  Notario
+                  <input name="notario" />
+                </label>
+                <label>
+                  Folio
+                  <input name="folio" />
+                </label>
+                <label>
+                  Tomo
+                  <input name="tomo" />
+                </label>
+                <label>
+                  Número
+                  <input name="numero" />
+                </label>
+                <label>
+                  Capital social
+                  <input name="capital_social" />
+                </label>
+                <label>
+                  Estado
+                  <select name="estado">
+                    <option>Borrador</option>
+                    <option>Activa</option>
+                    <option>Disuelta</option>
                   </select>
                 </label>
-                <label data-gestoria-persona="fisica">
-                  Apellido 1
-                  <input name="apellido1" />
+                <label class="span-2">
+                  Objeto social
+                  <input name="objeto_social" />
                 </label>
-                <label data-gestoria-persona="fisica">
-                  Apellido 2
-                  <input name="apellido2" />
+                <label class="span-2">
+                  Notas
+                  <input name="notas" />
+                </label>
+                <div class="form-actions span-2">
+                  <button type="submit">Guardar sociedad</button>
+                  <span id="gestoriaSociedadStatus" class="muted"></span>
+                </div>
+              </form>
+              <div id="gestoriaSociedadTable"></div>
+            </div>
+            <div class="form-card">
+              <h3>Socios</h3>
+              <form id="gestoriaSocioForm" class="form-grid">
+                <label>
+                  Sociedad
+                  <select id="gestoriaSocioSociedad" name="sociedad_id" required></select>
                 </label>
                 <label>
-                  Nombre / Razón social
+                  Nombre
                   <input name="nombre" required />
                 </label>
                 <label>
-                  DNI/NIF
-                  <input name="nif" />
+                  Documento
+                  <input name="documento" />
+                </label>
+                <label>
+                  Rol
+                  <input name="rol" />
+                </label>
+                <label>
+                  Porcentaje
+                  <input name="porcentaje" />
+                </label>
+                <label>
+                  Aportación
+                  <input name="aportacion" />
+                </label>
+                <label>
+                  Domicilio
+                  <input name="domicilio" />
                 </label>
                 <label>
                   Teléfono
@@ -5405,79 +5599,186 @@
                   Email
                   <input name="email" type="email" />
                 </label>
+                <div class="form-actions span-2">
+                  <button type="submit">Guardar socio</button>
+                  <span id="gestoriaSocioStatus" class="muted"></span>
+                </div>
+              </form>
+              <div id="gestoriaSocioTable"></div>
+            </div>
+            <div class="form-card">
+              <h3>Actas</h3>
+              <form id="gestoriaActaForm" class="form-grid">
                 <label>
-                  Dirección
-                  <input name="direccion" />
+                  Sociedad
+                  <select id="gestoriaActaSociedad" name="sociedad_id" required></select>
                 </label>
                 <label>
-                  Código postal
-                  <input name="codigo_postal" />
+                  Título
+                  <input name="titulo" required />
                 </label>
                 <label>
-                  Población
-                  <input name="poblacion" />
-                </label>
-	                <label>
-	                  Provincia
-	                  <input name="provincia" />
-	                </label>
-	                <label class="span-2">
-	                  Canal
-	                  <select name="procedencia_canal" id="gestoriaAltaCanal">
-	                    <option value=""></option>
-	                    <option>Oficina</option>
-	                    <option>Internet</option>
-	                    <option>Cliente referido</option>
-	                    <option>Colaborador interno</option>
-	                  </select>
-	                </label>
-	                <label class="span-2 hidden" id="gestoriaAltaCanalClienteWrap">
-	                  Cliente referido
-	                  <select name="procedencia_cliente_id" id="gestoriaAltaCanalCliente"></select>
-	                </label>
-	                <label class="span-2 hidden" id="gestoriaAltaCanalUserWrap">
-	                  Colaborador interno
-	                  <select name="procedencia_user_id" id="gestoriaAltaCanalUser"></select>
-	                </label>
-	                <label>
-	                  Fecha alta
-	                  <input name="fecha" type="date" />
-	                </label>
-                <label>
-                  Tipo servicio
-                  <select name="tipo">
-                    <option>Cuota mensual</option>
-                    <option>Gestión administrativa</option>
-                  </select>
+                  Tipo acta
+                  <input name="tipo_acta" />
                 </label>
                 <label>
-                  Perfil
-                  <select name="perfil">
-                    <option>Autónomo</option>
-                    <option>Empresa</option>
-                    <option>Cliente Renta</option>
-                    <option>Gestiones Administrativas</option>
-                  </select>
+                  Número acta
+                  <input name="numero_acta" />
                 </label>
                 <label>
-                  Cuota
-                  <input name="cuota" />
-                </label>
-                <label>
-                  Precio
-                  <input name="precio" type="number" step="0.01" />
+                  Fecha acta
+                  <input name="fecha_acta" type="date" />
                 </label>
                 <label>
                   Estado
                   <select name="estado">
-                    <option>Alta</option>
-                    <option>Baja</option>
+                    <option>Borrador</option>
+                    <option>Firmada</option>
+                    <option>Pendiente</option>
+                    <option>Archivada</option>
+                  </select>
+                </label>
+                <label class="span-2">
+                  Requiere firma
+                  <label class="checkbox">
+                    <input name="requiere_firma" type="checkbox" />
+                    <span>Sí</span>
+                  </label>
+                </label>
+                <label class="span-2">
+                  Texto del acta
+                  <input name="contenido_texto" />
+                </label>
+                <label class="span-2">
+                  Hash de firma
+                  <input name="firma_hash" />
+                </label>
+                <div class="form-actions span-2">
+                  <button type="submit">Guardar acta</button>
+                  <span id="gestoriaActaStatus" class="muted"></span>
+                </div>
+              </form>
+              <div id="gestoriaActaTable"></div>
+            </div>
+            <div class="form-card">
+              <h3>Firmas de actas</h3>
+              <form id="gestoriaActaFirmaForm" class="form-grid">
+                <label>
+                  Acta
+                  <select id="gestoriaActaFirmaActa" name="acta_id" required></select>
+                </label>
+                <label>
+                  Nombre firmante
+                  <input name="firmante_nombre" required />
+                </label>
+                <label>
+                  Documento
+                  <input name="firmante_documento" />
+                </label>
+                <label>
+                  Rol
+                  <input name="firmante_rol" />
+                </label>
+                <label>
+                  Email
+                  <input name="email" type="email" />
+                </label>
+                <label>
+                  Teléfono
+                  <input name="telefono" />
+                </label>
+                <label>
+                  Método de firma
+                  <select name="metodo_firma">
+                    <option>digital_simple</option>
+                    <option>firma_manual</option>
+                    <option>firma_notarial</option>
+                  </select>
+                </label>
+                <label class="span-2">
+                  Fecha de firma
+                  <input name="fecha_firma" type="date" />
+                </label>
+                <label class="span-2">
+                  Acepta términos y condiciones
+                  <label class="checkbox">
+                    <input name="acepta_terminos" type="checkbox" />
+                    <span>Sí</span>
+                  </label>
+                </label>
+                <label class="span-2">
+                  Evidencia / referencias
+                  <input name="evidencia" />
+                </label>
+                <label class="span-2">
+                  Hash de firma
+                  <input name="firma_hash" />
+                </label>
+                <div class="form-actions span-2">
+                  <button type="submit">Guardar firma</button>
+                  <span id="gestoriaActaFirmaStatus" class="muted"></span>
+                </div>
+              </form>
+              <div id="gestoriaActaFirmaTable"></div>
+            </div>
+          </div>
+        </div>
+        <div id="gestoriaDocsSection" class="hidden">
+          <div class="crm-header">
+            <div>
+              <h3>Gestoría · Inbox documental</h3>
+              <p class="muted">Histórico de clientes y expedientes incorporados desde cargas previas.</p>
+            </div>
+          </div>
+          <div class="crm-split">
+            <div class="form-card">
+              <h3>Base importada</h3>
+              <p class="muted">Histórico de clientes y expedientes incorporados desde cargas previas.</p>
+              <div id="gestoriaBdtTable"></div>
+              <div class="footer" id="gestoriaBdtInfo"></div>
+            </div>
+            <div class="form-card">
+              <h3>Documentos recientes</h3>
+              <p class="muted">Últimos documentos recibidos o registrados en gestoría.</p>
+              <div id="gestoriaDocsRecent"></div>
+              <div class="footer" id="gestoriaDocsRecentInfo"></div>
+            </div>
+          </div>
+          <div class="crm-split">
+            <div class="form-card">
+              <h3>Registrar documento</h3>
+              <p class="muted">Da entrada a documentación manual antes de enviarla a revisión o expediente.</p>
+              <form id="gestoriaDocsForm" class="form-grid">
+                <label>
+                  Cliente
+                  <select id="gestoriaDocsCliente" name="cliente_id" required></select>
+                </label>
+                <label>
+                  Nombre documento
+                  <input name="nombre" required />
+                </label>
+                <label>
+                  Tipo
+                  <input name="tipo" placeholder="Contrato, DNI, escritura..." />
+                </label>
+                <label>
+                  Fecha
+                  <input name="fecha" type="date" />
+                </label>
+                <label>
+                  Estado
+                  <select name="estado">
+                    <option>Pendiente</option>
+                    <option>Recibido</option>
+                    <option>Validado</option>
                   </select>
                 </label>
                 <label>
-                  Fecha baja
-                  <input name="fecha_baja" type="date" />
+                  Notas
+                  <input name="notas" />
                 </label>
+                <label class="span-2">
+                  Archivo
               </div>
               <div class="form-actions">
                 <button type="submit">Guardar y asignar</button>

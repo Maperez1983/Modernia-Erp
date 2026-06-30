@@ -7755,6 +7755,11 @@ body.crm-context-inmo .crm-resumen-compact-note {
   gap: 14px;
 }
 
+.gestoria-crm-alta-grid {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  align-items: start;
+}
+
 .crm-recent {
   display: grid;
   gap: 10px;
@@ -11500,6 +11505,10 @@ body.density-compact #crmSection [id$="Table"] table {
 
   body.density-compact .crm-split {
     grid-template-columns: minmax(0, 3fr) minmax(360px, 1fr);
+  }
+
+  .gestoria-crm-alta-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 

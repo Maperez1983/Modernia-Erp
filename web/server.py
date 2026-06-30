@@ -33860,6 +33860,93 @@ def ensure_tables(db_path):
         pass
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS gestoria_sociedades (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT,
+          denominacion TEXT,
+          tipo_social TEXT,
+          cif TEXT,
+          domicilio_social TEXT,
+          provincia TEXT,
+          fecha_constitucion TEXT,
+          fecha_escritura TEXT,
+          notario TEXT,
+          folio TEXT,
+          tomo TEXT,
+          numero TEXT,
+          capital_social REAL,
+          objeto_social TEXT,
+          estado TEXT,
+          notas TEXT,
+          formulario_json TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gestoria_socios (
+          id TEXT PRIMARY KEY,
+          sociedad_id TEXT,
+          empresa_id TEXT,
+          nombre TEXT,
+          documento TEXT,
+          rol TEXT,
+          porcentaje REAL,
+          aportacion REAL,
+          domicilio TEXT,
+          telefono TEXT,
+          email TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gestoria_actas (
+          id TEXT PRIMARY KEY,
+          sociedad_id TEXT,
+          empresa_id TEXT,
+          titulo TEXT,
+          tipo_acta TEXT,
+          numero_acta TEXT,
+          fecha_acta TEXT,
+          estado TEXT,
+          requiere_firma INTEGER,
+          contenido_json TEXT,
+          contenido_texto TEXT,
+          firma_hash TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gestoria_acta_firmas (
+          id TEXT PRIMARY KEY,
+          acta_id TEXT,
+          empresa_id TEXT,
+          sociedad_id TEXT,
+          firmante_nombre TEXT,
+          firmante_documento TEXT,
+          firmante_rol TEXT,
+          email TEXT,
+          telefono TEXT,
+          metodo_firma TEXT,
+          acepta_terminos INTEGER,
+          evidencia_json TEXT,
+          firma_hash TEXT,
+          fecha_firma TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS asesoramientos_financiacion (
           id TEXT PRIMARY KEY,
           empresa_id TEXT,
@@ -49248,6 +49335,10 @@ class Handler(BaseHTTPRequestHandler):
             "gestoria": "gestoria",
             "gestoria_docs": "gestoria",
             "gestoria_trabajos": "gestoria",
+            "gestoria_sociedades": "gestoria",
+            "gestoria_socios": "gestoria",
+            "gestoria_actas": "gestoria",
+            "gestoria_acta_firmas": "gestoria",
             "gestoria_contabilidad": "gestoria",
             "gestoria_modelos": "gestoria",
             "gestoria_conta_tasks": "gestoria",
@@ -50231,6 +50322,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_contabilidad",
             "/api/gestoria_contabilidad_update",
             "/api/gestoria_contabilidad_delete",
+            "/api/gestoria_sociedades",
+            "/api/gestoria_socios",
+            "/api/gestoria_actas",
+            "/api/gestoria_acta_firmas",
             "/api/gestoria_import_lotes",
             "/api/gestoria_import_upload",
             "/api/gestoria_import_documentos_bulk",
@@ -50724,6 +50819,10 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/gestoria_docs": "gestoria",
                         "/api/gestoria_docs_update": "gestoria",
                         "/api/gestoria_docs_delete": "gestoria",
+                        "/api/gestoria_sociedades": "gestoria",
+                        "/api/gestoria_socios": "gestoria",
+                        "/api/gestoria_actas": "gestoria",
+                        "/api/gestoria_acta_firmas": "gestoria",
                         "/api/gestoria_contabilidad": "gestoria",
                         "/api/gestoria_contabilidad_update": "gestoria",
                         "/api/gestoria_contabilidad_delete": "gestoria",
@@ -51188,6 +51287,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_trabajos_delete",
             "/api/gestoria_docs_update",
             "/api/gestoria_docs_delete",
+            "/api/gestoria_sociedades",
+            "/api/gestoria_socios",
+            "/api/gestoria_actas",
+            "/api/gestoria_acta_firmas",
             "/api/gestoria_contabilidad_update",
             "/api/gestoria_contabilidad_delete",
             "/api/fin_asesoramientos",
@@ -51483,6 +51586,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_trabajos_delete",
             "/api/gestoria_docs_update",
             "/api/gestoria_docs_delete",
+            "/api/gestoria_sociedades",
+            "/api/gestoria_socios",
+            "/api/gestoria_actas",
+            "/api/gestoria_acta_firmas",
                 "/api/seguros_delete",
                 "/api/seguros_cambio_compania",
                 "/api/seguros_update",
@@ -53326,6 +53433,280 @@ class Handler(BaseHTTPRequestHandler):
                 ),
             )
             audit("gestoria_cliente", payload.get("cliente"), "crear", json.dumps(payload), payload.get("usuario"))
+        elif parsed.path == "/api/gestoria_sociedades":
+            sociedad_id = str(payload.get("id") or "").strip() or os.urandom(16).hex()
+            denominacion = str(payload.get("denominacion") or "").strip()
+            if not denominacion:
+                json_response(self, {"error": "denominacion requerida"}, status=400)
+                return
+            conn.execute(
+                """
+                INSERT INTO gestoria_sociedades (
+                  id, empresa_id, denominacion, tipo_social, cif, domicilio_social, provincia,
+                  fecha_constitucion, fecha_escritura, notario, folio, tomo, numero,
+                  capital_social, objeto_social, estado, notas, formulario_json, created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    sociedad_id,
+                    empresa["id"],
+                    denominacion,
+                    payload.get("tipo_social"),
+                    payload.get("cif"),
+                    payload.get("domicilio_social"),
+                    payload.get("provincia"),
+                    payload.get("fecha_constitucion"),
+                    payload.get("fecha_escritura"),
+                    payload.get("notario"),
+                    payload.get("folio"),
+                    payload.get("tomo"),
+                    payload.get("numero"),
+                    payload.get("capital_social"),
+                    payload.get("objeto_social"),
+                    payload.get("estado") or "Borrador",
+                    payload.get("notas"),
+                    json.dumps(payload.get("formulario") or {}, ensure_ascii=False)
+                    if isinstance(payload.get("formulario"), (dict, list))
+                    else payload.get("formulario"),
+                    now,
+                    now,
+                ),
+            )
+            audit("gestoria_sociedad", sociedad_id, "crear", json.dumps(payload), payload.get("usuario"))
+            conn.commit()
+            json_response(self, {"ok": True, "id": sociedad_id})
+            return
+        elif parsed.path == "/api/gestoria_socios":
+            sociedad_id = str(payload.get("sociedad_id") or "").strip()
+            if not sociedad_id:
+                json_response(self, {"error": "sociedad_id requerido"}, status=400)
+                return
+            if not conn.execute(
+                "SELECT 1 FROM gestoria_sociedades WHERE id = ? AND empresa_id = ? LIMIT 1",
+                (sociedad_id, empresa["id"]),
+            ).fetchone():
+                json_response(self, {"error": "sociedad no encontrada"}, status=404)
+                return
+            socio_id = str(payload.get("id") or "").strip() or os.urandom(16).hex()
+            nombre = str(payload.get("nombre") or "").strip()
+            if not nombre:
+                json_response(self, {"error": "nombre requerido"}, status=400)
+                return
+            if str(payload.get("id") or "").strip():
+                updates = []
+                values = []
+                for field in (
+                    "sociedad_id",
+                    "nombre",
+                    "documento",
+                    "rol",
+                    "porcentaje",
+                    "aportacion",
+                    "domicilio",
+                    "telefono",
+                    "email",
+                ):
+                    if field in payload:
+                        updates.append(f"{field} = ?")
+                        values.append(payload.get(field))
+                if updates:
+                    conn.execute(
+                        f"""
+                        UPDATE gestoria_socios
+                        SET {", ".join(updates)}, updated_at = datetime(?)
+                        WHERE id = ? AND empresa_id = ?
+                        """,
+                        (*values, now, socio_id, empresa["id"]),
+                    )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_socios (
+                      id, sociedad_id, empresa_id, nombre, documento, rol, porcentaje, aportacion,
+                      domicilio, telefono, email, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        socio_id,
+                        sociedad_id,
+                        empresa["id"],
+                        nombre,
+                        payload.get("documento"),
+                        payload.get("rol"),
+                        payload.get("porcentaje"),
+                        payload.get("aportacion"),
+                        payload.get("domicilio"),
+                        payload.get("telefono"),
+                        payload.get("email"),
+                        now,
+                        now,
+                    ),
+                )
+            audit("gestoria_socio", socio_id, "guardar", json.dumps(payload), payload.get("usuario"))
+            conn.commit()
+            json_response(self, {"ok": True, "id": socio_id})
+            return
+        elif parsed.path == "/api/gestoria_actas":
+            acta_id = str(payload.get("id") or "").strip() or os.urandom(16).hex()
+            sociedad_id = str(payload.get("sociedad_id") or "").strip()
+            if not sociedad_id:
+                json_response(self, {"error": "sociedad_id requerido"}, status=400)
+                return
+            titulo = str(payload.get("titulo") or "").strip()
+            if not titulo:
+                json_response(self, {"error": "titulo requerido"}, status=400)
+                return
+            if not conn.execute(
+                "SELECT 1 FROM gestoria_sociedades WHERE id = ? AND empresa_id = ? LIMIT 1",
+                (sociedad_id, empresa["id"]),
+            ).fetchone():
+                json_response(self, {"error": "sociedad no encontrada"}, status=404)
+                return
+            if str(payload.get("id") or "").strip():
+                updates = []
+                values = []
+                for field in (
+                    "sociedad_id",
+                    "titulo",
+                    "tipo_acta",
+                    "numero_acta",
+                    "fecha_acta",
+                    "estado",
+                    "requiere_firma",
+                    "contenido_json",
+                    "contenido_texto",
+                    "firma_hash",
+                ):
+                    if field in payload:
+                        updates.append(f"{field} = ?")
+                        values.append(payload.get(field))
+                if updates:
+                    conn.execute(
+                        f"""
+                        UPDATE gestoria_actas
+                        SET {", ".join(updates)}, updated_at = datetime(?)
+                        WHERE id = ? AND empresa_id = ?
+                        """,
+                        (*values, now, acta_id, empresa["id"]),
+                    )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_actas (
+                      id, sociedad_id, empresa_id, titulo, tipo_acta, numero_acta, fecha_acta, estado,
+                      requiere_firma, contenido_json, contenido_texto, firma_hash, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        acta_id,
+                        sociedad_id,
+                        empresa["id"],
+                        titulo,
+                        payload.get("tipo_acta"),
+                        payload.get("numero_acta"),
+                        payload.get("fecha_acta"),
+                        payload.get("estado") or "Borrador",
+                        1 if str(payload.get("requiere_firma") or "").strip().lower() in {"1", "true", "yes", "on"} else 0,
+                        json.dumps(payload.get("contenido_json") or {}, ensure_ascii=False)
+                        if isinstance(payload.get("contenido_json"), (dict, list))
+                        else payload.get("contenido_json"),
+                        payload.get("contenido_texto"),
+                        payload.get("firma_hash"),
+                        now,
+                        now,
+                    ),
+                )
+            audit("gestoria_acta", acta_id, "guardar", json.dumps(payload), payload.get("usuario"))
+            conn.commit()
+            json_response(self, {"ok": True, "id": acta_id})
+            return
+        elif parsed.path == "/api/gestoria_acta_firmas":
+            acta_id = str(payload.get("acta_id") or "").strip()
+            if not acta_id:
+                json_response(self, {"error": "acta_id requerido"}, status=400)
+                return
+            acta_row = conn.execute(
+                "SELECT sociedad_id FROM gestoria_actas WHERE id = ? AND empresa_id = ? LIMIT 1",
+                (acta_id, empresa["id"]),
+            ).fetchone()
+            if not acta_row:
+                json_response(self, {"error": "acta no encontrada"}, status=404)
+                return
+            firma_id = str(payload.get("id") or "").strip() or os.urandom(16).hex()
+            firmante_nombre = str(payload.get("firmante_nombre") or "").strip()
+            if not firmante_nombre:
+                json_response(self, {"error": "firmante_nombre requerido"}, status=400)
+                return
+            if str(payload.get("id") or "").strip():
+                updates = []
+                values = []
+                for field in (
+                    "acta_id",
+                    "firmante_nombre",
+                    "firmante_documento",
+                    "firmante_rol",
+                    "email",
+                    "telefono",
+                    "metodo_firma",
+                    "acepta_terminos",
+                    "evidencia_json",
+                    "firma_hash",
+                    "fecha_firma",
+                ):
+                    if field in payload:
+                        updates.append(f"{field} = ?")
+                        values.append(payload.get(field))
+                if updates:
+                    conn.execute(
+                        f"""
+                        UPDATE gestoria_acta_firmas
+                        SET {", ".join(updates)}, updated_at = datetime(?)
+                        WHERE id = ? AND empresa_id = ?
+                        """,
+                        (*values, now, firma_id, empresa["id"]),
+                    )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_acta_firmas (
+                      id, acta_id, empresa_id, sociedad_id, firmante_nombre, firmante_documento,
+                      firmante_rol, email, telefono, metodo_firma, acepta_terminos, evidencia_json,
+                      firma_hash, fecha_firma, created_at, updated_at
+                    ) VALUES (
+                      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                    )
+                    """,
+                    (
+                        firma_id,
+                        acta_id,
+                        empresa["id"],
+                        acta_row["sociedad_id"],
+                        firmante_nombre,
+                        payload.get("firmante_documento"),
+                        payload.get("firmante_rol"),
+                        payload.get("email"),
+                        payload.get("telefono"),
+                        payload.get("metodo_firma") or "digital_simple",
+                        1 if str(payload.get("acepta_terminos") or "").strip().lower() in {"1", "true", "yes", "on"} else 0,
+                        json.dumps(payload.get("evidencia") or {}, ensure_ascii=False)
+                        if isinstance(payload.get("evidencia"), (dict, list))
+                        else payload.get("evidencia"),
+                        payload.get("firma_hash"),
+                        payload.get("fecha_firma") or now,
+                        now,
+                        now,
+                    ),
+                )
+            audit("gestoria_acta_firma", firma_id, "guardar", json.dumps(payload), payload.get("usuario"))
+            conn.commit()
+            json_response(self, {"ok": True, "id": firma_id})
+            return
         elif parsed.path == "/api/gestoria_trabajos":
             tipo_categoria = normalize_gestoria_trabajo_category(payload.get("tipo_categoria")) or classify_gestoria_trabajo_category(
                 payload.get("tipo_trabajo")
@@ -77194,6 +77575,158 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
+        if path == "/api/gestoria_sociedades":
+            empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
+            sociedad_id = (params.get("sociedad_id", [""])[0] or "").strip()
+            estado = (params.get("estado", [""])[0] or "").strip()
+            limit_raw = (params.get("limit", ["300"])[0] or "300").strip()
+            try:
+                limit = int(limit_raw)
+            except Exception:
+                limit = 300
+            limit = max(1, min(limit, 1000))
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+            if not empresa_ids:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                return
+            placeholders = ",".join(["?"] * len(empresa_ids))
+            where = [f"empresa_id IN ({placeholders})"]
+            values = list(empresa_ids)
+            if sociedad_id:
+                where.append("id = ?")
+                values.append(sociedad_id)
+            if estado:
+                where.append("LOWER(TRIM(COALESCE(estado, ''))) = LOWER(TRIM(?))")
+                values.append(estado)
+            where_clause = " AND ".join(where)
+            rows = conn.execute(
+                f"""
+                SELECT id, denominacion, tipo_social, cif, domicilio_social, provincia, fecha_constitucion,
+                       fecha_escritura, notario, folio, tomo, numero, capital_social, objeto_social,
+                       estado, notas, formulario_json, created_at, updated_at
+                FROM gestoria_sociedades
+                WHERE {where_clause}
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                [*values, limit],
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+        if path == "/api/gestoria_socios":
+            empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
+            sociedad_id = (params.get("sociedad_id", [""])[0] or "").strip()
+            limit_raw = (params.get("limit", ["300"])[0] or "300").strip()
+            try:
+                limit = int(limit_raw)
+            except Exception:
+                limit = 300
+            limit = max(1, min(limit, 1000))
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+            if not empresa_ids:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                return
+            placeholders = ",".join(["?"] * len(empresa_ids))
+            where = [f"s.empresa_id IN ({placeholders})"]
+            values = list(empresa_ids)
+            if sociedad_id:
+                where.append("s.sociedad_id = ?")
+                values.append(sociedad_id)
+            where_clause = " AND ".join(where)
+            rows = conn.execute(
+                f"""
+                SELECT s.id, s.sociedad_id, COALESCE(gs.denominacion, '') AS sociedad,
+                       s.nombre, s.documento, s.rol, s.porcentaje, s.aportacion, s.domicilio,
+                       s.telefono, s.email, s.created_at, s.updated_at
+                FROM gestoria_socios s
+                LEFT JOIN gestoria_sociedades gs ON gs.id = s.sociedad_id
+                WHERE {where_clause}
+                ORDER BY s.created_at DESC
+                LIMIT ?
+                """,
+                [*values, limit],
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+        if path == "/api/gestoria_actas":
+            empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
+            sociedad_id = (params.get("sociedad_id", [""])[0] or "").strip()
+            acta_id = (params.get("acta_id", [""])[0] or "").strip()
+            limit_raw = (params.get("limit", ["300"])[0] or "300").strip()
+            try:
+                limit = int(limit_raw)
+            except Exception:
+                limit = 300
+            limit = max(1, min(limit, 1000))
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+            if not empresa_ids:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                return
+            placeholders = ",".join(["?"] * len(empresa_ids))
+            where = [f"a.empresa_id IN ({placeholders})"]
+            values = list(empresa_ids)
+            if sociedad_id:
+                where.append("a.sociedad_id = ?")
+                values.append(sociedad_id)
+            if acta_id:
+                where.append("a.id = ?")
+                values.append(acta_id)
+            where_clause = " AND ".join(where)
+            rows = conn.execute(
+                f"""
+                SELECT a.id, a.sociedad_id, COALESCE(gs.denominacion, '') AS sociedad,
+                       a.titulo, a.tipo_acta, a.numero_acta, a.fecha_acta, a.estado, a.requiere_firma,
+                       a.contenido_texto, a.firma_hash, a.created_at, a.updated_at
+                FROM gestoria_actas a
+                LEFT JOIN gestoria_sociedades gs ON gs.id = a.sociedad_id
+                WHERE {where_clause}
+                ORDER BY a.created_at DESC
+                LIMIT ?
+                """,
+                [*values, limit],
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+        if path == "/api/gestoria_acta_firmas":
+            empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
+            acta_id = (params.get("acta_id", [""])[0] or "").strip()
+            limit_raw = (params.get("limit", ["300"])[0] or "300").strip()
+            try:
+                limit = int(limit_raw)
+            except Exception:
+                limit = 300
+            limit = max(1, min(limit, 1000))
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+            if not empresa_ids:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                return
+            placeholders = ",".join(["?"] * len(empresa_ids))
+            where = [f"f.empresa_id IN ({placeholders})"]
+            values = list(empresa_ids)
+            if acta_id:
+                where.append("f.acta_id = ?")
+                values.append(acta_id)
+            where_clause = " AND ".join(where)
+            rows = conn.execute(
+                f"""
+                SELECT f.id, f.acta_id, COALESCE(a.titulo, '') AS acta,
+                       f.firmante_nombre, f.firmante_documento, f.firmante_rol, f.email,
+                       f.telefono, f.metodo_firma, f.acepta_terminos, f.evidencia_json,
+                       f.firma_hash, f.fecha_firma, f.created_at, f.updated_at
+                FROM gestoria_acta_firmas f
+                LEFT JOIN gestoria_actas a ON a.id = f.acta_id
+                WHERE {where_clause}
+                ORDER BY f.created_at DESC
+                LIMIT ?
+                """,
+                [*values, limit],
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
         if path == "/api/gestoria_modelos":
             cliente_id = params.get("cliente_id", [""])[0]
             empresa_id = params.get("empresa_id", [""])[0]
