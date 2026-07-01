@@ -24583,6 +24583,12 @@ const resolveCrmSegurosEmpresa = () => {
   return state.empresas[0] || null;
 };
 
+const resolveSegurosDashboardEmpresaId = () => {
+  return String(
+    state.currentEmpresaId || state.crmSegurosEmpresaId || resolveCrmSegurosEmpresa()?.id || ""
+  ).trim();
+};
+
 const resolveCrmGestoriaEmpresa = () => {
   // En modo tenant, la "fuente de verdad" es la empresa activa del workspace (o su matriz de servicio),
   // nunca el fallback por nombre ("Fincas...") que pertenece al modo global.
@@ -37981,9 +37987,13 @@ const setSegurosTab = (name) => {
   sections.forEach((section) => {
     section.classList.toggle("active", section.dataset.segurosTab === name);
   });
-  if (name === "dashboard" && state.currentEmpresaId) {
+  if (name === "dashboard") {
+    const empresaId = resolveSegurosDashboardEmpresaId();
+    if (!empresaId) {
+      return;
+    }
     window.requestAnimationFrame(() => {
-      renderFincasDashboard(state.currentEmpresaId);
+      renderFincasDashboard(empresaId);
     });
   }
   if (name === "renovaciones") {
@@ -61016,6 +61026,12 @@ const loadSegurosCrm = () => {
         segurosRecClienteId
       );
     }
+    if (state.segurosTab === "dashboard") {
+      const dashboardEmpresaId = resolveSegurosDashboardEmpresaId();
+      if (dashboardEmpresaId) {
+        window.requestAnimationFrame(() => renderFincasDashboard(dashboardEmpresaId));
+      }
+    }
   }).catch((error) => {
     const message = error?.data?.error || error?.message || "No se pudieron cargar las pólizas.";
     segurosCrmTable.innerHTML = `<p class='muted'>${message}</p>`;
@@ -61107,14 +61123,14 @@ const loadSegurosKpis = () => {
   }
   const renderHeaderMiniKpis = (data) => {
     if (!segurosHeaderMiniKpis) return;
-    const total = Number((data && data.total_real != null ? data.total_real : data?.total) || 0);
-    const enVigor = Number((data && data.en_vigor_real != null ? data.en_vigor_real : data?.en_vigor) || 0);
+    const totalPdf = Number((data && data.total != null ? data.total : data?.total_real) || 0);
+    const enVigorPdf = Number((data && data.en_vigor != null ? data.en_vigor : data?.en_vigor_real) || 0);
     const vencen30 = Number(data?.vencen_30 || 0);
     const faltantes = Number(data?.faltantes || 0);
     const prima = Number(data?.prima_total || 0);
     const items = [
-      { label: "Pólizas", value: numberFormatter.format(total) },
-      { label: "En vigor", value: numberFormatter.format(enVigor) },
+      { label: "Pólizas", value: numberFormatter.format(totalPdf) },
+      { label: "En vigor", value: numberFormatter.format(enVigorPdf) },
       { label: "Vencen 30d", value: numberFormatter.format(vencen30) },
       { label: "Faltantes", value: numberFormatter.format(faltantes) },
     ];
@@ -61163,14 +61179,23 @@ const loadSegurosKpis = () => {
       }
       wrapper.appendChild(card);
     };
-    addKpi("Pólizas (real)", data.total_real ?? data.total ?? 0);
-    addKpi("Pólizas (filas)", data.total || 0);
+    const totalPdf = Number(data.total ?? data.total_real ?? 0);
+    const totalUnique = Number(data.total_real ?? data.total ?? 0);
+    const enVigorPdf = Number(data.en_vigor ?? data.en_vigor_real ?? 0);
+    const enVigorUnique = Number(data.en_vigor_real ?? data.en_vigor ?? 0);
+    addKpi("Pólizas PDF", totalPdf);
+    if (totalUnique !== totalPdf) {
+      addKpi("Pólizas únicas", totalUnique);
+    }
     if (Number(data.total_con_numero || 0) > 0) {
       addKpi("Con nº póliza", data.total_con_numero || 0);
     }
-    addKpi("Pólizas en vigor", data.en_vigor || 0);
+    addKpi("Pólizas en vigor", enVigorPdf);
     if (Number(data.en_vigor_con_numero || 0) > 0) {
       addKpi("En vigor (con nº)", data.en_vigor_con_numero || 0);
+    }
+    if (enVigorUnique !== enVigorPdf) {
+      addKpi("En vigor únicas", enVigorUnique);
     }
     if (Number(data.en_vigor_sin_numero || 0) > 0) {
       addKpi("En vigor sin nº póliza", data.en_vigor_sin_numero || 0);
@@ -61194,9 +61219,9 @@ const loadSegurosKpis = () => {
     segurosKpis.appendChild(wrapper);
   };
   const params = new URLSearchParams({ empresa_id: resolveLegacyEmpresaId(empresa) });
-  // KPIs deben reflejar toda la cartera (en vigor, vencimientos, primas),
-  // independientemente de si el PDF está enlazado.
-  params.set("uploaded_only", "0");
+  // KPIs deben reflejar las pólizas realmente cargadas desde PDF para que el conteo
+  // coincida con los documentos del sistema.
+  params.set("uploaded_only", "1");
   api(`/api/seguros_kpis?${params.toString()}`)
     .then((data) => {
       state.segurosKpisCache = data || {};
@@ -84123,7 +84148,7 @@ if (yearSelect) {
     const selectedYear = yearSelect.value;
     loadHomeFincasStats(selectedYear).then(() => renderCompanyCards());
     if (state.currentEmpresaName === FINCAS_COMPANY && currentTab === "seguros-crm") {
-      renderFincasDashboard(state.currentEmpresaId);
+      renderFincasDashboard(resolveSegurosDashboardEmpresaId());
     }
     updateCompanySummary(state.currentEmpresaName || (state.currentModule === "clientes" ? "Clientes" : ""));
   });
@@ -84132,7 +84157,7 @@ if (yearSelect) {
 if (fincasDashboardYearSelect) {
   fincasDashboardYearSelect.addEventListener("change", () => {
     if (state.currentEmpresaName === FINCAS_COMPANY && currentTab === "seguros-crm") {
-      renderFincasDashboard(state.currentEmpresaId);
+      renderFincasDashboard(resolveSegurosDashboardEmpresaId());
     }
   });
 }
