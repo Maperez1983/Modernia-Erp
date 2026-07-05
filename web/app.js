@@ -2059,6 +2059,7 @@ const state = {
   gestoriaImportSelectedLoteId: "",
   gestoriaImportSelectedDocumentoId: "",
   gestoriaImportEstadoFilter: "",
+  gestoriaConciliacionFilter: "all",
   gestoriaImportCurrentLotes: [],
   gestoriaImportCurrentDocs: [],
 };
@@ -2087,6 +2088,10 @@ const adminSection = document.getElementById("adminSection");
 const adminBackBtn = document.getElementById("adminBackBtn");
 const adminUserForm = document.getElementById("adminUserForm");
 const adminUserStatus = document.getElementById("adminUserStatus");
+const adminActivationLogin = document.getElementById("adminActivationLogin");
+const adminActivationBtn = document.getElementById("adminActivationBtn");
+const adminActivationStatus = document.getElementById("adminActivationStatus");
+const adminActivationLink = document.getElementById("adminActivationLink");
 const adminUsersTable = document.getElementById("adminUsersTable");
 const adminUsersInfo = document.getElementById("adminUsersInfo");
 const adminUsersSearch = document.getElementById("adminUsersSearch");
@@ -2820,18 +2825,38 @@ const gestoriaClienteKpiDocs = document.getElementById("gestoriaClienteKpiDocs")
 const gestoriaClienteAlerts = document.getElementById("gestoriaClienteAlerts");
 const gestoriaClienteFacturasTable = document.getElementById("gestoriaClienteFacturasTable");
 const gestoriaClienteFacturasInfo = document.getElementById("gestoriaClienteFacturasInfo");
+const gestoriaClienteFacturasConciliarBtn = document.getElementById("gestoriaClienteFacturasConciliarBtn");
 const gestoriaClienteFacturasExcelLink = document.getElementById("gestoriaClienteFacturasExcelLink");
 const gestoriaClienteAsientosTable = document.getElementById("gestoriaClienteAsientosTable");
 const gestoriaClienteAsientosInfo = document.getElementById("gestoriaClienteAsientosInfo");
+const gestoriaClienteConciliacionFicha = document.getElementById("gestoriaClienteConciliacionFicha");
+const gestoriaClienteConciliacionResumen = document.getElementById("gestoriaClienteConciliacionResumen");
+const gestoriaClienteConciliacionInfo = document.getElementById("gestoriaClienteConciliacionInfo");
+const gestoriaClienteConciliacionAcciones = document.getElementById("gestoriaClienteConciliacionAcciones");
+const gestoriaAsientoFicha = document.getElementById("gestoriaAsientoFicha");
+const gestoriaAsientoForm = document.getElementById("gestoriaAsientoForm");
+const gestoriaAsientoLineas = document.getElementById("gestoriaAsientoLineas");
+const gestoriaAsientoAddLineaBtn = document.getElementById("gestoriaAsientoAddLineaBtn");
+const gestoriaAsientoStatus = document.getElementById("gestoriaAsientoStatus");
+const gestoriaAsientoFormHint = document.getElementById("gestoriaAsientoFormHint");
 const gestoriaClienteLibrosTabs = document.getElementById("gestoriaClienteLibrosTabs");
 const gestoriaClienteLibroDiarioPanel = document.getElementById("gestoriaClienteLibroDiarioPanel");
 const gestoriaClienteLibroMayorPanel = document.getElementById("gestoriaClienteLibroMayorPanel");
+const gestoriaClienteLibroBalancePanel = document.getElementById("gestoriaClienteLibroBalancePanel");
+const gestoriaClienteLibroPyGPanel = document.getElementById("gestoriaClienteLibroPyGPanel");
+const gestoriaClienteLibroFacturasPanel = document.getElementById("gestoriaClienteLibroFacturasPanel");
 const gestoriaClienteLibroIvaPanel = document.getElementById("gestoriaClienteLibroIvaPanel");
 const gestoriaClienteLibroExcelPanel = document.getElementById("gestoriaClienteLibroExcelPanel");
 const gestoriaClienteLibroDiarioTable = document.getElementById("gestoriaClienteLibroDiarioTable");
 const gestoriaClienteLibroDiarioInfo = document.getElementById("gestoriaClienteLibroDiarioInfo");
 const gestoriaClienteLibroMayorTable = document.getElementById("gestoriaClienteLibroMayorTable");
 const gestoriaClienteLibroMayorInfo = document.getElementById("gestoriaClienteLibroMayorInfo");
+const gestoriaClienteLibroBalanceTable = document.getElementById("gestoriaClienteLibroBalanceTable");
+const gestoriaClienteLibroBalanceInfo = document.getElementById("gestoriaClienteLibroBalanceInfo");
+const gestoriaClienteLibroPyGTable = document.getElementById("gestoriaClienteLibroPyGTable");
+const gestoriaClienteLibroPyGInfo = document.getElementById("gestoriaClienteLibroPyGInfo");
+const gestoriaClienteLibroFacturasTable = document.getElementById("gestoriaClienteLibroFacturasTable");
+const gestoriaClienteLibroFacturasInfo = document.getElementById("gestoriaClienteLibroFacturasInfo");
 const gestoriaClienteLibroIvaTable = document.getElementById("gestoriaClienteLibroIvaTable");
 const gestoriaClienteLibroIvaInfo = document.getElementById("gestoriaClienteLibroIvaInfo");
 const gestoriaClienteLibroExcelBtn = document.getElementById("gestoriaClienteLibroExcelBtn");
@@ -2848,12 +2873,25 @@ const gestoriaImportUploadForm = document.getElementById("gestoriaImportUploadFo
 const gestoriaImportUploadFiles = document.getElementById("gestoriaImportUploadFiles");
 const gestoriaImportUploadStatus = document.getElementById("gestoriaImportUploadStatus");
 const gestoriaImportSelectedLoteMeta = document.getElementById("gestoriaImportSelectedLoteMeta");
+const gestoriaImportValoracionForm = document.getElementById("gestoriaImportValoracionForm");
+const gestoriaImportCerrarLoteBtn = document.getElementById("gestoriaImportCerrarLoteBtn");
+const gestoriaImportValoracionStatus = document.getElementById("gestoriaImportValoracionStatus");
 const gestoriaImportLotesTable = document.getElementById("gestoriaImportLotesTable");
 const gestoriaImportLotesInfo = document.getElementById("gestoriaImportLotesInfo");
 const gestoriaImportDocsTable = document.getElementById("gestoriaImportDocsTable");
 const gestoriaImportDocsInfo = document.getElementById("gestoriaImportDocsInfo");
 const gestoriaImportReviewForm = document.getElementById("gestoriaImportReviewForm");
 const gestoriaImportReviewStatus = document.getElementById("gestoriaImportReviewStatus");
+const gestoriaBancoStatus = document.getElementById("gestoriaBancoStatus");
+const gestoriaBancoCuentaForm = document.getElementById("gestoriaBancoCuentaForm");
+const gestoriaBancoCuentasTable = document.getElementById("gestoriaBancoCuentasTable");
+const gestoriaBancoImportForm = document.getElementById("gestoriaBancoImportForm");
+const gestoriaBancoImportFile = document.getElementById("gestoriaBancoImportFile");
+const gestoriaBancoImportPreviewBtn = document.getElementById("gestoriaBancoImportPreviewBtn");
+const gestoriaBancoImportStatus = document.getElementById("gestoriaBancoImportStatus");
+const gestoriaBancoImportPreview = document.getElementById("gestoriaBancoImportPreview");
+const gestoriaBancoMovimientosTable = document.getElementById("gestoriaBancoMovimientosTable");
+const gestoriaBancoMovimientosInfo = document.getElementById("gestoriaBancoMovimientosInfo");
 const gestoriaModuleFiscal = document.getElementById("gestoriaModuleFiscal");
 const gestoriaModuleLaboral = document.getElementById("gestoriaModuleLaboral");
 const gestoriaModuleRenta = document.getElementById("gestoriaModuleRenta");
@@ -4860,6 +4898,14 @@ const isPrivilegedUser = (user) => {
   return Boolean(user.is_superadmin);
 };
 
+const canSeeAllWorkspacesHome = (user) => {
+  if (!user) return false;
+  if (isPrivilegedUser(user)) return true;
+  if (isPrivilegedRole(user.rol || "")) return true;
+  if (isPrivilegedService(user.servicio || "")) return true;
+  return false;
+};
+
 const isWorkspaceMemberManagerRole = (value) => {
   const normalized = normalizeSimple(value);
   return normalized === "owner" || normalized === "admin";
@@ -4968,6 +5014,23 @@ const shouldPreferTenantRouting = () => {
     if (stored) return true;
   } catch (_e) {}
   return Boolean(String(state.currentWorkspaceId || "").trim());
+};
+
+const restoreWorkspaceCompanyContextFromStorage = () => {
+  try {
+    const wsCompanyId = String(localStorage.getItem("crm.currentWorkspaceCompanyWsId") || "").trim();
+    const legacyCompanyId = String(localStorage.getItem("crm.currentWorkspaceCompanyId") || "").trim();
+    const companyName = String(localStorage.getItem("crm.currentWorkspaceCompanyName") || "").trim();
+    if (wsCompanyId && !String(state.currentWorkspaceCompanyWsId || "").trim()) {
+      state.currentWorkspaceCompanyWsId = wsCompanyId;
+    }
+    if (legacyCompanyId && !String(state.currentWorkspaceCompanyId || "").trim()) {
+      state.currentWorkspaceCompanyId = legacyCompanyId;
+    }
+    if (companyName && !String(state.currentWorkspaceCompanyName || "").trim()) {
+      state.currentWorkspaceCompanyName = companyName;
+    }
+  } catch (_e) {}
 };
 
 const ensureTenantParams = (params) => {
@@ -6114,7 +6177,7 @@ const renderCompanyCards = () => {
   }
   if (coreCards) {
     const user = getAuthScopeUser();
-    const isPriv = isPrivilegedUser(user);
+    const isPriv = canSeeAllWorkspacesHome(user);
     const canAdmin = canAccessAdminPanel(user);
     const canInmo = userCanAccessService("inmobiliaria");
     const canGestoria = userCanAccessService("gestoria");
@@ -6772,7 +6835,8 @@ const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
   const raw = state.currentWorkspaceDetail || {};
   const companiesV2 = Array.isArray(raw?.companies_v2) ? raw.companies_v2 : [];
   const legacy = Array.isArray(raw?.companies) ? raw.companies : [];
-  const companies = companiesV2.length ? companiesV2 : legacy;
+  const globalCompanies = Array.isArray(state.empresas) ? state.empresas : [];
+  const companies = [...companiesV2, ...legacy, ...globalCompanies];
   if ((state.currentWorkspaceEntryMode || "platform") === "tenant") {
     const selected =
       companies.find((row) => String(row?.id || "").trim() === String(companyId || "").trim())
@@ -10204,14 +10268,46 @@ const _companyFichaTabs = [
 const getWorkspaceCompanyById = (companyId) => {
   const wanted = String(companyId || "").trim();
   if (!wanted) return null;
-  const companies = Array.isArray(state?.currentWorkspaceDetail?.companies)
+  const detailCompanies = Array.isArray(state?.currentWorkspaceDetail?.companies)
     ? state.currentWorkspaceDetail.companies
     : [];
+  const detailCompaniesV2 = Array.isArray(state?.currentWorkspaceDetail?.companies_v2)
+    ? state.currentWorkspaceDetail.companies_v2
+    : [];
+  const globalCompanies = Array.isArray(state?.empresas) ? state.empresas : [];
+  const companies = [...detailCompanies, ...detailCompaniesV2, ...globalCompanies];
   return (
     companies.find((row) => String(row?.id || "").trim() === wanted)
     || companies.find((row) => String(row?.legacy_empresa_id || "").trim() === wanted)
+    || companies.find((row) => slugify(String(row?.nombre || "")) === slugify(wanted))
     || null
   );
+};
+
+const getWorkspaceCompanyBySlug = (slug) => {
+  const wanted = String(slug || "").trim();
+  if (!wanted) return null;
+  const matches = (row) => {
+    const names = [
+      row?.nombre,
+      row?.razon_social,
+      row?.name,
+    ]
+      .filter(Boolean)
+      .map((value) => slugify(String(value || "")));
+    return names.includes(wanted);
+  };
+  const detailCompanies = Array.isArray(state?.currentWorkspaceDetail?.companies)
+    ? state.currentWorkspaceDetail.companies
+    : [];
+  const detailCompaniesV2 = Array.isArray(state?.currentWorkspaceDetail?.companies_v2)
+    ? state.currentWorkspaceDetail.companies_v2
+    : [];
+  const allDetailCompanies = [...detailCompanies, ...detailCompaniesV2];
+  const fromDetail = allDetailCompanies.find(matches) || null;
+  if (fromDetail) return fromDetail;
+  const fromGlobal = Array.isArray(state?.empresas) ? state.empresas.find(matches) || null : null;
+  return fromGlobal;
 };
 
 const ensureWorkspaceCompanyFichaPanels = () => {
@@ -10301,6 +10397,120 @@ const renderWorkspaceCompanyFichaDashboard = (company) => {
   `;
 };
 
+let _companyContaActiveTab = "dashboard";
+let _companyContaMovedNodes = [];
+
+const ensureWorkspaceCompanyContabilidadShell = () => {
+  if (!workspaceCompanyFichaBody) return null;
+  let shell = workspaceCompanyFichaBody.querySelector('[data-company-conta-shell="1"]');
+  if (shell) return shell;
+  const panel = workspaceCompanyFichaBody.querySelector('[data-company-ficha-panel="contabilidad"]');
+  if (!panel) return null;
+  shell = document.createElement("div");
+  shell.dataset.companyContaShell = "1";
+  shell.innerHTML = `
+    <div class="section-head">
+      <div>
+        <h3>Contabilidad de la empresa</h3>
+        <p class="muted">Dashboard, diarios, modelos fiscales, balances y asiento/importación.</p>
+      </div>
+    </div>
+    <div class="tabs crm-lightning-subbar" data-company-conta-tabs>
+      <button class="tab active" type="button" data-company-conta-tab="dashboard">Dashboard</button>
+      <button class="tab" type="button" data-company-conta-tab="diarios">Diarios</button>
+      <button class="tab" type="button" data-company-conta-tab="modelos">Modelos</button>
+      <button class="tab" type="button" data-company-conta-tab="balances">Balances</button>
+      <button class="tab" type="button" data-company-conta-tab="asientos">Asientos</button>
+    </div>
+    <div data-company-conta-pane="dashboard"></div>
+    <div data-company-conta-pane="modelos" class="hidden"></div>
+    <div data-company-conta-pane="workbench" class="hidden"></div>
+  `;
+  panel.appendChild(shell);
+  shell.querySelectorAll("[data-company-conta-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setWorkspaceCompanyContabilidadTab(String(btn.dataset.companyContaTab || "dashboard").trim());
+    });
+  });
+  return shell;
+};
+
+const moveNodeToCompanyContaPane = (node, paneKey) => {
+  if (!node || !workspaceCompanyFichaBody) return;
+  const shell = workspaceCompanyFichaBody.querySelector('[data-company-conta-shell="1"]');
+  if (!shell) return;
+  const pane = shell.querySelector(`[data-company-conta-pane="${paneKey}"]`);
+  if (!pane) return;
+  if (_companyContaMovedNodes.some((row) => row.node === node)) return;
+  _companyContaMovedNodes.push({ node, parent: node.parentNode, next: node.nextSibling });
+  pane.appendChild(node);
+};
+
+const restoreCompanyContaNodes = () => {
+  if (!_companyContaMovedNodes.length) return;
+  for (let i = _companyContaMovedNodes.length - 1; i >= 0; i -= 1) {
+    const item = _companyContaMovedNodes[i];
+    try {
+      if (!item?.node || !item?.parent) continue;
+      if (item.next && item.next.parentNode === item.parent) {
+        item.parent.insertBefore(item.node, item.next);
+      } else {
+        item.parent.appendChild(item.node);
+      }
+    } catch (e) {}
+  }
+  _companyContaMovedNodes = [];
+};
+
+const setWorkspaceCompanyContabilidadTab = (tabKey = "dashboard", opts = {}) => {
+  restoreWorkspaceCompanyContextFromStorage();
+  const shell = ensureWorkspaceCompanyContabilidadShell();
+  if (!shell) return;
+  const tab = String(tabKey || "dashboard").trim();
+  _companyContaActiveTab = tab;
+  shell.querySelectorAll("[data-company-conta-tab]").forEach((btn) => {
+    btn.classList.toggle("active", String(btn.dataset.companyContaTab || "") === tab);
+  });
+  shell.querySelectorAll("[data-company-conta-pane]").forEach((pane) => {
+    const key = String(pane.dataset.companyContaPane || "");
+    const show = key === "dashboard"
+      ? tab === "dashboard"
+      : key === "modelos"
+        ? tab === "modelos"
+        : key === "workbench"
+          ? ["diarios", "balances", "asientos"].includes(tab)
+          : false;
+    pane.classList.toggle("hidden", !show);
+    pane.hidden = !show;
+  });
+  if (tab === "diarios" || tab === "balances") {
+    try {
+      setGestoriaClienteContaTab("libros");
+      setGestoriaClienteLibroTab(tab === "balances" ? "balance" : "diario");
+      hydrateGestoriaBooksFromCache(String(state.currentWorkspaceCompanyId || "").trim());
+    } catch (e) {}
+  }
+  if (tab === "asientos") {
+    try {
+      setGestoriaClienteContaTab("operativa");
+    } catch (e) {}
+  }
+  if (tab === "modelos") {
+    try {
+      const companyId = String(state.currentWorkspaceCompanyId || "").trim();
+      if (companyId) loadGestoriaModelos(companyId);
+    } catch (e) {}
+  }
+  if (tab === "dashboard") {
+    try {
+      loadGestoriaDashboardContabilidad({ force: true }).catch(() => {});
+    } catch (e) {}
+  }
+  if (opts.scroll !== false && typeof workspaceCompanyFicha?.scrollIntoView === "function") {
+    workspaceCompanyFicha.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+};
+
 const prefillWorkspaceCompanyEditorFromRow = (company) => {
   if (!workspaceCompanyEditor || !workspaceCompanyForm) return;
   const companyId = String(company?.id || "").trim();
@@ -10368,6 +10578,11 @@ const setWorkspaceCompanyFichaTab = (tabKey, opts = {}) => {
       moveNodeToCompanyFicha(workspaceCompanyEditor, "ajustes");
     }
   }
+  if (tab === "contabilidad") {
+    try {
+      setWorkspaceCompanyContabilidadTab(_companyContaActiveTab || "dashboard", { scroll: false });
+    } catch (e) {}
+  }
 
   if (opts.scroll !== false && typeof workspaceCompanyFicha.scrollIntoView === "function") {
     workspaceCompanyFicha.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -10376,6 +10591,7 @@ const setWorkspaceCompanyFichaTab = (tabKey, opts = {}) => {
 
 function openWorkspaceCompanyFicha(companyId, initialTab = "dashboard") {
   if (!workspaceCompanyFicha) return;
+  restoreWorkspaceCompanyContextFromStorage();
   const company = getWorkspaceCompanyById(companyId);
   if (!company) {
     setUiToast("Empresa no encontrada", "No se pudo abrir la ficha de empresa.");
@@ -10384,10 +10600,21 @@ function openWorkspaceCompanyFicha(companyId, initialTab = "dashboard") {
 
   // Asegura contexto empresa activa para selects/queries.
   setWorkspaceCompanyContext(String(company.id || "").trim());
+  const explicitLegacyId = String(resolveLegacyEmpresaId(company) || "").trim();
+  state.currentWorkspaceCompanyWsId = String(company.id || "").trim();
+  state.currentWorkspaceCompanyId = explicitLegacyId || String(company.id || "").trim();
+  state.currentWorkspaceCompanyName = String(company.nombre || company.razon_social || "").trim();
+  try {
+    localStorage.setItem("crm.currentWorkspaceCompanyId", String(state.currentWorkspaceCompanyId || ""));
+    localStorage.setItem("crm.currentWorkspaceCompanyWsId", String(state.currentWorkspaceCompanyWsId || ""));
+    localStorage.setItem("crm.currentWorkspaceCompanyName", String(state.currentWorkspaceCompanyName || ""));
+  } catch (e) {}
 
   // Resetea UI previa
   restoreCompanyFichaNodes();
+  restoreCompanyContaNodes();
   ensureWorkspaceCompanyFichaPanels();
+  ensureWorkspaceCompanyContabilidadShell();
 
   // Título/subtítulo
   if (workspaceCompanyFichaTitle) workspaceCompanyFichaTitle.textContent = String(company.nombre || company.razon_social || "Empresa");
@@ -10403,19 +10630,35 @@ function openWorkspaceCompanyFicha(companyId, initialTab = "dashboard") {
 
   // Mover paneles de Motores a la ficha (contabilidad/OCR/facturación/etc.)
   const contaPanel = document.querySelector('[data-workspace-view="motores"][data-workspace-engine="contabilidad"]');
-  const facturasRecibidasPanel = document.querySelector('[data-workspace-view="motores"][data-workspace-engine="facturas_recibidas"]');
   const documentalPanel = document.querySelector('[data-workspace-view="motores"][data-workspace-engine="documental"]');
+  const companyModelsCard = gestoriaModelosTable ? gestoriaModelosTable.closest(".form-card") : null;
+  const companyModulesCard = gestoriaModuleContabilidad ? gestoriaModuleContabilidad : null;
 
-  const budgetsPanel = workspaceBudgetForm ? workspaceBudgetForm.closest('[data-workspace-engine="facturacion"]') : null;
-  const billingPanel = workspaceBillingForm ? workspaceBillingForm.closest('[data-workspace-engine="facturacion"]') : null;
-  const collectionsPanel = workspaceCollectionsForm ? workspaceCollectionsForm.closest('[data-workspace-engine="facturacion"]') : null;
-
-  if (facturasRecibidasPanel) moveNodeToCompanyFicha(facturasRecibidasPanel, "contabilidad");
-  if (contaPanel) moveNodeToCompanyFicha(contaPanel, "contabilidad");
-  if (billingPanel) moveNodeToCompanyFicha(billingPanel, "facturacion");
-  if (collectionsPanel) moveNodeToCompanyFicha(collectionsPanel, "facturacion");
-  if (budgetsPanel) moveNodeToCompanyFicha(budgetsPanel, "presupuestos");
+  if (contaPanel) moveNodeToCompanyContaPane(contaPanel, "dashboard");
+  if (companyModelsCard) moveNodeToCompanyContaPane(companyModelsCard, "modelos");
+  if (companyModulesCard) moveNodeToCompanyContaPane(companyModulesCard, "workbench");
   if (documentalPanel) moveNodeToCompanyFicha(documentalPanel, "documentos");
+
+  // La ficha de empresa no depende de abrir previamente la ficha de un cliente de Gestoría.
+  // Cargamos los datos con el `empresa_id` de la empresa activa para que Contabilidad y Documentos
+  // no queden vacíos cuando se entra desde workspace.
+  const companyLegacyId = String(resolveLegacyEmpresaId(company) || "").trim();
+  const urlContaTab = (() => {
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+      return String(params.get("conta") || "").trim().toLowerCase();
+    } catch (e) {
+      return "";
+    }
+  })();
+  loadGestoriaContabilidad();
+  loadGestoriaDocsWorkspace();
+  if (companyLegacyId) {
+    loadGestoriaClienteContaResultados("", companyLegacyId);
+    loadGestoriaDocs("", companyLegacyId);
+    loadGestoriaClienteLibros("", companyLegacyId);
+    loadGestoriaModelos(companyLegacyId);
+  }
 
   // Ajustes: editor (se mueve bajo demanda al cambiar tab, pero lo dejamos listo)
   if (workspaceCompanyEditor) workspaceCompanyEditor.classList.add("hidden");
@@ -10423,7 +10666,38 @@ function openWorkspaceCompanyFicha(companyId, initialTab = "dashboard") {
   workspaceCompanyFicha.classList.remove("hidden");
   workspaceCompanyFicha.hidden = false;
 
-  setWorkspaceCompanyFichaTab(initialTab || "dashboard", { scroll: true });
+  const nextTab = urlContaTab && ["dashboard", "validacion", "diarios", "modelos", "balances", "asientos"].includes(urlContaTab)
+    ? urlContaTab
+    : initialTab || "dashboard";
+  setWorkspaceCompanyFichaTab("contabilidad", { scroll: true });
+  setWorkspaceCompanyContabilidadTab(nextTab === "documentos" ? "dashboard" : (nextTab || "dashboard"));
+  hydrateGestoriaBooksFromCache(explicitLegacyId || company.id || "");
+  if (companyLegacyId) {
+    window.setTimeout(() => {
+      const qs = new URLSearchParams({ conciliar: "1", empresa_id: companyLegacyId });
+      fetch(`/api/gestoria_libros?${qs.toString()}`)
+        .then((response) => response.json())
+        .then((data) => {
+          try {
+            applyGestoriaClienteLibrosData(data || {}, companyLegacyId);
+          } catch (e) {
+            const raw = data || {};
+            state.gestoriaClienteLibrosCache = {
+              diarioRaw: raw.diario || [],
+              mayorRaw: raw.mayor || [],
+              balanceRaw: raw.balance || [],
+              pygRaw: raw.pyg || [],
+              facturasRaw: raw.facturas || [],
+              facturasResumenRaw: raw.facturas_resumen || {},
+            };
+            window.__gestoriaClienteLibrosCache = state.gestoriaClienteLibrosCache;
+            writeGestoriaBooksCache(companyLegacyId, state.gestoriaClienteLibrosCache);
+            syncGestoriaBooksDownloadButtons();
+          }
+        })
+        .catch(() => {});
+    }, 0);
+  }
   hydrateWorkspaceCompanySelects();
 }
 
@@ -17773,7 +18047,7 @@ const renderWorkspaceContabilidadFacturas = (rows = []) => {
   table.className = "data-table";
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
-  ["Fecha", "Número", "Tipo", "Tercero", "Total", "PDF"].forEach((col) => {
+  ["Fecha", "Número", "Tipo", "Tercero", "Total", "Conciliada", "Asiento", "PDF"].forEach((col) => {
     const th = document.createElement("th");
     th.textContent = col;
     trHead.appendChild(th);
@@ -17783,7 +18057,15 @@ const renderWorkspaceContabilidadFacturas = (rows = []) => {
   const tbody = document.createElement("tbody");
   items.slice(0, 60).forEach((row) => {
     const tr = document.createElement("tr");
-    [row.fecha_emision || "-", row.numero || "-", row.tipo || "-", row.tercero || "-", row.total ? euroFormatter.format(parseMoneyValue(row.total)) : "-"].forEach(
+    [
+      row.fecha_emision || "-",
+      row.numero || "-",
+      row.tipo || "-",
+      row.tercero || "-",
+      row.total ? euroFormatter.format(parseMoneyValue(row.total)) : "-",
+      row.conciliada ? "Sí" : "No",
+      row.asiento_referencia || row.asiento_concepto || "-",
+    ].forEach(
       (value) => {
         const td = document.createElement("td");
         td.textContent = value;
@@ -17946,7 +18228,7 @@ const refreshWorkspaceContabilidad = async ({ force = false } = {}) => {
     const params = new URLSearchParams({ empresa_id: empresaId, limit: "200" });
     const [conta, facturas, asientos] = await Promise.all([
       api(`/api/gestoria_contabilidad?${params.toString()}`),
-      api(`/api/gestoria_facturas?${new URLSearchParams({ empresa_id: empresaId }).toString()}`).catch(() => ({ rows: [] })),
+      api(`/api/gestoria_facturas?${new URLSearchParams({ empresa_id: empresaId, conciliar: "1" }).toString()}`).catch(() => ({ rows: [] })),
       api(`/api/gestoria_asientos?${new URLSearchParams({ empresa_id: empresaId }).toString()}`).catch(() => ({ rows: [] })),
     ]);
     if (conta?.error) throw new Error(String(conta.error));
@@ -24037,7 +24319,18 @@ const renderHoldingOrgChart = () => {
       if (!node) return;
       const name = node.dataset.empresa;
       if (name) {
-        openCompany(name);
+        const company = (Array.isArray(state.empresas) ? state.empresas : []).find(
+          (item) => String(item?.nombre || "").trim() === String(name || "").trim()
+            || slugify(String(item?.nombre || "")) === slugify(String(name || ""))
+        );
+        if (company && typeof openWorkspaceCompanyFicha === "function") {
+          openWorkspaceCompanyFicha(String(company.id || company.legacy_empresa_id || company.nombre || "").trim(), "dashboard");
+          try {
+            setUrlParams(new URLSearchParams({ empresa: slugify(String(company.nombre || name || "")) }));
+          } catch (e) {}
+        } else {
+          openCompany(name);
+        }
       }
     });
   });
@@ -26870,6 +27163,318 @@ const renderClienteContabilidadPanel = () => {
     return;
   }
 
+  const cliente = state.currentClienteData || {};
+  const tipoPersona = normalizeSimple(cliente.tipo_persona || "");
+  const companyScopeId = String(state.currentWorkspaceCompanyId || cliente.id || "").trim();
+  const hasCompanyWorkspace = Boolean(String(state.currentWorkspaceCompanyId || "").trim());
+  const isEmpresaExplorer = String(state.currentPage || "").trim() === "empresa";
+  const isEmpresaContable =
+    isEmpresaExplorer ||
+    hasCompanyWorkspace ||
+    tipoPersona.includes("juridica") ||
+    tipoPersona.includes("sociedad") ||
+    tipoPersona.includes("empresa") ||
+    tipoPersona.includes("sl") ||
+    tipoPersona.includes("s.l") ||
+    tipoPersona.includes("s.a");
+  if (isEmpresaContable) {
+    const mainTab = String(state.clienteContaMainTab || "dashboard").trim();
+    const companyId = String(state.currentWorkspaceCompanyId || companyScopeId || "").trim();
+    const setMainTab = (tabKey) => {
+      state.clienteContaMainTab = tabKey;
+      root.querySelectorAll("[data-company-conta-main-tab]").forEach((btn) => {
+        btn.classList.toggle("active", String(btn.dataset.companyContaMainTab || "") === tabKey);
+      });
+    };
+    const setMainPane = (tabKey) => {
+      const target = String(tabKey || "dashboard").trim();
+      root.querySelectorAll("[data-company-conta-main-pane]").forEach((pane) => {
+        const show = String(pane.dataset.companyContaMainPane || "") === target;
+        pane.classList.toggle("hidden", !show);
+        pane.hidden = !show;
+      });
+      const pane = root.querySelector(`[data-company-conta-main-pane="${target}"]`);
+      if (pane && typeof pane.scrollIntoView === "function") {
+        setTimeout(() => pane.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+      }
+      return pane;
+    };
+    const activateTab = (tabKey) => {
+      const tab = String(tabKey || "dashboard").trim();
+      setMainTab(tab);
+      setMainPane(tab);
+      try {
+        const params = new URLSearchParams(window.location.search || "");
+        if (companyId) {
+          params.set("empresa", slugify(String(state.currentWorkspaceCompanyName || companyId || "")));
+          params.set("conta", tab);
+        }
+        setUrlParams(params);
+      } catch (e) {}
+      try {
+        if (tab === "importacion") {
+          if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("importador");
+          if (companyScopeId) loadGestoriaClienteImportador("", companyScopeId);
+        } else if (tab === "validacion") {
+          if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("control");
+          if (companyScopeId) loadGestoriaClienteContaResultados("", companyScopeId);
+        } else if (tab === "banco") {
+          if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("banco");
+          if (companyScopeId) loadGestoriaClienteBanco("", companyScopeId);
+        } else if (tab === "diarios" || tab === "balances") {
+          if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("libros");
+          if (typeof setGestoriaClienteLibroTab === "function") setGestoriaClienteLibroTab(tab === "balances" ? "balance" : "diario");
+          if (companyScopeId) loadGestoriaClienteLibros("", companyScopeId);
+          if (typeof setWorkspaceCompanyContabilidadTab === "function") {
+            setWorkspaceCompanyContabilidadTab(tab, { scroll: false });
+          }
+        } else if (tab === "modelos") {
+          if (companyScopeId) loadGestoriaModelos(companyScopeId);
+          if (typeof setWorkspaceCompanyContabilidadTab === "function") {
+            setWorkspaceCompanyContabilidadTab("modelos", { scroll: false });
+          }
+        } else if (tab === "asientos") {
+          if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("operativa");
+          if (companyScopeId) loadGestoriaClienteContaResultados("", companyScopeId);
+          if (typeof setWorkspaceCompanyContabilidadTab === "function") {
+            setWorkspaceCompanyContabilidadTab("asientos", { scroll: false });
+          }
+        } else {
+          if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("libros");
+          if (typeof setGestoriaClienteLibroTab === "function") setGestoriaClienteLibroTab("diario");
+          if (companyScopeId) loadGestoriaClienteContaResultados("", companyScopeId);
+          if (typeof setWorkspaceCompanyContabilidadTab === "function") {
+            setWorkspaceCompanyContabilidadTab("dashboard", { scroll: false });
+          }
+        }
+      } catch (e) {}
+    };
+    const root = document.createElement("div");
+    root.className = "stack";
+    root.innerHTML = `
+      <div class="form-card">
+        <div class="section-head">
+          <div>
+            <h3>Contabilidad</h3>
+            <p class="muted">Módulo contable de la empresa. Cada pestaña abre su sección real.</p>
+          </div>
+          <div class="form-actions">
+            <button type="button" class="tab active" data-company-conta-main-tab="dashboard">Dashboard</button>
+            <button type="button" class="tab" data-company-conta-main-tab="importacion">Importación</button>
+            <button type="button" class="tab" data-company-conta-main-tab="validacion">Validación</button>
+            <button type="button" class="tab" data-company-conta-main-tab="banco">Banco</button>
+            <button type="button" class="tab" data-company-conta-main-tab="diarios">Diarios</button>
+            <button type="button" class="tab" data-company-conta-main-tab="modelos">Modelos</button>
+            <button type="button" class="tab" data-company-conta-main-tab="balances">Balances</button>
+            <button type="button" class="tab" data-company-conta-main-tab="asientos">Asientos</button>
+          </div>
+        </div>
+
+        <div data-company-conta-main-pane="dashboard" class="stack">
+          <div class="form-card" style="margin-bottom:12px;">
+            <h4>Dashboard</h4>
+            <div class="muted">Resumen general de la contabilidad de la empresa, con accesos a los libros y al control.</div>
+            <div class="form-actions" style="margin-top:10px;">
+              <button type="button" class="secondary" data-company-conta-main-tab="validacion">Ir a validación</button>
+              <button type="button" class="secondary" data-company-conta-main-tab="diarios">Ir a diario</button>
+              <button type="button" class="secondary" data-company-conta-main-tab="modelos">Ir a modelos</button>
+            </div>
+          </div>
+        </div>
+
+        <div data-company-conta-main-pane="importacion" class="stack hidden">
+          <div class="form-card" style="margin-bottom:12px;">
+            <h4>Importación</h4>
+            <div class="muted">Lotes y documentos importados por la gestoria o el cliente. Aquí se concilian y validan antes de pasar a contabilidad.</div>
+            <div class="form-actions" style="margin-top:10px;">
+              <button type="button" class="secondary" data-company-conta-main-tab="validacion">Abrir validación</button>
+              <button type="button" class="secondary" data-company-conta-main-tab="banco">Abrir banco</button>
+            </div>
+          </div>
+        </div>
+
+        <div data-company-conta-main-pane="validacion" class="stack hidden">
+          <div class="form-card" style="margin-bottom:12px;">
+            <h4>Validación</h4>
+            <div class="muted">Control de importaciones, facturas pendientes, asientos descuadrados y conciliación.</div>
+            <div class="form-actions" style="margin-top:10px;">
+              <button type="button" class="secondary" data-company-conta-main-tab="importacion">Volver a importación</button>
+              <button type="button" class="secondary" data-company-conta-main-tab="asientos">Abrir asientos</button>
+            </div>
+          </div>
+          <div id="clienteContaValidacionResumen"></div>
+          <div class="footer" id="clienteContaValidacionInfo"></div>
+          <div id="clienteContaValidacionAcciones" style="margin-top:10px;"></div>
+        </div>
+
+        <div data-company-conta-main-pane="banco" class="stack hidden">
+          <div class="form-card">
+            <h4>Banco</h4>
+            <div class="muted">Conciliación bancaria y movimientos pendientes de puntear con facturas o asientos.</div>
+            <div class="form-actions" style="margin-top:10px;">
+              <button type="button" class="secondary" data-company-conta-main-tab="asientos">Ir a asientos</button>
+            </div>
+          </div>
+        </div>
+
+        <div data-company-conta-main-pane="diarios" class="stack hidden">
+          <div class="form-card">
+            <h4>Libro diario</h4>
+            <div class="muted">Abre el libro diario de la empresa y desplaza la vista al bloque de libros de contabilidad.</div>
+            <div class="form-actions" style="margin-top:10px;">
+              <button type="button" class="secondary" data-company-conta-main-tab="balances">Ver balances</button>
+            </div>
+          </div>
+        </div>
+
+        <div data-company-conta-main-pane="modelos" class="stack hidden">
+          <div class="form-card">
+            <h4>Modelos</h4>
+            <div class="muted">Modelos fiscales y obligaciones de la empresa.</div>
+            <div class="form-actions" style="margin-top:10px;">
+              <button type="button" class="secondary" data-company-conta-main-tab="dashboard">Volver al dashboard</button>
+            </div>
+          </div>
+        </div>
+
+        <div data-company-conta-main-pane="balances" class="stack hidden">
+          <div class="form-card">
+            <h4>Balances</h4>
+            <div class="muted">Balance de sumas y saldos, P&G y libros asociados a la empresa.</div>
+            <div class="form-actions" style="margin-top:10px;">
+              <button type="button" class="secondary" data-company-conta-main-tab="diarios">Volver al diario</button>
+            </div>
+          </div>
+        </div>
+
+        <div data-company-conta-main-pane="asientos" class="stack hidden">
+          <div class="form-card">
+            <h4>Asientos</h4>
+            <div class="muted">Ficha de asientos y conciliación con facturas o movimientos bancarios.</div>
+            <div class="form-actions" style="margin-top:10px;">
+              <button type="button" class="secondary" data-company-conta-main-tab="banco">Abrir banco</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    clienteEconomicosPanel.innerHTML = "";
+    clienteEconomicosPanel.appendChild(root);
+    root.querySelectorAll("[data-company-conta-main-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => activateTab(String(btn.dataset.companyContaMainTab || "validacion").trim()));
+    });
+    setMainTab(mainTab);
+    const resumenEl = root.querySelector("#clienteContaValidacionResumen");
+    const infoEl = root.querySelector("#clienteContaValidacionInfo");
+    const accionesEl = root.querySelector("#clienteContaValidacionAcciones");
+    if (!companyScopeId) {
+      if (resumenEl) resumenEl.innerHTML = "<p class='muted'>Sin empresa activa para validar.</p>";
+      return;
+    }
+    const qs = new URLSearchParams({ conciliar: "1", empresa_id: companyScopeId });
+    Promise.all([
+      api(`/api/gestoria_facturas?${qs.toString()}`).catch(() => ({ rows: [] })),
+      api(`/api/gestoria_asientos?${new URLSearchParams({ empresa_id: companyScopeId }).toString()}`).catch(() => ({ rows: [] })),
+      api(`/api/gestoria_docs?${new URLSearchParams({ empresa_id: companyScopeId }).toString()}`).catch(() => ({ rows: [] })),
+      api(`/api/gestoria_movimientos_bancarios?${new URLSearchParams({ empresa_id: companyScopeId }).toString()}`).catch(() => ({ rows: [] })),
+    ]).then(([facturasData, asientosData, docsData, movimientosData]) => {
+      const facturas = Array.isArray(facturasData.rows) ? facturasData.rows : [];
+      const asientos = Array.isArray(asientosData.rows) ? asientosData.rows : [];
+      const docs = Array.isArray(docsData.rows) ? docsData.rows : [];
+      const movimientos = Array.isArray(movimientosData.rows) ? movimientosData.rows : [];
+      const facturasConciliadas = facturas.filter((row) => Boolean(row.conciliada));
+      const facturasPendientes = facturas.filter((row) => !row.conciliada);
+      const asientosSinFactura = asientos.filter((row) => !String(row.factura_id || "").trim());
+      const asientosDescuadrados = asientos.filter((row) => Math.abs(parseMoneyValue(row.total_debe) - parseMoneyValue(row.total_haber)) > 0.01);
+      const docsPendientes = docs.filter((row) => String(row.estado || "").toLowerCase() === "pendiente");
+      const movimientosConciliados = movimientos.filter((row) => String(row.asiento_id || "").trim());
+      const movimientosPendientes = movimientos.filter((row) => !String(row.asiento_id || "").trim());
+      if (resumenEl) {
+        const tiles = [
+          ["Documentos", docs.length],
+          ["Pendientes", docsPendientes.length],
+          ["Facturas", facturas.length],
+          ["Conciliadas", facturasConciliadas.length],
+          ["Asientos", asientos.length],
+          ["Sin factura", asientosSinFactura.length],
+          ["Descuadrados", asientosDescuadrados.length],
+          ["Mov. banco", movimientos.length],
+          ["Mov. conciliados", movimientosConciliados.length],
+        ];
+        resumenEl.innerHTML = `
+          <div class="grid cols-3 gap-2">
+            ${tiles.map(([label, value]) => `<div class="card-soft"><div class="muted">${label}</div><div style="font-size:1.4rem; font-weight:800;">${value}</div></div>`).join("")}
+          </div>
+        `;
+      }
+      if (infoEl) {
+        const notes = [];
+        if (docsPendientes.length) notes.push(`${docsPendientes.length} documentos pendientes de validar`);
+        if (facturasPendientes.length) notes.push(`${facturasPendientes.length} facturas sin conciliar`);
+        if (asientosSinFactura.length) notes.push(`${asientosSinFactura.length} asientos sin factura`);
+        if (asientosDescuadrados.length) notes.push(`${asientosDescuadrados.length} asientos descuadrados`);
+        if (movimientosPendientes.length) notes.push(`${movimientosPendientes.length} movimientos sin asiento`);
+        infoEl.textContent = notes.length ? notes.join(" · ") : "Toda la conciliación visible está cuadrada.";
+      }
+      if (accionesEl) {
+        const problems = [];
+        movimientosPendientes.slice(0, 10).forEach((row) => {
+          problems.push({
+            label: `Movimiento bancario sin asiento · ${row.fecha_operacion || row.fecha_valor || "-"} · ${row.concepto || "-"}`,
+            action: () => {
+              if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("banco");
+              if (companyScopeId) loadGestoriaClienteBanco("", companyScopeId);
+            },
+          });
+        });
+        asientosSinFactura.slice(0, 10).forEach((row) => {
+          problems.push({
+            label: `Asiento sin factura · ${row.fecha || "-"} · ${row.referencia || "-"} · ${row.concepto || "-"}`,
+            action: () => openGestoriaAsientoFichaAndScroll(row.id),
+          });
+        });
+        asientosDescuadrados.slice(0, 10).forEach((row) => {
+          problems.push({
+            label: `Asiento descuadrado · ${row.fecha || "-"} · Δ ${euroFormatter.format(Math.abs(parseMoneyValue(row.total_debe) - parseMoneyValue(row.total_haber)))}`,
+            action: () => openGestoriaAsientoFichaAndScroll(row.id),
+          });
+        });
+        if (!problems.length) {
+          accionesEl.innerHTML = "<p class='muted'>No hay incidencias abiertas.</p>";
+        } else {
+          const wrapper = document.createElement("div");
+          wrapper.className = "inline-list";
+          problems.forEach((problem) => {
+            const row = document.createElement("div");
+            row.className = "inline-row";
+            const label = document.createElement("div");
+            label.textContent = problem.label;
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "ghost";
+            btn.textContent = "Abrir asiento";
+            btn.addEventListener("click", problem.action);
+            row.appendChild(label);
+            row.appendChild(btn);
+            wrapper.appendChild(row);
+          });
+          accionesEl.innerHTML = "";
+          accionesEl.appendChild(wrapper);
+        }
+      }
+    });
+    if (companyId) {
+      const params = new URLSearchParams(window.location.search || "");
+      if (String(params.get("conta") || "").trim() !== mainTab) {
+        params.set("conta", mainTab);
+        params.set("empresa", slugify(String(state.currentWorkspaceCompanyName || companyId || "")));
+        setUrlParams(params, { replace: true });
+      }
+    }
+    activateTab(mainTab);
+    return;
+  }
+
   const root = document.createElement("div");
   if (availableTabs.length > 1) {
     const tabs = document.createElement("div");
@@ -28813,6 +29418,12 @@ const openAdmin = () => {
   const user = getAuthScopeUser();
   if (!canAccessAdminPanel(user)) return;
   setModule("empresas");
+  state.workspaceRrhhEntry = "";
+  state.workspaceRrhhJumpPersonaId = "";
+  state.workspaceRrhhEquipoView = "list";
+  state.workspaceRrhhEquipoMemberKey = "";
+  state.workspaceRrhhEquipoMemberPersonaId = "";
+  state.workspaceRrhhEquipoMemberUserId = "";
   explorerSection.classList.add("hidden");
   setPage("admin");
   if (adminSection) {
@@ -28847,6 +29458,12 @@ const goHome = () => {
   } catch (e) {}
   setCrmMode("");
   setModule("empresas");
+  state.workspaceRrhhEntry = "";
+  state.workspaceRrhhJumpPersonaId = "";
+  state.workspaceRrhhEquipoView = "list";
+  state.workspaceRrhhEquipoMemberKey = "";
+  state.workspaceRrhhEquipoMemberPersonaId = "";
+  state.workspaceRrhhEquipoMemberUserId = "";
   empresaSelect.value = "";
   state.currentEmpresaId = "";
   state.currentEmpresaName = "";
@@ -29073,9 +29690,16 @@ const handleRoute = () => {
     }
     const slug = params.get("empresa");
     if (slug) {
-      const empresa = state.empresas.find((item) => slugify(item.nombre) === slug);
+      const empresa = getWorkspaceCompanyBySlug(slug);
       if (empresa) {
-        openCompany(empresa.nombre);
+        if (typeof openWorkspaceCompanyFicha === "function") {
+          openWorkspaceCompanyFicha(
+            String(empresa.id || empresa.legacy_empresa_id || empresa.nombre || "").trim(),
+            params.get("conta") || "dashboard"
+          );
+        } else {
+          openCompany(empresa.nombre);
+        }
         UI?.refreshContext(state);
         return;
       }
@@ -37393,6 +38017,42 @@ const createAdminServiceCheckboxGroup = (rawValue = "") => {
   return wrapper;
 };
 
+const requestAdminActivationLink = async (login, { statusEl = null, linkEl = null, buttonEl = null } = {}) => {
+  const value = String(login || "").trim();
+  if (!value) {
+    if (statusEl) statusEl.textContent = "Introduce un login o email.";
+    return;
+  }
+  if (buttonEl) buttonEl.disabled = true;
+  if (statusEl) statusEl.textContent = "Generando enlace...";
+  try {
+    const data = await fetch("/api/admin_user_force_reset_invite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ login: value, confirm: "RESET" }),
+    }).then((res) => res.json());
+    if (data.error) {
+      if (statusEl) statusEl.textContent = data.error;
+      return;
+    }
+    const link = String(data.activar_url || "").trim();
+    if (linkEl) {
+      linkEl.innerHTML = link
+        ? `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`
+        : "Sin enlace generado todavía.";
+    }
+    if (link) {
+      try { await navigator.clipboard?.writeText(link); } catch (e) {}
+    }
+    if (statusEl) statusEl.textContent = link ? "Enlace generado y copiado." : "Enlace generado.";
+  } catch {
+    if (statusEl) statusEl.textContent = "Error al generar el enlace.";
+  } finally {
+    if (buttonEl) buttonEl.disabled = false;
+  }
+};
+
 const renderUsuariosSelect = () => {
   if (!userSelect) return;
   userSelect.innerHTML = "";
@@ -37601,15 +38261,31 @@ const renderAdminUserDetail = () => {
   inviteBtn.type = "button";
   inviteBtn.className = "secondary";
   inviteBtn.textContent = "Enviar invitación";
+  const resetInviteBtn = document.createElement("button");
+  resetInviteBtn.type = "button";
+  resetInviteBtn.className = "secondary";
+  resetInviteBtn.textContent = "Generar enlace de activación";
   const deleteBtn = document.createElement("button");
   deleteBtn.type = "button";
   deleteBtn.className = "secondary danger";
   deleteBtn.textContent = "Eliminar usuario";
   actions.appendChild(saveBtn);
   actions.appendChild(inviteBtn);
+  actions.appendChild(resetInviteBtn);
   actions.appendChild(deleteBtn);
   actions.appendChild(status);
   form.appendChild(actions);
+
+  const activationLinkBox = document.createElement("div");
+  activationLinkBox.className = "span-2";
+  activationLinkBox.innerHTML = `
+    <div class="form-card" style="margin: 0;">
+      <h4>Enlace de activación</h4>
+      <p class="muted">Se genera un enlace único para activar o restablecer el acceso del usuario.</p>
+      <div class="muted" data-admin-user-activation-link>Sin enlace generado todavía.</div>
+    </div>
+  `;
+  form.appendChild(activationLinkBox);
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -37675,6 +38351,97 @@ const renderAdminUserDetail = () => {
       status.textContent = "Error al enviar invitación.";
     }
   });
+
+  resetInviteBtn.addEventListener("click", async () => {
+    const login = String(user.usuario || user.email || "").trim();
+    if (!login) {
+      status.textContent = "No se puede generar el enlace: falta login/email.";
+      return;
+    }
+    resetInviteBtn.disabled = true;
+    status.textContent = "Generando enlace de activación...";
+    try {
+      const data = await fetch("/api/admin_user_force_reset_invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ login, confirm: "RESET" }),
+      }).then((res) => res.json());
+      if (data.error) {
+        status.textContent = data.error;
+        return;
+      }
+      const link = String(data.activar_url || "").trim();
+      const linkBox = activationLinkBox.querySelector("[data-admin-user-activation-link]");
+      if (linkBox) {
+        linkBox.innerHTML = link
+          ? `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`
+          : "Sin enlace generado.";
+      }
+      if (link) {
+        try { await navigator.clipboard?.writeText(link); } catch (e) {}
+      }
+      status.textContent = link
+        ? "Enlace de activación generado y copiado."
+        : "Enlace de activación generado.";
+    } catch {
+      status.textContent = "Error al generar el enlace.";
+    } finally {
+      resetInviteBtn.disabled = false;
+    }
+  });
+
+  const setActivationLink = (link = "") => {
+    if (!adminActivationLink) return;
+    const value = String(link || "").trim();
+    adminActivationLink.innerHTML = value
+      ? `<a href="${escapeHtml(value)}" target="_blank" rel="noreferrer">${escapeHtml(value)}</a>`
+      : "Sin enlace generado todavía.";
+  };
+
+  const generateAdminActivationLink = async () => {
+    const login = String(adminActivationLogin?.value || "").trim();
+    if (!login) {
+      if (adminActivationStatus) adminActivationStatus.textContent = "Introduce un login o email.";
+      return;
+    }
+    if (adminActivationBtn) adminActivationBtn.disabled = true;
+    if (adminActivationStatus) adminActivationStatus.textContent = "Generando enlace...";
+    try {
+      const data = await fetch("/api/admin_user_force_reset_invite", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ login, confirm: "RESET" }),
+      }).then((res) => res.json());
+      if (data.error) {
+        if (adminActivationStatus) adminActivationStatus.textContent = data.error;
+        return;
+      }
+      const link = String(data.activar_url || "").trim();
+      setActivationLink(link);
+      if (link) {
+        try { await navigator.clipboard?.writeText(link); } catch (e) {}
+      }
+      if (adminActivationStatus) adminActivationStatus.textContent = link ? "Enlace generado y copiado." : "Enlace generado.";
+    } catch {
+      if (adminActivationStatus) adminActivationStatus.textContent = "Error al generar el enlace.";
+    } finally {
+      if (adminActivationBtn) adminActivationBtn.disabled = false;
+    }
+  };
+
+  if (adminActivationBtn) {
+    adminActivationBtn.addEventListener("click", generateAdminActivationLink);
+  }
+  if (adminActivationLogin) {
+    adminActivationLogin.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        generateAdminActivationLink();
+      }
+    });
+  }
 
   deleteBtn.addEventListener("click", async () => {
     if (!window.confirm("¿Eliminar este usuario?")) return;
@@ -38110,7 +38877,7 @@ const setGestoriaClientModuleTab = (tabName = "") => {
 
 const setGestoriaClienteContaTab = (tabName = "operativa") => {
   if (!gestoriaModuleContabilidad) return;
-  const allowed = new Set(["operativa", "importador", "libros", "control"]);
+  const allowed = new Set(["operativa", "importador", "banco", "libros", "control"]);
   const target = allowed.has(tabName) ? tabName : "operativa";
   state.gestoriaClienteContaTab = target;
   if (gestoriaContaInnerTabs) {
@@ -38123,8 +38890,18 @@ const setGestoriaClienteContaTab = (tabName = "operativa") => {
     .forEach((panel) => {
       panel.classList.toggle("hidden", panel.dataset.gestoriaContaPane !== target);
     });
-  if (target === "importador" && state.currentClienteId) {
-    loadGestoriaClienteImportador(state.currentClienteId);
+  if (target === "importador") {
+    const activeClient = String(state.currentClienteId || "").trim();
+    const activeEmpresa = activeClient ? "" : String(state.currentWorkspaceCompanyId || "").trim();
+    if (activeClient || activeEmpresa) {
+      loadGestoriaClienteImportador(activeClient, activeEmpresa);
+    }
+  } else if (target === "banco") {
+    const activeClient = String(state.currentClienteId || "").trim();
+    const activeEmpresa = activeClient ? "" : String(state.currentWorkspaceCompanyId || "").trim();
+    if (activeClient || activeEmpresa) {
+      loadGestoriaClienteBanco(activeClient, activeEmpresa);
+    }
   }
 };
 
@@ -59124,15 +59901,53 @@ const loadGestoriaDashboardContabilidad = async ({ force = false } = {}) => {
   gestoriaDashContaReload.disabled = true;
   gestoriaDashContaReload.textContent = "Cargando...";
   try {
-    const params = new URLSearchParams({ limit: "60" });
+    const params = new URLSearchParams();
     if (workspaceId) params.set("workspace_id", workspaceId);
     else params.set("empresa_id", fallbackEmpresaId);
-    const data = await api(`/api/gestoria_contabilidad?${params.toString()}`);
-    if (data?.error) throw new Error(String(data.error));
-    const rows = Array.isArray(data.rows) ? data.rows : [];
-    const summary = data.summary || {};
-    state.gestoriaDashContaCache = { scopeKey, rows, summary, ts: Date.now() };
-    renderGestoriaDashboardContabilidad(rows, summary);
+    const facturasParams = new URLSearchParams({ conciliar: "1" });
+    if (workspaceId) facturasParams.set("workspace_id", workspaceId);
+    else facturasParams.set("empresa_id", fallbackEmpresaId);
+    const docsParams = new URLSearchParams();
+    if (workspaceId) docsParams.set("workspace_id", workspaceId);
+    else docsParams.set("empresa_id", fallbackEmpresaId);
+    const modelosParams = new URLSearchParams();
+    if (workspaceId) modelosParams.set("workspace_id", workspaceId);
+    else modelosParams.set("empresa_id", fallbackEmpresaId);
+    const [contabilidadData, facturasData, docsData, modelosData] = await Promise.all([
+      api(`/api/gestoria_contabilidad?${params.toString()}`),
+      api(`/api/gestoria_facturas?${facturasParams.toString()}`),
+      api(`/api/gestoria_docs?${docsParams.toString()}`),
+      api(`/api/gestoria_modelos?${modelosParams.toString()}`),
+    ]);
+    if (contabilidadData?.error) throw new Error(String(contabilidadData.error));
+    const rows = Array.isArray(contabilidadData.rows) ? contabilidadData.rows : [];
+    const summary = contabilidadData.summary || {};
+    const facturas = Array.isArray(facturasData?.rows) ? facturasData.rows : [];
+    const docs = Array.isArray(docsData?.rows) ? docsData.rows : [];
+    const modelos = Array.isArray(modelosData?.rows) ? modelosData.rows : [];
+    const facturasPendientes = facturas.filter((row) => !row.conciliada).length;
+    const facturasConciliadas = facturas.filter((row) => Boolean(row.conciliada)).length;
+    const docsPendientes = docs.filter((row) => String(row.estado || "").toLowerCase() === "pendiente").length;
+    const asientosSinFactura = rows.filter((row) => !String(row.factura_id || "").trim()).length;
+    const asientosDescuadrados = rows.filter((row) => Math.abs(parseMoneyValue(row.total_debe) - parseMoneyValue(row.total_haber)) > 0.01).length;
+    const modelosPendientes = modelos.filter((row) => String(row.estado || "").toLowerCase() !== "presentado").length;
+    const modelosVencen = modelos.filter((row) => {
+      const fecha = String(row.proxima_fecha || "").trim();
+      if (!fecha) return false;
+      const d = new Date(fecha);
+      if (Number.isNaN(d.getTime())) return false;
+      const limit = new Date();
+      limit.setDate(limit.getDate() + 30);
+      return d <= limit;
+    }).length;
+    state.gestoriaDashContaCache = {
+      scopeKey,
+      rows,
+      summary,
+      extra: { facturasPendientes, facturasConciliadas, docsPendientes, asientosSinFactura, asientosDescuadrados, modelosPendientes, modelosVencen },
+      ts: Date.now(),
+    };
+    renderGestoriaDashboardContabilidad(rows, summary, state.gestoriaDashContaCache.extra);
   } catch (err) {
     gestoriaDashContaTable.innerHTML = `<p class="muted">No se pudo cargar contabilidad: ${escapeHtml(String(err?.message || err || ""))}</p>`;
     if (gestoriaDashContaKpis) gestoriaDashContaKpis.innerHTML = "";
@@ -59143,15 +59958,29 @@ const loadGestoriaDashboardContabilidad = async ({ force = false } = {}) => {
   }
 };
 
-const renderGestoriaDashboardContabilidad = (rows = [], summary = {}) => {
+const renderGestoriaDashboardContabilidad = (rows = [], summary = {}, extra = {}) => {
   if (gestoriaDashContaKpis) {
     const total = Number(summary?.total_rows || 0);
     const ingresos = Number(summary?.ingresos || 0);
     const gastos = Number(summary?.gastos || 0);
+    const facturasPendientes = Number(extra?.facturasPendientes || 0);
+    const facturasConciliadas = Number(extra?.facturasConciliadas || 0);
+    const docsPendientes = Number(extra?.docsPendientes || 0);
+    const asientosSinFactura = Number(extra?.asientosSinFactura || 0);
+    const asientosDescuadrados = Number(extra?.asientosDescuadrados || 0);
+    const modelosPendientes = Number(extra?.modelosPendientes || 0);
+    const modelosVencen = Number(extra?.modelosVencen || 0);
     renderGestoriaDashKpis(gestoriaDashContaKpis, [
       { title: "Asientos", value: numberFormatter.format(total), note: "Totales" },
       { title: "Ingresos", value: euroFormatter.format(ingresos), note: "Suma importes" },
       { title: "Gastos", value: euroFormatter.format(gastos), note: "Suma importes" },
+      { title: "Facturas conciliadas", value: numberFormatter.format(facturasConciliadas), note: "Conciliadas" },
+      { title: "Facturas pendientes", value: numberFormatter.format(facturasPendientes), note: "Sin asiento" },
+      { title: "Docs pendientes", value: numberFormatter.format(docsPendientes), note: "Revisión" },
+      { title: "Asientos sin factura", value: numberFormatter.format(asientosSinFactura), note: "Control" },
+      { title: "Asientos descuadrados", value: numberFormatter.format(asientosDescuadrados), note: "Debe/Haber" },
+      { title: "Modelos pendientes", value: numberFormatter.format(modelosPendientes), note: "Fiscales" },
+      { title: "Modelos 30 días", value: numberFormatter.format(modelosVencen), note: "Vencen pronto" },
     ]);
   }
 
@@ -59221,7 +60050,7 @@ const loadGestoriaDashboardDocumentos = async ({ force = false } = {}) => {
   gestoriaDashDocsReload.disabled = true;
   gestoriaDashDocsReload.textContent = "Cargando...";
   try {
-    const params = new URLSearchParams({ limit: "50" });
+    const params = new URLSearchParams();
     if (workspaceId) params.set("workspace_id", workspaceId);
     else params.set("empresa_id", fallbackEmpresaId);
     const data = await api(`/api/gestoria_docs?${params.toString()}`);
@@ -67037,9 +67866,33 @@ const submitGestoriaTrabajoForm = async (form, statusEl, afterSubmit) => {
   }
 };
 
-const loadGestoriaDocs = (clienteId) => {
+const resolveGestoriaScopeParams = (clienteIdOrOpts = "", empresaId = "") => {
+  if (clienteIdOrOpts && typeof clienteIdOrOpts === "object") {
+    return {
+      clienteId: String(clienteIdOrOpts.clienteId || clienteIdOrOpts.cliente_id || "").trim(),
+      empresaId: String(clienteIdOrOpts.empresaId || clienteIdOrOpts.empresa_id || "").trim(),
+      workspaceId: String(clienteIdOrOpts.workspaceId || clienteIdOrOpts.workspace_id || "").trim(),
+    };
+  }
+  return {
+    clienteId: String(clienteIdOrOpts || "").trim(),
+    empresaId: String(empresaId || "").trim(),
+    workspaceId: "",
+  };
+};
+
+const loadGestoriaDocs = (clienteIdOrOpts, empresaId = "") => {
   if (!gestoriaDocsTable) return;
-  api(`/api/gestoria_docs?cliente_id=${clienteId}`).then((data) => {
+  const scope = resolveGestoriaScopeParams(clienteIdOrOpts, empresaId);
+  const qs = new URLSearchParams();
+  if (scope.clienteId) qs.set("cliente_id", scope.clienteId);
+  if (scope.empresaId) qs.set("empresa_id", scope.empresaId);
+  if (scope.workspaceId) qs.set("workspace_id", scope.workspaceId);
+  if (!qs.toString()) {
+    gestoriaDocsTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
+    return;
+  }
+  api(`/api/gestoria_docs?${qs.toString()}`).then((data) => {
     const rows = data.rows || [];
     if (!rows.length) {
       gestoriaDocsTable.innerHTML = "<p class='muted'>Sin documentación registrada.</p>";
@@ -67260,11 +68113,16 @@ const loadGestoriaClienteDashboard = (clienteId) => {
   );
 };
 
-const loadGestoriaClienteContaResultados = (clienteId) => {
+const loadGestoriaClienteContaResultados = (clienteIdOrOpts, empresaId = "") => {
   if (!gestoriaClienteFacturasTable || !gestoriaClienteAsientosTable) return;
-  if (!clienteId) {
-    gestoriaClienteFacturasTable.innerHTML = "<p class='muted'>Sin cliente seleccionado.</p>";
-    gestoriaClienteAsientosTable.innerHTML = "<p class='muted'>Sin cliente seleccionado.</p>";
+  const scope = resolveGestoriaScopeParams(clienteIdOrOpts, empresaId);
+  const clienteId = scope.clienteId;
+  const empresaScopeId = scope.empresaId;
+  if (!clienteId && !empresaScopeId) {
+    gestoriaClienteFacturasTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
+    gestoriaClienteAsientosTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
+    if (gestoriaClienteConciliacionResumen) gestoriaClienteConciliacionResumen.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
+    if (gestoriaClienteConciliacionInfo) gestoriaClienteConciliacionInfo.textContent = "";
     if (gestoriaClienteFacturasInfo) gestoriaClienteFacturasInfo.textContent = "";
     if (gestoriaClienteAsientosInfo) gestoriaClienteAsientosInfo.textContent = "";
     if (gestoriaClienteFacturasExcelLink) {
@@ -67276,71 +68134,138 @@ const loadGestoriaClienteContaResultados = (clienteId) => {
   if (gestoriaClienteFacturasExcelLink) {
     const wsId = String(state.currentWorkspaceId || "").trim();
     const href = wsId
-      ? `/api/gestoria_excel_plantilla?workspace_id=${encodeURIComponent(wsId)}&cliente_id=${encodeURIComponent(clienteId)}`
-      : `/api/gestoria_excel_plantilla?cliente_id=${encodeURIComponent(clienteId)}`;
+      ? `/api/gestoria_excel_plantilla?workspace_id=${encodeURIComponent(wsId)}${clienteId ? `&cliente_id=${encodeURIComponent(clienteId)}` : ""}${empresaScopeId ? `&empresa_id=${encodeURIComponent(empresaScopeId)}` : ""}`
+      : `/api/gestoria_excel_plantilla?${clienteId ? `cliente_id=${encodeURIComponent(clienteId)}` : ""}${empresaScopeId ? `${clienteId ? "&" : ""}empresa_id=${encodeURIComponent(empresaScopeId)}` : ""}`;
     gestoriaClienteFacturasExcelLink.href = href;
     gestoriaClienteFacturasExcelLink.classList.remove("hidden");
   }
-  const qs = new URLSearchParams({ cliente_id: clienteId });
+  const qs = new URLSearchParams({ conciliar: "1" });
+  if (clienteId) qs.set("cliente_id", clienteId);
+  if (empresaScopeId) qs.set("empresa_id", empresaScopeId);
   Promise.all([
     api(`/api/gestoria_facturas?${qs.toString()}`).catch(() => ({ rows: [] })),
-    api(`/api/gestoria_asientos?${qs.toString()}`).catch(() => ({ rows: [] })),
-  ]).then(([facturasData, asientosData]) => {
-    const facturas = facturasData.rows || [];
-    const asientos = asientosData.rows || [];
+    api(`/api/gestoria_asientos?${new URLSearchParams(empresaScopeId ? { empresa_id: empresaScopeId } : { cliente_id: clienteId }).toString()}`).catch(() => ({ rows: [] })),
+    api(`/api/gestoria_movimientos_bancarios?${new URLSearchParams(empresaScopeId ? { empresa_id: empresaScopeId } : { cliente_id: clienteId }).toString()}`).catch(() => ({ rows: [] })),
+  ]).then(([facturasData, asientosData, movimientosBancoData]) => {
+    const facturas = Array.isArray(facturasData?.rows) ? facturasData.rows : [];
+    const asientos = Array.isArray(asientosData?.rows) ? asientosData.rows : [];
+    const movimientosBanco = Array.isArray(movimientosBancoData?.rows) ? movimientosBancoData.rows : [];
+    const facturasConciliadas = facturas.filter((row) => Boolean(row.conciliada));
+    const facturasPendientes = facturas.filter((row) => !row.conciliada);
+    const asientosConFactura = asientos.filter((row) => String(row.factura_id || "").trim());
+    const asientosSinFactura = asientos.filter((row) => !String(row.factura_id || "").trim());
+    const asientosDescuadrados = asientos.filter((row) => Math.abs(parseMoneyValue(row.total_debe) - parseMoneyValue(row.total_haber)) > 0.01);
+    const asientosPunteadosBanco = asientos.filter((row) => Number(row.punteado_banco || 0) === 1);
+    const asientosSinBanco = asientos.filter((row) => Number(row.punteado_banco || 0) !== 1);
+    const movimientosPunteados = movimientosBanco.filter((row) => Number(row.punteado || 0) === 1);
 
-    if (!facturas.length) {
-      gestoriaClienteFacturasTable.innerHTML = "<p class='muted'>Sin facturas OCR registradas.</p>";
-      if (gestoriaClienteFacturasInfo) gestoriaClienteFacturasInfo.textContent = "";
-    } else {
-      const table = document.createElement("table");
-      const thead = document.createElement("thead");
-      const trHead = document.createElement("tr");
-      ["Fecha", "Número", "Tipo", "Tercero", "Total", "PDF"].forEach((col) => {
-        const th = document.createElement("th");
-        th.textContent = col;
-        trHead.appendChild(th);
-      });
-      thead.appendChild(trHead);
-      table.appendChild(thead);
-      const tbody = document.createElement("tbody");
-      facturas.forEach((row) => {
-        const tr = document.createElement("tr");
-        [row.fecha_emision || "-", row.numero || "-", row.tipo || "-", row.tercero || "-", row.total ? euroFormatter.format(parseMoneyValue(row.total)) : "-"].forEach((value) => {
-          const td = document.createElement("td");
-          td.textContent = value;
-          tr.appendChild(td);
+    renderGestoriaFacturasGrouped(gestoriaClienteFacturasTable, facturas);
+    if (gestoriaClienteFacturasInfo) {
+      gestoriaClienteFacturasInfo.textContent = facturas.length
+        ? `Mostrando ${facturas.length} facturas agrupadas por año, mes y tipo.`
+        : "";
+    }
+
+    if (gestoriaClienteConciliacionResumen) {
+      const tiles = [
+        ["Facturas", facturas.length],
+        ["Conciliadas", facturasConciliadas.length],
+        ["Pendientes", facturasPendientes.length],
+        ["Asientos", asientos.length],
+        ["Con factura", asientosConFactura.length],
+        ["Punteados banco", asientosPunteadosBanco.length],
+        ["Mov. banco", movimientosBanco.length],
+        ["Mov. punteados", movimientosPunteados.length],
+        ["Sin banco", asientosSinBanco.length],
+        ["Sin factura", asientosSinFactura.length],
+        ["Descuadrados", asientosDescuadrados.length],
+      ];
+      gestoriaClienteConciliacionResumen.innerHTML = `
+        <div class="grid cols-3 gap-2">
+          ${tiles
+            .map(
+              ([label, value]) => `
+                <div class="card-soft">
+                  <div class="muted">${label}</div>
+                  <div style="font-size:1.4rem; font-weight:800;">${value}</div>
+                </div>
+              `
+            )
+            .join("")}
+        </div>
+      `;
+    }
+    if (gestoriaClienteConciliacionInfo) {
+      const mensajes = [];
+      if (facturasPendientes.length) mensajes.push(`${facturasPendientes.length} facturas sin asiento`);
+      if (asientosSinFactura.length) mensajes.push(`${asientosSinFactura.length} asientos sin factura`);
+      if (asientosSinBanco.length) mensajes.push(`${asientosSinBanco.length} asientos sin puntear banco`);
+      if (asientosDescuadrados.length) mensajes.push(`${asientosDescuadrados.length} asientos descuadrados`);
+      gestoriaClienteConciliacionInfo.textContent = mensajes.length ? mensajes.join(" · ") : "Toda la conciliación visible está cuadrada.";
+    }
+    if (gestoriaClienteConciliacionAcciones) {
+      const filter = state.gestoriaConciliacionFilter || "all";
+      const issues = [];
+      if (filter === "all" || filter === "sin_factura") {
+        asientosSinFactura.slice(0, 20).forEach((row) => {
+          issues.push({
+            type: "sin_factura",
+            label: `Asiento sin factura · ${row.fecha || "-"} · ${row.referencia || "-"} · ${row.concepto || "-"}`,
+            action: () => openGestoriaAsientoFichaAndScroll(row.id),
+          });
         });
-        const pdfTd = document.createElement("td");
-        if (row.doc_key) {
+      }
+      if (filter === "all" || filter === "sin_banco") {
+        asientosSinBanco.slice(0, 20).forEach((row) => {
+          issues.push({
+            type: "sin_banco",
+            label: `Asiento sin puntear banco · ${row.fecha || "-"} · ${row.referencia || "-"} · ${row.concepto || "-"}`,
+            action: () => openGestoriaAsientoFichaAndScroll(row.id),
+          });
+        });
+      }
+      if (filter === "all" || filter === "descuadrados") {
+        asientosDescuadrados.slice(0, 20).forEach((row) => {
+          issues.push({
+            type: "descuadrado",
+            label: `Asiento descuadrado · ${row.fecha || "-"} · Δ ${euroFormatter.format(Math.abs(parseMoneyValue(row.total_debe) - parseMoneyValue(row.total_haber)))}`,
+            action: () => openGestoriaAsientoFichaAndScroll(row.id),
+          });
+        });
+      }
+      if (!issues.length) {
+        gestoriaClienteConciliacionAcciones.innerHTML = "<p class='muted'>No hay incidencias abiertas.</p>";
+      } else {
+        const wrapper = document.createElement("div");
+        wrapper.className = "inline-list";
+        issues.forEach((issue) => {
+          const row = document.createElement("div");
+          row.className = "inline-row";
+          const label = document.createElement("div");
+          label.textContent = issue.label;
           const btn = document.createElement("button");
           btn.type = "button";
-          btn.className = "secondary";
-          btn.textContent = "Ver";
-          btn.addEventListener("click", () => openS3File(row.doc_key, ""));
-          pdfTd.appendChild(btn);
-        } else {
-          pdfTd.textContent = "-";
-        }
-        tr.appendChild(pdfTd);
-        tbody.appendChild(tr);
-      });
-      table.appendChild(tbody);
-      gestoriaClienteFacturasTable.innerHTML = "";
-      gestoriaClienteFacturasTable.appendChild(table);
-      if (gestoriaClienteFacturasInfo) {
-        gestoriaClienteFacturasInfo.textContent = `Mostrando ${facturas.length} facturas.`;
+          btn.className = "ghost";
+          btn.textContent = "Abrir asiento";
+          btn.addEventListener("click", issue.action);
+          row.appendChild(label);
+          row.appendChild(btn);
+          wrapper.appendChild(row);
+        });
+        gestoriaClienteConciliacionAcciones.innerHTML = "";
+        gestoriaClienteConciliacionAcciones.appendChild(wrapper);
       }
     }
 
     if (!asientos.length) {
       gestoriaClienteAsientosTable.innerHTML = "<p class='muted'>Sin asientos registrados.</p>";
       if (gestoriaClienteAsientosInfo) gestoriaClienteAsientosInfo.textContent = "";
+      resetGestoriaAsientoFicha();
     } else {
       const table = document.createElement("table");
       const thead = document.createElement("thead");
       const trHead = document.createElement("tr");
-      ["Fecha", "Referencia", "Concepto", "Debe", "Haber", "Factura"].forEach((col) => {
+      ["Fecha", "Referencia", "Concepto", "Debe", "Haber", "Factura", "Banco", ""].forEach((col) => {
         const th = document.createElement("th");
         th.textContent = col;
         trHead.appendChild(th);
@@ -67356,12 +68281,63 @@ const loadGestoriaClienteContaResultados = (clienteId) => {
           row.concepto || "-",
           row.total_debe ? euroFormatter.format(parseMoneyValue(row.total_debe)) : "-",
           row.total_haber ? euroFormatter.format(parseMoneyValue(row.total_haber)) : "-",
-          row.factura_numero || "-",
+          row.factura_id || row.factura_numero ? (row.factura_numero || "Sí") : "No",
+          Number(row.punteado_banco || 0) === 1
+            ? `<span class="ocr-badge ok">Punteado</span>`
+            : `<span class="ocr-badge danger">Sin puntear</span>`,
         ].forEach((value) => {
           const td = document.createElement("td");
-          td.textContent = value;
+          const rawValue = String(value);
+          if (rawValue.includes("<span")) {
+            td.innerHTML = rawValue;
+          } else {
+            td.textContent = rawValue;
+          }
           tr.appendChild(td);
         });
+        const actionTd = document.createElement("td");
+        const wrap = document.createElement("div");
+        wrap.style.display = "flex";
+        wrap.style.gap = "8px";
+        wrap.style.flexWrap = "wrap";
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "ghost";
+        btn.textContent = "Abrir";
+        btn.addEventListener("click", () => openGestoriaAsientoFicha(row.id));
+        wrap.appendChild(btn);
+        const toggleBankBtn = document.createElement("button");
+        toggleBankBtn.type = "button";
+        toggleBankBtn.className = Number(row.punteado_banco || 0) === 1 ? "secondary" : "ghost";
+        toggleBankBtn.textContent = Number(row.punteado_banco || 0) === 1 ? "Despuntear" : "Puntear";
+        toggleBankBtn.addEventListener("click", async () => {
+          try {
+            toggleBankBtn.disabled = true;
+            const authUser = getAuthScopeUser();
+            const usuario = String(authUser?.nombre_completo || authUser?.usuario || authUser?.email || getCurrentUser() || "Sistema").trim();
+            const res = await fetch("/api/gestoria_asiento_punteo_banco", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "same-origin",
+              body: JSON.stringify({
+                asiento_id: row.id,
+                punteado_banco: Number(row.punteado_banco || 0) === 1 ? 0 : 1,
+                usuario,
+              }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data?.detail || data?.error || "No se pudo actualizar el punteo");
+            await loadGestoriaClienteContaResultados(state.currentClienteId, state.currentWorkspaceCompanyId || "");
+          } catch (err) {
+            if (gestoriaClienteConciliacionInfo) gestoriaClienteConciliacionInfo.textContent = String(err?.message || err || "No se pudo actualizar el punteo");
+          } finally {
+            toggleBankBtn.disabled = false;
+          }
+        });
+        wrap.appendChild(toggleBankBtn);
+        actionTd.appendChild(wrap);
+        tr.appendChild(actionTd);
+        tr.addEventListener("dblclick", () => openGestoriaAsientoFicha(row.id));
         tbody.appendChild(tr);
       });
       table.appendChild(tbody);
@@ -67374,6 +68350,268 @@ const loadGestoriaClienteContaResultados = (clienteId) => {
   });
 };
 
+const renderGestoriaBancoCuentas = (rows = []) => {
+  if (!gestoriaBancoCuentasTable) return;
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    gestoriaBancoCuentasTable.innerHTML = "<p class='muted'>Sin cuentas bancarias registradas.</p>";
+    return;
+  }
+  const table = document.createElement("table");
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>Principal</th>
+        <th>Banco</th>
+        <th>IBAN</th>
+        <th>Cuenta contable</th>
+        <th>Titular</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  `;
+  const tbody = table.querySelector("tbody");
+  items.forEach((row) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td>${Number(row.es_principal || 0) === 1 ? "<span class='ocr-badge ok'>Sí</span>" : "<span class='ocr-badge danger'>No</span>"}</td>
+      <td>${escapeHtml(row.banco_nombre || "-")}</td>
+      <td>${escapeHtml(row.iban || "-")}</td>
+      <td>${escapeHtml(row.cuenta_contable || "-")}</td>
+      <td>${escapeHtml(row.titular || "-")}</td>
+      <td><button type="button" class="ghost" data-banco-edit-cuenta="${escapeHtml(row.id || "")}">Editar</button></td>
+    `;
+    tbody.appendChild(tr);
+  });
+  gestoriaBancoCuentasTable.innerHTML = "";
+  gestoriaBancoCuentasTable.appendChild(table);
+  gestoriaBancoCuentasTable.querySelectorAll("[data-banco-edit-cuenta]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const id = String(btn.dataset.bancoEditCuenta || "").trim();
+      const row = items.find((it) => String(it.id || "") === id);
+      if (!row || !gestoriaBancoCuentaForm) return;
+      const setValue = (name, value) => {
+        const input = gestoriaBancoCuentaForm.querySelector(`[name="${name}"]`);
+        if (input) input.value = value ?? "";
+      };
+      setValue("id", row.id || "");
+      setValue("iban", row.iban || "");
+      setValue("banco_nombre", row.banco_nombre || "");
+      setValue("cuenta_contable", row.cuenta_contable || "");
+      setValue("titular", row.titular || "");
+      setValue("es_principal", Number(row.es_principal || 0) === 1 ? "1" : "0");
+      if (gestoriaBancoStatus) gestoriaBancoStatus.textContent = "Editando cuenta bancaria.";
+    });
+  });
+};
+
+const renderGestoriaBancoMovimientos = (rows = []) => {
+  if (!gestoriaBancoMovimientosTable) return;
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    gestoriaBancoMovimientosTable.innerHTML = "<p class='muted'>Sin movimientos bancarios importados.</p>";
+    if (gestoriaBancoMovimientosInfo) gestoriaBancoMovimientosInfo.textContent = "";
+    return;
+  }
+  const table = document.createElement("table");
+  table.innerHTML = `
+    <thead>
+      <tr>
+        <th>Fecha</th>
+        <th>Concepto</th>
+        <th>Importe</th>
+        <th>Saldo</th>
+        <th>Banco</th>
+        <th>Punteo</th>
+        <th>Asiento</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  `;
+  const tbody = table.querySelector("tbody");
+  items.forEach((row) => {
+    const tr = document.createElement("tr");
+    const score = Number(row.conciliacion_confianza || row.matched_score || 0);
+    const badge = Number(row.punteado || 0) === 1 ? `<span class="ocr-badge ok">Punteado</span>` : `<span class="ocr-badge danger">Pendiente</span>`;
+    tr.innerHTML = `
+      <td>${escapeHtml(row.fecha_operacion || row.fecha_valor || "-")}</td>
+      <td>${escapeHtml(row.concepto || "-")}</td>
+      <td style="white-space:nowrap;">${euroFormatter.format(parseMoneyValue(row.importe || 0))}</td>
+      <td style="white-space:nowrap;">${row.saldo != null ? euroFormatter.format(parseMoneyValue(row.saldo)) : "-"}</td>
+      <td>${escapeHtml([row.banco_nombre, row.iban].filter(Boolean).join(" · ") || "-")}</td>
+      <td>${badge}${score ? ` <span class="muted">(${Math.round(score)}%)</span>` : ""}</td>
+      <td>${row.asiento_id ? escapeHtml(row.asiento_referencia || row.asiento_concepto || row.asiento_id) : "-"}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  gestoriaBancoMovimientosTable.innerHTML = "";
+  gestoriaBancoMovimientosTable.appendChild(table);
+  gestoriaBancoMovimientosTable.querySelectorAll("[data-banco-open-asiento]").forEach((btn) => {
+    btn.addEventListener("click", () => openGestoriaAsientoFichaAndScroll(btn.dataset.bancoOpenAsiento || ""));
+  });
+  if (gestoriaBancoMovimientosInfo) {
+    const punteados = items.filter((row) => Number(row.punteado || 0) === 1).length;
+    gestoriaBancoMovimientosInfo.textContent = `Movimientos: ${items.length} · Punteados ${punteados} · Pendientes ${Math.max(0, items.length - punteados)}`;
+  }
+};
+
+const loadGestoriaClienteBanco = (clienteIdOrOpts, empresaId = "") => {
+  const scope = resolveGestoriaScopeParams(clienteIdOrOpts, empresaId);
+  const clienteId = scope.clienteId;
+  const empresaScopeId = scope.empresaId;
+  const params = new URLSearchParams();
+  if (empresaScopeId) params.set("empresa_id", empresaScopeId);
+  if (clienteId) params.set("cliente_id", clienteId);
+  if (!params.toString()) return Promise.resolve();
+  return Promise.all([
+    api(`/api/gestoria_cuentas_bancarias?${params.toString()}`).catch(() => ({ rows: [] })),
+    api(`/api/gestoria_movimientos_bancarios?${params.toString()}`).catch(() => ({ rows: [] })),
+  ]).then(([cuentasData, movimientosData]) => {
+    renderGestoriaBancoCuentas(cuentasData.rows || []);
+    renderGestoriaBancoMovimientos(movimientosData.rows || []);
+    if (gestoriaBancoStatus) {
+      gestoriaBancoStatus.textContent = `Cuentas ${Array.isArray(cuentasData.rows) ? cuentasData.rows.length : 0} · Movimientos ${Array.isArray(movimientosData.rows) ? movimientosData.rows.length : 0}`;
+    }
+  });
+};
+
+const renderGestoriaAsientoLineas = (lineas = []) => {
+  if (!gestoriaAsientoLineas) return;
+  const rows = Array.isArray(lineas) && lineas.length ? lineas : [{
+    id: "",
+    tercero_id: "",
+    cuenta: "",
+    descripcion: "",
+    debe: "",
+    haber: "",
+    impuesto_tipo: "",
+    impuesto_pct: "",
+  }];
+  const table = document.createElement("table");
+  const thead = document.createElement("thead");
+  const trHead = document.createElement("tr");
+  ["Cuenta", "Descripción", "Debe", "Haber", "Imp.", "%", ""].forEach((label) => {
+    const th = document.createElement("th");
+    th.textContent = label;
+    trHead.appendChild(th);
+  });
+  thead.appendChild(trHead);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  rows.forEach((line, index) => {
+    const tr = document.createElement("tr");
+    const cells = [
+      { name: `linea_${index}_cuenta`, value: line.cuenta || "", type: "text" },
+      { name: `linea_${index}_descripcion`, value: line.descripcion || "", type: "text" },
+      { name: `linea_${index}_debe`, value: line.debe ?? "", type: "number", step: "0.01" },
+      { name: `linea_${index}_haber`, value: line.haber ?? "", type: "number", step: "0.01" },
+      { name: `linea_${index}_impuesto_tipo`, value: line.impuesto_tipo || "", type: "text" },
+      { name: `linea_${index}_impuesto_pct`, value: line.impuesto_pct ?? "", type: "number", step: "0.01" },
+    ];
+    cells.forEach((cell) => {
+      const td = document.createElement("td");
+      const input = document.createElement("input");
+      input.name = cell.name;
+      input.type = cell.type;
+      if (cell.step) input.step = cell.step;
+      input.value = cell.value ?? "";
+      td.appendChild(input);
+      tr.appendChild(td);
+    });
+    const hiddenTd = document.createElement("td");
+    hiddenTd.style.display = "none";
+    const hidden = document.createElement("input");
+    hidden.type = "hidden";
+    hidden.name = `linea_${index}_tercero_id`;
+    hidden.value = line.tercero_id || "";
+    hiddenTd.appendChild(hidden);
+    tr.appendChild(hiddenTd);
+    const btnTd = document.createElement("td");
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "ghost";
+    remove.textContent = "Quitar";
+    remove.addEventListener("click", () => {
+      const current = collectGestoriaAsientoLines();
+      current.splice(index, 1);
+      renderGestoriaAsientoLineas(current);
+    });
+    btnTd.appendChild(remove);
+    tr.appendChild(btnTd);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  gestoriaAsientoLineas.innerHTML = "";
+  gestoriaAsientoLineas.appendChild(table);
+};
+
+const collectGestoriaAsientoLines = () => {
+  if (!gestoriaAsientoLineas) return [];
+  const inputs = Array.from(gestoriaAsientoLineas.querySelectorAll("input"));
+  const byIndex = {};
+  inputs.forEach((input) => {
+    const match = String(input.name || "").match(/^linea_(\d+)_(.+)$/);
+    if (!match) return;
+    const idx = match[1];
+    const key = match[2];
+    if (!byIndex[idx]) byIndex[idx] = { id: "" };
+    byIndex[idx][key] = input.value;
+  });
+  return Object.values(byIndex)
+    .map((line) => ({
+      tercero_id: line.tercero_id || "",
+      cuenta: line.cuenta || "",
+      descripcion: line.descripcion || "",
+      debe: line.debe || "",
+      haber: line.haber || "",
+      impuesto_tipo: line.impuesto_tipo || "",
+      impuesto_pct: line.impuesto_pct || "",
+    }))
+    .filter((line) => String(line.cuenta || "").trim());
+};
+
+const resetGestoriaAsientoFicha = () => {
+  if (gestoriaAsientoForm) gestoriaAsientoForm.reset();
+  renderGestoriaAsientoLineas([]);
+  if (gestoriaAsientoFormHint) gestoriaAsientoFormHint.textContent = "Selecciona un asiento para editarlo.";
+  if (gestoriaAsientoStatus) gestoriaAsientoStatus.textContent = "";
+};
+
+const openGestoriaAsientoFicha = async (asientoId) => {
+  if (!gestoriaAsientoForm || !asientoId) return;
+  if (gestoriaAsientoFormHint) gestoriaAsientoFormHint.textContent = "Cargando asiento...";
+  try {
+    const data = await api(`/api/gestoria_asiento?asiento_id=${encodeURIComponent(asientoId)}`);
+    const row = data.row || {};
+    const lineas = data.lineas || [];
+    const setValue = (name, value) => {
+      const input = gestoriaAsientoForm.querySelector(`[name="${name}"]`);
+      if (input) input.value = value ?? "";
+    };
+    setValue("asiento_id", row.id || asientoId);
+    setValue("fecha", row.fecha || "");
+    setValue("referencia", row.referencia || "");
+    setValue("concepto", row.concepto || "");
+    setValue("factura_id", row.factura_id || "");
+    setValue("factura_numero", row.factura_numero || row.factura_id || "");
+    setValue("factura_clear", row.factura_id ? "0" : "1");
+    setValue("punteado_banco", Number(row.punteado_banco || 0) === 1 ? "1" : "0");
+    setValue("punteado_banco_by", row.punteado_banco_by || "");
+    setValue("punteado_banco_notas", row.punteado_banco_notas || "");
+    renderGestoriaAsientoLineas(lineas);
+    if (gestoriaAsientoFormHint) {
+      const parts = [];
+      parts.push(row.factura_numero ? `Factura ${row.factura_numero}` : "Sin factura vinculada");
+      parts.push(Number(row.punteado_banco || 0) === 1 ? "Punteado contra banco" : "Pendiente de puntear contra banco");
+      gestoriaAsientoFormHint.textContent = parts.join(" · ");
+    }
+    if (gestoriaAsientoStatus) gestoriaAsientoStatus.textContent = "";
+  } catch (error) {
+    if (gestoriaAsientoStatus) gestoriaAsientoStatus.textContent = error?.message || "No se pudo cargar el asiento.";
+  }
+};
+
 const getGestoriaImportSelectedDoc = () =>
   (state.gestoriaImportCurrentDocs || []).find((row) => row.id === state.gestoriaImportSelectedDocumentoId) || null;
 
@@ -67381,16 +68619,40 @@ const fillGestoriaImportSelectedLoteMeta = (row) => {
   if (!gestoriaImportSelectedLoteMeta) return;
   if (!row) {
     gestoriaImportSelectedLoteMeta.innerHTML = "<p class='muted'>Sin lote seleccionado.</p>";
+    if (gestoriaImportValoracionForm) gestoriaImportValoracionForm.reset();
     return;
+  }
+  if (gestoriaImportValoracionForm) {
+    const setValue = (name, value) => {
+      const input = gestoriaImportValoracionForm.querySelector(`[name="${name}"]`);
+      if (input) input.value = value ?? "";
+    };
+    let valoracion = {};
+    try {
+      valoracion = row.valoracion_json ? JSON.parse(row.valoracion_json) : {};
+    } catch (e) {
+      valoracion = {};
+    }
+    setValue("valoracion_estado", row.valoracion_estado || valoracion.estado || "abierta");
+    setValue("valoracion_total_asientos", row.valoracion_total_asientos ?? valoracion.asientos ?? row.total_documentos ?? 0);
+    setValue("valoracion_total_terceros", row.valoracion_total_terceros ?? valoracion.terceros ?? 0);
+    setValue("valoracion_total_cuentas", row.valoracion_total_cuentas ?? valoracion.cuentas ?? 0);
+    setValue("valoracion_total_pendientes", row.valoracion_total_pendientes ?? valoracion.pendientes ?? (row.total_revisar || 0) + (row.total_duplicado || 0) + (row.total_error || 0));
+    setValue("valoracion_notas", row.valoracion_notas || valoracion.notas || "");
   }
   const items = [
     ["Lote", row.id],
     ["Estado", row.estado || "-"],
+    ["Valoración", row.valoracion_estado || "-"],
     ["Periodo", row.periodo || "-"],
     ["Docs", row.total_documentos || 0],
     ["OK", row.total_ok || 0],
     ["Revisar", row.total_revisar || 0],
     ["Error", row.total_error || 0],
+    ["Asientos", row.valoracion_total_asientos || row.total_documentos || 0],
+    ["Terceros", row.valoracion_total_terceros || 0],
+    ["Cuentas", row.valoracion_total_cuentas || 0],
+    ["Pendientes", row.valoracion_total_pendientes || 0],
   ];
   gestoriaImportSelectedLoteMeta.innerHTML = items
     .map(
@@ -67429,7 +68691,8 @@ const fillGestoriaImportReviewForm = (row) => {
   setValue("total_detectado", doc.total_detectado ?? "");
   setValue("motivos_revision", doc.motivos_revision || "");
   if (gestoriaImportReviewStatus) {
-    gestoriaImportReviewStatus.textContent = `Documento seleccionado: ${doc.archivo_nombre || doc.id}`;
+    const validado = String(doc.validado_manual_at || "").trim();
+    gestoriaImportReviewStatus.textContent = `Documento seleccionado: ${doc.archivo_nombre || doc.id}${validado ? ` · Validado por ${doc.validado_manual_by || "humano"}` : ""}`;
   }
 };
 
@@ -67450,7 +68713,7 @@ const renderGestoriaImportDocsTable = (rows = []) => {
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
-  ["Fecha", "Archivo", "Estado", "Categoría", "Tercero", "Número", "Total", "Factura", ""].forEach((col) => {
+  ["Fecha", "Archivo", "Estado", "Compat.", "Tercero", "Número", "Total", "Asiento", "Validado", ""].forEach((col) => {
     const th = document.createElement("th");
     th.textContent = col;
     trHead.appendChild(th);
@@ -67461,49 +68724,125 @@ const renderGestoriaImportDocsTable = (rows = []) => {
   rows.forEach((row) => {
     const tr = document.createElement("tr");
     if (row.id === state.gestoriaImportSelectedDocumentoId) tr.classList.add("active");
+    const compat = Number(row.compatibilidad_pct || 0);
+    const compatClass = compat >= 80 ? "ok" : compat >= 55 ? "warn" : "danger";
+    const validado = Boolean(String(row.validado_manual_at || "").trim());
     const values = [
       row.fecha_detectada || "-",
       row.archivo_nombre || "-",
       row.estado_revision || "-",
-      row.categoria_detectada || "-",
+      `<span class="ocr-badge ${compatClass}">${compat ? `${compat}%` : "Pend."}</span>`,
       row.tercero_detectado || row.tercero_nombre || "-",
       row.numero_detectado || row.factura_numero || "-",
       row.total_detectado ? euroFormatter.format(parseMoneyValue(row.total_detectado)) : "-",
-      row.factura_numero || row.factura_id || "-",
+      row.asiento_id
+        ? `<button type="button" class="ghost" data-open-asiento="${row.asiento_id}">${row.asiento_referencia || row.asiento_concepto || "Ver asiento"}</button>`
+        : "-",
+      validado
+        ? `<span class="ocr-badge ok">Validado</span>`
+        : `<span class="ocr-badge danger">Pendiente</span>`,
     ];
     values.forEach((value) => {
       const td = document.createElement("td");
-      td.textContent = value;
+      td.innerHTML = value;
       tr.appendChild(td);
     });
     const actionTd = document.createElement("td");
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = row.id === state.gestoriaImportSelectedDocumentoId ? "secondary" : "ghost";
-    btn.textContent = "Revisar";
-    btn.addEventListener("click", () => {
+    const wrap = document.createElement("div");
+    wrap.style.display = "flex";
+    wrap.style.gap = "8px";
+    wrap.style.flexWrap = "wrap";
+    const reviewBtn = document.createElement("button");
+    reviewBtn.type = "button";
+    reviewBtn.className = row.id === state.gestoriaImportSelectedDocumentoId ? "secondary" : "ghost";
+    reviewBtn.textContent = "Revisar";
+    reviewBtn.addEventListener("click", () => {
       state.gestoriaImportSelectedDocumentoId = row.id;
       fillGestoriaImportReviewForm(row);
       renderGestoriaImportDocsTable(state.gestoriaImportCurrentDocs || []);
     });
-    actionTd.appendChild(btn);
+    const conciliarBtn = document.createElement("button");
+    conciliarBtn.type = "button";
+    conciliarBtn.className = "secondary";
+    conciliarBtn.textContent = "Conciliar";
+    conciliarBtn.disabled = !String(row.factura_id || "").trim();
+    conciliarBtn.addEventListener("click", async () => {
+      try {
+        conciliarBtn.disabled = true;
+        const res = await fetch("/api/gestoria_import_documento_conciliar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ id: row.id }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.detail || data?.error || "No se pudo conciliar");
+        if (gestoriaImportReviewStatus) {
+          gestoriaImportReviewStatus.textContent = `Compatibilidad ${Math.round(Number(data.score || 0))}% · ${data.reason || "conciliado"}`;
+        }
+        await loadGestoriaImportLoteDocuments(state.gestoriaImportSelectedLoteId || row.lote_id || "");
+      } catch (err) {
+        if (gestoriaImportReviewStatus) gestoriaImportReviewStatus.textContent = String(err?.message || err || "No se pudo conciliar");
+      } finally {
+        conciliarBtn.disabled = !String(row.factura_id || "").trim();
+      }
+    });
+    const validarBtn = document.createElement("button");
+    validarBtn.type = "button";
+    validarBtn.className = "ghost";
+    validarBtn.textContent = validado ? "Revalidar" : "Validar";
+    validarBtn.addEventListener("click", async () => {
+      try {
+        validarBtn.disabled = true;
+        const authUser = getAuthScopeUser();
+        const validatedBy = String(authUser?.nombre_completo || authUser?.usuario || authUser?.email || getCurrentUser() || "Sistema").trim();
+        const res = await fetch("/api/gestoria_import_documento_resolver", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            id: row.id,
+            estado_revision: "OK",
+            validado_manual_at: new Date().toISOString(),
+            validado_manual_by: validatedBy,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data?.detail || data?.error || "No se pudo validar");
+        if (gestoriaImportReviewStatus) {
+          gestoriaImportReviewStatus.textContent = `Documento validado por ${validatedBy}`;
+        }
+        await loadGestoriaImportLoteDocuments(state.gestoriaImportSelectedLoteId || row.lote_id || "");
+      } catch (err) {
+        if (gestoriaImportReviewStatus) gestoriaImportReviewStatus.textContent = String(err?.message || err || "No se pudo validar");
+      } finally {
+        validarBtn.disabled = false;
+      }
+    });
+    wrap.appendChild(reviewBtn);
+    wrap.appendChild(conciliarBtn);
+    wrap.appendChild(validarBtn);
+    actionTd.appendChild(wrap);
     tr.appendChild(actionTd);
     tbody.appendChild(tr);
   });
   table.appendChild(tbody);
   gestoriaImportDocsTable.innerHTML = "";
   gestoriaImportDocsTable.appendChild(table);
+  gestoriaImportDocsTable.querySelectorAll("[data-open-asiento]").forEach((btn) => {
+    btn.addEventListener("click", () => openGestoriaAsientoFichaAndScroll(btn.dataset.openAsiento || ""));
+  });
   fillGestoriaImportReviewForm(getGestoriaImportSelectedDoc());
   if (gestoriaImportDocsInfo) {
     const summary = rows.reduce(
       (acc, row) => {
-        const key = String(row.estado_revision || "").toUpperCase();
+        const key = String(row.validado_manual_at || "").trim() ? "VALIDADO" : String(row.estado_revision || "").toUpperCase();
         acc[key] = (acc[key] || 0) + 1;
         return acc;
       },
       {}
     );
-    gestoriaImportDocsInfo.textContent = `Documentos: ${rows.length} · OK ${summary.OK || 0} · REVISAR ${summary.REVISAR || 0} · DUPLICADO ${summary.DUPLICADO || 0} · ERROR ${summary.ERROR || 0}`;
+    gestoriaImportDocsInfo.textContent = `Documentos: ${rows.length} · Validados ${summary.VALIDADO || 0} · OK ${summary.OK || 0} · REVISAR ${summary.REVISAR || 0} · DUPLICADO ${summary.DUPLICADO || 0} · ERROR ${summary.ERROR || 0}`;
   }
 };
 
@@ -67549,7 +68888,7 @@ const renderGestoriaImportLotesTable = (clienteId, rows = []) => {
   const table = document.createElement("table");
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
-  ["Fecha", "Origen", "Estado", "Cliente", "Docs", "OK", "Revisar", "Error", ""].forEach((col) => {
+  ["Fecha", "Origen", "Estado", "Valoración", "Cliente", "Docs", "OK", "Revisar", "Error", ""].forEach((col) => {
     const th = document.createElement("th");
     th.textContent = col;
     trHead.appendChild(th);
@@ -67564,6 +68903,7 @@ const renderGestoriaImportLotesTable = (clienteId, rows = []) => {
       row.created_at || "-",
       row.origen || "-",
       row.estado || "-",
+      row.valoracion_estado || "-",
       row.cliente || (row.cliente_id ? row.cliente_id : "Sin asignar"),
       row.total_documentos || 0,
       row.total_ok || 0,
@@ -67597,12 +68937,14 @@ const renderGestoriaImportLotesTable = (clienteId, rows = []) => {
   loadGestoriaImportLoteDocuments(selectedId);
 };
 
-const loadGestoriaClienteImportador = (clienteId) => {
+const loadGestoriaClienteImportador = (clienteIdOrOpts, empresaId = "") => {
   if (!gestoriaImportLotesTable) return;
+  const scope = resolveGestoriaScopeParams(clienteIdOrOpts, empresaId);
   const params = buildGestoriaWorkspaceParams();
-  if (clienteId) params.set("cliente_id", clienteId);
-  if (!clienteId || !params.toString()) {
-    gestoriaImportLotesTable.innerHTML = "<p class='muted'>Sin cliente o workspace seleccionado.</p>";
+  if (scope.clienteId) params.set("cliente_id", scope.clienteId);
+  if (scope.empresaId) params.set("empresa_id", scope.empresaId);
+  if (!params.toString()) {
+    gestoriaImportLotesTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
     if (gestoriaImportLotesInfo) gestoriaImportLotesInfo.textContent = "";
     fillGestoriaImportSelectedLoteMeta(null);
     renderGestoriaImportDocsTable([]);
@@ -67610,7 +68952,7 @@ const loadGestoriaClienteImportador = (clienteId) => {
   }
   return api(`/api/gestoria_import_lotes?${params.toString()}`)
     .then((data) => {
-      renderGestoriaImportLotesTable(clienteId, data.rows || []);
+      renderGestoriaImportLotesTable(scope.clienteId || scope.empresaId || "", data.rows || []);
     })
     .catch(() => {
       gestoriaImportLotesTable.innerHTML = "<p class='muted'>No se pudo cargar la cola del importador.</p>";
@@ -67628,6 +68970,9 @@ const setGestoriaClienteLibroTab = (tabName = "diario") => {
   });
   if (gestoriaClienteLibroDiarioPanel) gestoriaClienteLibroDiarioPanel.classList.toggle("hidden", target !== "diario");
   if (gestoriaClienteLibroMayorPanel) gestoriaClienteLibroMayorPanel.classList.toggle("hidden", target !== "mayor");
+  if (gestoriaClienteLibroBalancePanel) gestoriaClienteLibroBalancePanel.classList.toggle("hidden", target !== "balance");
+  if (gestoriaClienteLibroPyGPanel) gestoriaClienteLibroPyGPanel.classList.toggle("hidden", target !== "pyg");
+  if (gestoriaClienteLibroFacturasPanel) gestoriaClienteLibroFacturasPanel.classList.toggle("hidden", target !== "facturas");
   if (gestoriaClienteLibroIvaPanel) gestoriaClienteLibroIvaPanel.classList.toggle("hidden", target !== "iva");
   if (gestoriaClienteLibroExcelPanel) gestoriaClienteLibroExcelPanel.classList.toggle("hidden", target !== "excel");
 };
@@ -67663,6 +69008,144 @@ const renderSimpleTable = (container, columns, rows) => {
   container.appendChild(table);
 };
 
+const getGestoriaMonthLabel = (dateStr) => {
+  const months = [
+    "Enero",
+    "Febrero",
+    "Marzo",
+    "Abril",
+    "Mayo",
+    "Junio",
+    "Julio",
+    "Agosto",
+    "Septiembre",
+    "Octubre",
+    "Noviembre",
+    "Diciembre",
+  ];
+  const d = new Date(dateStr || "");
+  if (Number.isNaN(d.getTime())) return "Sin fecha";
+  return `${months[d.getMonth()]} ${d.getFullYear()}`;
+};
+
+const groupGestoriaFacturas = (rows = []) => {
+  const grouped = new Map();
+  rows.forEach((row) => {
+    const date = String(row.fecha_emision || "").trim();
+    const d = new Date(date);
+    const year = Number.isNaN(d.getTime()) ? "Sin año" : String(d.getFullYear());
+    const monthKey = Number.isNaN(d.getTime()) ? "0000-00" : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    const month = Number.isNaN(d.getTime()) ? "Sin mes" : getGestoriaMonthLabel(date);
+    const tipo = String(row.tipo || "").trim().toLowerCase() === "venta" ? "Ingresos" : "Gastos";
+    if (!grouped.has(year)) grouped.set(year, new Map());
+    const months = grouped.get(year);
+    if (!months.has(monthKey)) months.set(monthKey, { label: month, Ingresos: [], Gastos: [] });
+    months.get(monthKey)[tipo].push(row);
+  });
+  return grouped;
+};
+
+const renderGestoriaFacturasGrouped = (container, rows = []) => {
+  if (!container) return;
+  if (!rows.length) {
+    container.innerHTML = "<p class='muted'>Sin facturas OCR registradas.</p>";
+    return;
+  }
+  const grouped = groupGestoriaFacturas(rows);
+  const yearKeys = Array.from(grouped.keys()).sort((a, b) => String(b).localeCompare(String(a)));
+  container.innerHTML = yearKeys
+    .map((year) => {
+      const months = grouped.get(year);
+      const monthKeys = Array.from(months.keys()).sort((a, b) => String(b).localeCompare(String(a)));
+      const monthBlocks = monthKeys
+        .map((month) => {
+          const bucket = months.get(month);
+          const renderBucket = (title, bucketRows) => {
+            if (!bucketRows.length) return "";
+            const total = bucketRows.reduce((sum, row) => sum + parseMoneyValue(row.total), 0);
+            return `
+              <div class="card-soft" style="margin-top:8px;">
+                <div class="section-head">
+                  <div>
+                    <strong>${title}</strong>
+                    <div class="muted">${bucketRows.length} facturas · ${euroFormatter.format(total)}</div>
+                  </div>
+                </div>
+                <div style="overflow:auto;">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Número</th>
+                        <th>Tercero</th>
+                        <th>Total</th>
+                        <th>Conciliada</th>
+                        <th>Asiento</th>
+                        <th>PDF</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${bucketRows
+                        .map((row) => `
+                          <tr>
+                            <td>${row.fecha_emision || "-"}</td>
+                            <td>${row.numero || "-"}</td>
+                            <td>${row.tercero || "-"}</td>
+                            <td>${row.total ? euroFormatter.format(parseMoneyValue(row.total)) : "-"}</td>
+                            <td>${row.conciliada ? "Sí" : "No"}</td>
+                            <td>${row.asiento_referencia || row.asiento_concepto || "-"}</td>
+                            <td>${row.doc_key ? `<button type="button" class="secondary" data-open-doc="${row.doc_key}">Ver</button>` : "-"}</td>
+                          </tr>
+                        `)
+                        .join("")}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            `;
+          };
+          return `
+            <details open class="card-soft" style="margin-top:10px;">
+              <summary style="cursor:pointer; font-weight:700;">${bucket.label}</summary>
+              ${renderBucket("Ingresos", bucket.Ingresos)}
+              ${renderBucket("Gastos", bucket.Gastos)}
+            </details>
+          `;
+        })
+        .join("");
+      return `
+        <details open class="card-soft">
+          <summary style="cursor:pointer; font-weight:800; font-size:1.05rem;">${year}</summary>
+          <div style="margin-top:8px;">${monthBlocks}</div>
+        </details>
+      `;
+    })
+    .join("");
+  container.querySelectorAll("[data-open-doc]").forEach((btn) => {
+    btn.addEventListener("click", () => openS3File(btn.dataset.openDoc || "", ""));
+  });
+};
+
+const openGestoriaAsientoFichaAndScroll = (asientoId) => {
+  openGestoriaAsientoFicha(asientoId);
+  if (gestoriaAsientoFicha && typeof gestoriaAsientoFicha.scrollIntoView === "function") {
+    setTimeout(() => gestoriaAsientoFicha.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+  }
+};
+
+const setGestoriaConciliacionFilter = (filter) => {
+  state.gestoriaConciliacionFilter = filter || "all";
+  const root = gestoriaClienteConciliacionFicha || document;
+  root.querySelectorAll("[data-conciliacion-filter]").forEach((btn) => {
+    btn.classList.toggle("secondary", btn.dataset.conciliacionFilter === state.gestoriaConciliacionFilter);
+  });
+  const activeClient = String(state.currentClienteId || "").trim();
+  const activeEmpresa = activeClient ? "" : String(state.currentWorkspaceCompanyId || "").trim();
+  if (activeClient || activeEmpresa) {
+    loadGestoriaClienteContaResultados(activeClient, activeEmpresa);
+  }
+};
+
 const toCsv = (rows) =>
   rows
     .map((row) =>
@@ -67696,6 +69179,426 @@ const downloadBlobFile = (filename, blob) => {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+};
+
+const sanitizeGestoriaFilenamePart = (value = "") =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80) || "empresa";
+
+const downloadGestoriaCsvRows = (filename, headers, rows = []) => {
+  const csv = toCsv([Array.isArray(headers) ? headers : [], ...(Array.isArray(rows) ? rows : [])]);
+  downloadBlobFile(filename, new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" }));
+};
+
+const renderGestoriaPrintableTable = (title, headers, rows = [], note = "") => {
+  const headHtml = (Array.isArray(headers) ? headers : [])
+    .map((h) => `<th>${escapeHtml(String(h || ""))}</th>`)
+    .join("");
+  const bodyHtml = (Array.isArray(rows) ? rows : [])
+    .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(String(cell ?? ""))}</td>`).join("")}</tr>`)
+    .join("");
+  return `
+    <div style="font-family:Arial,Helvetica,sans-serif;padding:20px;color:#111827;">
+      <h1 style="margin:0 0 8px 0;font-size:20px;">${escapeHtml(title || "Informe")}</h1>
+      ${note ? `<p style="margin:0 0 16px 0;color:#6b7280;">${escapeHtml(note)}</p>` : ""}
+      <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <thead>
+          <tr>${headHtml}</tr>
+        </thead>
+        <tbody>
+          ${bodyHtml || `<tr><td colspan="${Math.max(1, (Array.isArray(headers) ? headers.length : 1))}">Sin datos</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  `;
+};
+
+const toGestoriaMoneyCsv = (value) => {
+  const num = parseMoneyValue(value);
+  return Number.isFinite(num) ? num.toFixed(2) : "";
+};
+
+const getGestoriaBooksCacheStorageKey = (companyId = "") =>
+  `crm.gestoriaClienteLibrosCache.${String(companyId || "").trim() || "default"}`;
+
+const readGestoriaBooksCache = (companyId = "") => {
+  try {
+    const preferredKey = getGestoriaBooksCacheStorageKey(companyId);
+    const raw = localStorage.getItem(preferredKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : null;
+    }
+    const keys = Object.keys(localStorage || {}).filter((key) => String(key || "").startsWith("crm.gestoriaClienteLibrosCache."));
+    for (const key of keys) {
+      const altRaw = localStorage.getItem(key);
+      if (!altRaw) continue;
+      const parsed = JSON.parse(altRaw);
+      if (parsed && typeof parsed === "object") return parsed;
+    }
+    return null;
+  } catch (e) {
+    return null;
+  }
+};
+
+const hydrateGestoriaBooksFromCache = (companyId = "") => {
+  const resolvedCompanyId = String(companyId || state.currentWorkspaceCompanyId || "").trim();
+  const cache =
+    window.__gestoriaClienteLibrosCache
+    || state.gestoriaClienteLibrosCache
+    || readGestoriaBooksCache(resolvedCompanyId)
+    || null;
+  if (!cache) return false;
+  const rawData = {
+    diario: Array.isArray(cache.diarioRaw) ? cache.diarioRaw : [],
+    mayor: Array.isArray(cache.mayorRaw) ? cache.mayorRaw : [],
+    balance: Array.isArray(cache.balanceRaw) ? cache.balanceRaw : [],
+    pyg: Array.isArray(cache.pygRaw) ? cache.pygRaw : [],
+    facturas: Array.isArray(cache.facturasRaw) ? cache.facturasRaw : [],
+    facturas_resumen: cache.facturasResumenRaw && typeof cache.facturasResumenRaw === "object" ? cache.facturasResumenRaw : {},
+  };
+  try {
+    applyGestoriaClienteLibrosData(rawData, resolvedCompanyId);
+    return true;
+  } catch (e) {
+    return false;
+  }
+};
+
+const writeGestoriaBooksCache = (companyId = "", cache = null) => {
+  try {
+    if (!cache || typeof cache !== "object") return;
+    localStorage.setItem(getGestoriaBooksCacheStorageKey(companyId), JSON.stringify(cache));
+  } catch (e) {}
+};
+
+const syncGestoriaBooksDownloadButtons = () => {
+  const companyKey = String(
+    state.currentWorkspaceCompanyId
+    || (() => {
+      try { return localStorage.getItem("crm.currentWorkspaceCompanyId") || ""; } catch { return ""; }
+    })()
+    || ""
+  ).trim();
+  const storageCache = readGestoriaBooksCache(companyKey);
+  const cache = window.__gestoriaClienteLibrosCache || state.gestoriaClienteLibrosCache || storageCache || {};
+  if (storageCache && !window.__gestoriaClienteLibrosCache) {
+    window.__gestoriaClienteLibrosCache = storageCache;
+  }
+  if (storageCache && !state.gestoriaClienteLibrosCache) {
+    state.gestoriaClienteLibrosCache = storageCache;
+  }
+  const companyPart = sanitizeGestoriaFilenamePart(state.currentWorkspaceCompanyName || state.currentWorkspaceCompanyId || "empresa");
+  const companyLegacyId = String(
+    state.currentWorkspaceCompanyId
+      || (() => {
+        try { return localStorage.getItem("crm.currentWorkspaceCompanyId") || ""; } catch { return ""; }
+      })()
+      || resolveLegacyEmpresaId(resolveCrmGestoriaEmpresa())
+      || ""
+  ).trim();
+  if ((!cache.diarioRaw?.length || !cache.facturasRaw?.length) && companyLegacyId) {
+    hydrateGestoriaBooksFromCache(companyLegacyId);
+  }
+  if (!cache.diarioRaw?.length && companyLegacyId) {
+    loadGestoriaClienteLibros("", companyLegacyId)
+      .then(() => {
+        if ((state.gestoriaClienteLibrosCache?.diarioRaw || []).length) {
+          syncGestoriaBooksDownloadButtons();
+        }
+      })
+      .catch(() => {});
+  }
+  const bind = (id, statusId, builder) => {
+    const btn = document.getElementById(id);
+    const status = statusId ? document.getElementById(statusId) : null;
+    if (!btn) return;
+    btn.disabled = !builder;
+    btn.onclick = async () => {
+      if (!builder) return;
+      try {
+        if (status) status.textContent = "Generando...";
+        const result = builder();
+        if (result instanceof Promise) await result;
+        if (status) status.textContent = "Descargado.";
+        window.setTimeout(() => {
+          if (status) status.textContent = "";
+        }, 1600);
+      } catch (err) {
+        if (status) status.textContent = "No se pudo descargar.";
+        alert(`No se pudo descargar el CSV: ${String(err?.message || err || "").trim()}`);
+      }
+    };
+  };
+  const bindPdf = (id, builder) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.disabled = !builder;
+    btn.onclick = () => {
+      if (!builder) return;
+      const spec = builder();
+      if (!spec) return;
+      openCrmPrintWindow({
+        title: spec.title || "Informe",
+        html: spec.html || "<p>Sin datos.</p>",
+      });
+    };
+  };
+  bind("gestoriaClienteLibroDiarioDownloadBtn", "gestoriaClienteLibroDiarioDownloadStatus", cache.diarioRaw?.length ? () => {
+    downloadGestoriaCsvRows(
+      `${companyPart}_libro_diario.csv`,
+      ["Fecha", "Asiento", "Concepto", "Referencia", "Cuenta", "Descripción", "Debe", "Haber", "Impuesto", "% Impuesto", "Tercero", "NIF tercero", "Factura", "Fecha factura", "Total factura", "Tipo factura"],
+      cache.diarioRaw.map((row) => [
+        row.fecha || "",
+        row.asiento_id || "",
+        row.concepto || "",
+        row.referencia || "",
+        row.cuenta || "",
+        row.descripcion || "",
+        toGestoriaMoneyCsv(row.debe),
+        toGestoriaMoneyCsv(row.haber),
+        row.impuesto_tipo || "",
+        toGestoriaMoneyCsv(row.impuesto_pct),
+        row.tercero || "",
+        row.tercero_nif || "",
+        row.factura_numero || "",
+        row.factura_fecha || "",
+        toGestoriaMoneyCsv(row.factura_total),
+        row.tipo_factura || "",
+      ])
+    );
+  } : null);
+  bindPdf("gestoriaClienteLibroDiarioPdfBtn", cache.diarioRaw?.length ? () => ({
+    title: `${companyPart}_libro_diario`,
+    html: renderGestoriaPrintableTable(
+      "Libro diario",
+      ["Fecha", "Asiento", "Concepto", "Referencia", "Cuenta", "Descripción", "Debe", "Haber", "Impuesto", "% Impuesto", "Tercero", "NIF tercero", "Factura", "Fecha factura", "Total factura", "Tipo factura"],
+      cache.diarioRaw.map((row) => [
+        row.fecha || "",
+        row.asiento_id || "",
+        row.concepto || "",
+        row.referencia || "",
+        row.cuenta || "",
+        row.descripcion || "",
+        toGestoriaMoneyCsv(row.debe),
+        toGestoriaMoneyCsv(row.haber),
+        row.impuesto_tipo || "",
+        toGestoriaMoneyCsv(row.impuesto_pct),
+        row.tercero || "",
+        row.tercero_nif || "",
+        row.factura_numero || "",
+        row.factura_fecha || "",
+        toGestoriaMoneyCsv(row.factura_total),
+        row.tipo_factura || "",
+      ]),
+      `Empresa: ${state.currentWorkspaceCompanyName || companyPart}`
+    ),
+  }) : null);
+  bind("gestoriaClienteLibroMayorDownloadBtn", "gestoriaClienteLibroMayorDownloadStatus", cache.mayorRaw?.length ? () => {
+    downloadGestoriaCsvRows(
+      `${companyPart}_libro_mayor.csv`,
+      ["Cuenta", "Debe", "Haber", "Saldo"],
+      cache.mayorRaw.map((row) => [row.cuenta || "", toGestoriaMoneyCsv(row.debe), toGestoriaMoneyCsv(row.haber), toGestoriaMoneyCsv(row.saldo)])
+    );
+  } : null);
+  bindPdf("gestoriaClienteLibroMayorPdfBtn", cache.mayorRaw?.length ? () => ({
+    title: `${companyPart}_libro_mayor`,
+    html: renderGestoriaPrintableTable(
+      "Libro mayor",
+      ["Cuenta", "Debe", "Haber", "Saldo"],
+      cache.mayorRaw.map((row) => [row.cuenta || "", toGestoriaMoneyCsv(row.debe), toGestoriaMoneyCsv(row.haber), toGestoriaMoneyCsv(row.saldo)]),
+      `Empresa: ${state.currentWorkspaceCompanyName || companyPart}`
+    ),
+  }) : null);
+  bind("gestoriaClienteLibroBalanceDownloadBtn", "gestoriaClienteLibroBalanceDownloadStatus", cache.balanceRaw?.length ? () => {
+    downloadGestoriaCsvRows(
+      `${companyPart}_balance.csv`,
+      ["Cuenta", "Debe", "Haber", "Saldo"],
+      cache.balanceRaw.map((row) => [row.cuenta || "", toGestoriaMoneyCsv(row.debe), toGestoriaMoneyCsv(row.haber), toGestoriaMoneyCsv(row.saldo)])
+    );
+  } : null);
+  bindPdf("gestoriaClienteLibroBalancePdfBtn", cache.balanceRaw?.length ? () => ({
+    title: `${companyPart}_balance`,
+    html: renderGestoriaPrintableTable(
+      "Balance",
+      ["Cuenta", "Debe", "Haber", "Saldo"],
+      cache.balanceRaw.map((row) => [row.cuenta || "", toGestoriaMoneyCsv(row.debe), toGestoriaMoneyCsv(row.haber), toGestoriaMoneyCsv(row.saldo)]),
+      `Empresa: ${state.currentWorkspaceCompanyName || companyPart}`
+    ),
+  }) : null);
+  bind("gestoriaClienteLibroPyGDownloadBtn", "gestoriaClienteLibroPyGDownloadStatus", cache.pygRaw?.length ? () => {
+    downloadGestoriaCsvRows(
+      `${companyPart}_pyg.csv`,
+      ["Cuenta", "Debe", "Haber", "Saldo"],
+      cache.pygRaw.map((row) => [row.cuenta || "", toGestoriaMoneyCsv(row.debe), toGestoriaMoneyCsv(row.haber), toGestoriaMoneyCsv(row.saldo)])
+    );
+  } : null);
+  bindPdf("gestoriaClienteLibroPyGPdfBtn", cache.pygRaw?.length ? () => ({
+    title: `${companyPart}_pyg`,
+    html: renderGestoriaPrintableTable(
+      "P&G",
+      ["Cuenta", "Debe", "Haber", "Saldo"],
+      cache.pygRaw.map((row) => [row.cuenta || "", toGestoriaMoneyCsv(row.debe), toGestoriaMoneyCsv(row.haber), toGestoriaMoneyCsv(row.saldo)]),
+      `Empresa: ${state.currentWorkspaceCompanyName || companyPart}`
+    ),
+  }) : null);
+  bind("gestoriaClienteLibroFacturasDownloadBtn", "gestoriaClienteLibroFacturasDownloadStatus", cache.facturasRaw?.length ? () => {
+    downloadGestoriaCsvRows(
+      `${companyPart}_libro_facturas.csv`,
+      ["Fecha", "Número", "Tipo", "Tercero", "NIF tercero", "Base imponible", "Cuota IVA", "Cuota IRPF", "Total", "IVA %", "Conciliada", "Asiento", "Fecha asiento", "Referencia asiento", "Concepto asiento", "Documento"],
+      cache.facturasRaw.map((row) => [
+        row.fecha_emision || "",
+        row.numero || "",
+        row.tipo || "",
+        row.tercero || "",
+        row.tercero_nif || "",
+        toGestoriaMoneyCsv(row.base_imponible),
+        toGestoriaMoneyCsv(row.cuota_iva),
+        toGestoriaMoneyCsv(row.cuota_irpf),
+        toGestoriaMoneyCsv(row.total),
+        toGestoriaMoneyCsv(row.iva_pct),
+        String(row.asiento_id || "").trim() ? "Sí" : "No",
+        row.asiento_id || "",
+        row.asiento_fecha || "",
+        row.asiento_referencia || "",
+        row.asiento_concepto || "",
+        row.doc_key || "",
+      ])
+    );
+  } : null);
+  bindPdf("gestoriaClienteLibroFacturasPdfBtn", cache.facturasRaw?.length ? () => ({
+    title: `${companyPart}_libro_facturas`,
+    html: renderGestoriaPrintableTable(
+      "Libro de facturas",
+      ["Fecha", "Número", "Tipo", "Tercero", "NIF tercero", "Base imponible", "Cuota IVA", "Cuota IRPF", "Total", "IVA %", "Conciliada", "Asiento", "Fecha asiento", "Referencia asiento", "Concepto asiento", "Documento"],
+      cache.facturasRaw.map((row) => [
+        row.fecha_emision || "",
+        row.numero || "",
+        row.tipo || "",
+        row.tercero || "",
+        row.tercero_nif || "",
+        toGestoriaMoneyCsv(row.base_imponible),
+        toGestoriaMoneyCsv(row.cuota_iva),
+        toGestoriaMoneyCsv(row.cuota_irpf),
+        toGestoriaMoneyCsv(row.total),
+        toGestoriaMoneyCsv(row.iva_pct),
+        String(row.asiento_id || "").trim() ? "Sí" : "No",
+        row.asiento_id || "",
+        row.asiento_fecha || "",
+        row.asiento_referencia || "",
+        row.asiento_concepto || "",
+        row.doc_key || "",
+      ]),
+      `Empresa: ${state.currentWorkspaceCompanyName || companyPart}`
+    ),
+  }) : null);
+  bind("gestoriaClienteLibroIvaDownloadBtn", "gestoriaClienteLibroIvaDownloadStatus", cache.ivaRowsRaw?.length ? () => {
+    downloadGestoriaCsvRows(
+      `${companyPart}_desglose_iva.csv`,
+      ["Tipo", "% IVA", "Base imponible", "Cuota IVA", "Total"],
+      cache.ivaRowsRaw.map((row) => [
+        row.tipo || "",
+        toGestoriaMoneyCsv(row.pct),
+        toGestoriaMoneyCsv(row.base),
+        toGestoriaMoneyCsv(row.cuota),
+        toGestoriaMoneyCsv(row.total),
+      ])
+    );
+  } : null);
+  bindPdf("gestoriaClienteLibroIvaPdfBtn", cache.ivaRowsRaw?.length ? () => ({
+    title: `${companyPart}_desglose_iva`,
+    html: renderGestoriaPrintableTable(
+      "Desglose IVA",
+      ["Tipo", "% IVA", "Base imponible", "Cuota IVA", "Total"],
+      cache.ivaRowsRaw.map((row) => [
+        row.tipo || "",
+        toGestoriaMoneyCsv(row.pct),
+        toGestoriaMoneyCsv(row.base),
+        toGestoriaMoneyCsv(row.cuota),
+        toGestoriaMoneyCsv(row.total),
+      ]),
+      `Empresa: ${state.currentWorkspaceCompanyName || companyPart}`
+    ),
+  }) : null);
+};
+
+const syncGestoriaModelosDownloadButton = () => {
+  const btn = document.getElementById("gestoriaModelosDownloadBtn");
+  const status = document.getElementById("gestoriaModelosDownloadStatus");
+  const rows = Array.isArray(state.gestoriaModelosCache?.rows) ? state.gestoriaModelosCache.rows : [];
+  const companyLegacyId = String(
+    state.currentWorkspaceCompanyId
+      || resolveLegacyEmpresaId(resolveCrmGestoriaEmpresa())
+      || ""
+  ).trim();
+  if (!rows.length && companyLegacyId) {
+    loadGestoriaModelos(companyLegacyId)
+      .then(() => {
+        if ((state.gestoriaModelosCache?.rows || []).length) {
+          syncGestoriaModelosDownloadButton();
+        }
+      })
+      .catch(() => {});
+  }
+  if (!btn) return;
+  btn.disabled = !rows.length;
+  btn.onclick = () => {
+    if (!rows.length) return;
+    try {
+      if (status) status.textContent = "Generando...";
+      const companyPart = sanitizeGestoriaFilenamePart(state.currentWorkspaceCompanyName || state.currentWorkspaceCompanyId || "empresa");
+      downloadGestoriaCsvRows(
+        `${companyPart}_modelos_hacienda.csv`,
+        ["Cliente", "Modelo", "Periodicidad", "Próxima fecha", "Responsable", "Estado", "Notas"],
+        rows.map((row) => [
+          row.cliente || "",
+          row.modelo || "",
+          row.periodicidad || "",
+          row.proxima_fecha || "",
+          row.responsable || "",
+          row.estado || "",
+          row.notas || "",
+        ])
+      );
+      if (status) status.textContent = "Descargado.";
+      window.setTimeout(() => {
+        if (status) status.textContent = "";
+      }, 1600);
+    } catch (err) {
+      if (status) status.textContent = "No se pudo descargar.";
+      alert(`No se pudo descargar el CSV: ${String(err?.message || err || "").trim()}`);
+    }
+  };
+  const pdfBtn = document.getElementById("gestoriaModelosPdfBtn");
+  if (pdfBtn) {
+    pdfBtn.disabled = !rows.length;
+    pdfBtn.onclick = () => {
+      if (!rows.length) return;
+      const companyPart = sanitizeGestoriaFilenamePart(state.currentWorkspaceCompanyName || state.currentWorkspaceCompanyId || "empresa");
+      openCrmPrintWindow({
+        title: `${companyPart}_modelos_hacienda`,
+        html: renderGestoriaPrintableTable(
+          "Modelos Hacienda",
+          ["Cliente", "Modelo", "Periodicidad", "Próxima fecha", "Responsable", "Estado", "Notas"],
+          rows.map((row) => [
+            row.cliente || "",
+            row.modelo || "",
+            row.periodicidad || "",
+            row.proxima_fecha || "",
+            row.responsable || "",
+            row.estado || "",
+            row.notas || "",
+          ]),
+          `Empresa: ${state.currentWorkspaceCompanyName || companyPart}`
+        ),
+      });
+    };
+  }
 };
 
 const downloadPdfFromApi = async (endpoint, payload, options = {}) => {
@@ -67808,16 +69711,255 @@ const buildPlantillaConversorRows = (diario = []) => {
   return rows;
 };
 
-const loadGestoriaClienteLibros = (clienteId) => {
-  if (!clienteId || !gestoriaClienteLibroDiarioTable) return;
-  const empresa = resolveCrmGestoriaEmpresa();
-  const empresaId = resolveLegacyEmpresaId(empresa);
-  if (!empresaId) return;
-  const qs = new URLSearchParams({ empresa_id: empresaId, cliente_id: clienteId });
+const applyGestoriaClienteLibrosData = (data = {}, empresaId = "") => {
+  const resolvedEmpresaId = String(empresaId || state.currentWorkspaceCompanyId || "").trim();
+  const diario = data.diario || [];
+  const mayor = data.mayor || [];
+  const balance = data.balance || [];
+  const pyg = data.pyg || [];
+  const facturas = data.facturas || [];
+  const facturasResumen = data.facturas_resumen || {};
+
+  state.gestoriaClienteLibrosCache = {
+    diarioRaw: diario,
+    mayorRaw: mayor,
+    balanceRaw: balance,
+    pygRaw: pyg,
+    facturasRaw: facturas,
+    facturasResumenRaw: facturasResumen,
+  };
+  window.__gestoriaClienteLibrosCache = state.gestoriaClienteLibrosCache;
+
+  if (diario.length > 500) {
+    if (gestoriaClienteLibroDiarioTable) {
+      gestoriaClienteLibroDiarioTable.innerHTML = `<p class="muted">Libro cargado: ${diario.length} apuntes. Usa descarga CSV/PDF para el detalle completo.</p>`;
+    }
+    if (gestoriaClienteLibroMayorTable) {
+      gestoriaClienteLibroMayorTable.innerHTML = `<p class="muted">Libro mayor cargado: ${mayor.length} cuentas.</p>`;
+    }
+    if (gestoriaClienteLibroBalanceTable) {
+      gestoriaClienteLibroBalanceTable.innerHTML = `<p class="muted">Balance cargado: ${balance.length} cuentas.</p>`;
+    }
+    if (gestoriaClienteLibroPyGTable) {
+      gestoriaClienteLibroPyGTable.innerHTML = `<p class="muted">P&G cargado: ${pyg.length} cuentas.</p>`;
+    }
+    if (gestoriaClienteLibroFacturasTable) {
+      gestoriaClienteLibroFacturasTable.innerHTML = `<p class="muted">Facturas cargadas: ${facturas.length} registros.</p>`;
+    }
+    if (gestoriaClienteLibroIvaTable) {
+      gestoriaClienteLibroIvaTable.innerHTML = `<p class="muted">Desglose IVA cargado.</p>`;
+    }
+    syncGestoriaBooksDownloadButtons();
+    return;
+  }
+
+  const diarioRows = diario.map((row) => [
+    row.fecha || "-",
+    row.referencia || "-",
+    row.concepto || "-",
+    row.tercero || "-",
+    row.factura_numero || "-",
+    row.cuenta || "-",
+    row.descripcion || "-",
+    row.debe ? euroFormatter.format(parseMoneyValue(row.debe)) : "-",
+    row.haber ? euroFormatter.format(parseMoneyValue(row.haber)) : "-",
+  ]);
+  renderSimpleTable(gestoriaClienteLibroDiarioTable, ["Fecha", "Referencia", "Concepto", "Tercero", "Factura", "Cuenta", "Descripción", "Debe", "Haber"], diarioRows);
+  if (gestoriaClienteLibroDiarioInfo) gestoriaClienteLibroDiarioInfo.textContent = `Mostrando ${diarioRows.length} apuntes.`;
+
+  const mayorRows = mayor.map((row) => [
+    row.cuenta || "-",
+    row.debe ? euroFormatter.format(parseMoneyValue(row.debe)) : "-",
+    row.haber ? euroFormatter.format(parseMoneyValue(row.haber)) : "-",
+    row.saldo ? euroFormatter.format(parseMoneyValue(row.saldo)) : "-",
+  ]);
+  renderSimpleTable(gestoriaClienteLibroMayorTable, ["Cuenta", "Debe", "Haber", "Saldo"], mayorRows);
+  if (gestoriaClienteLibroMayorInfo) gestoriaClienteLibroMayorInfo.textContent = `Mostrando ${mayorRows.length} cuentas.`;
+
+  const balanceRows = balance.map((row) => [
+    row.cuenta || "-",
+    row.debe ? euroFormatter.format(parseMoneyValue(row.debe)) : "-",
+    row.haber ? euroFormatter.format(parseMoneyValue(row.haber)) : "-",
+    row.saldo ? euroFormatter.format(parseMoneyValue(row.saldo)) : "-",
+  ]);
+  renderSimpleTable(gestoriaClienteLibroBalanceTable, ["Cuenta", "Debe", "Haber", "Saldo"], balanceRows);
+  if (gestoriaClienteLibroBalanceInfo) gestoriaClienteLibroBalanceInfo.textContent = `Mostrando ${balanceRows.length} cuentas de balance.`;
+
+  const pygRows = pyg.map((row) => [
+    row.cuenta || "-",
+    row.debe ? euroFormatter.format(parseMoneyValue(row.debe)) : "-",
+    row.haber ? euroFormatter.format(parseMoneyValue(row.haber)) : "-",
+    row.saldo ? euroFormatter.format(parseMoneyValue(row.saldo)) : "-",
+  ]);
+  renderSimpleTable(gestoriaClienteLibroPyGTable, ["Cuenta", "Debe", "Haber", "Saldo"], pygRows);
+  if (gestoriaClienteLibroPyGInfo) gestoriaClienteLibroPyGInfo.textContent = `Mostrando ${pygRows.length} cuentas de PyG.`;
+
+  const facturasRows = facturas.map((row) => [
+    row.fecha_emision || "-",
+    row.numero || "-",
+    row.tipo || "-",
+    row.tercero || "-",
+    row.total ? euroFormatter.format(parseMoneyValue(row.total)) : "-",
+    row.conciliada ? "Sí" : "No",
+    row.asiento_referencia || row.asiento_concepto || "-",
+  ]);
+  renderSimpleTable(gestoriaClienteLibroFacturasTable, ["Fecha", "Número", "Tipo", "Tercero", "Total", "Conciliada", "Asiento"], facturasRows);
+  if (gestoriaClienteLibroFacturasInfo) {
+    const conciliadas = Number(facturasResumen.conciliadas || 0) || 0;
+    const totalFacturas = Number(facturasResumen.total || facturasRows.length) || facturasRows.length;
+    gestoriaClienteLibroFacturasInfo.textContent = `Mostrando ${facturasRows.length} facturas. Conciliadas: ${conciliadas}/${totalFacturas}.`;
+  }
+
+  const byAsiento = new Map();
+  diario.forEach((row) => {
+    const key = row.asiento_id || `${row.fecha || ""}-${row.referencia || ""}`;
+    if (!byAsiento.has(key)) byAsiento.set(key, []);
+    byAsiento.get(key).push(row);
+  });
+  const ivaAgg = new Map();
+  byAsiento.forEach((lines) => {
+    const sample = lines[0] || {};
+    const tipo = normalizeSimple(sample.tipo_factura || "") === "venta" ? "Venta" : "Compra";
+    const ivaLines = lines.filter((l) => normalizeSimple(l.impuesto_tipo || "") === "iva");
+    if (!ivaLines.length) return;
+    const pct = Number(ivaLines[0].impuesto_pct || 0) || 0;
+    let cuota = 0;
+    ivaLines.forEach((line) => {
+      const debe = parseMoneyValue(line.debe);
+      const haber = parseMoneyValue(line.haber);
+      cuota += Math.abs(tipo === "Venta" ? haber : debe);
+    });
+    let base = 0;
+    lines.forEach((line) => {
+      const cuenta = String(line.cuenta || "");
+      if (tipo === "Compra" && cuenta.startsWith("6")) base += Math.abs(parseMoneyValue(line.debe));
+      if (tipo === "Venta" && cuenta.startsWith("7")) base += Math.abs(parseMoneyValue(line.haber));
+    });
+    if (!base && pct > 0) base = (cuota * 100) / pct;
+    const key = `${tipo}-${pct.toFixed(2)}`;
+    if (!ivaAgg.has(key)) ivaAgg.set(key, { tipo, pct, base: 0, cuota: 0 });
+    const acc = ivaAgg.get(key);
+    acc.base += base;
+    acc.cuota += cuota;
+  });
+  const ivaRowsData = Array.from(ivaAgg.values()).sort((a, b) => {
+    if (a.tipo !== b.tipo) return a.tipo.localeCompare(b.tipo);
+    return a.pct - b.pct;
+  });
+  const ivaRows = ivaRowsData.map((row) => [
+    row.tipo,
+    `${row.pct.toFixed(2)} %`,
+    euroFormatter.format(row.base || 0),
+    euroFormatter.format(row.cuota || 0),
+    euroFormatter.format((row.base || 0) + (row.cuota || 0)),
+  ]);
+  renderSimpleTable(gestoriaClienteLibroIvaTable, ["Tipo", "% IVA", "Base imponible", "Cuota IVA", "Total"], ivaRows);
+  if (gestoriaClienteLibroIvaInfo) gestoriaClienteLibroIvaInfo.textContent = `Mostrando ${ivaRows.length} líneas de desglose IVA.`;
+
+  state.gestoriaClienteLibrosCache = {
+    diarioRaw: diario,
+    mayorRaw: mayor,
+    balanceRaw: balance,
+    pygRaw: pyg,
+    facturasRaw: facturasRows,
+    ivaRowsRaw: ivaRowsData,
+    facturasResumenRaw: facturasResumen,
+    diarioRows,
+    mayorRows,
+    balanceRows,
+    pygRows,
+    facturasRows,
+    ivaRows,
+    plantillaRows: buildPlantillaConversorRows(diario),
+  };
+  window.__gestoriaClienteLibrosCache = state.gestoriaClienteLibrosCache;
+  writeGestoriaBooksCache(resolvedEmpresaId, state.gestoriaClienteLibrosCache);
+  syncGestoriaBooksDownloadButtons();
+};
+
+const loadGestoriaClienteLibros = async (clienteIdOrOpts, empresaId = "") => {
+  if (!gestoriaClienteLibroDiarioTable) return;
+  const scope = resolveGestoriaScopeParams(clienteIdOrOpts, empresaId);
+  const clienteId = scope.clienteId;
+  let resolvedEmpresaId = scope.empresaId || resolveLegacyEmpresaId(resolveCrmGestoriaEmpresa());
+  if (!resolvedEmpresaId) {
+    const visibleCompanyName = String(
+      state.currentWorkspaceCompanyName
+        || workspaceCompanyFichaTitle?.textContent
+        || workspaceCompanyFichaSubtitle?.textContent
+        || ""
+    ).trim();
+    if (visibleCompanyName) {
+      try {
+        const companies = Array.isArray(state.empresas) && state.empresas.length
+          ? state.empresas
+          : await api("/api/empresas");
+        const wantedSlug = slugify(visibleCompanyName);
+        const match = Array.isArray(companies)
+          ? companies.find((row) => {
+            const names = [
+              row?.nombre,
+              row?.razon_social,
+              row?.name,
+            ]
+              .filter(Boolean)
+              .map((value) => slugify(String(value || "")));
+            return names.includes(wantedSlug);
+          }) || null
+          : null;
+        if (match) {
+          state.empresas = Array.isArray(companies) ? companies : state.empresas;
+          resolvedEmpresaId = resolveLegacyEmpresaId(match) || String(match.id || "").trim();
+        }
+      } catch (e) {}
+    }
+  }
+  if (!clienteId && !resolvedEmpresaId) return;
+  const qs = new URLSearchParams({ conciliar: "1" });
+  if (resolvedEmpresaId) qs.set("empresa_id", resolvedEmpresaId);
+  if (clienteId) qs.set("cliente_id", clienteId);
   api(`/api/gestoria_libros?${qs.toString()}`)
     .then((data) => {
       const diario = data.diario || [];
       const mayor = data.mayor || [];
+      const balance = data.balance || [];
+      const pyg = data.pyg || [];
+      const facturas = data.facturas || [];
+      const facturasResumen = data.facturas_resumen || {};
+
+      state.gestoriaClienteLibrosCache = {
+        diarioRaw: diario,
+        mayorRaw: mayor,
+        balanceRaw: balance,
+        pygRaw: pyg,
+        facturasRaw: facturas,
+        facturasResumenRaw: facturasResumen,
+      };
+      window.__gestoriaClienteLibrosCache = state.gestoriaClienteLibrosCache;
+      writeGestoriaBooksCache(resolvedEmpresaId, state.gestoriaClienteLibrosCache);
+
+      if (diario.length > 500) {
+        if (gestoriaClienteLibroDiarioTable) {
+          gestoriaClienteLibroDiarioTable.innerHTML = `<p class='muted'>Libro cargado: ${diario.length} apuntes. Usa descarga CSV/PDF para el detalle completo.</p>`;
+        }
+        if (gestoriaClienteLibroMayorTable) {
+          gestoriaClienteLibroMayorTable.innerHTML = `<p class='muted'>Libro mayor cargado: ${mayor.length} cuentas.</p>`;
+        }
+        if (gestoriaClienteLibroBalanceTable) {
+          gestoriaClienteLibroBalanceTable.innerHTML = `<p class='muted'>Balance cargado: ${balance.length} cuentas.</p>`;
+        }
+        if (gestoriaClienteLibroPyGTable) {
+          gestoriaClienteLibroPyGTable.innerHTML = `<p class='muted'>P&G cargado: ${pyg.length} cuentas.</p>`;
+        }
+        if (gestoriaClienteLibroFacturasTable) {
+          gestoriaClienteLibroFacturasTable.innerHTML = `<p class='muted'>Facturas cargadas: ${facturas.length} registros.</p>`;
+        }
+        if (gestoriaClienteLibroIvaTable) {
+          gestoriaClienteLibroIvaTable.innerHTML = "<p class='muted'>Desglose IVA cargado.</p>";
+        }
+        syncGestoriaBooksDownloadButtons();
+        return;
+      }
 
       const diarioRows = diario.map((row) => [
         row.fecha || "-",
@@ -67852,6 +69994,56 @@ const loadGestoriaClienteLibros = (clienteId) => {
       );
       if (gestoriaClienteLibroMayorInfo) {
         gestoriaClienteLibroMayorInfo.textContent = `Mostrando ${mayorRows.length} cuentas.`;
+      }
+
+      const balanceRows = balance.map((row) => [
+        row.cuenta || "-",
+        row.debe ? euroFormatter.format(parseMoneyValue(row.debe)) : "-",
+        row.haber ? euroFormatter.format(parseMoneyValue(row.haber)) : "-",
+        row.saldo ? euroFormatter.format(parseMoneyValue(row.saldo)) : "-",
+      ]);
+      renderSimpleTable(
+        gestoriaClienteLibroBalanceTable,
+        ["Cuenta", "Debe", "Haber", "Saldo"],
+        balanceRows
+      );
+      if (gestoriaClienteLibroBalanceInfo) {
+        gestoriaClienteLibroBalanceInfo.textContent = `Mostrando ${balanceRows.length} cuentas de balance.`;
+      }
+
+      const pygRows = pyg.map((row) => [
+        row.cuenta || "-",
+        row.debe ? euroFormatter.format(parseMoneyValue(row.debe)) : "-",
+        row.haber ? euroFormatter.format(parseMoneyValue(row.haber)) : "-",
+        row.saldo ? euroFormatter.format(parseMoneyValue(row.saldo)) : "-",
+      ]);
+      renderSimpleTable(
+        gestoriaClienteLibroPyGTable,
+        ["Cuenta", "Debe", "Haber", "Saldo"],
+        pygRows
+      );
+      if (gestoriaClienteLibroPyGInfo) {
+        gestoriaClienteLibroPyGInfo.textContent = `Mostrando ${pygRows.length} cuentas de PyG.`;
+      }
+
+      const facturasRows = facturas.map((row) => [
+        row.fecha_emision || "-",
+        row.numero || "-",
+        row.tipo || "-",
+        row.tercero || "-",
+        row.total ? euroFormatter.format(parseMoneyValue(row.total)) : "-",
+        row.conciliada ? "Sí" : "No",
+        row.asiento_referencia || row.asiento_concepto || "-",
+      ]);
+      renderSimpleTable(
+        gestoriaClienteLibroFacturasTable,
+        ["Fecha", "Número", "Tipo", "Tercero", "Total", "Conciliada", "Asiento"],
+        facturasRows
+      );
+      if (gestoriaClienteLibroFacturasInfo) {
+        const conciliadas = Number(facturasResumen.conciliadas || 0) || 0;
+        const totalFacturas = Number(facturasResumen.total || facturasRows.length) || facturasRows.length;
+        gestoriaClienteLibroFacturasInfo.textContent = `Mostrando ${facturasRows.length} facturas. Conciliadas: ${conciliadas}/${totalFacturas}.`;
       }
 
       // El desglose IVA se deriva del libro diario (asientos/líneas), no de un origen externo.
@@ -67915,11 +70107,20 @@ const loadGestoriaClienteLibros = (clienteId) => {
 
       state.gestoriaClienteLibrosCache = {
         diarioRaw: diario,
+        mayorRaw: mayor,
+        balanceRaw: balance,
+        pygRaw: pyg,
+        facturasRaw: facturasRows,
+        ivaRowsRaw: ivaRowsData,
         diarioRows,
         mayorRows,
+        balanceRows,
+        pygRows,
+        facturasRows,
         ivaRows,
         plantillaRows: buildPlantillaConversorRows(diario),
       };
+      syncGestoriaBooksDownloadButtons();
     })
     .catch(() => {
       if (gestoriaClienteLibroDiarioTable) {
@@ -67928,9 +70129,19 @@ const loadGestoriaClienteLibros = (clienteId) => {
       if (gestoriaClienteLibroMayorTable) {
         gestoriaClienteLibroMayorTable.innerHTML = "<p class='muted'>No se pudo cargar libro mayor.</p>";
       }
+      if (gestoriaClienteLibroBalanceTable) {
+        gestoriaClienteLibroBalanceTable.innerHTML = "<p class='muted'>No se pudo cargar balance.</p>";
+      }
+      if (gestoriaClienteLibroPyGTable) {
+        gestoriaClienteLibroPyGTable.innerHTML = "<p class='muted'>No se pudo cargar P&G.</p>";
+      }
+      if (gestoriaClienteLibroFacturasTable) {
+        gestoriaClienteLibroFacturasTable.innerHTML = "<p class='muted'>No se pudo cargar libro de facturas.</p>";
+      }
       if (gestoriaClienteLibroIvaTable) {
         gestoriaClienteLibroIvaTable.innerHTML = "<p class='muted'>No se pudo cargar desglose IVA.</p>";
       }
+      syncGestoriaBooksDownloadButtons();
     });
 };
 
@@ -69681,10 +71892,20 @@ const loadClienteGestoria = (clienteId) => {
   });
 };
 
-const loadGestoriaModelos = (clienteId) => {
+const loadGestoriaModelos = (clienteIdOrOpts, empresaId = "") => {
   if (!gestoriaModelosTable) return;
-  api(`/api/gestoria_modelos?cliente_id=${clienteId}`).then((data) => {
+  const scope = resolveGestoriaScopeParams(clienteIdOrOpts, empresaId);
+  const qs = new URLSearchParams();
+  if (scope.clienteId) qs.set("cliente_id", scope.clienteId);
+  if (scope.empresaId) qs.set("empresa_id", scope.empresaId);
+  if (!qs.toString()) {
+    gestoriaModelosTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
+    return;
+  }
+  api(`/api/gestoria_modelos?${qs.toString()}`).then((data) => {
     const rows = data.rows || [];
+    state.gestoriaModelosCache = { clienteId: scope.clienteId || "", empresaId: scope.empresaId || "", rows };
+    syncGestoriaModelosDownloadButton();
     if (!rows.length) {
       gestoriaModelosTable.innerHTML = "<p class='muted'>Sin modelos asignados.</p>";
       return;
@@ -69849,8 +72070,10 @@ const deleteGestoriaDoc = (id) => {
   })
     .then((res) => res.json())
     .then(() => {
-      if (state.currentClienteId) {
-        loadGestoriaDocs(state.currentClienteId);
+      const activeClient = String(state.currentClienteId || "").trim();
+      const activeEmpresa = activeClient ? "" : String(state.currentWorkspaceCompanyId || "").trim();
+      if (activeClient || activeEmpresa) {
+        loadGestoriaDocs(activeClient, activeEmpresa);
       }
     });
 };
@@ -73098,6 +75321,10 @@ const setAuthUi = (user) => {
     authLogoutBtn.classList.toggle("hidden", !user);
   }
   try {
+    // La home se pinta antes de que la auth termine de resolver; repintamos cuando ya tenemos usuario.
+    renderCompanyCards();
+  } catch (e) {}
+  try {
     if (user && state.currentPage === "home") {
       loadSegurosRenewalAlertForUser();
     }
@@ -73335,6 +75562,10 @@ const init = async () => {
     handleRoute();
     UI?.boot(state);
     renderCompanyCards();
+    try {
+      debugLog("init: handleRoute() post-bootstrap", `search=${window.location.search || ""}`);
+    } catch (e) {}
+    handleRoute();
 
     // Cargas pesadas en segundo plano: stats, clientes, workspaces, etc.
     const safe = (promise) => promise.catch(() => null);
@@ -78407,6 +80638,7 @@ if (workspaceCompanyFichaClose && workspaceCompanyFicha) {
   workspaceCompanyFichaClose.addEventListener("click", () => {
     try {
       restoreCompanyFichaNodes();
+      restoreCompanyContaNodes();
     } catch (e) {}
     try {
       if (workspaceCompanyEditor) workspaceCompanyEditor.classList.add("hidden");
@@ -83313,10 +85545,11 @@ if (gestoriaImportUploadForm) {
     const empresa = resolveCrmGestoriaEmpresa();
     const empresaId = resolveLegacyEmpresaId(empresa);
     const clienteId = String(state.currentClienteId || "").trim();
+    const activeEmpresaId = clienteId ? empresaId : String(state.currentWorkspaceCompanyId || empresaId || "").trim();
     const files = Array.from(gestoriaImportUploadFiles?.files || []);
-    if (!empresaId || !clienteId) {
+    if (!activeEmpresaId) {
       if (gestoriaImportUploadStatus) {
-        gestoriaImportUploadStatus.textContent = "Selecciona cliente y workspace antes de importar.";
+        gestoriaImportUploadStatus.textContent = "Selecciona una empresa o cliente antes de importar.";
       }
       return;
     }
@@ -83325,9 +85558,10 @@ if (gestoriaImportUploadForm) {
       return;
     }
     const formData = new FormData(gestoriaImportUploadForm);
-    formData.set("empresa_id", empresaId);
+    formData.set("empresa_id", activeEmpresaId);
     formData.set("empresa_nombre", empresa?.nombre || "");
-    formData.set("cliente_id", clienteId);
+    if (clienteId) formData.set("cliente_id", clienteId);
+    else formData.delete("cliente_id");
     if (gestoriaImportUploadStatus) {
       gestoriaImportUploadStatus.textContent = `Procesando ${files.length} archivo${files.length === 1 ? "" : "s"}...`;
     }
@@ -83347,7 +85581,7 @@ if (gestoriaImportUploadForm) {
         gestoriaImportUploadStatus.textContent = `Lote creado: ${data.inserted || 0} documentos · Excel filas ${data.excel_rows ?? "-"}${skipped}.`;
       }
       gestoriaImportUploadForm.reset();
-      await loadGestoriaClienteImportador(clienteId);
+      await loadGestoriaClienteImportador(clienteId || activeEmpresaId, activeEmpresaId);
       if (data.lote_id) {
         await loadGestoriaImportLoteDocuments(data.lote_id);
       }
@@ -83361,8 +85595,10 @@ if (gestoriaImportUploadForm) {
 
 if (gestoriaImportRefreshBtn) {
   gestoriaImportRefreshBtn.addEventListener("click", () => {
-    if (state.currentClienteId) {
-      loadGestoriaClienteImportador(state.currentClienteId);
+    const activeClient = String(state.currentClienteId || "").trim();
+    const activeEmpresa = activeClient ? "" : String(state.currentWorkspaceCompanyId || "").trim();
+    if (activeClient || activeEmpresa) {
+      loadGestoriaClienteImportador(activeClient, activeEmpresa);
     }
   });
 }
@@ -83375,6 +85611,11 @@ if (gestoriaImportEstadoFilter) {
     }
   });
 }
+
+document.querySelectorAll("[data-conciliacion-filter]").forEach((btn) => {
+  btn.addEventListener("click", () => setGestoriaConciliacionFilter(btn.dataset.conciliacionFilter || "all"));
+});
+setGestoriaConciliacionFilter(state.gestoriaConciliacionFilter || "all");
 
 if (gestoriaImportApplyBtn) {
   gestoriaImportApplyBtn.addEventListener("click", async () => {
@@ -83396,12 +85637,225 @@ if (gestoriaImportApplyBtn) {
           : `Lote aplicado. Documentos aplicados: ${(data.applied || []).length}. Errores: ${(data.errors || []).length}.`;
       }
       if (!data.error && state.currentClienteId) {
-        loadGestoriaClienteImportador(state.currentClienteId);
-        loadGestoriaClienteContaResultados(state.currentClienteId);
-        loadGestoriaClienteLibros(state.currentClienteId);
+        loadGestoriaClienteImportador(state.currentClienteId, state.currentWorkspaceCompanyId || "");
+        loadGestoriaClienteContaResultados(state.currentClienteId, state.currentWorkspaceCompanyId || "");
+        loadGestoriaClienteLibros(state.currentClienteId, state.currentWorkspaceCompanyId || "");
       }
     } catch (_) {
       if (gestoriaImportDocsInfo) gestoriaImportDocsInfo.textContent = "Error al aplicar el lote.";
+    }
+  });
+}
+
+if (gestoriaAsientoAddLineaBtn) {
+  gestoriaAsientoAddLineaBtn.addEventListener("click", () => {
+    const current = collectGestoriaAsientoLines();
+    current.push({ tercero_id: "", cuenta: "", descripcion: "", debe: "", haber: "", impuesto_tipo: "", impuesto_pct: "" });
+    renderGestoriaAsientoLineas(current);
+  });
+}
+
+if (gestoriaAsientoForm) {
+  gestoriaAsientoForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const asientoId = String(gestoriaAsientoForm.querySelector('[name="asiento_id"]')?.value || "").trim();
+    if (!asientoId) {
+      if (gestoriaAsientoStatus) gestoriaAsientoStatus.textContent = "Selecciona un asiento.";
+      return;
+    }
+    const payload = Object.fromEntries(new FormData(gestoriaAsientoForm).entries());
+    payload.asiento_id = asientoId;
+    payload.lineas = collectGestoriaAsientoLines();
+    const authUser = getAuthScopeUser();
+    payload.usuario = String(authUser?.nombre_completo || authUser?.usuario || authUser?.email || getCurrentUser() || "Sistema").trim();
+    if (String(payload.factura_clear || "0") === "1") {
+      payload.factura_id = "";
+    }
+    try {
+      const data = await postJsonWithDbRetry("/api/gestoria_asiento_update", payload);
+      if (gestoriaAsientoStatus) gestoriaAsientoStatus.textContent = data.error ? data.error : "Asiento guardado.";
+      if (state.currentClienteId) {
+        loadGestoriaClienteContaResultados(state.currentClienteId);
+        loadGestoriaClienteLibros(state.currentClienteId);
+      }
+      if (data.row && data.row.id) {
+        openGestoriaAsientoFicha(data.row.id);
+      }
+    } catch (error) {
+      if (gestoriaAsientoStatus) gestoriaAsientoStatus.textContent = error?.message || "No se pudo guardar el asiento.";
+    }
+  });
+}
+
+if (gestoriaImportValoracionForm) {
+  gestoriaImportValoracionForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const loteId = String(state.gestoriaImportSelectedLoteId || "").trim();
+    if (!loteId) {
+      if (gestoriaImportValoracionStatus) gestoriaImportValoracionStatus.textContent = "Selecciona un lote.";
+      return;
+    }
+    const formData = new FormData(gestoriaImportValoracionForm);
+    const payload = Object.fromEntries(formData.entries());
+    payload.lote_id = loteId;
+    try {
+      const data = await postJsonWithDbRetry("/api/gestoria_import_lote_valoracion", payload);
+      if (gestoriaImportValoracionStatus) gestoriaImportValoracionStatus.textContent = data.error ? data.error : "Valoración guardada.";
+      const activeClient = String(state.currentClienteId || "").trim();
+      const activeEmpresa = activeClient ? "" : String(state.currentWorkspaceCompanyId || "").trim();
+      if (activeClient || activeEmpresa) loadGestoriaClienteImportador(activeClient, activeEmpresa);
+    } catch (error) {
+      if (gestoriaImportValoracionStatus) gestoriaImportValoracionStatus.textContent = error?.message || "No se pudo guardar la valoración.";
+    }
+  });
+}
+
+if (gestoriaImportCerrarLoteBtn) {
+  gestoriaImportCerrarLoteBtn.addEventListener("click", async () => {
+    const loteId = String(state.gestoriaImportSelectedLoteId || "").trim();
+    if (!loteId) {
+      if (gestoriaImportValoracionStatus) gestoriaImportValoracionStatus.textContent = "Selecciona un lote.";
+      return;
+    }
+    const payload = gestoriaImportValoracionForm ? Object.fromEntries(new FormData(gestoriaImportValoracionForm).entries()) : {};
+    payload.lote_id = loteId;
+    payload.cerrar = 1;
+    try {
+      const data = await postJsonWithDbRetry("/api/gestoria_import_lote_valoracion", payload);
+      if (gestoriaImportValoracionStatus) gestoriaImportValoracionStatus.textContent = data.error ? data.error : "Lote cerrado.";
+      const activeClient = String(state.currentClienteId || "").trim();
+      const activeEmpresa = activeClient ? "" : String(state.currentWorkspaceCompanyId || "").trim();
+      if (activeClient || activeEmpresa) loadGestoriaClienteImportador(activeClient, activeEmpresa);
+    } catch (error) {
+      if (gestoriaImportValoracionStatus) gestoriaImportValoracionStatus.textContent = error?.message || "No se pudo cerrar el lote.";
+    }
+  });
+}
+
+if (gestoriaBancoCuentaForm) {
+  gestoriaBancoCuentaForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const empresaId = String(state.currentWorkspaceCompanyId || resolveLegacyEmpresaId(resolveCrmGestoriaEmpresa()) || "").trim();
+    if (!empresaId) {
+      if (gestoriaBancoStatus) gestoriaBancoStatus.textContent = "Selecciona una empresa.";
+      return;
+    }
+    if (gestoriaBancoStatus) gestoriaBancoStatus.textContent = "Guardando cuenta bancaria...";
+    const payload = Object.fromEntries(new FormData(gestoriaBancoCuentaForm).entries());
+    payload.empresa_id = empresaId;
+    try {
+      const data = await postJsonWithDbRetry("/api/gestoria_cuentas_bancarias_save", payload);
+      if (gestoriaBancoStatus) gestoriaBancoStatus.textContent = data.error ? data.error : "Cuenta bancaria guardada.";
+      if (!data.error) {
+        await loadGestoriaClienteBanco(state.currentClienteId || "", empresaId);
+      }
+    } catch (error) {
+      if (gestoriaBancoStatus) gestoriaBancoStatus.textContent = error?.message || "No se pudo guardar la cuenta bancaria.";
+    }
+  });
+}
+
+if (gestoriaBancoImportPreviewBtn) {
+  gestoriaBancoImportPreviewBtn.addEventListener("click", async () => {
+    const file = gestoriaBancoImportFile?.files?.[0];
+    const empresaId = String(state.currentWorkspaceCompanyId || resolveLegacyEmpresaId(resolveCrmGestoriaEmpresa()) || "").trim();
+    if (!empresaId) {
+      if (gestoriaBancoImportStatus) gestoriaBancoImportStatus.textContent = "Selecciona una empresa.";
+      return;
+    }
+    if (!file) {
+      if (gestoriaBancoImportStatus) gestoriaBancoImportStatus.textContent = "Selecciona un PDF o XLSX.";
+      return;
+    }
+    if (gestoriaBancoImportStatus) gestoriaBancoImportStatus.textContent = "Analizando extracto...";
+    try {
+      const fileBase64 = await fileToBase64(file);
+      const res = await postJsonWithDbRetry("/api/gestoria_movimientos_bancarios_import_preview", {
+        empresa_id: empresaId,
+        workspace_id: String(state.currentWorkspaceId || "").trim(),
+        filename: file.name || "",
+        file_base64: fileBase64,
+      });
+      if (res?.error) throw new Error(res.error);
+      if (gestoriaBancoImportStatus) {
+        gestoriaBancoImportStatus.textContent = `Detectados ${res.total || 0} movimientos.`;
+      }
+      if (gestoriaBancoImportPreview) {
+        const rows = Array.isArray(res.preview) ? res.preview : [];
+        gestoriaBancoImportPreview.innerHTML = rows.length
+          ? `
+            <div class="section-head">
+              <h4>Previsualización</h4>
+              <span class="muted">${rows.length} líneas mostradas</span>
+            </div>
+            <div style="overflow:auto; max-height: 320px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Concepto</th>
+                    <th>Importe</th>
+                    <th>Saldo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${rows.map((row) => `
+                    <tr>
+                      <td>${escapeHtml(row.fecha_operacion || row.fecha_valor || "-")}</td>
+                      <td>${escapeHtml(row.concepto || "-")}</td>
+                      <td>${euroFormatter.format(parseMoneyValue(row.importe || 0))}</td>
+                      <td>${row.saldo != null ? euroFormatter.format(parseMoneyValue(row.saldo)) : "-"}</td>
+                    </tr>
+                  `).join("")}
+                </tbody>
+              </table>
+            </div>
+          `
+          : "<p class='muted'>Sin movimientos detectados.</p>";
+      }
+    } catch (error) {
+      if (gestoriaBancoImportStatus) gestoriaBancoImportStatus.textContent = error?.message || "No se pudo previsualizar.";
+    }
+  });
+}
+
+if (gestoriaBancoImportForm) {
+  gestoriaBancoImportForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const file = gestoriaBancoImportFile?.files?.[0];
+    const empresaId = String(state.currentWorkspaceCompanyId || resolveLegacyEmpresaId(resolveCrmGestoriaEmpresa()) || "").trim();
+    if (!empresaId) {
+      if (gestoriaBancoImportStatus) gestoriaBancoImportStatus.textContent = "Selecciona una empresa.";
+      return;
+    }
+    if (!file) {
+      if (gestoriaBancoImportStatus) gestoriaBancoImportStatus.textContent = "Selecciona un PDF o XLSX.";
+      return;
+    }
+    if (gestoriaBancoImportStatus) gestoriaBancoImportStatus.textContent = "Importando extracto...";
+    try {
+      const fileBase64 = await fileToBase64(file);
+      const usuario = String(getAuthScopeUser()?.nombre_completo || getAuthScopeUser()?.usuario || getCurrentUser() || "Sistema").trim();
+      const res = await postJsonWithDbRetry("/api/gestoria_movimientos_bancarios_import", {
+        empresa_id: empresaId,
+        workspace_id: String(state.currentWorkspaceId || "").trim(),
+        filename: file.name || "",
+        file_base64: fileBase64,
+        usuario,
+      });
+      if (res?.error) throw new Error(res.error);
+      if (gestoriaBancoImportStatus) {
+        const compat = Number(res.compatibilidad_pct || 0);
+        const conciliados = Number(res.conciliados || res.matched || 0);
+        const total = Number(res.total_movimientos || res.inserted || 0);
+        const pendientes = Number(res.pendientes || Math.max(0, total - conciliados));
+        gestoriaBancoImportStatus.textContent = `Importados ${res.inserted || 0} movimientos · conciliados ${conciliados}/${total} (${Math.round(compat)}%) · pendientes ${pendientes} · omitidos ${res.skipped || 0}.`;
+      }
+      await loadGestoriaClienteBanco(state.currentClienteId || "", empresaId);
+      await loadGestoriaClienteContaResultados(state.currentClienteId || "", empresaId);
+      await loadGestoriaClienteLibros(state.currentClienteId || "", empresaId);
+    } catch (error) {
+      if (gestoriaBancoImportStatus) gestoriaBancoImportStatus.textContent = error?.message || "No se pudo importar el extracto.";
     }
   });
 }
@@ -83442,6 +85896,22 @@ if (gestoriaImportExcelBtn) {
   });
 }
 
+if (gestoriaClienteFacturasConciliarBtn) {
+  gestoriaClienteFacturasConciliarBtn.addEventListener("click", () => {
+    const clienteId = String(state.currentClienteId || "").trim();
+    const empresaId = clienteId ? "" : String(state.currentWorkspaceCompanyId || "").trim();
+    if (!clienteId && !empresaId) return;
+    gestoriaClienteFacturasConciliarBtn.disabled = true;
+    const originalText = gestoriaClienteFacturasConciliarBtn.textContent;
+    gestoriaClienteFacturasConciliarBtn.textContent = "Conciliando...";
+    Promise.resolve(loadGestoriaClienteContaResultados(clienteId, empresaId))
+      .finally(() => {
+        gestoriaClienteFacturasConciliarBtn.disabled = false;
+        gestoriaClienteFacturasConciliarBtn.textContent = originalText;
+      });
+  });
+}
+
 if (gestoriaImportReviewForm) {
   gestoriaImportReviewForm.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -83469,8 +85939,10 @@ if (gestoriaImportReviewForm) {
         gestoriaImportReviewStatus.textContent = data.error ? data.error : "Revisión guardada.";
       }
       if (!data.error) {
-        if (state.currentClienteId) {
-          loadGestoriaClienteImportador(state.currentClienteId);
+        const activeClient = String(state.currentClienteId || "").trim();
+        const activeEmpresa = activeClient ? "" : String(state.currentWorkspaceCompanyId || "").trim();
+        if (activeClient || activeEmpresa) {
+          loadGestoriaClienteImportador(activeClient, activeEmpresa);
         } else if (state.gestoriaImportSelectedLoteId) {
           loadGestoriaImportLoteDocuments(state.gestoriaImportSelectedLoteId);
         }
@@ -83499,15 +85971,16 @@ if (gestoriaClienteLibroExcelBtn) {
   gestoriaClienteLibroExcelBtn.addEventListener("click", async () => {
     const clienteId = String(state.currentClienteId || "").trim();
     const empresa = resolveCrmGestoriaEmpresa();
-    const empresaId = resolveLegacyEmpresaId(empresa);
-    if (!clienteId || !empresaId) {
+    const empresaId = resolveLegacyEmpresaId(empresa) || String(state.currentWorkspaceCompanyId || "").trim();
+    if (!clienteId && !empresaId) {
       if (gestoriaClienteLibroExcelStatus) {
         gestoriaClienteLibroExcelStatus.textContent = "Cliente o workspace no disponible.";
       }
       return;
     }
     try {
-      const qs = new URLSearchParams({ empresa_id: empresaId, cliente_id: clienteId });
+      const qs = new URLSearchParams({ empresa_id: empresaId });
+      if (clienteId) qs.set("cliente_id", clienteId);
       const resp = await fetch(`/api/gestoria_excel_plantilla?${qs.toString()}`, {
         credentials: "same-origin",
       });

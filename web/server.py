@@ -13058,6 +13058,340 @@ def ensure_factura_doc_link(
     return doc_id
 
 
+def reconcile_gestoria_factura_asiento(conn, factura_row, now, *, auto_link=True, lookback_days=7):
+    if not factura_row:
+        return None
+    if not isinstance(factura_row, dict):
+        factura_row = dict(factura_row)
+    factura_id = str(factura_row.get("id") or "").strip()
+    empresa_id = str(factura_row.get("empresa_id") or "").strip()
+    cliente_id = str(factura_row.get("cliente_id") or "").strip()
+    if not factura_id or not empresa_id:
+        return None
+    factura = conn.execute(
+        """
+        SELECT
+          f.*,
+          COALESCE(t.nombre, '') AS tercero_nombre,
+          COALESCE(t.nif, '') AS tercero_nif,
+          COALESCE(t.cuenta_contable, '') AS tercero_cuenta
+        FROM gestoria_facturas f
+        LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+        WHERE f.id = ?
+        LIMIT 1
+        """,
+        (factura_id,),
+    ).fetchone()
+    if not factura:
+        return None
+    existing_asiento = conn.execute(
+        "SELECT id, fecha, concepto, referencia FROM gestoria_asientos WHERE factura_id = ? LIMIT 1",
+        (factura_id,),
+    ).fetchone()
+    if existing_asiento:
+        try:
+            learn_gestoria_factura_rule(conn, factura, existing_asiento, None, now=now)
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "factura_id": factura_id,
+            "asiento_id": existing_asiento["id"],
+            "matched": True,
+            "linked": True,
+            "score": 100,
+            "reason": "ya_vinculada",
+        }
+
+    fecha_factura = str(factura["fecha_emision"] or "").strip()
+    factura_total = round(parse_money_value(factura["total"] or 0), 2)
+    factura_numero = str(factura["numero"] or "").strip()
+    factura_tipo = normalize_service_key(factura["tipo"] or "")
+    factura_nif = normalize_lookup_text(factura["tercero_nif"] or "")
+    factura_nombre = normalize_lookup_text(factura["tercero_nombre"] or "")
+    fecha_desde = ""
+    fecha_hasta = ""
+    if fecha_factura:
+        try:
+            dt_fact = datetime.strptime(fecha_factura[:10], "%Y-%m-%d")
+            fecha_desde = (dt_fact - timedelta(days=max(0, int(lookback_days or 0)))).strftime("%Y-%m-%d")
+            fecha_hasta = (dt_fact + timedelta(days=max(0, int(lookback_days or 0)))).strftime("%Y-%m-%d")
+        except Exception:
+            fecha_desde = fecha_factura
+            fecha_hasta = fecha_factura
+    where = [
+        "a.empresa_id = ?",
+        "COALESCE(a.factura_id, '') = ''",
+    ]
+    values = [empresa_id]
+    if cliente_id:
+        where.append("COALESCE(a.cliente_id, '') = ?")
+        values.append(cliente_id)
+    if fecha_desde:
+        where.append("a.fecha >= ?")
+        values.append(fecha_desde)
+    if fecha_hasta:
+        where.append("a.fecha <= ?")
+        values.append(fecha_hasta)
+    if factura_total > 0:
+        tolerance = max(1.0, round(factura_total * 0.03, 2))
+        where.append("(ABS(COALESCE(a.total_debe, 0) - ?) <= ? OR ABS(COALESCE(a.total_haber, 0) - ?) <= ?)")
+        values.extend([factura_total, tolerance, factura_total, tolerance])
+    candidates = conn.execute(
+        f"""
+        SELECT a.id, a.fecha, a.concepto, a.referencia, a.total_debe, a.total_haber, a.diario
+        FROM gestoria_asientos a
+        WHERE {' AND '.join(where)}
+        ORDER BY a.fecha ASC, a.created_at ASC
+        LIMIT 200
+        """,
+        values,
+    ).fetchall()
+
+    def _candidate_score(asiento_row, line_rows):
+        score = 0
+        asiento_total = round(max(parse_money_value(asiento_row["total_debe"] or 0), parse_money_value(asiento_row["total_haber"] or 0)), 2)
+        if factura_total > 0 and asiento_total > 0:
+            diff = abs(factura_total - asiento_total)
+            if diff <= 0.01:
+                score += 70
+            elif diff <= max(0.5, factura_total * 0.005):
+                score += 55
+            elif diff <= max(2.0, factura_total * 0.02):
+                score += 40
+            elif diff <= max(5.0, factura_total * 0.05):
+                score += 20
+        fecha_asiento = str(asiento_row["fecha"] or "").strip()
+        if fecha_factura and fecha_asiento:
+            try:
+                d1 = datetime.strptime(fecha_factura[:10], "%Y-%m-%d")
+                d2 = datetime.strptime(fecha_asiento[:10], "%Y-%m-%d")
+                days = abs((d1 - d2).days)
+                if days == 0:
+                    score += 18
+                elif days <= 1:
+                    score += 14
+                elif days <= 3:
+                    score += 10
+                elif days <= 7:
+                    score += 5
+            except Exception:
+                pass
+        ref_text = normalize_lookup_text(" ".join([asiento_row["concepto"] or "", asiento_row["referencia"] or ""]))
+        if factura_numero and factura_numero and factura_numero.upper() in ref_text:
+            score += 20
+        if factura_numero and factura_numero.upper().replace("/", "") in ref_text.replace("/", ""):
+            score += 10
+        tercero_text = ""
+        tercero_nif_line = ""
+        cuenta_tercero = ""
+        cuenta_gasto_ingreso = ""
+        for line in line_rows:
+            tercero_text = tercero_text or normalize_lookup_text(line.get("tercero_nombre") or "")
+            tercero_nif_line = tercero_nif_line or normalize_lookup_text(line.get("tercero_nif") or "")
+            cuenta = str(line.get("cuenta") or "").strip()
+            if not cuenta_tercero and cuenta.startswith(("4", "5")):
+                cuenta_tercero = cuenta
+            if not cuenta_gasto_ingreso and cuenta.startswith(("6", "7")):
+                cuenta_gasto_ingreso = cuenta
+        if factura_nif and tercero_nif_line and factura_nif == tercero_nif_line:
+            score += 15
+        if factura_nombre and tercero_text and (factura_nombre in tercero_text or tercero_text in factura_nombre):
+            score += 8
+        if factura_tipo == "venta" and cuenta_tercero.startswith("430"):
+            score += 5
+        if factura_tipo == "compra" and cuenta_tercero.startswith("400"):
+            score += 5
+        if factura_tipo == "venta" and cuenta_gasto_ingreso.startswith("7"):
+            score += 5
+        if factura_tipo == "compra" and cuenta_gasto_ingreso.startswith("6"):
+            score += 5
+        return score
+
+    best = None
+    best_lines = []
+    best_score = 0
+    for asiento_row in candidates:
+        line_rows = conn.execute(
+            """
+            SELECT
+              l.cuenta,
+              l.descripcion,
+              l.debe,
+              l.haber,
+              l.impuesto_tipo,
+              l.impuesto_pct,
+              COALESCE(t.nombre, '') AS tercero_nombre,
+              COALESCE(t.nif, '') AS tercero_nif,
+              COALESCE(t.cuenta_contable, '') AS tercero_cuenta
+            FROM gestoria_asiento_lineas l
+            LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
+            WHERE l.asiento_id = ?
+            ORDER BY l.created_at ASC
+            """,
+            (asiento_row["id"],),
+        ).fetchall()
+        line_dicts = [dict(r) for r in line_rows]
+        score = _candidate_score(asiento_row, line_dicts)
+        if score > best_score:
+            best = dict(asiento_row)
+            best_lines = line_dicts
+            best_score = score
+
+    if not best:
+        return {
+            "ok": False,
+            "factura_id": factura_id,
+            "asiento_id": None,
+            "matched": False,
+            "linked": False,
+            "score": 0,
+            "reason": "sin_candidatos",
+        }
+
+    linked = False
+    if auto_link and best_score >= 50:
+        updated = conn.execute(
+            """
+            UPDATE gestoria_asientos
+            SET factura_id = ?, updated_at = datetime(?)
+            WHERE id = ?
+              AND COALESCE(factura_id, '') = ''
+            """,
+            (factura_id, now, best["id"]),
+        ).rowcount
+        linked = updated == 1
+    if best and best_score >= 50:
+        try:
+            learn_gestoria_factura_rule(conn, factura, best, best_lines, now=now)
+        except Exception:
+            pass
+    return {
+        "ok": True,
+        "factura_id": factura_id,
+        "asiento_id": best["id"],
+        "matched": True,
+        "linked": linked,
+        "score": best_score,
+        "reason": "auto" if linked else "sugerido",
+        "asiento_fecha": best.get("fecha") or "",
+        "asiento_referencia": best.get("referencia") or "",
+        "asiento_concepto": best.get("concepto") or "",
+    }
+
+
+def learn_gestoria_factura_rule(conn, factura_row, asiento_row=None, line_rows=None, now=None):
+    if not factura_row:
+        return None
+    if not isinstance(factura_row, dict):
+        factura_row = dict(factura_row)
+    empresa_id = str(factura_row.get("empresa_id") or "").strip()
+    if not empresa_id:
+        return None
+    cliente_id = str(factura_row.get("cliente_id") or "").strip() or None
+    tercero_nombre = str(factura_row.get("tercero_nombre") or factura_row.get("tercero") or "").strip()
+    tercero_nif = str(factura_row.get("tercero_nif") or "").strip().upper()
+    factura_numero = str(factura_row.get("numero") or "").strip()
+    factura_tipo = normalize_service_key(factura_row.get("tipo") or "")
+    factura_iva = round(parse_money_value(factura_row.get("iva_pct") or 0), 2) if factura_row.get("iva_pct") else None
+    cuenta_tercero = str(factura_row.get("tercero_cuenta") or "").strip()
+    cuenta_gasto = ""
+    texto_match = " ".join(
+        [
+            tercero_nombre,
+            tercero_nif,
+            factura_numero,
+            str(factura_row.get("descripcion") or ""),
+            str(factura_row.get("doc_key") or ""),
+        ]
+    ).strip()
+    if line_rows:
+        for line in line_rows:
+            cuenta = str((line or {}).get("cuenta") or "").strip()
+            if not cuenta_tercero and cuenta.startswith(("4", "5")):
+                cuenta_tercero = cuenta
+            if not cuenta_gasto and cuenta.startswith(("6", "7")):
+                cuenta_gasto = cuenta
+            texto_match = " ".join([texto_match, str((line or {}).get("descripcion") or "")]).strip()
+    if asiento_row:
+        texto_match = " ".join(
+            [
+                texto_match,
+                str((asiento_row or {}).get("referencia") or ""),
+                str((asiento_row or {}).get("concepto") or ""),
+            ]
+        ).strip()
+    now = now or datetime.utcnow().isoformat()
+    existing = conn.execute(
+        """
+        SELECT id
+        FROM gestoria_import_reglas
+        WHERE empresa_id = ?
+          AND COALESCE(cliente_id, '') = COALESCE(?, '')
+          AND ambito = 'factura'
+          AND (
+            (COALESCE(proveedor_nif_match, '') <> '' AND COALESCE(proveedor_nif_match, '') = COALESCE(?, ''))
+            OR (COALESCE(proveedor_match, '') <> '' AND COALESCE(proveedor_match, '') = COALESCE(?, ''))
+          )
+        LIMIT 1
+        """,
+        (empresa_id, cliente_id or "", tercero_nif, tercero_nombre),
+    ).fetchone()
+    values = (
+        tercero_nombre or None,
+        tercero_nif or None,
+        texto_match[:500] or None,
+        factura_tipo or None,
+        tercero_nombre or None,
+        tercero_nif or None,
+        cuenta_gasto or None,
+        cuenta_tercero or None,
+        factura_iva,
+        1,
+        f"Aprendida desde conciliación factura {'/' + factura_numero if factura_numero else ''}".strip(),
+        now,
+    )
+    if existing:
+        conn.execute(
+            """
+            UPDATE gestoria_import_reglas
+            SET proveedor_match = COALESCE(NULLIF(?, ''), proveedor_match),
+                proveedor_nif_match = COALESCE(NULLIF(?, ''), proveedor_nif_match),
+                texto_match = COALESCE(NULLIF(?, ''), texto_match),
+                categoria_forzada = COALESCE(NULLIF(?, ''), categoria_forzada),
+                tercero_nombre_forzado = COALESCE(NULLIF(?, ''), tercero_nombre_forzado),
+                tercero_nif_forzado = COALESCE(NULLIF(?, ''), tercero_nif_forzado),
+                cuenta_gasto_forzada = COALESCE(NULLIF(?, ''), cuenta_gasto_forzada),
+                cuenta_tercero_forzada = COALESCE(NULLIF(?, ''), cuenta_tercero_forzada),
+                iva_pct_forzado = COALESCE(?, iva_pct_forzado),
+                auto_ok = CASE WHEN ? = 1 THEN 1 ELSE auto_ok END,
+                notas = COALESCE(NULLIF(?, ''), notas),
+                updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (*values, existing["id"]),
+        )
+        return {"id": existing["id"], "updated": True}
+    rule_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO gestoria_import_reglas (
+          id, empresa_id, cliente_id, ambito, prioridad, activo,
+          proveedor_match, proveedor_nif_match, texto_match, categoria_forzada,
+          tercero_nombre_forzado, tercero_nif_forzado, cuenta_gasto_forzada, cuenta_tercero_forzada,
+          iva_pct_forzado, auto_ok, notas, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, 'factura', 100, 1,
+          ?, ?, ?, ?,
+          ?, ?, ?, ?,
+          ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (rule_id, empresa_id, cliente_id, *values, now),
+    )
+    return {"id": rule_id, "updated": False}
+
+
 def _extract_matricula_from_campos_ocr(campos_ocr):
     raw = str(campos_ocr or "").strip()
     if not raw:
@@ -78522,6 +78856,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/gestoria_facturas":
             cliente_id = params.get("cliente_id", [""])[0]
             empresa_id = params.get("empresa_id", [""])[0]
+            conciliar = _bool_param(params, "conciliar", default=False)
             if not cliente_id and not empresa_id:
                 json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
                 return
@@ -78536,17 +78871,70 @@ class Handler(BaseHTTPRequestHandler):
             where_clause = " AND ".join(where) if where else "1=1"
             rows = conn.execute(
                 f"""
-                SELECT f.id, f.fecha_emision, f.numero, f.tipo, f.total, f.estado_ocr, f.doc_key,
-                       COALESCE(t.nombre, '') AS tercero
+                SELECT
+                  f.id,
+                  f.fecha_emision,
+                  f.numero,
+                  f.tipo,
+                  f.total,
+                  f.estado_ocr,
+                  f.doc_key,
+                  COALESCE(t.nombre, '') AS tercero,
+                  COALESCE(a.id, '') AS asiento_id,
+                  COALESCE(a.fecha, '') AS asiento_fecha,
+                  COALESCE(a.referencia, '') AS asiento_referencia,
+                  COALESCE(a.concepto, '') AS asiento_concepto,
+                  CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END AS conciliada
                 FROM gestoria_facturas f
                 LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                LEFT JOIN gestoria_asientos a ON a.factura_id = f.id
                 WHERE {where_clause}
                 ORDER BY f.created_at DESC
                 LIMIT 300
                 """,
                 values,
             ).fetchall()
-            json_response(self, {"rows": [dict(r) for r in rows]})
+            facturas = [dict(r) for r in rows]
+            if conciliar and facturas:
+                changed = False
+                for factura_row in facturas:
+                    try:
+                        result = reconcile_gestoria_factura_asiento(conn, factura_row, datetime.utcnow().isoformat(), auto_link=True)
+                        changed = changed or bool(result and result.get("linked"))
+                    except Exception:
+                        continue
+                if changed:
+                    try:
+                        conn.commit()
+                    except Exception:
+                        pass
+                    rows = conn.execute(
+                        f"""
+                        SELECT
+                          f.id,
+                          f.fecha_emision,
+                          f.numero,
+                          f.tipo,
+                          f.total,
+                          f.estado_ocr,
+                          f.doc_key,
+                          COALESCE(t.nombre, '') AS tercero,
+                          COALESCE(a.id, '') AS asiento_id,
+                          COALESCE(a.fecha, '') AS asiento_fecha,
+                          COALESCE(a.referencia, '') AS asiento_referencia,
+                          COALESCE(a.concepto, '') AS asiento_concepto,
+                          CASE WHEN a.id IS NOT NULL THEN 1 ELSE 0 END AS conciliada
+                        FROM gestoria_facturas f
+                        LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                        LEFT JOIN gestoria_asientos a ON a.factura_id = f.id
+                        WHERE {where_clause}
+                        ORDER BY f.created_at DESC
+                        LIMIT 300
+                        """,
+                        values,
+                    ).fetchall()
+                    facturas = [dict(r) for r in rows]
+            json_response(self, {"rows": facturas})
             return
 
         if path == "/api/gestoria_import_lotes":
@@ -78776,106 +79164,260 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
-            if path == "/api/gestoria_libros":
-                empresa_id = params.get("empresa_id", [""])[0]
-                workspace_id = params.get("workspace_id", [""])[0]
-                cliente_id = (params.get("cliente_id", [""])[0] or "").strip()
-                desde = (params.get("desde", [""])[0] or "").strip()
-                hasta = (params.get("hasta", [""])[0] or "").strip()
-                empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
-                if not empresa_ids:
-                    json_response(self, {"diario": [], "mayor": [], "iva_compras": [], "iva_ventas": []})
-                    return
-                placeholders = ",".join(["?"] * len(empresa_ids))
-                date_clause = ""
-                values = list(empresa_ids)
-                if cliente_id:
-                    date_clause += " AND a.cliente_id = ?"
-                    values.append(cliente_id)
-                if desde:
-                    date_clause += " AND a.fecha >= ?"
-                    values.append(desde)
-                if hasta:
-                    date_clause += " AND a.fecha <= ?"
-                    values.append(hasta)
-                diario = conn.execute(
-                    f"""
-                    SELECT a.id AS asiento_id, a.fecha, a.concepto, a.referencia,
-                           l.cuenta, l.descripcion, l.debe, l.haber,
-                           l.impuesto_tipo, l.impuesto_pct,
-                           COALESCE(t.nombre, '') AS tercero,
-                           COALESCE(t.nif, '') AS tercero_nif,
-                           COALESCE(f.numero, '') AS factura_numero,
-                           COALESCE(f.fecha_emision, '') AS factura_fecha,
-                           COALESCE(f.total, 0) AS factura_total,
-                           COALESCE(f.tipo, '') AS tipo_factura
-                    FROM gestoria_asientos a
-                    JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
-                    LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
-                    LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
-                    WHERE a.empresa_id IN ({placeholders}) {date_clause}
-                    ORDER BY a.fecha ASC, a.created_at ASC, l.cuenta ASC
-                    """,
-                    values,
-                ).fetchall()
-                mayor = conn.execute(
-                    f"""
-                    SELECT l.cuenta,
-                           ROUND(SUM(COALESCE(l.debe, 0)), 2) AS debe,
-                           ROUND(SUM(COALESCE(l.haber, 0)), 2) AS haber,
-                           ROUND(SUM(COALESCE(l.debe, 0) - COALESCE(l.haber, 0)), 2) AS saldo
-                    FROM gestoria_asientos a
-                    JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
-                    WHERE a.empresa_id IN ({placeholders}) {date_clause}
-                    GROUP BY l.cuenta
-                    ORDER BY l.cuenta ASC
-                    """,
-                    values,
-                ).fetchall()
-                iva_values = list(empresa_ids)
-                iva_clause = ""
-                if desde:
-                    iva_clause += " AND f.fecha_emision >= ?"
-                    iva_values.append(desde)
-                if hasta:
-                    iva_clause += " AND f.fecha_emision <= ?"
-                    iva_values.append(hasta)
-                iva_compras = conn.execute(
-                    f"""
-                    SELECT f.id, f.fecha_emision, f.numero, COALESCE(t.nombre, '') AS tercero,
-                           f.base_imponible, f.cuota_iva, f.iva_pct, f.total
-                    FROM gestoria_facturas f
-                    LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
-                    WHERE f.empresa_id IN ({placeholders})
-                      AND LOWER(COALESCE(f.tipo, '')) = 'compra'
-                      {iva_clause}
-                    ORDER BY f.fecha_emision ASC, f.created_at ASC
-                    """,
-                    iva_values,
-                ).fetchall()
-                iva_ventas = conn.execute(
-                    f"""
-                    SELECT f.id, f.fecha_emision, f.numero, COALESCE(t.nombre, '') AS tercero,
-                           f.base_imponible, f.cuota_iva, f.iva_pct, f.total
-                    FROM gestoria_facturas f
-                    LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
-                    WHERE f.empresa_id IN ({placeholders})
-                      AND LOWER(COALESCE(f.tipo, '')) = 'venta'
-                      {iva_clause}
-                    ORDER BY f.fecha_emision ASC, f.created_at ASC
-                    """,
-                    iva_values,
-                ).fetchall()
+        if path == "/api/gestoria_libros":
+            empresa_id = params.get("empresa_id", [""])[0]
+            workspace_id = params.get("workspace_id", [""])[0]
+            cliente_id = (params.get("cliente_id", [""])[0] or "").strip()
+            desde = (params.get("desde", [""])[0] or "").strip()
+            hasta = (params.get("hasta", [""])[0] or "").strip()
+            conciliar = _bool_param(params, "conciliar", default=False)
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+            if not empresa_ids:
                 json_response(
                     self,
                     {
-                        "diario": [dict(r) for r in diario],
-                        "mayor": [dict(r) for r in mayor],
-                        "iva_compras": [dict(r) for r in iva_compras],
-                        "iva_ventas": [dict(r) for r in iva_ventas],
+                        "diario": [],
+                        "mayor": [],
+                        "balance": [],
+                        "pyg": [],
+                        "iva_compras": [],
+                        "iva_ventas": [],
+                        "facturas": [],
+                        "facturas_resumen": {"total": 0, "conciliadas": 0, "pendientes": 0},
                     },
                 )
                 return
+            placeholders = ",".join(["?"] * len(empresa_ids))
+            date_clause = ""
+            values = list(empresa_ids)
+            if cliente_id:
+                date_clause += " AND a.cliente_id = ?"
+                values.append(cliente_id)
+            if desde:
+                date_clause += " AND a.fecha >= ?"
+                values.append(desde)
+            if hasta:
+                date_clause += " AND a.fecha <= ?"
+                values.append(hasta)
+            diario = conn.execute(
+                f"""
+                SELECT a.id AS asiento_id, a.fecha, a.concepto, a.referencia,
+                       l.cuenta, l.descripcion, l.debe, l.haber,
+                       l.impuesto_tipo, l.impuesto_pct,
+                       COALESCE(t.nombre, '') AS tercero,
+                       COALESCE(t.nif, '') AS tercero_nif,
+                       COALESCE(f.numero, '') AS factura_numero,
+                       COALESCE(f.fecha_emision, '') AS factura_fecha,
+                       COALESCE(f.total, 0) AS factura_total,
+                       COALESCE(f.tipo, '') AS tipo_factura
+                FROM gestoria_asientos a
+                JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+                LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
+                LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
+                WHERE a.empresa_id IN ({placeholders}) {date_clause}
+                ORDER BY a.fecha ASC, a.created_at ASC, l.cuenta ASC
+                """,
+                values,
+            ).fetchall()
+            mayor = conn.execute(
+                f"""
+                SELECT l.cuenta,
+                       ROUND(SUM(COALESCE(l.debe, 0)), 2) AS debe,
+                       ROUND(SUM(COALESCE(l.haber, 0)), 2) AS haber,
+                       ROUND(SUM(COALESCE(l.debe, 0) - COALESCE(l.haber, 0)), 2) AS saldo
+                FROM gestoria_asientos a
+                JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+                WHERE a.empresa_id IN ({placeholders}) {date_clause}
+                GROUP BY l.cuenta
+                ORDER BY l.cuenta ASC
+                """,
+                values,
+            ).fetchall()
+            balance = conn.execute(
+                f"""
+                SELECT l.cuenta,
+                       ROUND(SUM(COALESCE(l.debe, 0)), 2) AS debe,
+                       ROUND(SUM(COALESCE(l.haber, 0)), 2) AS haber,
+                       ROUND(SUM(COALESCE(l.debe, 0) - COALESCE(l.haber, 0)), 2) AS saldo
+                FROM gestoria_asientos a
+                JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+                WHERE a.empresa_id IN ({placeholders}) {date_clause}
+                  AND (l.cuenta GLOB '1*' OR l.cuenta GLOB '2*' OR l.cuenta GLOB '3*' OR l.cuenta GLOB '4*' OR l.cuenta GLOB '5*')
+                GROUP BY l.cuenta
+                ORDER BY l.cuenta ASC
+                """,
+                values,
+            ).fetchall()
+            pyg = conn.execute(
+                f"""
+                SELECT l.cuenta,
+                       ROUND(SUM(COALESCE(l.debe, 0)), 2) AS debe,
+                       ROUND(SUM(COALESCE(l.haber, 0)), 2) AS haber,
+                       ROUND(SUM(COALESCE(l.debe, 0) - COALESCE(l.haber, 0)), 2) AS saldo
+                FROM gestoria_asientos a
+                JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+                WHERE a.empresa_id IN ({placeholders}) {date_clause}
+                  AND (l.cuenta GLOB '6*' OR l.cuenta GLOB '7*')
+                GROUP BY l.cuenta
+                ORDER BY l.cuenta ASC
+                """,
+                values,
+            ).fetchall()
+            iva_values = list(empresa_ids)
+            iva_clause = ""
+            if desde:
+                iva_clause += " AND f.fecha_emision >= ?"
+                iva_values.append(desde)
+            if hasta:
+                iva_clause += " AND f.fecha_emision <= ?"
+                iva_values.append(hasta)
+            iva_compras = conn.execute(
+                f"""
+                SELECT f.id, f.fecha_emision, f.numero, COALESCE(t.nombre, '') AS tercero,
+                       f.base_imponible, f.cuota_iva, f.iva_pct, f.total
+                FROM gestoria_facturas f
+                LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                WHERE f.empresa_id IN ({placeholders})
+                  AND LOWER(COALESCE(f.tipo, '')) = 'compra'
+                  {iva_clause}
+                ORDER BY f.fecha_emision ASC, f.created_at ASC
+                """,
+                iva_values,
+            ).fetchall()
+            iva_ventas = conn.execute(
+                f"""
+                SELECT f.id, f.fecha_emision, f.numero, COALESCE(t.nombre, '') AS tercero,
+                       f.base_imponible, f.cuota_iva, f.iva_pct, f.total
+                FROM gestoria_facturas f
+                LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                WHERE f.empresa_id IN ({placeholders})
+                  AND LOWER(COALESCE(f.tipo, '')) = 'venta'
+                  {iva_clause}
+                ORDER BY f.fecha_emision ASC, f.created_at ASC
+                """,
+                iva_values,
+            ).fetchall()
+            fact_values = list(empresa_ids)
+            fact_clause = ""
+            if cliente_id:
+                fact_clause += " AND COALESCE(f.cliente_id, '') = ?"
+                fact_values.append(cliente_id)
+            if desde:
+                fact_clause += " AND COALESCE(f.fecha_emision, '') >= ?"
+                fact_values.append(desde)
+            if hasta:
+                fact_clause += " AND COALESCE(f.fecha_emision, '') <= ?"
+                fact_values.append(hasta)
+            facturas_rows = conn.execute(
+                f"""
+                SELECT
+                  f.id,
+                  f.fecha_emision,
+                  f.numero,
+                  f.tipo,
+                  COALESCE(t.nombre, '') AS tercero,
+                  COALESCE(t.nif, '') AS tercero_nif,
+                  f.base_imponible,
+                  f.cuota_iva,
+                  f.cuota_irpf,
+                  f.total,
+                  f.iva_pct,
+                  f.doc_key,
+                  COALESCE(a.id, '') AS asiento_id,
+                  COALESCE(a.fecha, '') AS asiento_fecha,
+                  COALESCE(a.referencia, '') AS asiento_referencia,
+                  COALESCE(a.concepto, '') AS asiento_concepto
+                FROM gestoria_facturas f
+                LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                LEFT JOIN gestoria_asientos a ON a.factura_id = f.id
+                WHERE f.empresa_id IN ({placeholders}) {fact_clause}
+                ORDER BY f.fecha_emision ASC, f.created_at ASC
+                """,
+                fact_values,
+            ).fetchall()
+            facturas = [dict(r) for r in facturas_rows]
+            if conciliar and facturas:
+                changed = False
+                for factura_row in facturas:
+                    try:
+                        result = reconcile_gestoria_factura_asiento(conn, factura_row, datetime.utcnow().isoformat(), auto_link=True)
+                        changed = changed or bool(result and result.get("linked"))
+                    except Exception:
+                        continue
+                if changed:
+                    try:
+                        conn.commit()
+                    except Exception:
+                        pass
+                    diario = conn.execute(
+                        f"""
+                        SELECT a.id AS asiento_id, a.fecha, a.concepto, a.referencia,
+                               l.cuenta, l.descripcion, l.debe, l.haber,
+                               l.impuesto_tipo, l.impuesto_pct,
+                               COALESCE(t.nombre, '') AS tercero,
+                               COALESCE(t.nif, '') AS tercero_nif,
+                               COALESCE(f.numero, '') AS factura_numero,
+                               COALESCE(f.fecha_emision, '') AS factura_fecha,
+                               COALESCE(f.total, 0) AS factura_total,
+                               COALESCE(f.tipo, '') AS tipo_factura
+                        FROM gestoria_asientos a
+                        JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+                        LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
+                        LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
+                        WHERE a.empresa_id IN ({placeholders}) {date_clause}
+                        ORDER BY a.fecha ASC, a.created_at ASC, l.cuenta ASC
+                        """,
+                        values,
+                    ).fetchall()
+                    facturas_rows = conn.execute(
+                        f"""
+                        SELECT
+                          f.id,
+                          f.fecha_emision,
+                          f.numero,
+                          f.tipo,
+                          COALESCE(t.nombre, '') AS tercero,
+                          COALESCE(t.nif, '') AS tercero_nif,
+                          f.base_imponible,
+                          f.cuota_iva,
+                          f.cuota_irpf,
+                          f.total,
+                          f.iva_pct,
+                          f.doc_key,
+                          COALESCE(a.id, '') AS asiento_id,
+                          COALESCE(a.fecha, '') AS asiento_fecha,
+                          COALESCE(a.referencia, '') AS asiento_referencia,
+                          COALESCE(a.concepto, '') AS asiento_concepto
+                        FROM gestoria_facturas f
+                        LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                        LEFT JOIN gestoria_asientos a ON a.factura_id = f.id
+                        WHERE f.empresa_id IN ({placeholders}) {fact_clause}
+                        ORDER BY f.fecha_emision ASC, f.created_at ASC
+                        """,
+                        fact_values,
+                    ).fetchall()
+                    facturas = [dict(r) for r in facturas_rows]
+            facturas_total = len(facturas)
+            facturas_conciliadas = sum(1 for row in facturas if str(row.get("asiento_id") or "").strip())
+            facturas_pendientes = max(0, facturas_total - facturas_conciliadas)
+            json_response(
+                self,
+                {
+                    "diario": [dict(r) for r in diario],
+                    "mayor": [dict(r) for r in mayor],
+                    "balance": [dict(r) for r in balance],
+                    "pyg": [dict(r) for r in pyg],
+                    "iva_compras": [dict(r) for r in iva_compras],
+                    "iva_ventas": [dict(r) for r in iva_ventas],
+                    "facturas": facturas,
+                    "facturas_resumen": {
+                        "total": facturas_total,
+                        "conciliadas": facturas_conciliadas,
+                        "pendientes": facturas_pendientes,
+                    },
+                },
+            )
+            return
 
             if path == "/api/gestoria_excel_plantilla":
                 empresa_id = params.get("empresa_id", [""])[0]

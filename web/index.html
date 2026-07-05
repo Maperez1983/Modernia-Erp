@@ -10434,6 +10434,7 @@
                       <p class="muted">Facturas detectadas y registradas para este cliente.</p>
                     </div>
                     <div class="toolbar">
+                      <button type="button" class="secondary" id="gestoriaClienteFacturasConciliarBtn">Conciliar facturas</button>
                       <a class="secondary hidden" id="gestoriaClienteFacturasExcelLink" target="_blank" rel="noreferrer">Descargar Excel</a>
                     </div>
                   </div>
@@ -10450,12 +10451,15 @@
                   <div class="section-head">
                     <div>
                       <h3>Libros contables</h3>
-                      <p class="muted">Libro diario, mayor, desglose de IVA y exportación.</p>
+                      <p class="muted">Libro diario, mayor, balance, P&amp;G, libro de facturas, desglose de IVA y exportación.</p>
                     </div>
                   </div>
                   <div class="tabs crm-lightning-subbar" id="gestoriaClienteLibrosTabs">
                     <button class="tab active" type="button" data-libro-tab="diario">Libro diario</button>
                     <button class="tab" type="button" data-libro-tab="mayor">Libro mayor</button>
+                    <button class="tab" type="button" data-libro-tab="balance">Balance</button>
+                    <button class="tab" type="button" data-libro-tab="pyg">P&G</button>
+                    <button class="tab" type="button" data-libro-tab="facturas">Facturas</button>
                     <button class="tab" type="button" data-libro-tab="iva">Desglose IVA</button>
                     <button class="tab" type="button" data-libro-tab="excel">Excel</button>
                   </div>
@@ -10466,6 +10470,18 @@
                   <div id="gestoriaClienteLibroMayorPanel" class="hidden">
                     <div id="gestoriaClienteLibroMayorTable"></div>
                     <div class="footer" id="gestoriaClienteLibroMayorInfo"></div>
+                  </div>
+                  <div id="gestoriaClienteLibroBalancePanel" class="hidden">
+                    <div id="gestoriaClienteLibroBalanceTable"></div>
+                    <div class="footer" id="gestoriaClienteLibroBalanceInfo"></div>
+                  </div>
+                  <div id="gestoriaClienteLibroPyGPanel" class="hidden">
+                    <div id="gestoriaClienteLibroPyGTable"></div>
+                    <div class="footer" id="gestoriaClienteLibroPyGInfo"></div>
+                  </div>
+                  <div id="gestoriaClienteLibroFacturasPanel" class="hidden">
+                    <div id="gestoriaClienteLibroFacturasTable"></div>
+                    <div class="footer" id="gestoriaClienteLibroFacturasInfo"></div>
                   </div>
                   <div id="gestoriaClienteLibroIvaPanel" class="hidden">
                     <div id="gestoriaClienteLibroIvaTable"></div>
