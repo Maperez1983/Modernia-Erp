@@ -10692,6 +10692,14 @@ function openWorkspaceCompanyFicha(companyId, initialTab = "dashboard") {
   setWorkspaceCompanyFichaTab("contabilidad", { scroll: true });
   setWorkspaceCompanyContabilidadTab(nextTab === "documentos" ? "dashboard" : (nextTab || "dashboard"));
   hydrateGestoriaBooksFromCache(explicitLegacyId || company.id || "");
+  let revealRoot = workspaceCompanyFicha.parentElement;
+  while (revealRoot && revealRoot !== document.body) {
+    if (revealRoot.classList?.contains("crm-workspace-view") || revealRoot.classList?.contains("hidden")) {
+      revealRoot.classList.remove("hidden");
+      revealRoot.hidden = false;
+    }
+    revealRoot = revealRoot.parentElement;
+  }
   if (companyLegacyId) {
     window.setTimeout(() => {
       const qs = new URLSearchParams({ conciliar: "1", empresa_id: companyLegacyId });
