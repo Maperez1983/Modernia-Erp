@@ -24200,6 +24200,23 @@ const loadWorkspaceDetail = async (workspaceId) => {
   }
   renderWorkspaceList(state.workspaces || []);
   renderCompanyCards();
+  try {
+    window.requestAnimationFrame(() => {
+      try {
+        const params = new URLSearchParams(window.location.search || "");
+        const slug = String(params.get("empresa") || "").trim();
+        if (!slug) return;
+        const company = typeof getWorkspaceCompanyBySlug === "function" ? getWorkspaceCompanyBySlug(slug) : null;
+        if (!company) return;
+        if (typeof openWorkspaceCompanyFicha === "function") {
+          openWorkspaceCompanyFicha(
+            String(company.id || company.legacy_empresa_id || company.nombre || "").trim(),
+            params.get("conta") || "dashboard"
+          );
+        }
+      } catch (e) {}
+    });
+  } catch (e) {}
 };
 
 const loadWorkspaceCentral = async () => {
