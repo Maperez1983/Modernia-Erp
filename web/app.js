@@ -10466,8 +10466,13 @@ const setWorkspaceCompanyContabilidadTab = (tabKey = "dashboard", opts = {}) => 
   restoreWorkspaceCompanyContextFromStorage();
   const shell = ensureWorkspaceCompanyContabilidadShell();
   if (!shell) return;
-  const tab = String(tabKey || "dashboard").trim();
+  const tab = String(tabKey || "dashboard").trim().toLowerCase();
   _companyContaActiveTab = tab;
+  try {
+    if (typeof setGestoriaClientModuleTab === "function") {
+      setGestoriaClientModuleTab("contabilidad");
+    }
+  } catch (e) {}
   shell.querySelectorAll("[data-company-conta-tab]").forEach((btn) => {
     btn.classList.toggle("active", String(btn.dataset.companyContaTab || "") === tab);
   });
@@ -10483,27 +10488,42 @@ const setWorkspaceCompanyContabilidadTab = (tabKey = "dashboard", opts = {}) => 
     pane.classList.toggle("hidden", !show);
     pane.hidden = !show;
   });
+  const scrollTo = (selector) => {
+    const targetNode = shell.querySelector(selector) || document.querySelector(selector);
+    if (targetNode && typeof targetNode.scrollIntoView === "function") {
+      window.requestAnimationFrame(() => {
+        try {
+          targetNode.scrollIntoView({ behavior: "smooth", block: "start" });
+        } catch (e) {}
+      });
+    }
+  };
   if (tab === "diarios" || tab === "balances") {
     try {
       setGestoriaClienteContaTab("libros");
       setGestoriaClienteLibroTab(tab === "balances" ? "balance" : "diario");
       hydrateGestoriaBooksFromCache(String(state.currentWorkspaceCompanyId || "").trim());
+      scrollTo(tab === "balances" ? "#gestoriaClienteLibroBalancePanel" : "#gestoriaClienteLibroDiarioPanel");
     } catch (e) {}
   }
   if (tab === "asientos") {
     try {
-      setGestoriaClienteContaTab("operativa");
+      setGestoriaClienteContaTab("libros");
+      setGestoriaClienteLibroTab("diario");
+      scrollTo("#gestoriaAsientoFicha");
     } catch (e) {}
   }
   if (tab === "modelos") {
     try {
       const companyId = String(state.currentWorkspaceCompanyId || "").trim();
       if (companyId) loadGestoriaModelos(companyId);
+      scrollTo("#gestoriaModelosTable");
     } catch (e) {}
   }
   if (tab === "dashboard") {
     try {
       loadGestoriaDashboardContabilidad({ force: true }).catch(() => {});
+      scrollTo('[data-company-conta-pane="dashboard"]');
     } catch (e) {}
   }
   if (opts.scroll !== false && typeof workspaceCompanyFicha?.scrollIntoView === "function") {
@@ -27186,23 +27206,15 @@ const renderClienteContabilidadPanel = () => {
         btn.classList.toggle("active", String(btn.dataset.companyContaMainTab || "") === tabKey);
       });
     };
-    const setMainPane = (tabKey) => {
-      const target = String(tabKey || "dashboard").trim();
-      root.querySelectorAll("[data-company-conta-main-pane]").forEach((pane) => {
-        const show = String(pane.dataset.companyContaMainPane || "") === target;
-        pane.classList.toggle("hidden", !show);
-        pane.hidden = !show;
-      });
-      const pane = root.querySelector(`[data-company-conta-main-pane="${target}"]`);
-      if (pane && typeof pane.scrollIntoView === "function") {
-        setTimeout(() => pane.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    const jumpTo = (selector) => {
+      const el = typeof selector === "string" ? document.querySelector(selector) : selector;
+      if (el && typeof el.scrollIntoView === "function") {
+        setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
       }
-      return pane;
     };
     const activateTab = (tabKey) => {
       const tab = String(tabKey || "dashboard").trim();
       setMainTab(tab);
-      setMainPane(tab);
       try {
         const params = new URLSearchParams(window.location.search || "");
         if (companyId) {
@@ -27215,37 +27227,32 @@ const renderClienteContabilidadPanel = () => {
         if (tab === "importacion") {
           if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("importador");
           if (companyScopeId) loadGestoriaClienteImportador("", companyScopeId);
+          jumpTo("#gestoriaModuleContabilidad");
         } else if (tab === "validacion") {
           if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("control");
           if (companyScopeId) loadGestoriaClienteContaResultados("", companyScopeId);
+          jumpTo("#clienteContaValidacionResumen");
         } else if (tab === "banco") {
           if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("banco");
           if (companyScopeId) loadGestoriaClienteBanco("", companyScopeId);
+          jumpTo("#gestoriaModuleContabilidad");
         } else if (tab === "diarios" || tab === "balances") {
           if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("libros");
           if (typeof setGestoriaClienteLibroTab === "function") setGestoriaClienteLibroTab(tab === "balances" ? "balance" : "diario");
           if (companyScopeId) loadGestoriaClienteLibros("", companyScopeId);
-          if (typeof setWorkspaceCompanyContabilidadTab === "function") {
-            setWorkspaceCompanyContabilidadTab(tab, { scroll: false });
-          }
+          jumpTo(tab === "balances" ? "#gestoriaClienteLibroBalancePanel" : "#gestoriaClienteLibroDiarioPanel");
         } else if (tab === "modelos") {
           if (companyScopeId) loadGestoriaModelos(companyScopeId);
-          if (typeof setWorkspaceCompanyContabilidadTab === "function") {
-            setWorkspaceCompanyContabilidadTab("modelos", { scroll: false });
-          }
+          jumpTo("#gestoriaModuleFiscal");
         } else if (tab === "asientos") {
           if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("operativa");
           if (companyScopeId) loadGestoriaClienteContaResultados("", companyScopeId);
-          if (typeof setWorkspaceCompanyContabilidadTab === "function") {
-            setWorkspaceCompanyContabilidadTab("asientos", { scroll: false });
-          }
+          jumpTo("#gestoriaModuleContabilidad");
         } else {
           if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("libros");
           if (typeof setGestoriaClienteLibroTab === "function") setGestoriaClienteLibroTab("diario");
           if (companyScopeId) loadGestoriaClienteContaResultados("", companyScopeId);
-          if (typeof setWorkspaceCompanyContabilidadTab === "function") {
-            setWorkspaceCompanyContabilidadTab("dashboard", { scroll: false });
-          }
+          jumpTo("#gestoriaClienteConciliacionFicha");
         }
       } catch (e) {}
     };
@@ -27256,7 +27263,7 @@ const renderClienteContabilidadPanel = () => {
         <div class="section-head">
           <div>
             <h3>Contabilidad</h3>
-            <p class="muted">Módulo contable de la empresa. Cada pestaña abre su sección real.</p>
+            <p class="muted">Módulo contable de la empresa. La validación es una capa interna de control.</p>
           </div>
           <div class="form-actions">
             <button type="button" class="tab active" data-company-conta-main-tab="dashboard">Dashboard</button>
@@ -27269,93 +27276,24 @@ const renderClienteContabilidadPanel = () => {
             <button type="button" class="tab" data-company-conta-main-tab="asientos">Asientos</button>
           </div>
         </div>
-
-        <div data-company-conta-main-pane="dashboard" class="stack">
-          <div class="form-card" style="margin-bottom:12px;">
-            <h4>Dashboard</h4>
-            <div class="muted">Resumen general de la contabilidad de la empresa, con accesos a los libros y al control.</div>
-            <div class="form-actions" style="margin-top:10px;">
-              <button type="button" class="secondary" data-company-conta-main-tab="validacion">Ir a validación</button>
-              <button type="button" class="secondary" data-company-conta-main-tab="diarios">Ir a diario</button>
-              <button type="button" class="secondary" data-company-conta-main-tab="modelos">Ir a modelos</button>
-            </div>
+        <div class="form-card" style="margin-bottom:12px;">
+          <h4>Dashboard</h4>
+          <div class="muted">Resumen general de la contabilidad de la empresa, con accesos a los libros y al control.</div>
+        </div>
+        <div class="form-card" style="margin-bottom:12px;">
+          <h4>Importación</h4>
+          <div class="muted">Lotes y documentos importados por la gestoria o el cliente. Aquí se concilian y validan antes de pasar a contabilidad.</div>
+          <div class="form-actions" style="margin-top:10px;">
+            <button type="button" class="secondary" data-company-conta-main-tab="importacion">Abrir importador</button>
           </div>
         </div>
-
-        <div data-company-conta-main-pane="importacion" class="stack hidden">
-          <div class="form-card" style="margin-bottom:12px;">
-            <h4>Importación</h4>
-            <div class="muted">Lotes y documentos importados por la gestoria o el cliente. Aquí se concilian y validan antes de pasar a contabilidad.</div>
-            <div class="form-actions" style="margin-top:10px;">
-              <button type="button" class="secondary" data-company-conta-main-tab="validacion">Abrir validación</button>
-              <button type="button" class="secondary" data-company-conta-main-tab="banco">Abrir banco</button>
-            </div>
-          </div>
+        <div class="form-card" style="margin-bottom:12px;">
+          <h4>Validación</h4>
+          <div class="muted">Control de importaciones, facturas pendientes, asientos descuadrados y conciliación.</div>
         </div>
-
-        <div data-company-conta-main-pane="validacion" class="stack hidden">
-          <div class="form-card" style="margin-bottom:12px;">
-            <h4>Validación</h4>
-            <div class="muted">Control de importaciones, facturas pendientes, asientos descuadrados y conciliación.</div>
-            <div class="form-actions" style="margin-top:10px;">
-              <button type="button" class="secondary" data-company-conta-main-tab="importacion">Volver a importación</button>
-              <button type="button" class="secondary" data-company-conta-main-tab="asientos">Abrir asientos</button>
-            </div>
-          </div>
-          <div id="clienteContaValidacionResumen"></div>
-          <div class="footer" id="clienteContaValidacionInfo"></div>
-          <div id="clienteContaValidacionAcciones" style="margin-top:10px;"></div>
-        </div>
-
-        <div data-company-conta-main-pane="banco" class="stack hidden">
-          <div class="form-card">
-            <h4>Banco</h4>
-            <div class="muted">Conciliación bancaria y movimientos pendientes de puntear con facturas o asientos.</div>
-            <div class="form-actions" style="margin-top:10px;">
-              <button type="button" class="secondary" data-company-conta-main-tab="asientos">Ir a asientos</button>
-            </div>
-          </div>
-        </div>
-
-        <div data-company-conta-main-pane="diarios" class="stack hidden">
-          <div class="form-card">
-            <h4>Libro diario</h4>
-            <div class="muted">Abre el libro diario de la empresa y desplaza la vista al bloque de libros de contabilidad.</div>
-            <div class="form-actions" style="margin-top:10px;">
-              <button type="button" class="secondary" data-company-conta-main-tab="balances">Ver balances</button>
-            </div>
-          </div>
-        </div>
-
-        <div data-company-conta-main-pane="modelos" class="stack hidden">
-          <div class="form-card">
-            <h4>Modelos</h4>
-            <div class="muted">Modelos fiscales y obligaciones de la empresa.</div>
-            <div class="form-actions" style="margin-top:10px;">
-              <button type="button" class="secondary" data-company-conta-main-tab="dashboard">Volver al dashboard</button>
-            </div>
-          </div>
-        </div>
-
-        <div data-company-conta-main-pane="balances" class="stack hidden">
-          <div class="form-card">
-            <h4>Balances</h4>
-            <div class="muted">Balance de sumas y saldos, P&G y libros asociados a la empresa.</div>
-            <div class="form-actions" style="margin-top:10px;">
-              <button type="button" class="secondary" data-company-conta-main-tab="diarios">Volver al diario</button>
-            </div>
-          </div>
-        </div>
-
-        <div data-company-conta-main-pane="asientos" class="stack hidden">
-          <div class="form-card">
-            <h4>Asientos</h4>
-            <div class="muted">Ficha de asientos y conciliación con facturas o movimientos bancarios.</div>
-            <div class="form-actions" style="margin-top:10px;">
-              <button type="button" class="secondary" data-company-conta-main-tab="banco">Abrir banco</button>
-            </div>
-          </div>
-        </div>
+        <div id="clienteContaValidacionResumen"></div>
+        <div class="footer" id="clienteContaValidacionInfo"></div>
+        <div id="clienteContaValidacionAcciones" style="margin-top:10px;"></div>
       </div>
     `;
     clienteEconomicosPanel.innerHTML = "";
@@ -38888,7 +38826,9 @@ const setGestoriaClienteContaTab = (tabName = "operativa") => {
   gestoriaModuleContabilidad
     .querySelectorAll("[data-gestoria-conta-pane]")
     .forEach((panel) => {
-      panel.classList.toggle("hidden", panel.dataset.gestoriaContaPane !== target);
+      const isVisible = panel.dataset.gestoriaContaPane === target;
+      panel.classList.toggle("hidden", !isVisible);
+      panel.hidden = !isVisible;
     });
   if (target === "importador") {
     const activeClient = String(state.currentClienteId || "").trim();
@@ -68968,13 +68908,41 @@ const setGestoriaClienteLibroTab = (tabName = "diario") => {
   gestoriaClienteLibrosTabs.querySelectorAll(".tab").forEach((btn) => {
     btn.classList.toggle("active", btn.dataset.libroTab === target);
   });
-  if (gestoriaClienteLibroDiarioPanel) gestoriaClienteLibroDiarioPanel.classList.toggle("hidden", target !== "diario");
-  if (gestoriaClienteLibroMayorPanel) gestoriaClienteLibroMayorPanel.classList.toggle("hidden", target !== "mayor");
-  if (gestoriaClienteLibroBalancePanel) gestoriaClienteLibroBalancePanel.classList.toggle("hidden", target !== "balance");
-  if (gestoriaClienteLibroPyGPanel) gestoriaClienteLibroPyGPanel.classList.toggle("hidden", target !== "pyg");
-  if (gestoriaClienteLibroFacturasPanel) gestoriaClienteLibroFacturasPanel.classList.toggle("hidden", target !== "facturas");
-  if (gestoriaClienteLibroIvaPanel) gestoriaClienteLibroIvaPanel.classList.toggle("hidden", target !== "iva");
-  if (gestoriaClienteLibroExcelPanel) gestoriaClienteLibroExcelPanel.classList.toggle("hidden", target !== "excel");
+  if (gestoriaClienteLibroDiarioPanel) {
+    const show = target === "diario";
+    gestoriaClienteLibroDiarioPanel.classList.toggle("hidden", !show);
+    gestoriaClienteLibroDiarioPanel.hidden = !show;
+  }
+  if (gestoriaClienteLibroMayorPanel) {
+    const show = target === "mayor";
+    gestoriaClienteLibroMayorPanel.classList.toggle("hidden", !show);
+    gestoriaClienteLibroMayorPanel.hidden = !show;
+  }
+  if (gestoriaClienteLibroBalancePanel) {
+    const show = target === "balance";
+    gestoriaClienteLibroBalancePanel.classList.toggle("hidden", !show);
+    gestoriaClienteLibroBalancePanel.hidden = !show;
+  }
+  if (gestoriaClienteLibroPyGPanel) {
+    const show = target === "pyg";
+    gestoriaClienteLibroPyGPanel.classList.toggle("hidden", !show);
+    gestoriaClienteLibroPyGPanel.hidden = !show;
+  }
+  if (gestoriaClienteLibroFacturasPanel) {
+    const show = target === "facturas";
+    gestoriaClienteLibroFacturasPanel.classList.toggle("hidden", !show);
+    gestoriaClienteLibroFacturasPanel.hidden = !show;
+  }
+  if (gestoriaClienteLibroIvaPanel) {
+    const show = target === "iva";
+    gestoriaClienteLibroIvaPanel.classList.toggle("hidden", !show);
+    gestoriaClienteLibroIvaPanel.hidden = !show;
+  }
+  if (gestoriaClienteLibroExcelPanel) {
+    const show = target === "excel";
+    gestoriaClienteLibroExcelPanel.classList.toggle("hidden", !show);
+    gestoriaClienteLibroExcelPanel.hidden = !show;
+  }
 };
 
 const renderSimpleTable = (container, columns, rows) => {
