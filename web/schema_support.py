@@ -22,6 +22,14 @@ def _columns_cache(conn) -> dict:
     return cache
 
 
+def _rollback_best_effort(conn):
+    try:
+        if conn:
+            conn.rollback()
+    except Exception:
+        pass
+
+
 def apply_schema_file(conn, schema_path):
     path = Path(schema_path)
     if not path.exists():
@@ -64,6 +72,7 @@ def table_columns(conn, table_name):
         try:
             cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()}
         except Exception:
+            _rollback_best_effort(conn)
             cols = set()
         if key and isinstance(cache, dict):
             cache[key] = set(cols)
@@ -88,6 +97,7 @@ def table_columns(conn, table_name):
             cache[key] = set(cols)
         return cols
     except Exception:
+        _rollback_best_effort(conn)
         return set()
 
 

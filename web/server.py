@@ -312,6 +312,7 @@ def seed_workspace_service_matrix(conn, now=None):
                         (now, ws_id, service_key, inserted[0]),
                     )
                 except Exception:
+                    _rollback_best_effort(conn)
                     pass
 
             # Normaliza: 1 solo default por servicio.
@@ -36566,37 +36567,53 @@ def infer_workspace_doc_classification(nombre, tipo, servicio):
     return None
 
 
+def _rollback_best_effort(conn):
+    try:
+        if conn:
+            conn.rollback()
+    except Exception:
+        pass
+
+
 def fetch_workspace_company_ids(conn, workspace_id):
     ws_id = str(workspace_id or "").strip()
     if not ws_id:
         return []
+    def _safe_fetchall(sql, params=()):
+        try:
+            return conn.execute(sql, params).fetchall()
+        except Exception:
+            _rollback_best_effort(conn)
+            return []
+
     # Prefer v2: companies living inside the workspace.
     try:
         ensure_workspace_core_tables(conn)
-        rows_v2 = conn.execute(
-            """
-            SELECT legacy_empresa_id
-            FROM workspace_companies
-            WHERE workspace_id = ?
-              AND COALESCE(activo, 1) = 1
-              AND COALESCE(TRIM(legacy_empresa_id), '') <> ''
-            ORDER BY nombre COLLATE NOCASE ASC
-            """,
-            (ws_id,),
-        ).fetchall()
-        legacy_ids = [
-            str(row_value(r, "legacy_empresa_id") or row_value(r, 0) or "").strip()
-            for r in (rows_v2 or [])
-        ]
-        legacy_ids = [eid for eid in legacy_ids if eid]
-        if legacy_ids:
-            return legacy_ids
     except Exception:
-        pass
-    rows = conn.execute(
+        _rollback_best_effort(conn)
+    rows_v2 = _safe_fetchall(
+        """
+        SELECT legacy_empresa_id
+        FROM workspace_companies
+        WHERE workspace_id = ?
+          AND COALESCE(activo, 1) = 1
+          AND COALESCE(TRIM(legacy_empresa_id), '') <> ''
+        ORDER BY nombre COLLATE NOCASE ASC
+        """,
+        (ws_id,),
+    )
+    legacy_ids = [
+        str(row_value(r, "legacy_empresa_id") or row_value(r, 0) or "").strip()
+        for r in (rows_v2 or [])
+    ]
+    legacy_ids = [eid for eid in legacy_ids if eid]
+    if legacy_ids:
+        return legacy_ids
+
+    rows = _safe_fetchall(
         "SELECT empresa_id FROM workspace_empresas WHERE workspace_id = ?",
         (ws_id,),
-    ).fetchall()
+    )
     empresa_ids = [str(row_value(row, "empresa_id") or row_value(row, 0) or "").strip() for row in rows]
     empresa_ids = [eid for eid in empresa_ids if eid]
     if empresa_ids:
@@ -36604,95 +36621,86 @@ def fetch_workspace_company_ids(conn, workspace_id):
     # Inferencia segura: si aún no hay vínculos en `workspace_empresas`, derivamos empresas
     # desde RRHH del propio workspace. Esto evita listados vacíos (p.ej. Agenda) hasta que
     # se complete el setup de compañías.
-    try:
-        persona_rows = conn.execute(
-            """
+    persona_rows = _safe_fetchall(
+        """
+        SELECT DISTINCT empresa_id
+        FROM workspace_registro_personal
+        WHERE workspace_id = ?
+          AND COALESCE(activo, 1) = 1
+          AND COALESCE(TRIM(empresa_id), '') <> ''
+        ORDER BY empresa_id
+        LIMIT 50
+        """,
+        (ws_id,),
+    )
+    inferred = [
+        str(row_value(r, "empresa_id") or row_value(r, 0) or "").strip()
+        for r in (persona_rows or [])
+    ]
+    inferred = [eid for eid in inferred if eid]
+    if inferred:
+        return inferred
+    # Inferencia segura (multi-workspace): deriva empresa_ids desde tablas que ya estén
+    # correctamente scopiadas por `workspace_id`. Esto NO mezcla workspaces y permite
+    # que listados legacy (p.ej. Agenda) funcionen aunque falten vínculos en `workspace_empresas`.
+    inferred_ids = []
+    seen = set()
+    candidate_tables = [
+        "clientes_empresas",
+        "inmuebles",
+        "captaciones",
+        "operaciones_inmobiliarias",
+        "demandas",
+        "visitas",
+        "acciones",
+        "hipotecas",
+        "seguros",
+    ]
+    for table in candidate_tables:
+        try:
+            cols = table_columns(conn, table) or set()
+        except Exception:
+            _rollback_best_effort(conn)
+            cols = set()
+        if "workspace_id" not in cols or "empresa_id" not in cols:
+            continue
+        rows2 = _safe_fetchall(
+            f"""
             SELECT DISTINCT empresa_id
-            FROM workspace_registro_personal
+            FROM {table}
             WHERE workspace_id = ?
-              AND COALESCE(activo, 1) = 1
               AND COALESCE(TRIM(empresa_id), '') <> ''
             ORDER BY empresa_id
             LIMIT 50
             """,
             (ws_id,),
-        ).fetchall()
-        inferred = [
-            str(row_value(r, "empresa_id") or row_value(r, 0) or "").strip()
-            for r in (persona_rows or [])
-        ]
-        inferred = [eid for eid in inferred if eid]
-        if inferred:
-            return inferred
-    except Exception:
-        pass
-    # Inferencia segura (multi-workspace): deriva empresa_ids desde tablas que ya estén
-    # correctamente scopiadas por `workspace_id`. Esto NO mezcla workspaces y permite
-    # que listados legacy (p.ej. Agenda) funcionen aunque falten vínculos en `workspace_empresas`.
-    try:
-        inferred_ids = []
-        seen = set()
-        candidate_tables = [
-            "clientes_empresas",
-            "inmuebles",
-            "captaciones",
-            "operaciones_inmobiliarias",
-            "demandas",
-            "visitas",
-            "acciones",
-            "hipotecas",
-            "seguros",
-        ]
-        for table in candidate_tables:
-            try:
-                cols = table_columns(conn, table) or set()
-            except Exception:
-                cols = set()
-            if "workspace_id" not in cols or "empresa_id" not in cols:
+        )
+        for r in rows2 or []:
+            eid = str(row_value(r, "empresa_id") or row_value(r, 0) or "").strip()
+            if not eid or eid in seen:
                 continue
-            try:
-                rows2 = conn.execute(
-                    f"""
-                    SELECT DISTINCT empresa_id
-                    FROM {table}
-                    WHERE workspace_id = ?
-                      AND COALESCE(TRIM(empresa_id), '') <> ''
-                    ORDER BY empresa_id
-                    LIMIT 50
-                    """,
-                    (ws_id,),
-                ).fetchall()
-            except Exception:
-                rows2 = []
-            for r in rows2 or []:
-                eid = str(row_value(r, "empresa_id") or row_value(r, 0) or "").strip()
-                if not eid or eid in seen:
-                    continue
-                seen.add(eid)
-                inferred_ids.append(eid)
-                if len(inferred_ids) >= 50:
-                    break
+            seen.add(eid)
+            inferred_ids.append(eid)
             if len(inferred_ids) >= 50:
                 break
-        if inferred_ids:
-            return inferred_ids
-    except Exception:
-        pass
+        if len(inferred_ids) >= 50:
+            break
+    if inferred_ids:
+        return inferred_ids
     if not WORKSPACE_AUTO_LINK_COMPANIES:
         return []
     # Safety: en entornos multi-workspace, nunca debemos auto-vincular "todas las empresas" a un
     # workspace vacío (crearía contaminación de datos entre clientes).
     # Solo permitimos el autolink en setups legacy de 1 workspace, o en el workspace legacy del "grupo".
+    ws_total_rows = _safe_fetchall("SELECT COUNT(*) AS total FROM workspaces")
+    ws_total_row = ws_total_rows[0] if ws_total_rows else None
     try:
-        ws_total_row = conn.execute("SELECT COUNT(*) AS total FROM workspaces").fetchone()
         ws_total = int(row_value(ws_total_row, "total") or row_value(ws_total_row, 0) or 0)
     except Exception:
         ws_total = 0
     if ws_total > 1:
-        try:
-            ws_row = conn.execute("SELECT slug, nombre FROM workspaces WHERE id = ? LIMIT 1", (ws_id,)).fetchone()
-        except Exception:
-            ws_row = None
+        ws_rows = _safe_fetchall("SELECT slug, nombre FROM workspaces WHERE id = ? LIMIT 1", (ws_id,))
+        ws_row = ws_rows[0] if ws_rows else None
         ws_slug = str(row_value(ws_row, "slug") or "") if ws_row else ""
         ws_name = str(row_value(ws_row, "nombre") or "") if ws_row else ""
         ws_key = normalize_workspace_slug(ws_slug or ws_name or "")
@@ -36708,12 +36716,7 @@ def fetch_workspace_company_ids(conn, workspace_id):
             return []
     # Backfill: si el workspace no tiene empresas asociadas, no podemos mostrar RRHH/operativa.
     # Creamos los links por defecto usando empresas activas existentes.
-    try:
-        all_rows = conn.execute(
-            "SELECT id FROM empresas WHERE COALESCE(activo, 1) = 1 ORDER BY nombre",
-        ).fetchall()
-    except Exception:
-        all_rows = []
+    all_rows = _safe_fetchall("SELECT id FROM empresas WHERE COALESCE(activo, 1) = 1 ORDER BY nombre")
     fallback = [str(row_value(row, "id") or row_value(row, 0) or "").strip() for row in (all_rows or [])]
     fallback = [eid for eid in fallback if eid]
     if not fallback:
@@ -36730,11 +36733,11 @@ def fetch_workspace_company_ids(conn, workspace_id):
                 (os.urandom(16).hex(), ws_id, eid, now, now),
             )
         except Exception:
-            pass
+            _rollback_best_effort(conn)
     try:
         conn.commit()
     except Exception:
-        pass
+        _rollback_best_effort(conn)
     return fallback
 
 
@@ -36750,7 +36753,11 @@ def resolve_workspace_scope_empresa_ids(conn, workspace_id, *, empresa_id=""):
     ws_id = str(workspace_id or "").strip()
     if not ws_id:
         return []
-    ids = fetch_workspace_company_ids(conn, ws_id) or []
+    try:
+        ids = fetch_workspace_company_ids(conn, ws_id) or []
+    except Exception:
+        _rollback_best_effort(conn)
+        ids = []
     eid = str(empresa_id or "").strip()
     if eid and eid not in ids:
         ids.append(eid)
@@ -39892,6 +39899,7 @@ def workspace_actor_is_privileged(conn, session):
             (user_id,),
         ).fetchone()
     except Exception:
+        _rollback_best_effort(conn)
         row = None
     if not row:
         return False
@@ -39920,7 +39928,7 @@ def workspace_actor_can_manage_workspace(conn, session, workspace_id):
     try:
         ensure_workspace_core_tables(conn)
     except Exception:
-        pass
+        _rollback_best_effort(conn)
     member = fetch_workspace_member(conn, ws_id, user_id)
     if not member:
         return False
@@ -39981,7 +39989,7 @@ def ensure_workspace_member(conn, workspace_id, user_id, role="Miembro", now=Non
             (record_id, ws_id, uid, role_norm, now_ts, now_ts),
         )
     except Exception:
-        pass
+        _rollback_best_effort(conn)
     # Return existing id if it already existed.
     existing = conn.execute(
         "SELECT id FROM workspace_miembros WHERE workspace_id = ? AND usuario_id = ? LIMIT 1",
@@ -40073,6 +40081,7 @@ def ensure_partner_membership(conn, source_workspace_id, target_workspace_id, *,
                 if uid:
                     services_by_user_id[uid] = servicio
         except Exception:
+            _rollback_best_effort(conn)
             services_by_user_id = {}
     added = 0
     for row in members or []:
@@ -40125,6 +40134,7 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
                 (uid,),
             ).fetchone()
         except Exception:
+            _rollback_best_effort(conn)
             user_row = None
         if user_row and int(row_value(user_row, "activo", 0) or 0) == 1:
             user_email = normalize_email(row_value(user_row, "email") or "")
@@ -40153,6 +40163,7 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
                 ).fetchone():
                     has_persona = True
             except Exception:
+                _rollback_best_effort(conn)
                 has_persona = False
             if not has_persona and user_email:
                 try:
@@ -40169,7 +40180,7 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
                     ).fetchone():
                         has_persona = True
                 except Exception:
-                    pass
+                    _rollback_best_effort(conn)
             if not has_persona and user_full_name:
                 try:
                     if conn.execute(
@@ -40185,7 +40196,7 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
                     ).fetchone():
                         has_persona = True
                 except Exception:
-                    pass
+                    _rollback_best_effort(conn)
 
             # Si hay un único workspace, mantenemos comportamiento legacy (casi seguro en despliegues single-tenant).
             single_workspace = False
@@ -40194,6 +40205,7 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
                 ws_total = int(row_value(ws_count_row, "total", 0) or row_value(ws_count_row, 0) or 0)
                 single_workspace = ws_total == 1
             except Exception:
+                _rollback_best_effort(conn)
                 single_workspace = False
 
             # Además, permitimos auto-vincular en el workspace "default" si el usuario tiene servicios o fichaje activo.
@@ -40201,6 +40213,7 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
             try:
                 ws_row = conn.execute("SELECT nombre, slug FROM workspaces WHERE id = ? LIMIT 1", (ws_id,)).fetchone()
             except Exception:
+                _rollback_best_effort(conn)
                 ws_row = None
             try:
                 ws_slug = normalize_workspace_slug(row_value(ws_row, "slug") or row_value(ws_row, "nombre") or "")
@@ -40228,13 +40241,13 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
                 try:
                     ensure_workspace_core_tables(conn)
                 except Exception:
-                    pass
+                    _rollback_best_effort(conn)
                 now_ts = datetime.now(timezone.utc).isoformat()
                 ensure_workspace_member(conn, ws_id, uid, role="Miembro", now=now_ts)
                 try:
                     conn.commit()
                 except Exception:
-                    pass
+                    _rollback_best_effort(conn)
                 member = fetch_workspace_member(conn, ws_id, uid)
     if not member:
         return False, "No autorizado"
@@ -40268,6 +40281,7 @@ def enforce_empresa_membership(conn, session, empresa_id, *, write=False):
             (eid,),
         ).fetchall()
     except Exception:
+        _rollback_best_effort(conn)
         ws_rows = []
     workspace_ids = [
         str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip()
@@ -40280,12 +40294,14 @@ def enforce_empresa_membership(conn, session, empresa_id, *, write=False):
             ws_count_row = conn.execute("SELECT COUNT(*) AS total FROM workspaces").fetchone()
             ws_total = int(row_value(ws_count_row, "total", 0) or row_value(ws_count_row, 0) or 0)
         except Exception:
+            _rollback_best_effort(conn)
             ws_total = 0
         if ws_total == 1:
             try:
                 one = conn.execute("SELECT id FROM workspaces LIMIT 1").fetchone()
                 only_id = str(row_value(one, "id") or row_value(one, 0) or "").strip()
             except Exception:
+                _rollback_best_effort(conn)
                 only_id = ""
             if only_id:
                 return enforce_workspace_membership(conn, session, only_id, write=write)
@@ -40457,7 +40473,7 @@ def resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspa
     try:
         ensure_workspace_core_tables(conn)
     except Exception:
-        pass
+        _rollback_best_effort(conn)
     try:
         row = conn.execute(
             """
@@ -40469,6 +40485,7 @@ def resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspa
             (ws_id, wc_id),
         ).fetchone()
     except Exception:
+        _rollback_best_effort(conn)
         row = None
     legacy_id = str(row_value(row, "legacy_empresa_id") or row_value(row, 0) or "").strip() if row else ""
     return legacy_id
@@ -43349,7 +43366,7 @@ def get_platform_empresa_id(conn) -> str:
                 if exists:
                     return cached
         except Exception:
-            pass
+            _rollback_best_effort(conn)
 
         # 2) busca por nombre
         row2 = conn.execute(
@@ -43378,7 +43395,7 @@ def get_platform_empresa_id(conn) -> str:
                 try:
                     conn.commit()
                 except Exception:
-                    pass
+                    _rollback_best_effort(conn)
                 return eid
 
         # 3) crea
@@ -43415,9 +43432,13 @@ def get_platform_empresa_id(conn) -> str:
                 "INSERT OR REPLACE INTO crm_meta (key, value, updated_at) VALUES (?, ?, datetime('now'))",
                 ("platform_empresa_id", eid),
             )
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            _rollback_best_effort(conn)
         return eid
     except Exception:
+        _rollback_best_effort(conn)
         return ""
 
 
@@ -87126,6 +87147,7 @@ class Handler(BaseHTTPRequestHandler):
                     if legacy:
                         empresa_id = legacy
                 except Exception:
+                    _rollback_best_effort(conn)
                     pass
             q = params.get("q", [""])[0].strip()
             uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
