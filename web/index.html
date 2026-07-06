@@ -3019,12 +3019,27 @@
                   <input type="checkbox" name="registro_horario_activo" value="1" />
                   Vincular a registro horario
                 </label>
-                <div class="form-actions">
+              <div class="form-actions">
                   <button type="submit">Crear usuario</button>
                   <span id="adminUserStatus" class="muted"></span>
                 </div>
               </form>
             </details>
+          </div>
+          <div class="form-card">
+            <h3>Enlace de activación</h3>
+            <p class="muted">Genera aquí el enlace de activación sin entrar en una ficha.</p>
+            <div class="form-grid">
+              <label class="span-2">
+                Usuario o email
+                <input id="adminActivationLogin" placeholder="login o email del usuario" />
+              </label>
+              <div class="form-actions span-2">
+                <button type="button" id="adminActivationBtn" class="secondary">Generar enlace</button>
+                <span id="adminActivationStatus" class="muted"></span>
+              </div>
+              <div class="span-2 muted" id="adminActivationLink">Sin enlace generado todavía.</div>
+            </div>
           </div>
           <div class="form-card">
             <h3>Listado de usuarios</h3>
@@ -10162,6 +10177,7 @@
                 <div class="tabs crm-lightning-subbar" id="gestoriaContaInnerTabs">
                   <button class="tab active" type="button" data-gestoria-conta-tab="operativa">Entrada</button>
                   <button class="tab" type="button" data-gestoria-conta-tab="importador">Importador</button>
+                  <button class="tab" type="button" data-gestoria-conta-tab="banco">Banco</button>
                   <button class="tab" type="button" data-gestoria-conta-tab="libros">Libros</button>
                   <button class="tab" type="button" data-gestoria-conta-tab="control">Control</button>
                 </div>
@@ -10212,6 +10228,65 @@
                     </div>
                   </div>
                 </div>
+                <div class="form-card hidden" data-gestoria-conta-pane="banco">
+                  <div class="section-head">
+                    <div>
+                      <h3>Banco y conciliación</h3>
+                      <p class="muted">Cuentas bancarias, importación de extractos y punteo contra el libro diario.</p>
+                    </div>
+                    <div class="form-actions">
+                      <span id="gestoriaBancoStatus" class="muted"></span>
+                    </div>
+                  </div>
+                  <form id="gestoriaBancoCuentaForm" class="form-grid">
+                    <input type="hidden" name="id" />
+                    <label class="span-2">
+                      IBAN
+                      <input name="iban" placeholder="ES00...." />
+                    </label>
+                    <label>
+                      Banco
+                      <input name="banco_nombre" placeholder="Banco Santander" />
+                    </label>
+                    <label>
+                      Cuenta contable
+                      <input name="cuenta_contable" placeholder="572000000" />
+                    </label>
+                    <label class="span-2">
+                      Titular
+                      <input name="titular" />
+                    </label>
+                    <label>
+                      Principal
+                      <select name="es_principal">
+                        <option value="0">No</option>
+                        <option value="1">Sí</option>
+                      </select>
+                    </label>
+                    <div class="form-actions span-2">
+                      <button type="submit">Guardar cuenta bancaria</button>
+                    </div>
+                  </form>
+                  <div id="gestoriaBancoCuentasTable" style="margin-top:10px;"></div>
+                  <form id="gestoriaBancoImportForm" class="form-grid" style="margin-top:18px;">
+                    <label class="span-2">
+                      Extracto bancario
+                      <input id="gestoriaBancoImportFile" name="file" type="file" accept=".pdf,.xlsx,.csv" />
+                    </label>
+                    <label>
+                      Archivo
+                      <input name="filename" placeholder="MovimientosCuenta.pdf" />
+                    </label>
+                    <div class="form-actions">
+                      <button type="button" id="gestoriaBancoImportPreviewBtn">Previsualizar</button>
+                      <button type="submit">Importar y conciliar</button>
+                    </div>
+                    <div class="muted span-2" id="gestoriaBancoImportStatus"></div>
+                  </form>
+                  <div id="gestoriaBancoImportPreview" class="form-card" style="margin-top:12px;"></div>
+                  <div id="gestoriaBancoMovimientosTable" style="margin-top:12px;"></div>
+                  <div class="footer" id="gestoriaBancoMovimientosInfo"></div>
+                </div>
                 <div class="form-card hidden" data-gestoria-conta-pane="importador">
                   <h3>Nuevo lote de facturas</h3>
                   <p class="muted">Sube un ZIP con carpetas mensuales o varios PDFs/imagenes. El lote queda en revisión antes de aplicarse a contabilidad.</p>
@@ -10249,6 +10324,42 @@
                     </div>
                   </div>
                   <div class="inline-list" id="gestoriaImportSelectedLoteMeta"></div>
+                  <form id="gestoriaImportValoracionForm" class="form-grid" style="margin-top:12px;">
+                    <label>
+                      Estado valoración
+                      <select name="valoracion_estado">
+                        <option value="abierta">Abierta</option>
+                        <option value="en_revision">En revisión</option>
+                        <option value="pendiente">Pendiente</option>
+                        <option value="cerrada">Cerrada</option>
+                      </select>
+                    </label>
+                    <label>
+                      Asientos previstos
+                      <input name="valoracion_total_asientos" type="number" min="0" />
+                    </label>
+                    <label>
+                      Terceros nuevos
+                      <input name="valoracion_total_terceros" type="number" min="0" />
+                    </label>
+                    <label>
+                      Cuentas nuevas
+                      <input name="valoracion_total_cuentas" type="number" min="0" />
+                    </label>
+                    <label>
+                      Pendientes
+                      <input name="valoracion_total_pendientes" type="number" min="0" />
+                    </label>
+                    <label class="span-2">
+                      Notas de valoración
+                      <input name="valoracion_notas" type="text" placeholder="Control del lote, faltas detectadas, incidencias..." />
+                    </label>
+                    <div class="form-actions span-2">
+                      <button type="submit">Guardar valoración</button>
+                      <button type="button" class="ghost" id="gestoriaImportCerrarLoteBtn">Cerrar lote</button>
+                      <span id="gestoriaImportValoracionStatus" class="muted"></span>
+                    </div>
+                  </form>
                   <div id="gestoriaImportLotesTable"></div>
                   <div class="footer" id="gestoriaImportLotesInfo"></div>
                 </div>
@@ -10446,8 +10557,85 @@
                   <p class="muted">Asientos generados automáticamente desde OCR.</p>
                   <div id="gestoriaClienteAsientosTable"></div>
                   <div class="footer" id="gestoriaClienteAsientosInfo"></div>
+                  <div class="form-card" id="gestoriaAsientoFicha" style="margin-top:12px;">
+                    <div class="section-head">
+                      <div>
+                        <h3>Ficha de asiento</h3>
+                        <p class="muted">Edición completa de cabecera, factura vinculada y líneas contables.</p>
+                      </div>
+                      <div class="form-actions">
+                        <span id="gestoriaAsientoStatus" class="muted"></span>
+                      </div>
+                    </div>
+                    <form id="gestoriaAsientoForm" class="form-grid">
+                      <input type="hidden" name="asiento_id" />
+                      <label>
+                        Fecha
+                        <input name="fecha" type="date" />
+                      </label>
+                      <label>
+                        Referencia
+                        <input name="referencia" />
+                      </label>
+                      <label class="span-2">
+                        Concepto
+                        <input name="concepto" />
+                      </label>
+                      <label>
+                        Factura vinculada
+                        <input name="factura_numero" readonly />
+                      </label>
+                      <label>
+                        Desvincular factura
+                        <select name="factura_clear">
+                          <option value="0">No</option>
+                          <option value="1">Sí</option>
+                        </select>
+                      </label>
+                      <label>
+                        Banco
+                        <select name="punteado_banco">
+                          <option value="0">Sin puntear</option>
+                          <option value="1">Punteado</option>
+                        </select>
+                      </label>
+                      <label class="span-2">
+                        Notas banco
+                        <input name="punteado_banco_notas" placeholder="Observación o referencia del extracto bancario" />
+                      </label>
+                      <input type="hidden" name="factura_id" />
+                      <div class="span-2">
+                        <div class="section-head">
+                          <h4>Líneas del asiento</h4>
+                          <button type="button" class="ghost" id="gestoriaAsientoAddLineaBtn">Añadir línea</button>
+                        </div>
+                        <div id="gestoriaAsientoLineas"></div>
+                      </div>
+                      <div class="form-actions span-2">
+                        <button type="submit">Guardar asiento</button>
+                        <span class="muted" id="gestoriaAsientoFormHint">Selecciona un asiento para editarlo.</span>
+                      </div>
+                    </form>
+                  </div>
                 </div>
                 <div class="form-card hidden" data-gestoria-conta-pane="libros">
+                  <div class="form-card" id="gestoriaClienteConciliacionFicha" style="margin-bottom:12px;">
+                    <div class="section-head">
+                      <div>
+                        <h3>Ficha de validación</h3>
+                        <p class="muted">Control de conciliación entre facturas, asientos y cuadre contable.</p>
+                      </div>
+                    </div>
+                  <div id="gestoriaClienteConciliacionResumen"></div>
+                  <div class="form-actions" style="margin-top:10px;">
+                    <button type="button" class="secondary" data-conciliacion-filter="all">Todas</button>
+                    <button type="button" class="secondary" data-conciliacion-filter="sin_factura">Sin factura</button>
+                    <button type="button" class="secondary" data-conciliacion-filter="sin_banco">Sin puntear banco</button>
+                    <button type="button" class="secondary" data-conciliacion-filter="descuadrados">Descuadrados</button>
+                  </div>
+                  <div class="footer" id="gestoriaClienteConciliacionInfo"></div>
+                  <div id="gestoriaClienteConciliacionAcciones" style="margin-top:10px;"></div>
+                </div>
                   <div class="section-head">
                     <div>
                       <h3>Libros contables</h3>
@@ -10464,26 +10652,56 @@
                     <button class="tab" type="button" data-libro-tab="excel">Excel</button>
                   </div>
                   <div id="gestoriaClienteLibroDiarioPanel">
+                    <div class="form-actions">
+                      <button type="button" id="gestoriaClienteLibroDiarioDownloadBtn">Descargar CSV</button>
+                      <button type="button" class="secondary ghost" id="gestoriaClienteLibroDiarioPdfBtn">Descargar PDF</button>
+                      <span id="gestoriaClienteLibroDiarioDownloadStatus" class="muted"></span>
+                    </div>
                     <div id="gestoriaClienteLibroDiarioTable"></div>
                     <div class="footer" id="gestoriaClienteLibroDiarioInfo"></div>
                   </div>
                   <div id="gestoriaClienteLibroMayorPanel" class="hidden">
+                    <div class="form-actions">
+                      <button type="button" id="gestoriaClienteLibroMayorDownloadBtn">Descargar CSV</button>
+                      <button type="button" class="secondary ghost" id="gestoriaClienteLibroMayorPdfBtn">Descargar PDF</button>
+                      <span id="gestoriaClienteLibroMayorDownloadStatus" class="muted"></span>
+                    </div>
                     <div id="gestoriaClienteLibroMayorTable"></div>
                     <div class="footer" id="gestoriaClienteLibroMayorInfo"></div>
                   </div>
                   <div id="gestoriaClienteLibroBalancePanel" class="hidden">
+                    <div class="form-actions">
+                      <button type="button" id="gestoriaClienteLibroBalanceDownloadBtn">Descargar CSV</button>
+                      <button type="button" class="secondary ghost" id="gestoriaClienteLibroBalancePdfBtn">Descargar PDF</button>
+                      <span id="gestoriaClienteLibroBalanceDownloadStatus" class="muted"></span>
+                    </div>
                     <div id="gestoriaClienteLibroBalanceTable"></div>
                     <div class="footer" id="gestoriaClienteLibroBalanceInfo"></div>
                   </div>
                   <div id="gestoriaClienteLibroPyGPanel" class="hidden">
+                    <div class="form-actions">
+                      <button type="button" id="gestoriaClienteLibroPyGDownloadBtn">Descargar CSV</button>
+                      <button type="button" class="secondary ghost" id="gestoriaClienteLibroPyGPdfBtn">Descargar PDF</button>
+                      <span id="gestoriaClienteLibroPyGDownloadStatus" class="muted"></span>
+                    </div>
                     <div id="gestoriaClienteLibroPyGTable"></div>
                     <div class="footer" id="gestoriaClienteLibroPyGInfo"></div>
                   </div>
                   <div id="gestoriaClienteLibroFacturasPanel" class="hidden">
+                    <div class="form-actions">
+                      <button type="button" id="gestoriaClienteLibroFacturasDownloadBtn">Descargar CSV</button>
+                      <button type="button" class="secondary ghost" id="gestoriaClienteLibroFacturasPdfBtn">Descargar PDF</button>
+                      <span id="gestoriaClienteLibroFacturasDownloadStatus" class="muted"></span>
+                    </div>
                     <div id="gestoriaClienteLibroFacturasTable"></div>
                     <div class="footer" id="gestoriaClienteLibroFacturasInfo"></div>
                   </div>
                   <div id="gestoriaClienteLibroIvaPanel" class="hidden">
+                    <div class="form-actions">
+                      <button type="button" id="gestoriaClienteLibroIvaDownloadBtn">Descargar CSV</button>
+                      <button type="button" class="secondary ghost" id="gestoriaClienteLibroIvaPdfBtn">Descargar PDF</button>
+                      <span id="gestoriaClienteLibroIvaDownloadStatus" class="muted"></span>
+                    </div>
                     <div id="gestoriaClienteLibroIvaTable"></div>
                     <div class="footer" id="gestoriaClienteLibroIvaInfo"></div>
                   </div>
@@ -10588,6 +10806,11 @@
                       <span id="gestoriaModeloStatus" class="muted"></span>
                     </div>
                   </form>
+                  <div class="form-actions" style="margin-bottom:10px;">
+                    <button type="button" id="gestoriaModelosDownloadBtn">Descargar CSV</button>
+                    <button type="button" class="secondary ghost" id="gestoriaModelosPdfBtn">Descargar PDF</button>
+                    <span id="gestoriaModelosDownloadStatus" class="muted"></span>
+                  </div>
                   <div id="gestoriaModelosTable"></div>
                   <div class="footer" id="gestoriaModelosInfo"></div>
                 </div>
@@ -11659,7 +11882,7 @@
         </script>
 				    <script src="app-routing.js?v=11"></script>
 				    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-																	    <script src="app.js?v=774"></script>
+				    <script src="app.js?v=779"></script>
 		    <script>
 					      (function () {
 					        if (!("serviceWorker" in navigator)) return;
