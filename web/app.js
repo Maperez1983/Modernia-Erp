@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v366";
+const APP_SW_VERSION = "v367";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -27245,6 +27245,7 @@ const renderClienteContabilidadPanel = () => {
       : (contaTabs.includes(savedMainTab) ? savedMainTab : "dashboard");
     state.clienteContaMainTab = mainTab;
     const companyId = String(state.currentWorkspaceCompanyId || companyScopeId || "").trim();
+    let contaStatusEl = null;
     const setMainTab = (tabKey) => {
       state.clienteContaMainTab = tabKey;
       try {
@@ -27464,7 +27465,8 @@ const renderClienteContabilidadPanel = () => {
     const balancesActionsEl = root.querySelector("#clienteContaBalancesActions");
     const asientosSummaryEl = root.querySelector("#clienteContaAsientosSummary");
     const asientosActionsEl = root.querySelector("#clienteContaAsientosActions");
-    const contaStatusEl = root.querySelector("#clienteContaMainTabStatus");
+    contaStatusEl = root.querySelector("#clienteContaMainTabStatus");
+    setMainTab(mainTab);
     const renderMetricCards = (container, items = [], emptyText = "") => {
       if (!container) return;
       const tiles = Array.isArray(items) ? items : [];
