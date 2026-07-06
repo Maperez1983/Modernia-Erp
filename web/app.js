@@ -27331,7 +27331,7 @@ const renderClienteContabilidadPanel = () => {
         <div id="clienteContaValidacionAcciones" style="margin-top:10px;"></div>
       </div>
     `;
-    const mainPanes = Array.from(root.querySelectorAll(":scope > .form-card"));
+    const mainPanes = Array.from(root.children).filter((node) => node?.classList?.contains("form-card"));
     if (mainPanes[0]) mainPanes[0].dataset.companyContaMainPane = "dashboard";
     if (mainPanes[1]) mainPanes[1].dataset.companyContaMainPane = "importacion";
     if (mainPanes[2]) mainPanes[2].dataset.companyContaMainPane = "validacion";
