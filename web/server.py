@@ -30,8 +30,8 @@ import xml.etree.ElementTree as ET
 import socket
 import ipaddress
 import calendar
-from collections import defaultdict
-from decimal import Decimal
+from collections import defaultdict, OrderedDict
+from decimal import Decimal, ROUND_HALF_UP
 from io import BytesIO, StringIO
 from copy import copy as shallow_copy
 from datetime import datetime, timedelta, timezone, date
@@ -4851,6 +4851,15 @@ def parse_money_value(value):
         return 0.0
 
 
+def _money_decimal2(value):
+    if value in (None, ""):
+        return Decimal("0.00")
+    try:
+        return Decimal(str(parse_money_value(value))).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except Exception:
+        return Decimal("0.00")
+
+
 def parse_optional_float(value):
     if value is None:
         return None
@@ -8369,11 +8378,13 @@ def parse_multipart_form_data(body, content_type=""):
 
 def safe_extract_invoice_uploads(files, target_dir: Path) -> tuple[int, list[str]]:
     import zipfile
+    import hashlib
 
     allowed = {".pdf", ".png", ".jpg", ".jpeg"}
     target_dir.mkdir(parents=True, exist_ok=True)
     saved = 0
     skipped = []
+    seen_hashes = set()
 
     def safe_name(value):
         raw = str(value or "documento").replace("\\", "/").split("/")[-1].strip()
@@ -8393,6 +8404,14 @@ def safe_extract_invoice_uploads(files, target_dir: Path) -> tuple[int, list[str
                 return candidate
         return base_dir / f"{stem}-{os.urandom(4).hex()}{suffix}"
 
+    def register_blob(blob: bytes, label: str) -> bool:
+        digest = hashlib.sha256(blob or b"").hexdigest()
+        if digest in seen_hashes:
+            skipped.append(f"{label} (duplicado)")
+            return False
+        seen_hashes.add(digest)
+        return True
+
     for item in files or []:
         filename = str(item.get("filename") or "").strip()
         payload = item.get("bytes") or b""
@@ -8410,6 +8429,13 @@ def safe_extract_invoice_uploads(files, target_dir: Path) -> tuple[int, list[str
                         if not parts or Path(parts[-1]).suffix.lower() not in allowed:
                             skipped.append(member_name)
                             continue
+                        try:
+                            member_payload = zf.read(member)
+                        except Exception:
+                            skipped.append(member_name)
+                            continue
+                        if not register_blob(member_payload, member_name):
+                            continue
                         relative_parent = Path(*parts[:-1]) if len(parts) > 1 else Path()
                         dest_parent = (target_dir / relative_parent).resolve()
                         if target_dir.resolve() not in dest_parent.parents and dest_parent != target_dir.resolve():
@@ -8417,14 +8443,15 @@ def safe_extract_invoice_uploads(files, target_dir: Path) -> tuple[int, list[str
                             continue
                         dest_parent.mkdir(parents=True, exist_ok=True)
                         dest = unique_path(dest_parent, parts[-1])
-                        with zf.open(member) as src, dest.open("wb") as out:
-                            shutil.copyfileobj(src, out)
+                        dest.write_bytes(member_payload)
                         saved += 1
             except Exception as exc:
                 skipped.append(f"{filename}: {type(exc).__name__}")
             continue
         if suffix not in allowed:
             skipped.append(filename)
+            continue
+        if not register_blob(payload, filename):
             continue
         dest = unique_path(target_dir, filename)
         dest.write_bytes(payload)
@@ -12125,16 +12152,31 @@ def parse_invoice_text(text):
     base = extract_invoice_amount(raw, ["base imponible", "subtotal", "base"], kind="base")
     cuota_iva = extract_invoice_amount(raw, ["cuota iva", "iva", "i\\.v\\.a\\."], kind="iva")
     cuota_irpf = extract_invoice_amount(raw, ["retencion", "irpf"], kind="irpf")
+    exento = extract_invoice_amount(raw, ["exento", "exenta"], kind="base")
+    no_sujeta = extract_invoice_amount(
+        raw,
+        ["no sujeto", "no sujeta", "operacion no sujeta", "operación no sujeta", "no sujecion", "no sujeción"],
+        kind="base",
+    )
     total = extract_invoice_amount(raw, ["total factura", "importe total", "total a pagar", "total"], kind="total")
     if cuota_irpf < 0:
         cuota_irpf = 0.0
     if total > 0 and cuota_irpf > max(5.0, total * 0.4):
         # En OCR es habitual confundir \"IRPF\" con el total. Si se dispara, lo anulamos.
         cuota_irpf = 0.0
+    if exento <= 0 and total > 0 and base > 0 and "EXENTO" in upper:
+        inferred_exento = round(total - base - cuota_iva + cuota_irpf, 2)
+        if inferred_exento > 0:
+            exento = inferred_exento
+    if no_sujeta <= 0 and total > 0 and base > 0 and "NO SUJET" in upper:
+        inferred_no_sujeta = round(total - base - cuota_iva + cuota_irpf, 2)
+        if inferred_no_sujeta > 0:
+            no_sujeta = inferred_no_sujeta
+    special_total = round(max(0.0, exento) + max(0.0, no_sujeta), 2)
     if base <= 0 and total > 0:
         base = max(0.0, total - cuota_iva + cuota_irpf)
     if total <= 0 and base > 0:
-        total = max(0.0, base + cuota_iva - cuota_irpf)
+        total = max(0.0, base + cuota_iva + special_total - cuota_irpf)
     iva_pct = 0.0
     iva_pct_explicit = 0.0
     pct_match = re.search(r"\b(4|10|21)(?:[.,]0+)?\s*%\b", raw)
@@ -12160,41 +12202,42 @@ def parse_invoice_text(text):
             if total_value > 0 and abs((base_value + iva_value - irpf_value) - total_value) > max(1.0, total_value * 0.15):
                 return True
         return False
-    def vat_combo_ok(base_value, iva_value, total_value, irpf_value):
+    def vat_combo_ok(base_value, iva_value, total_value, irpf_value, special_value=0.0):
         base_value = float(base_value or 0.0)
         iva_value = float(iva_value or 0.0)
         total_value = float(total_value or 0.0)
         irpf_value = float(irpf_value or 0.0)
+        special_value = float(special_value or 0.0)
         if total_value <= 0 or base_value <= 0:
             return False
         if iva_value < 0:
             return False
         if iva_value > 0 and (iva_value / max(base_value, 0.01)) > 0.30:
             return False
-        return abs((base_value + iva_value - irpf_value) - total_value) <= max(1.0, total_value * 0.15)
+        return abs((base_value + iva_value + special_value - irpf_value) - total_value) <= max(1.0, total_value * 0.15)
 
     # Ajustes conservadores: solo aceptamos un desglose Base/IVA si cuadra con el total.
     if total > 0:
-        if vat_combo_ok(base, cuota_iva, total, cuota_irpf):
+        if vat_combo_ok(base, cuota_iva, total, cuota_irpf, special_total):
             pass
         elif iva_pct_explicit in (4.0, 10.0, 21.0):
             inferred_base = round((total + cuota_irpf) / (1.0 + (iva_pct_explicit / 100.0)), 2)
             inferred_iva = round((inferred_base * iva_pct_explicit) / 100.0, 2)
-            if vat_combo_ok(inferred_base, inferred_iva, total, cuota_irpf):
+            if vat_combo_ok(inferred_base, inferred_iva, total, cuota_irpf, special_total):
                 base = inferred_base
                 cuota_iva = inferred_iva
                 iva_pct = iva_pct_explicit
             else:
-                base = round(total + cuota_irpf, 2)
+                base = round(total + cuota_irpf - special_total, 2)
                 cuota_iva = 0.0
         else:
-            base = round(total + cuota_irpf, 2)
+            base = round(total + cuota_irpf - special_total, 2)
             cuota_iva = 0.0
     else:
         if base > 0 and cuota_iva > 0:
-            total = round(base + cuota_iva - cuota_irpf, 2)
+            total = round(base + cuota_iva + special_total - cuota_irpf, 2)
         elif base > 0:
-            total = round(base - cuota_irpf, 2)
+            total = round(base + special_total - cuota_irpf, 2)
     descripcion = numero or "Factura"
     if tercero:
         descripcion = f"{descripcion} · {tercero}"
@@ -12207,6 +12250,10 @@ def parse_invoice_text(text):
         "base_imponible": round(base, 2),
         "cuota_iva": round(cuota_iva, 2),
         "cuota_irpf": round(cuota_irpf, 2),
+        "exento": round(exento, 2),
+        "base_exenta": round(exento, 2),
+        "base_no_sujeta": round(no_sujeta, 2),
+        "tipo_operacion": "exenta" if exento > 0 else ("no_sujeta" if no_sujeta > 0 else ""),
         "total": round(total, 2),
         "iva_pct": iva_pct,
         "descripcion": descripcion,
@@ -12303,8 +12350,12 @@ def build_invoice_asiento(parsed, counterpart_account):
     base = float(parsed.get("base_imponible") or 0.0)
     iva = float(parsed.get("cuota_iva") or 0.0)
     irpf = float(parsed.get("cuota_irpf") or 0.0)
+    exento = float(parsed.get("exento") or 0.0)
+    base_exenta = float(parsed.get("base_exenta") or exento or 0.0)
+    base_no_sujeta = float(parsed.get("base_no_sujeta") or 0.0)
     total = float(parsed.get("total") or 0.0)
     concepto = parsed.get("descripcion") or parsed.get("numero") or "Factura"
+    special_total = round(max(0.0, base_exenta) + max(0.0, base_no_sujeta), 2)
     lines = []
     if tipo == "venta":
         ingreso = infer_revenue_account(concepto)
@@ -12312,22 +12363,987 @@ def build_invoice_asiento(parsed, counterpart_account):
             lines.append({"cuenta": counterpart_account or "430", "descripcion": "Cliente", "debe": round(total, 2), "haber": 0.0})
         if base > 0:
             lines.append({"cuenta": ingreso, "descripcion": "Ingreso", "debe": 0.0, "haber": round(base, 2)})
+        if base_exenta > 0:
+            lines.append({"cuenta": ingreso, "descripcion": "Ingreso exento", "debe": 0.0, "haber": round(base_exenta, 2)})
+        if base_no_sujeta > 0:
+            lines.append({"cuenta": ingreso, "descripcion": "Ingreso no sujeto", "debe": 0.0, "haber": round(base_no_sujeta, 2)})
         if iva > 0:
             lines.append({"cuenta": "477", "descripcion": "IVA repercutido", "debe": 0.0, "haber": round(iva, 2), "impuesto": "IVA", "porcentaje": parsed.get("iva_pct") or 0.0})
     else:
         gasto = infer_expense_account(concepto)
         if base > 0:
             lines.append({"cuenta": gasto, "descripcion": "Gasto", "debe": round(base, 2), "haber": 0.0})
+        if base_exenta > 0:
+            lines.append({"cuenta": gasto, "descripcion": "Gasto exento", "debe": round(base_exenta, 2), "haber": 0.0})
+        if base_no_sujeta > 0:
+            lines.append({"cuenta": gasto, "descripcion": "Gasto no sujeto", "debe": round(base_no_sujeta, 2), "haber": 0.0})
         if iva > 0:
             lines.append({"cuenta": "472", "descripcion": "IVA soportado", "debe": round(iva, 2), "haber": 0.0, "impuesto": "IVA", "porcentaje": parsed.get("iva_pct") or 0.0})
         if irpf > 0:
             lines.append({"cuenta": "4751", "descripcion": "H.P. acreedora retenciones", "debe": 0.0, "haber": round(irpf, 2), "impuesto": "IRPF", "porcentaje": 0.0})
-        payable = total if total > 0 else max(0.0, base + iva - irpf)
+        payable = total if total > 0 else max(0.0, base + iva + special_total - irpf)
         if payable > 0:
             lines.append({"cuenta": counterpart_account or "400", "descripcion": "Proveedor/Acreedor", "debe": 0.0, "haber": round(payable, 2)})
     debe = round(sum(float(item.get("debe") or 0.0) for item in lines), 2)
     haber = round(sum(float(item.get("haber") or 0.0) for item in lines), 2)
+    lines, debe, haber = ensure_asiento_balanced(lines, allow_adjustment=True)
     return lines, debe, haber
+
+
+def ensure_asiento_balanced(lines, *, allow_adjustment=False):
+    normalized = []
+    for item in lines or []:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                **item,
+                "debe": round(parse_money_value(item.get("debe")), 2),
+                "haber": round(parse_money_value(item.get("haber")), 2),
+            }
+        )
+    total_debe = round(sum(float(item.get("debe") or 0.0) for item in normalized), 2)
+    total_haber = round(sum(float(item.get("haber") or 0.0) for item in normalized), 2)
+    diff = round(total_debe - total_haber, 2)
+    if diff == 0:
+        return normalized, total_debe, total_haber
+    if allow_adjustment and abs(diff) <= 0.01 and normalized:
+        adjust_idx = None
+        adjust_field = ""
+        if diff > 0:
+            # Falta haber o sobra debe.
+            candidates = sorted(
+                [i for i, item in enumerate(normalized) if parse_money_value(item.get("debe")) > 0],
+                key=lambda i: parse_money_value(normalized[i].get("debe")),
+                reverse=True,
+            )
+            if candidates:
+                adjust_idx = candidates[0]
+                adjust_field = "debe"
+        else:
+            candidates = sorted(
+                [i for i, item in enumerate(normalized) if parse_money_value(item.get("haber")) > 0],
+                key=lambda i: parse_money_value(normalized[i].get("haber")),
+                reverse=True,
+            )
+            if candidates:
+                adjust_idx = candidates[0]
+                adjust_field = "haber"
+        if adjust_idx is not None and adjust_field:
+            item = dict(normalized[adjust_idx])
+            if diff > 0 and adjust_field == "debe":
+                new_value = round(parse_money_value(item.get("debe")) - diff, 2)
+                if new_value >= 0:
+                    item["debe"] = new_value
+                    normalized[adjust_idx] = item
+            elif diff < 0 and adjust_field == "haber":
+                new_value = round(parse_money_value(item.get("haber")) - abs(diff), 2)
+                if new_value >= 0:
+                    item["haber"] = new_value
+                    normalized[adjust_idx] = item
+            total_debe = round(sum(float(item.get("debe") or 0.0) for item in normalized), 2)
+            total_haber = round(sum(float(item.get("haber") or 0.0) for item in normalized), 2)
+            if round(total_debe - total_haber, 2) == 0:
+                return normalized, total_debe, total_haber
+    raise ValueError(f"Asiento descuadrado: Δ {diff:.2f}")
+
+
+def sync_gestoria_modelos_from_contabilidad(conn, *, empresa_ids=None, cliente_ids=None, now=None):
+    now = now or datetime.utcnow().isoformat()
+    empresa_ids = [str(x).strip() for x in (empresa_ids or []) if str(x or "").strip()]
+    cliente_ids = [str(x).strip() for x in (cliente_ids or []) if str(x or "").strip()]
+    if not empresa_ids and not cliente_ids:
+        return 0
+
+    resolved_cliente_ids = set(cliente_ids)
+    if empresa_ids:
+        placeholders = ",".join(["?"] * len(empresa_ids))
+        try:
+            rows = conn.execute(
+                f"""
+                SELECT DISTINCT TRIM(COALESCE(a.cliente_id, '')) AS cliente_id
+                FROM gestoria_asientos a
+                WHERE a.empresa_id IN ({placeholders})
+                  AND TRIM(COALESCE(a.cliente_id, '')) <> ''
+                UNION
+                SELECT DISTINCT TRIM(COALESCE(f.cliente_id, '')) AS cliente_id
+                FROM gestoria_facturas f
+                WHERE f.empresa_id IN ({placeholders})
+                  AND TRIM(COALESCE(f.cliente_id, '')) <> ''
+                """,
+                [*empresa_ids, *empresa_ids],
+            ).fetchall()
+            for row in rows:
+                cid = str(row["cliente_id"] or "").strip()
+                if cid:
+                    resolved_cliente_ids.add(cid)
+        except Exception:
+            pass
+        if not resolved_cliente_ids:
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT DISTINCT TRIM(COALESCE(ce.cliente_id, '')) AS cliente_id
+                    FROM clientes_empresas ce
+                    WHERE ce.empresa_id IN ({placeholders})
+                      AND TRIM(COALESCE(ce.cliente_id, '')) <> ''
+                    """,
+                    empresa_ids,
+                ).fetchall()
+                for row in rows:
+                    cid = str(row["cliente_id"] or "").strip()
+                    if cid:
+                        resolved_cliente_ids.add(cid)
+            except Exception:
+                pass
+
+    if not resolved_cliente_ids:
+        return 0
+
+    placeholders = ",".join(["?"] * len(resolved_cliente_ids))
+    years = set()
+    retention_years = set()
+    iva_years = set()
+
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT SUBSTR(COALESCE(a.fecha, ''), 1, 4) AS anio
+            FROM gestoria_asientos a
+            WHERE TRIM(COALESCE(a.cliente_id, '')) IN ({placeholders})
+              AND LENGTH(COALESCE(a.fecha, '')) >= 4
+            """,
+            list(resolved_cliente_ids),
+        ).fetchall()
+        for row in rows:
+            anio = str(row["anio"] or "").strip()
+            if len(anio) == 4 and anio.isdigit():
+                years.add(anio)
+    except Exception:
+        pass
+
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT SUBSTR(COALESCE(f.fecha_emision, ''), 1, 4) AS anio
+            FROM gestoria_facturas f
+            WHERE TRIM(COALESCE(f.cliente_id, '')) IN ({placeholders})
+              AND LENGTH(COALESCE(f.fecha_emision, '')) >= 4
+            """,
+            list(resolved_cliente_ids),
+        ).fetchall()
+        for row in rows:
+            anio = str(row["anio"] or "").strip()
+            if len(anio) == 4 and anio.isdigit():
+                years.add(anio)
+    except Exception:
+        pass
+
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT SUBSTR(COALESCE(a.fecha, ''), 1, 4) AS anio
+            FROM gestoria_asientos a
+            JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+            WHERE TRIM(COALESCE(a.cliente_id, '')) IN ({placeholders})
+              AND (
+                TRIM(COALESCE(l.cuenta, '')) LIKE '4751%'
+                OR TRIM(COALESCE(l.cuenta, '')) LIKE '180%'
+                OR TRIM(COALESCE(l.cuenta, '')) LIKE '471%'
+                OR TRIM(COALESCE(l.cuenta, '')) LIKE '473%'
+              )
+              AND LENGTH(COALESCE(a.fecha, '')) >= 4
+            """,
+            list(resolved_cliente_ids),
+        ).fetchall()
+        for row in rows:
+            anio = str(row["anio"] or "").strip()
+            if len(anio) == 4 and anio.isdigit():
+                retention_years.add(anio)
+    except Exception:
+        pass
+
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT DISTINCT SUBSTR(COALESCE(a.fecha, ''), 1, 4) AS anio
+            FROM gestoria_asientos a
+            JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+            WHERE TRIM(COALESCE(a.cliente_id, '')) IN ({placeholders})
+              AND (
+                TRIM(COALESCE(l.cuenta, '')) LIKE '472%'
+                OR TRIM(COALESCE(l.cuenta, '')) LIKE '477%'
+              )
+              AND LENGTH(COALESCE(a.fecha, '')) >= 4
+            """,
+            list(resolved_cliente_ids),
+        ).fetchall()
+        for row in rows:
+            anio = str(row["anio"] or "").strip()
+            if len(anio) == 4 and anio.isdigit():
+                iva_years.add(anio)
+    except Exception:
+        pass
+
+    if not years:
+        years.add(str(datetime.utcnow().year))
+
+    def _model_exists(cliente_id, modelo, proxima_fecha):
+        row = conn.execute(
+            """
+            SELECT id
+            FROM gestoria_modelos
+            WHERE cliente_id = ? AND modelo = ? AND proxima_fecha = ?
+            LIMIT 1
+            """,
+            (cliente_id, modelo, proxima_fecha),
+        ).fetchone()
+        return bool(row)
+
+    def _insert_model(cliente_id, modelo, periodicidad, proxima_fecha, responsable="", estado="Pendiente", notas=""):
+        if not cliente_id or not modelo or not proxima_fecha:
+            return 0
+        if _model_exists(cliente_id, modelo, proxima_fecha):
+            return 0
+        new_id = os.urandom(16).hex()
+        conn.execute(
+            """
+            INSERT INTO gestoria_modelos (
+              id, cliente_id, modelo, periodicidad, proxima_fecha, responsable, estado, notas, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+            """,
+            (new_id, cliente_id, modelo, periodicidad, proxima_fecha, responsable, estado, notas, now, now),
+        )
+        return 1
+
+    created = 0
+    for cliente_id in sorted(resolved_cliente_ids):
+        for year in sorted(years):
+            if len(year) != 4 or not year.isdigit():
+                continue
+            y = int(year)
+            fiscal_next = f"{y + 1}-01-30"
+            quarterly_models = [
+                ("303 - IVA 1T", "Trimestral", f"{year}-04-20"),
+                ("303 - IVA 2T", "Trimestral", f"{year}-07-20"),
+                ("303 - IVA 3T", "Trimestral", f"{year}-10-20"),
+                ("303 - IVA 4T", "Trimestral", f"{y + 1}-01-30"),
+                ("390 - Resumen anual IVA", "Anual", fiscal_next),
+            ]
+            for modelo, periodicidad, proxima_fecha in quarterly_models:
+                created += _insert_model(
+                    cliente_id,
+                    f"{modelo} {year}",
+                    periodicidad,
+                    proxima_fecha,
+                    estado="Pendiente",
+                    notas="Generado automáticamente desde la contabilidad importada.",
+                )
+            if year in iva_years:
+                # El modelo 303 ya queda cubierto arriba. Aquí dejamos trazabilidad de IVA activo sin duplicar.
+                pass
+            if year in retention_years:
+                retention_models = [
+                    ("111 - Retenciones profesionales 1T", "Trimestral", f"{year}-04-20"),
+                    ("111 - Retenciones profesionales 2T", "Trimestral", f"{year}-07-20"),
+                    ("111 - Retenciones profesionales 3T", "Trimestral", f"{year}-10-20"),
+                    ("111 - Retenciones profesionales 4T", "Trimestral", f"{y + 1}-01-20"),
+                    ("190 - Resumen anual retenciones", "Anual", f"{y + 1}-01-30"),
+                ]
+                for modelo, periodicidad, proxima_fecha in retention_models:
+                    created += _insert_model(
+                        cliente_id,
+                        f"{modelo} {year}",
+                        periodicidad,
+                        proxima_fecha,
+                        estado="Pendiente",
+                        notas="Generado automáticamente desde asientos con retenciones.",
+                    )
+
+    if created:
+        try:
+            conn.commit()
+        except Exception:
+            pass
+    return created
+
+
+def _factura_campos_ocr_payload(parsed_factura):
+    if not parsed_factura:
+        return ""
+    payload = {
+        "numero": parsed_factura.get("numero") or "",
+        "fecha": parsed_factura.get("fecha") or "",
+        "nif": parsed_factura.get("nif") or "",
+        "tercero": parsed_factura.get("tercero") or "",
+        "tipo": parsed_factura.get("tipo") or "",
+        "base_imponible": parsed_factura.get("base_imponible") or 0.0,
+        "base_exenta": parsed_factura.get("base_exenta") or 0.0,
+        "base_no_sujeta": parsed_factura.get("base_no_sujeta") or 0.0,
+        "cuota_iva": parsed_factura.get("cuota_iva") or 0.0,
+        "cuota_irpf": parsed_factura.get("cuota_irpf") or 0.0,
+        "total": parsed_factura.get("total") or 0.0,
+        "iva_pct": parsed_factura.get("iva_pct") or 0.0,
+        "tipo_operacion": parsed_factura.get("tipo_operacion") or "",
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def guess_gestoria_invoice_fields_from_raw_text(raw_text):
+    text = str(raw_text or "").strip()
+    if not text:
+        return {}
+    lines = [re.sub(r"\s+", " ", str(line or "").strip()) for line in text.splitlines()]
+    lines = [line for line in lines if line]
+
+    def _amount_from_text(snippet):
+        text_snippet = str(snippet or "")
+        amounts = []
+        for pat in (
+            r"((?:\d{1,3}(?:[.\s]\d{3})*|\d+)[,\.]\d{2})\s*(?:€|EUR|EUROS)\b",
+            r"(?:€|EUR|EUROS)\s*((?:\d{1,3}(?:[.\s]\d{3})*|\d+)[,\.]\d{2})",
+            r"((?:\d{1,3}(?:[.\s]\d{3})*|\d+)[,\.]\d{2})",
+        ):
+            amounts.extend(re.findall(pat, text_snippet, re.IGNORECASE))
+        for raw in reversed(amounts):
+            try:
+                value = round(parse_money_value(raw), 2)
+            except Exception:
+                continue
+            if abs(value) > 0:
+                return value
+        return None
+
+    def _find_date():
+        label_patterns = (
+            "FECHA DE LA FACTURA",
+            "FECHA FACTURA",
+            "FECHA / FECHA DE DEVENGO",
+            "FECHA DE FACTURA",
+            "FECHA:",
+        )
+        date_patterns = (
+            r"([0-3]?\d[/-][01]?\d[/-](?:\d{2}|\d{4}))",
+            r"((?:19|20)\d{2}[/-][01]?\d[/-][0-3]?\d)",
+        )
+        def _normalize_date_local(raw_value):
+            raw_value = re.sub(r"\s+", "", str(raw_value or "").strip()).replace(".", "/").replace("-", "/")
+            for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y/%m/%d"):
+                try:
+                    return datetime.strptime(raw_value, fmt).strftime("%Y-%m-%d")
+                except Exception:
+                    continue
+            return raw_value.replace("/", "-")
+        for line in lines:
+            upper = line.upper()
+            if any(label in upper for label in label_patterns):
+                for dpat in date_patterns:
+                    m = re.search(dpat, line, re.IGNORECASE)
+                    if m:
+                        raw = m.group(1).strip()
+                        return _normalize_date_local(raw)
+        for dpat in date_patterns:
+            m = re.search(dpat, text, re.IGNORECASE)
+            if m:
+                raw = m.group(1).strip()
+                return _normalize_date_local(raw)
+        return ""
+
+    def _find_number():
+        patterns = (
+            r"FACTURA\s*N[º°O\.]?\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\/\.]{1,30})",
+            r"N[º°O\.]?\s*FACTURA\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\/\.]{1,30})",
+            r"NUMERO\s+DE\s+FACTURA\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\/\.]{1,30})",
+            r"SECUENCIA\s*:\s*([A-Z0-9][A-Z0-9\-\/\.]{1,30})",
+        )
+        for line in lines:
+            for pat in patterns:
+                m = re.search(pat, line, re.IGNORECASE)
+                if m:
+                    return re.sub(r"\s+", " ", str(m.group(1) or "").strip())
+        return ""
+
+    def _find_total():
+        label_patterns = (
+            "TOTAL FACTURA",
+            "TOTAL A PAGAR",
+            "TOTAL EUR",
+            "IMPORTE TOTAL",
+            "TOTAL (EUR)",
+            "TOTAL:",
+        )
+        for idx, line in enumerate(lines):
+            upper = line.upper()
+            if any(label in upper for label in label_patterns):
+                amount = _amount_from_text(line)
+                if amount is not None:
+                    return amount
+                amount = _amount_from_text(" ".join(lines[idx : min(len(lines), idx + 3)]))
+                if amount is not None:
+                    return amount
+        for label in label_patterns:
+            idx = text.upper().find(label)
+            if idx >= 0:
+                amount = _amount_from_text(text[idx : idx + 300])
+                if amount is not None:
+                    return amount
+        fallback_amounts = []
+        for line in lines:
+            upper = line.upper()
+            if "€" not in line and "EUR" not in upper and "EUROS" not in upper and not any(
+                token in upper for token in ("TOTAL", "IMPORTE", "PAGAR", "ABONAR", "BASE", "CUOTA")
+            ):
+                continue
+            amount = _amount_from_text(line)
+            if amount is not None and 0 < abs(amount) < 100000:
+                fallback_amounts.append(amount)
+        if fallback_amounts:
+            return max(fallback_amounts)
+        return None
+
+    payload = {}
+    fecha = _find_date()
+    numero = _find_number()
+    total = _find_total()
+    if fecha:
+        payload["fecha"] = fecha
+    if numero:
+        payload["numero"] = numero
+    if total is not None:
+        payload["total"] = round(float(total), 2)
+    return payload
+
+
+def rebuild_gestoria_factura_from_raw_text(conn, factura_row, now, *, rebuild_asiento=True):
+    if not factura_row:
+        return None
+    if not isinstance(factura_row, dict):
+        factura_row = dict(factura_row)
+    factura_id = str(factura_row.get("id") or "").strip()
+    empresa_id = str(factura_row.get("empresa_id") or "").strip()
+    cliente_id = str(factura_row.get("cliente_id") or "").strip() or None
+    raw_text = str(factura_row.get("raw_text") or "").strip()
+    if not factura_id or not empresa_id or not raw_text:
+        return {"ok": False, "factura_id": factura_id, "reason": "sin_raw_text"}
+    parsed = parse_invoice_text(raw_text)
+    if not parsed:
+        return {"ok": False, "factura_id": factura_id, "reason": "sin_parse"}
+    parsed["tipo"] = str(factura_row.get("tipo") or parsed.get("tipo") or "compra").strip().lower()
+    if not parsed.get("fecha"):
+        parsed["fecha"] = str(factura_row.get("fecha_emision") or "").strip()
+    if not parsed.get("numero"):
+        parsed["numero"] = str(factura_row.get("numero") or "").strip()
+    if not parsed.get("tercero"):
+        parsed["tercero"] = str(factura_row.get("tercero_nombre") or "").strip()
+    if not parsed.get("nif"):
+        parsed["nif"] = str(factura_row.get("tercero_nif") or "").strip().upper()
+    parsed["descripcion"] = str(parsed.get("descripcion") or factura_row.get("descripcion") or parsed.get("numero") or "Factura").strip()
+    parsed["base_imponible"] = round(parse_money_value(parsed.get("base_imponible") or factura_row.get("base_imponible") or 0.0), 2)
+    parsed["base_exenta"] = round(parse_money_value(parsed.get("base_exenta") or factura_row.get("base_exenta") or parsed.get("exento") or 0.0), 2)
+    parsed["base_no_sujeta"] = round(parse_money_value(parsed.get("base_no_sujeta") or factura_row.get("base_no_sujeta") or 0.0), 2)
+    parsed["cuota_iva"] = round(parse_money_value(parsed.get("cuota_iva") or factura_row.get("cuota_iva") or 0.0), 2)
+    parsed["cuota_irpf"] = round(parse_money_value(parsed.get("cuota_irpf") or factura_row.get("cuota_irpf") or 0.0), 2)
+    parsed["total"] = round(parse_money_value(parsed.get("total") or factura_row.get("total") or 0.0), 2)
+    parsed["iva_pct"] = round(parse_money_value(parsed.get("iva_pct") or factura_row.get("iva_pct") or 0.0), 2)
+    parsed["tipo_operacion"] = str(parsed.get("tipo_operacion") or "").strip().lower()
+    parsed["raw_text"] = raw_text
+    tercero_id = str(factura_row.get("tercero_id") or "").strip() or None
+    counterpart_account = ""
+    if tercero_id:
+        tercero_row = conn.execute(
+            "SELECT id, nombre, nif, cuenta_contable FROM gestoria_terceros WHERE id = ? LIMIT 1",
+            (tercero_id,),
+        ).fetchone()
+        if tercero_row:
+            counterpart_account = str(tercero_row["cuenta_contable"] or "").strip()
+    if not counterpart_account:
+        third_type = "cliente" if parsed.get("tipo") == "venta" else ("proveedor" if parsed.get("numero") else "acreedor")
+        tercero_id, counterpart_account = ensure_gestoria_tercero(
+            conn,
+            empresa_id,
+            parsed.get("nif"),
+            parsed.get("tercero"),
+            third_type,
+            now,
+        )
+    if not counterpart_account:
+        counterpart_account = "430" if parsed.get("tipo") == "venta" else "400"
+    conn.execute(
+        """
+        UPDATE gestoria_facturas
+        SET cliente_id = COALESCE(?, cliente_id),
+            tercero_id = COALESCE(?, tercero_id),
+            tipo = ?,
+            numero = ?,
+            fecha_emision = ?,
+            descripcion = ?,
+            base_imponible = ?,
+            base_exenta = ?,
+            base_no_sujeta = ?,
+            cuota_iva = ?,
+            cuota_irpf = ?,
+            total = ?,
+            iva_pct = ?,
+            tipo_operacion = ?,
+            raw_text = ?,
+            updated_at = datetime(?)
+        WHERE id = ?
+        """,
+        (
+            cliente_id,
+            tercero_id,
+            parsed.get("tipo") or "compra",
+            parsed.get("numero") or None,
+            parsed.get("fecha") or None,
+            parsed.get("descripcion") or None,
+            parsed.get("base_imponible") or 0.0,
+            parsed.get("base_exenta") or 0.0,
+            parsed.get("base_no_sujeta") or 0.0,
+            parsed.get("cuota_iva") or 0.0,
+            parsed.get("cuota_irpf") or 0.0,
+            parsed.get("total") or 0.0,
+            parsed.get("iva_pct") or 0.0,
+            parsed.get("tipo_operacion") or "",
+            raw_text,
+            now,
+            factura_id,
+        ),
+    )
+    doc_key = str(factura_row.get("doc_key") or "").strip()
+    if doc_key:
+        try:
+            ensure_factura_doc_link(
+                conn,
+                empresa_id=empresa_id,
+                cliente_id=cliente_id,
+                factura_id=factura_id,
+                doc_key=doc_key,
+                nombre=parsed.get("numero") or "Factura",
+                fecha=parsed.get("fecha") or "",
+                estado="Recibido",
+                notas="OCR factura reprocesada",
+                calidad_ocr=None,
+                campos_ocr=_factura_campos_ocr_payload(parsed),
+                now=now,
+            )
+        except Exception:
+            pass
+    asiento_row = conn.execute(
+        "SELECT id FROM gestoria_asientos WHERE factura_id = ? LIMIT 1",
+        (factura_id,),
+    ).fetchone()
+    asiento_id = str(asiento_row["id"]).strip() if asiento_row else ""
+    lineas = []
+    total_debe = 0.0
+    total_haber = 0.0
+    if rebuild_asiento and asiento_id:
+        lineas, total_debe, total_haber = build_invoice_asiento(parsed, counterpart_account)
+        conn.execute(
+            """
+            UPDATE gestoria_asientos
+            SET fecha = ?, concepto = ?, referencia = ?, total_debe = ?, total_haber = ?, updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (
+                parsed.get("fecha") or factura_row.get("fecha_emision") or "",
+                parsed.get("descripcion") or factura_row.get("descripcion") or "Factura",
+                parsed.get("numero") or factura_id,
+                total_debe,
+                total_haber,
+                now,
+                asiento_id,
+            ),
+        )
+        conn.execute("DELETE FROM gestoria_asiento_lineas WHERE asiento_id = ?", (asiento_id,))
+        for item in lineas:
+            conn.execute(
+                """
+                INSERT INTO gestoria_asiento_lineas (
+                  id, asiento_id, tercero_id, cuenta, descripcion, debe, haber,
+                  impuesto_tipo, impuesto_pct, created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    os.urandom(16).hex(),
+                    asiento_id,
+                    tercero_id,
+                    item.get("cuenta"),
+                    item.get("descripcion"),
+                    item.get("debe") or 0.0,
+                    item.get("haber") or 0.0,
+                    item.get("impuesto"),
+                    item.get("porcentaje"),
+                    now,
+                    now,
+                ),
+            )
+    return {
+        "ok": True,
+        "factura_id": factura_id,
+        "asiento_id": asiento_id or None,
+        "tercero_id": tercero_id,
+        "parsed": {
+            "numero": parsed.get("numero") or "",
+            "fecha": parsed.get("fecha") or "",
+            "base_imponible": parsed.get("base_imponible") or 0.0,
+            "base_exenta": parsed.get("base_exenta") or 0.0,
+            "base_no_sujeta": parsed.get("base_no_sujeta") or 0.0,
+            "cuota_iva": parsed.get("cuota_iva") or 0.0,
+            "cuota_irpf": parsed.get("cuota_irpf") or 0.0,
+            "total": parsed.get("total") or 0.0,
+            "tipo_operacion": parsed.get("tipo_operacion") or "",
+        },
+        "lineas": lineas,
+        "totales": {"debe": total_debe, "haber": total_haber},
+    }
+
+
+PGC_ACCOUNT_PREFIXES = {
+    "102": {"tipo": "Patrimonio Neto", "categoria": "Capital", "destino": "Balance"},
+    "118": {"tipo": "Patrimonio Neto", "categoria": "Reservas", "destino": "Balance"},
+    "121": {"tipo": "Patrimonio Neto", "categoria": "Resultados negativos de ejercicios anteriores", "destino": "Balance"},
+    "129": {"tipo": "Patrimonio Neto", "categoria": "Resultado del ejercicio", "destino": "Balance"},
+    "170": {"tipo": "Pasivo", "categoria": "Deudas a Largo Plazo", "destino": "Balance"},
+    "100": {"tipo": "Patrimonio Neto", "categoria": "Capital Social", "destino": "Balance"},
+    "200": {"tipo": "Activo", "categoria": "Inmovilizado Intangible", "destino": "Balance"},
+    "206": {"tipo": "Activo", "categoria": "Aplicaciones Informáticas", "destino": "Balance"},
+    "210": {"tipo": "Activo", "categoria": "Inmovilizado Material", "destino": "Balance"},
+    "211": {"tipo": "Activo", "categoria": "Construcciones", "destino": "Balance"},
+    "215": {"tipo": "Activo", "categoria": "Otras Instalaciones", "destino": "Balance"},
+    "216": {"tipo": "Activo", "categoria": "Mobiliario", "destino": "Balance"},
+    "217": {"tipo": "Activo", "categoria": "Equipos para Procesos de Información", "destino": "Balance"},
+    "218": {"tipo": "Activo", "categoria": "Vehículos", "destino": "Balance"},
+    "242": {"tipo": "Activo", "categoria": "Créditos a Largo Plazo", "destino": "Balance"},
+    "280": {"tipo": "Amortización", "categoria": "Amortización Inmovilizado Intangible", "destino": "Balance"},
+    "281": {"tipo": "Amortización", "categoria": "Amortización Acumulada", "destino": "Balance"},
+    "300": {"tipo": "Activo", "categoria": "Existencias", "destino": "Balance"},
+    "400": {"tipo": "Pasivo", "categoria": "Proveedores", "destino": "Balance"},
+    "410": {"tipo": "Pasivo", "categoria": "Acreedores Varios", "destino": "Balance"},
+    "430": {"tipo": "Activo", "categoria": "Clientes", "destino": "Balance"},
+    "440": {"tipo": "Activo", "categoria": "Deudores Varios", "destino": "Balance"},
+    "407": {"tipo": "Pasivo", "categoria": "Anticipos a Proveedores", "destino": "Balance"},
+    "460": {"tipo": "Activo", "categoria": "Anticipos de Remuneraciones", "destino": "Balance"},
+    "465": {"tipo": "Pasivo", "categoria": "Remuneraciones Pendientes de Pago", "destino": "Balance"},
+    "472": {"tipo": "Impuesto", "categoria": "Hacienda IVA Soportado", "destino": "Balance"},
+    "471": {"tipo": "Impuesto", "categoria": "Hacienda IVA Soportado / Deudora", "destino": "Balance"},
+    "474": {"tipo": "Impuesto", "categoria": "Activo por Impuestos Diferidos", "destino": "Balance"},
+    "476": {"tipo": "Impuesto", "categoria": "Organismos de la Seguridad Social Acreedores", "destino": "Balance"},
+    "477": {"tipo": "Impuesto", "categoria": "Hacienda IVA Repercutido", "destino": "Balance"},
+    "475": {"tipo": "Impuesto", "categoria": "Hacienda IVA Repercutido", "destino": "Balance"},
+    "520": {"tipo": "Pasivo", "categoria": "Deudas a CP", "destino": "Balance"},
+    "523": {"tipo": "Pasivo", "categoria": "Proveedores de Inmovilizado a Corto Plazo", "destino": "Balance"},
+    "532": {"tipo": "Tesorería", "categoria": "Cuentas Financieras a Corto Plazo", "destino": "Balance"},
+    "551": {"tipo": "Tesorería", "categoria": "Cuenta Corriente con Socios y Administradores", "destino": "Balance"},
+    "561": {"tipo": "Tesorería", "categoria": "Depósitos y Fianzas Recibidos", "destino": "Balance"},
+    "570": {"tipo": "Tesorería", "categoria": "Caja", "destino": "Balance"},
+    "572": {"tipo": "Tesorería", "categoria": "Bancos y Cajas", "destino": "Balance"},
+    "600": {"tipo": "Gasto", "categoria": "Compras de Mercaderías", "destino": "Dashboard"},
+    "610": {"tipo": "Gasto", "categoria": "Variación Existencias", "destino": "Dashboard"},
+    "620": {"tipo": "Gasto", "categoria": "Servicios Exteriores", "destino": "Dashboard"},
+    "602": {"tipo": "Gasto", "categoria": "Compras de Otros Aprovisionamientos", "destino": "Dashboard"},
+    "608": {"tipo": "Gasto", "categoria": "Devoluciones de Compras y Operaciones Similares", "destino": "Dashboard"},
+    "621": {"tipo": "Gasto", "categoria": "Arrendamientos y Cánones", "destino": "Dashboard"},
+    "622": {"tipo": "Gasto", "categoria": "Reparaciones y Conservación", "destino": "Dashboard"},
+    "623": {"tipo": "Gasto", "categoria": "Servicios Profesionales", "destino": "Dashboard"},
+    "626": {"tipo": "Gasto", "categoria": "Servicios Bancarios", "destino": "Dashboard"},
+    "625": {"tipo": "Gasto", "categoria": "Seguros", "destino": "Dashboard"},
+    "627": {"tipo": "Gasto", "categoria": "Publicidad y Relaciones Públicas", "destino": "Dashboard"},
+    "628": {"tipo": "Gasto", "categoria": "Suministros", "destino": "Dashboard"},
+    "629": {"tipo": "Gasto", "categoria": "Otros Servicios", "destino": "Dashboard"},
+    "631": {"tipo": "Gasto", "categoria": "Otros Tributos", "destino": "Dashboard"},
+    "640": {"tipo": "Gasto", "categoria": "Sueldos y Salarios", "destino": "Dashboard"},
+    "642": {"tipo": "Gasto", "categoria": "Seguridad Social a Cargo de la Empresa", "destino": "Dashboard"},
+    "662": {"tipo": "Gasto", "categoria": "Intereses Deuda", "destino": "Dashboard"},
+    "669": {"tipo": "Gasto", "categoria": "Otros Gastos Financieros", "destino": "Dashboard"},
+    "670": {"tipo": "Gasto", "categoria": "Pérdidas Procedentes del Inmovilizado", "destino": "Dashboard"},
+    "671": {"tipo": "Gasto", "categoria": "Pérdidas por Inversiones Financieras", "destino": "Dashboard"},
+    "678": {"tipo": "Gasto", "categoria": "Gastos Excepcionales", "destino": "Dashboard"},
+    "680": {"tipo": "Gasto", "categoria": "Amortización del Inmovilizado Intangible", "destino": "Dashboard"},
+    "681": {"tipo": "Gasto", "categoria": "Amortización del Inmovilizado Material", "destino": "Dashboard"},
+    "700": {"tipo": "Ingreso", "categoria": "Ventas de Mercaderías", "destino": "Dashboard"},
+    "705": {"tipo": "Ingreso", "categoria": "Prestaciones de Servicios", "destino": "Dashboard"},
+    "740": {"tipo": "Ingreso", "categoria": "Subvenciones, Donaciones y Legados", "destino": "Dashboard"},
+    "746": {"tipo": "Ingreso", "categoria": "Subvenciones de Capital Transferidas al Resultado", "destino": "Dashboard"},
+    "778": {"tipo": "Ingreso", "categoria": "Ingresos Excepcionales", "destino": "Dashboard"},
+    "752": {"tipo": "Ingreso", "categoria": "Subvenciones de Explotación", "destino": "Dashboard"},
+}
+
+PGC_EXPENSE_PREFIXES = {"600", "602", "608", "610", "620", "621", "622", "623", "625", "626", "627", "628", "629", "631", "640", "642", "662", "669", "670", "671", "678", "680", "681"}
+PGC_INCOME_PREFIXES = {"700", "705", "740", "746", "752", "778"}
+PGC_THIRD_PARTY_PREFIXES = {
+    "400": "proveedor",
+    "410": "acreedor",
+    "430": "cliente",
+    "440": "cliente",
+}
+PGC_GENERIC_THIRD_PARTY_LABELS = {
+    "ACREEDORES POR PRESTACIONES DE SERVICIOS",
+    "ACREEDORES VARIOS",
+    "PROVEEDORES",
+    "PROVEEDORES VARIOS",
+    "CLIENTES",
+    "CLIENTES VARIOS",
+    "DEUDORES",
+    "DEUDORES VARIOS",
+}
+
+
+def _normalize_diario_asiento_value(value):
+    if value in (None, ""):
+        return ""
+    if isinstance(value, (int, float)):
+        try:
+            return str(int(value))
+        except Exception:
+            return str(value).strip()
+    text = str(value).strip()
+    if not text:
+        return ""
+    if re.fullmatch(r"\d+(?:\.0+)?", text):
+        try:
+            return str(int(float(text)))
+        except Exception:
+            return text
+    return text
+
+
+def _normalize_diario_date_value(value, epoch):
+    if value in (None, ""):
+        return ""
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, (int, float)):
+        try:
+            from openpyxl.utils.datetime import from_excel
+
+            dt = from_excel(value, epoch=epoch)
+            if isinstance(dt, datetime):
+                return dt.date().isoformat()
+            if isinstance(dt, date):
+                return dt.isoformat()
+        except Exception:
+            pass
+    text = str(value).strip()
+    if not text:
+        return ""
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y", "%d-%m-%y"):
+        try:
+            return datetime.strptime(text, fmt).date().isoformat()
+        except Exception:
+            continue
+    return text
+
+
+def _normalize_diario_party_name(value):
+    text = re.sub(r"\s+", " ", str(value or "")).strip(" ,.;:-")
+    if not text:
+        return ""
+    upper = normalize_lookup_text(text)
+    if upper in PGC_GENERIC_THIRD_PARTY_LABELS:
+        return ""
+    text = re.sub(
+        r"^(?:SU|NTRA|NUESTRA|NUESTRO|PAGO|COBRO|DEVOLUCION|DEV\.?|PAGO FRA\.?|SU FRA\.?|NTRA\. FRA\.?)\s*(?:N[º°O]\.?|Nº|NO\.?)?\s*[A-Z0-9./-]+\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"^(?:FACTURA|FRA\.?|RECIBO|PAGO|COBRO)\s*(?:N[º°O]\.?|Nº|NO\.?)?\s*[A-Z0-9./-]+\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip(" ,.;:-")
+    if not text:
+        return ""
+    normalized = normalize_lookup_text(text)
+    if normalized in PGC_GENERIC_THIRD_PARTY_LABELS:
+        return ""
+    if len(normalized.split()) < 2 and not re.search(r"[A-ZÁÉÍÓÚÑ]", text):
+        return ""
+    return text[:180]
+
+
+def _import_gestoria_diario_excel(conn, *, empresa_id, cliente_id, xlsx_bytes, filename="", now=None, periodo="2024"):
+    now = now or datetime.now(timezone.utc).isoformat()
+    if not empresa_id:
+        raise ValueError("empresa_id requerido")
+    if not cliente_id:
+        raise ValueError("cliente_id requerido")
+    if not xlsx_bytes:
+        raise ValueError("xlsx_b64 requerido")
+    if not OPENPYXL_AVAILABLE:
+        raise ValueError("openpyxl no disponible en servidor")
+    from io import BytesIO
+    from openpyxl import load_workbook
+
+    wb = load_workbook(BytesIO(xlsx_bytes), data_only=True, read_only=True)
+    sheet = wb["LIBRO DIARIO"] if "LIBRO DIARIO" in wb.sheetnames else wb[wb.sheetnames[0]]
+    header_row = None
+    for idx, row in enumerate(sheet.iter_rows(values_only=True), start=1):
+        labels = [normalize_lookup_text(cell) for cell in (row[:7] if row else [])]
+        if labels[:4] == ["ASIENTO", "FECHA", "SUBCUENTA", "CONCEPTO"]:
+            header_row = idx
+            break
+    if not header_row:
+        raise ValueError("No se encontró la cabecera del libro diario")
+
+    grouped = OrderedDict()
+    skipped_rows = 0
+    unknown_prefixes = set()
+    for row in sheet.iter_rows(min_row=header_row + 1, values_only=True):
+        asiento_raw = row[0] if len(row) > 0 else ""
+        fecha_raw = row[1] if len(row) > 1 else ""
+        subcuenta_raw = row[2] if len(row) > 2 else ""
+        concepto_raw = row[3] if len(row) > 3 else ""
+        debe_raw = row[4] if len(row) > 4 else ""
+        haber_raw = row[5] if len(row) > 5 else ""
+        descripcion_raw = row[6] if len(row) > 6 else ""
+        asiento = _normalize_diario_asiento_value(asiento_raw)
+        subcuenta = re.sub(r"\s+", "", str(subcuenta_raw or "")).strip()
+        if not asiento or not subcuenta:
+            skipped_rows += 1
+            continue
+        concept_text = re.sub(r"\s+", " ", str(concepto_raw or "")).strip()
+        desc_text = re.sub(r"\s+", " ", str(descripcion_raw or "")).strip()
+        if not concept_text and not desc_text:
+            skipped_rows += 1
+            continue
+        if normalize_lookup_text(concept_text).startswith("SUMA TOTAL") or normalize_lookup_text(desc_text).startswith("SUMA TOTAL"):
+            continue
+        fecha = _normalize_diario_date_value(fecha_raw, getattr(wb, "epoch", None))
+        debe = _money_decimal2(debe_raw)
+        haber = _money_decimal2(haber_raw)
+        entry = grouped.setdefault(
+            asiento,
+            {
+                "asiento": asiento,
+                "fecha": fecha,
+                "concepto": concept_text or desc_text or "Asiento",
+                "lines": [],
+            },
+        )
+        if not entry["fecha"] and fecha:
+            entry["fecha"] = fecha
+        if concept_text and entry["concepto"] in {"Asiento", ""}:
+            entry["concepto"] = concept_text
+        prefix = subcuenta[:3]
+        if prefix and prefix not in PGC_ACCOUNT_PREFIXES:
+            unknown_prefixes.add(prefix)
+        party_kind = PGC_THIRD_PARTY_PREFIXES.get(prefix, "")
+        party_name = _normalize_diario_party_name(desc_text or concept_text)
+        tercero_id = None
+        tercero_cuenta = ""
+        if party_kind and party_name and not re.fullmatch(r"\d{3,}", subcuenta):
+            tercero_id, tercero_cuenta = ensure_gestoria_tercero(conn, empresa_id, "", party_name, party_kind, now)
+        entry["lines"].append(
+            {
+                "cuenta": subcuenta,
+                "descripcion": desc_text or concept_text or "Asiento",
+                "debe": float(debe),
+                "haber": float(haber),
+                "tercero_id": tercero_id,
+                "tercero_cuenta": tercero_cuenta,
+            }
+        )
+
+    if not grouped:
+        raise ValueError("El libro diario no contenía apuntes importables")
+
+    lot_id = os.urandom(16).hex()
+    total_lineas = sum(len(item["lines"]) for item in grouped.values())
+    total_debe_import = Decimal("0.00")
+    total_haber_import = Decimal("0.00")
+    warnings = []
+    conn.execute(
+        """
+        INSERT INTO gestoria_import_lotes (
+          id, empresa_id, cliente_id, origen, estado, periodo, carpeta_origen,
+          template_path, total_documentos, total_ok, total_revisar, total_duplicado, total_error,
+          notas, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+        """,
+        (
+            lot_id,
+            empresa_id,
+            cliente_id,
+            "diario_excel",
+            "aplicado",
+            periodo or "2024",
+            filename or "diario_excel",
+            "DIARIO ESTUDIO 2024.XLSX",
+            len(grouped),
+            len(grouped),
+            0,
+            0,
+            0,
+            f"Importación libro diario Excel · filas {total_lineas} · prefijos desconocidos {','.join(sorted(unknown_prefixes)) if unknown_prefixes else 'ninguno'}",
+            now,
+            now,
+        ),
+    )
+
+    for asiento_key, entry in grouped.items():
+        lines = entry["lines"]
+        try:
+            lines, asiento_debe, asiento_haber = ensure_asiento_balanced(lines, allow_adjustment=True)
+        except ValueError as exc:
+            raise ValueError(f"Asiento {asiento_key}: {exc}") from exc
+        total_debe_import += Decimal(str(asiento_debe or 0.0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        total_haber_import += Decimal(str(asiento_haber or 0.0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        asiento_id = os.urandom(16).hex()
+        referencia = f"EXCEL2024-{asiento_key}"
+        conn.execute(
+            """
+            INSERT INTO gestoria_asientos (
+              id, empresa_id, cliente_id, factura_id, fecha, concepto, diario, referencia,
+              total_debe, total_haber, created_at, updated_at
+            ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+            """,
+            (
+                asiento_id,
+                empresa_id,
+                cliente_id,
+                entry.get("fecha") or None,
+                entry.get("concepto") or "Asiento importado",
+                "LD2024",
+                referencia,
+                float(asiento_debe),
+                float(asiento_haber),
+                now,
+                now,
+            ),
+        )
+        for line in lines:
+            conn.execute(
+                """
+                INSERT INTO gestoria_asiento_lineas (
+                  id, asiento_id, tercero_id, cuenta, descripcion, debe, haber,
+                  impuesto_tipo, impuesto_pct, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, datetime(?), datetime(?))
+                """,
+                (
+                    os.urandom(16).hex(),
+                    asiento_id,
+                    line.get("tercero_id"),
+                    line.get("cuenta"),
+                    line.get("descripcion"),
+                    line.get("debe") or 0.0,
+                    line.get("haber") or 0.0,
+                    now,
+                    now,
+                ),
+            )
+
+    return {
+        "lote_id": lot_id,
+        "asientos": len(grouped),
+        "lineas": total_lineas,
+        "total_debe": float(total_debe_import.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+        "total_haber": float(total_haber_import.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
+        "warnings": warnings,
+        "unknown_prefixes": sorted(unknown_prefixes),
+        "periodo": periodo or "2024",
+    }
 
 
 def normalize_import_review_state(value):
@@ -12692,6 +13708,32 @@ def refresh_gestoria_import_lote_totals(conn, lote_id, now):
         estado = "preparado"
     else:
         estado = "vacio"
+    extra = conn.execute(
+        """
+        SELECT
+          COUNT(DISTINCT CASE WHEN COALESCE(tercero_id, '') <> '' THEN tercero_id END) AS total_terceros,
+          COUNT(DISTINCT CASE WHEN COALESCE(cuenta_sugerida, '') <> '' THEN cuenta_sugerida END) AS total_cuentas,
+          COUNT(DISTINCT CASE WHEN COALESCE(factura_id, '') <> '' THEN factura_id END) AS total_facturas_vinculadas
+        FROM gestoria_import_documentos
+        WHERE lote_id = ?
+        """,
+        (lote_id,),
+    ).fetchone()
+    total_terceros = int((extra["total_terceros"] if extra else 0) or 0)
+    total_cuentas = int((extra["total_cuentas"] if extra else 0) or 0)
+    total_asientos = int(summary["total_documentos"] or 0)
+    total_pendientes = max(0, total_revisar + total_duplicado + total_error)
+    valoracion_json = json.dumps(
+        {
+            "estado": estado,
+            "asientos": total_asientos,
+            "terceros": total_terceros,
+            "cuentas": total_cuentas,
+            "pendientes": total_pendientes,
+            "facturas_vinculadas": int((extra["total_facturas_vinculadas"] if extra else 0) or 0),
+        },
+        ensure_ascii=False,
+    )
     conn.execute(
         """
         UPDATE gestoria_import_lotes
@@ -12700,6 +13742,12 @@ def refresh_gestoria_import_lote_totals(conn, lote_id, now):
             total_revisar = ?,
             total_duplicado = ?,
             total_error = ?,
+            valoracion_estado = COALESCE(valoracion_estado, ?),
+            valoracion_json = ?,
+            valoracion_total_asientos = ?,
+            valoracion_total_terceros = ?,
+            valoracion_total_cuentas = ?,
+            valoracion_total_pendientes = ?,
             estado = ?,
             updated_at = datetime(?)
         WHERE id = ?
@@ -12710,6 +13758,12 @@ def refresh_gestoria_import_lote_totals(conn, lote_id, now):
             total_revisar,
             total_duplicado,
             total_error,
+            estado,
+            valoracion_json,
+            total_asientos,
+            total_terceros,
+            total_cuentas,
+            total_pendientes,
             estado,
             now,
             lote_id,
@@ -12997,6 +14051,7 @@ def ensure_factura_doc_link(
             """
             UPDATE gestoria_docs
             SET referencia_id = COALESCE(?, referencia_id),
+                repo_key = COALESCE(NULLIF(?, ''), repo_key),
                 nombre = COALESCE(NULLIF(?, ''), nombre),
                 tipo = COALESCE(NULLIF(?, ''), tipo),
                 fecha = COALESCE(NULLIF(?, ''), fecha),
@@ -13011,6 +14066,7 @@ def ensure_factura_doc_link(
             """,
             (
                 factura_id,
+                "factura",
                 nombre or "Factura",
                 "Factura",
                 fecha or "",
@@ -13029,17 +14085,18 @@ def ensure_factura_doc_link(
     conn.execute(
         """
         INSERT INTO gestoria_docs (
-          id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+          id, empresa_id, cliente_id, repo_key, referencia_tipo, referencia_id,
           nombre, tipo, fecha, estado, notas, doc_key, doc_url,
           calidad_ocr, campos_ocr, created_at, updated_at
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
         )
         """,
         (
             doc_id,
             empresa_id,
             str(cliente_id or "").strip() or None,
+            "factura",
             "facturas",
             factura_id,
             nombre or "Factura",
@@ -13058,7 +14115,7 @@ def ensure_factura_doc_link(
     return doc_id
 
 
-def reconcile_gestoria_factura_asiento(conn, factura_row, now, *, auto_link=True, lookback_days=7):
+def reconcile_gestoria_factura_asiento(conn, factura_row, now, *, auto_link=True, lookback_days=7, historico_cerrado=False):
     if not factura_row:
         return None
     if not isinstance(factura_row, dict):
@@ -13085,10 +14142,11 @@ def reconcile_gestoria_factura_asiento(conn, factura_row, now, *, auto_link=True
     if not factura:
         return None
     existing_asiento = conn.execute(
-        "SELECT id, fecha, concepto, referencia FROM gestoria_asientos WHERE factura_id = ? LIMIT 1",
+        "SELECT id, fecha, concepto, referencia, diario FROM gestoria_asientos WHERE factura_id = ? LIMIT 1",
         (factura_id,),
     ).fetchone()
-    if existing_asiento:
+    existing_asiento_is_auto = bool(existing_asiento and str(existing_asiento["diario"] or "").strip().upper() == "FACT")
+    if existing_asiento and not (historico_cerrado and existing_asiento_is_auto):
         try:
             learn_gestoria_factura_rule(conn, factura, existing_asiento, None, now=now)
         except Exception:
@@ -13103,12 +14161,151 @@ def reconcile_gestoria_factura_asiento(conn, factura_row, now, *, auto_link=True
             "reason": "ya_vinculada",
         }
 
+    def _create_auto_asiento_from_factura():
+        parsed_factura = {
+            "tipo": str(factura["tipo"] or "compra").strip().lower() or "compra",
+            "numero": str(factura["numero"] or "").strip(),
+            "fecha": fecha_factura or str(factura["fecha_emision"] or "").strip(),
+            "nif": str(factura["tercero_nif"] or "").strip().upper(),
+            "tercero": str(factura["tercero_nombre"] or "").strip(),
+            "base_imponible": round(parse_money_value(factura["base_imponible"] or 0.0), 2),
+            "base_exenta": round(parse_money_value(factura["base_exenta"] or 0.0), 2),
+            "base_no_sujeta": round(parse_money_value(factura["base_no_sujeta"] or 0.0), 2),
+            "cuota_iva": round(parse_money_value(factura["cuota_iva"] or 0.0), 2),
+            "cuota_irpf": round(parse_money_value(factura["cuota_irpf"] or 0.0), 2),
+            "total": round(parse_money_value(factura["total"] or 0.0), 2),
+            "iva_pct": round(parse_money_value(factura["iva_pct"] or 0.0), 2),
+            "tipo_operacion": str(factura["tipo_operacion"] or "").strip().lower(),
+            "descripcion": str(factura["descripcion"] or factura["numero"] or "Factura").strip(),
+            "raw_text": str(factura["raw_text"] or "").strip(),
+        }
+        tercero_id = str(factura["tercero_id"] or "").strip() or None
+        counterpart_account = str(factura["tercero_cuenta"] or "").strip()
+        if not counterpart_account:
+            third_type = "cliente" if parsed_factura["tipo"] == "venta" else ("proveedor" if parsed_factura["numero"] else "acreedor")
+            tercero_id, counterpart_account = ensure_gestoria_tercero(
+                conn,
+                empresa_id,
+                parsed_factura.get("nif"),
+                parsed_factura.get("tercero"),
+                third_type,
+                now,
+            )
+        if not counterpart_account:
+            counterpart_account = "430" if parsed_factura["tipo"] == "venta" else "400"
+        lines, total_debe, total_haber = build_invoice_asiento(parsed_factura, counterpart_account)
+        factura_id_new = factura_id
+        asiento_id = os.urandom(16).hex()
+        referencia = parsed_factura["numero"] or factura_id_new
+        conn.execute(
+            """
+            INSERT INTO gestoria_asientos (
+              id, empresa_id, cliente_id, factura_id, fecha, concepto, diario, referencia,
+              total_debe, total_haber, created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+            )
+            """,
+            (
+                asiento_id,
+                empresa_id,
+                cliente_id or None,
+                factura_id_new,
+                parsed_factura["fecha"] or fecha_factura or now[:10],
+                parsed_factura["descripcion"] or "Factura",
+                "FACT",
+                referencia,
+                total_debe,
+                total_haber,
+                now,
+                now,
+            ),
+        )
+        for item in lines:
+            conn.execute(
+                """
+                INSERT INTO gestoria_asiento_lineas (
+                  id, asiento_id, tercero_id, cuenta, descripcion, debe, haber,
+                  impuesto_tipo, impuesto_pct, created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                )
+                """,
+                (
+                    os.urandom(16).hex(),
+                    asiento_id,
+                    tercero_id,
+                    item.get("cuenta"),
+                    item.get("descripcion"),
+                    item.get("debe") or 0.0,
+                    item.get("haber") or 0.0,
+                    item.get("impuesto"),
+                    item.get("porcentaje"),
+                    now,
+                    now,
+                ),
+            )
+        try:
+            learn_gestoria_factura_rule(conn, factura, {"id": asiento_id, "fecha": parsed_factura["fecha"]}, lines, now=now)
+        except Exception:
+            pass
+        try:
+            conn.execute(
+                "UPDATE gestoria_facturas SET asiento_auto = 1, updated_at = datetime(?) WHERE id = ?",
+                (now, factura_id_new),
+            )
+        except Exception:
+            pass
+        return {
+            "ok": True,
+            "factura_id": factura_id_new,
+            "asiento_id": asiento_id,
+            "matched": False,
+            "linked": True,
+            "created": True,
+            "score": 0,
+            "reason": "auto_creado",
+            "asiento_fecha": parsed_factura["fecha"] or fecha_factura or "",
+            "asiento_referencia": referencia,
+            "asiento_concepto": parsed_factura["descripcion"] or "Factura",
+        }
+
     fecha_factura = str(factura["fecha_emision"] or "").strip()
     factura_total = round(parse_money_value(factura["total"] or 0), 2)
     factura_numero = str(factura["numero"] or "").strip()
     factura_tipo = normalize_service_key(factura["tipo"] or "")
     factura_nif = normalize_lookup_text(factura["tercero_nif"] or "")
     factura_nombre = normalize_lookup_text(factura["tercero_nombre"] or "")
+    factura_raw_lookup = normalize_lookup_text(
+        " ".join(
+            [
+                str(factura["raw_text"] or ""),
+                factura_nombre or "",
+                factura_numero or "",
+            ]
+        )
+    )
+    guessed_fields = guess_gestoria_invoice_fields_from_raw_text(factura["raw_text"] or "")
+    guessed_fecha = str(guessed_fields.get("fecha") or "").strip()
+    guessed_numero = str(guessed_fields.get("numero") or "").strip()
+    guessed_total = round(parse_money_value(guessed_fields.get("total") or 0), 2) if guessed_fields.get("total") not in (None, "") else 0.0
+    if guessed_fecha and (
+        not fecha_factura
+        or fecha_factura[:4] not in {"2023", "2024"}
+        or fecha_factura.startswith("2025")
+        or fecha_factura.startswith("2026")
+    ):
+        fecha_factura = guessed_fecha
+    if guessed_numero and (not factura_numero or len(factura_numero) < 2):
+        factura_numero = guessed_numero
+    if guessed_total > 0:
+        ratio_ok = factura_total <= 0
+        if factura_total > 0:
+            ratio = guessed_total / factura_total if factura_total else 0
+            ratio_ok = 0.5 <= ratio <= 2.0
+        if ratio_ok:
+            factura_total = guessed_total
+    match_threshold = 28 if historico_cerrado else 50
     fecha_desde = ""
     fecha_hasta = ""
     if fecha_factura:
@@ -13127,6 +14324,8 @@ def reconcile_gestoria_factura_asiento(conn, factura_row, now, *, auto_link=True
     if cliente_id:
         where.append("COALESCE(a.cliente_id, '') = ?")
         values.append(cliente_id)
+    if historico_cerrado:
+        where.append("COALESCE(a.diario, '') <> 'FACT'")
     if fecha_desde:
         where.append("a.fecha >= ?")
         values.append(fecha_desde)
@@ -13182,6 +14381,21 @@ def reconcile_gestoria_factura_asiento(conn, factura_row, now, *, auto_link=True
             score += 20
         if factura_numero and factura_numero.upper().replace("/", "") in ref_text.replace("/", ""):
             score += 10
+        if factura_raw_lookup:
+            raw_tokens = [tok for tok in re.split(r"\s+", factura_raw_lookup) if len(tok) >= 4]
+            ref_tokens = set(re.split(r"\s+", ref_text))
+            overlap_tokens = set(raw_tokens) & ref_tokens
+            overlap = len(overlap_tokens)
+            if overlap:
+                score += min(18, overlap * 6)
+                if overlap >= 2:
+                    score += 4
+                if any(len(tok) >= 8 for tok in overlap_tokens):
+                    score += 6
+            for keyword in ("APPLE", "WIBER", "AMAZON", "REPSOL", "TELEFONICA", "CULLIGAN", "THUNDERBIRD", "THUNDERBIRD"):
+                if keyword in factura_raw_lookup and keyword in ref_text:
+                    score += 12
+                    break
         tercero_text = ""
         tercero_nif_line = ""
         cuenta_tercero = ""
@@ -13238,19 +14452,68 @@ def reconcile_gestoria_factura_asiento(conn, factura_row, now, *, auto_link=True
             best_lines = line_dicts
             best_score = score
 
+    if historico_cerrado and best_score < match_threshold:
+        broad_where = [
+            "a.empresa_id = ?",
+            "COALESCE(a.factura_id, '') = ''",
+            "COALESCE(a.diario, '') <> 'FACT'",
+        ]
+        broad_values = [empresa_id]
+        if cliente_id:
+            broad_where.append("COALESCE(a.cliente_id, '') = ?")
+            broad_values.append(cliente_id)
+        broad_candidates = conn.execute(
+            f"""
+            SELECT a.id, a.fecha, a.concepto, a.referencia, a.total_debe, a.total_haber, a.diario
+            FROM gestoria_asientos a
+            WHERE {' AND '.join(broad_where)}
+            ORDER BY a.fecha ASC, a.created_at ASC
+            LIMIT 500
+            """,
+            broad_values,
+        ).fetchall()
+        for asiento_row in broad_candidates:
+            line_rows = conn.execute(
+                """
+                SELECT
+                  l.cuenta,
+                  l.descripcion,
+                  l.debe,
+                  l.haber,
+                  l.impuesto_tipo,
+                  l.impuesto_pct,
+                  COALESCE(t.nombre, '') AS tercero_nombre,
+                  COALESCE(t.nif, '') AS tercero_nif,
+                  COALESCE(t.cuenta_contable, '') AS tercero_cuenta
+                FROM gestoria_asiento_lineas l
+                LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
+                WHERE l.asiento_id = ?
+                ORDER BY l.created_at ASC
+                """,
+                (asiento_row["id"],),
+            ).fetchall()
+            line_dicts = [dict(r) for r in line_rows]
+            score = _candidate_score(asiento_row, line_dicts)
+            if score > best_score:
+                best = dict(asiento_row)
+                best_lines = line_dicts
+                best_score = score
+
     if not best:
-        return {
-            "ok": False,
-            "factura_id": factura_id,
-            "asiento_id": None,
-            "matched": False,
-            "linked": False,
-            "score": 0,
-            "reason": "sin_candidatos",
-        }
+        if historico_cerrado:
+            return {
+                "ok": True,
+                "factura_id": factura_id,
+                "asiento_id": None,
+                "matched": False,
+                "linked": False,
+                "score": 0,
+                "reason": "historico_sin_match",
+            }
+        return _create_auto_asiento_from_factura()
 
     linked = False
-    if auto_link and best_score >= 50:
+    if auto_link and best_score >= match_threshold:
         updated = conn.execute(
             """
             UPDATE gestoria_asientos
@@ -13261,9 +14524,45 @@ def reconcile_gestoria_factura_asiento(conn, factura_row, now, *, auto_link=True
             (factura_id, now, best["id"]),
         ).rowcount
         linked = updated == 1
-    if best and best_score >= 50:
+    if best and best_score >= match_threshold:
         try:
             learn_gestoria_factura_rule(conn, factura, best, best_lines, now=now)
+        except Exception:
+            pass
+    if best_score < match_threshold:
+        if historico_cerrado:
+            if existing_asiento and existing_asiento_is_auto:
+                return {
+                    "ok": True,
+                    "factura_id": factura_id,
+                    "asiento_id": existing_asiento["id"],
+                    "matched": False,
+                    "linked": False,
+                    "score": best_score,
+                    "reason": "historico_sin_match",
+                    "asiento_fecha": existing_asiento["fecha"] or "",
+                    "asiento_referencia": existing_asiento["referencia"] or "",
+                    "asiento_concepto": existing_asiento["concepto"] or "",
+                }
+            return {
+                "ok": True,
+                "factura_id": factura_id,
+                "asiento_id": best["id"],
+                "matched": False,
+                "linked": False,
+                "score": best_score,
+                "reason": "historico_sin_match",
+                "asiento_fecha": best.get("fecha") or "",
+                "asiento_referencia": best.get("referencia") or "",
+                "asiento_concepto": best.get("concepto") or "",
+            }
+        return _create_auto_asiento_from_factura()
+    if historico_cerrado and existing_asiento and existing_asiento_is_auto and best["id"] != existing_asiento["id"]:
+        try:
+            conn.execute(
+                "UPDATE gestoria_asientos SET factura_id = NULL, updated_at = datetime(?) WHERE id = ?",
+                (now, existing_asiento["id"]),
+            )
         except Exception:
             pass
     return {
@@ -13294,6 +14593,9 @@ def learn_gestoria_factura_rule(conn, factura_row, asiento_row=None, line_rows=N
     factura_numero = str(factura_row.get("numero") or "").strip()
     factura_tipo = normalize_service_key(factura_row.get("tipo") or "")
     factura_iva = round(parse_money_value(factura_row.get("iva_pct") or 0), 2) if factura_row.get("iva_pct") else None
+    factura_exento = round(parse_money_value(factura_row.get("base_exenta") or factura_row.get("exento") or 0), 2) if (factura_row.get("base_exenta") or factura_row.get("exento")) else None
+    factura_no_sujeta = round(parse_money_value(factura_row.get("base_no_sujeta") or 0), 2) if factura_row.get("base_no_sujeta") else None
+    factura_tipo_operacion = str(factura_row.get("tipo_operacion") or "").strip().lower()
     cuenta_tercero = str(factura_row.get("tercero_cuenta") or "").strip()
     cuenta_gasto = ""
     texto_match = " ".join(
@@ -13303,6 +14605,9 @@ def learn_gestoria_factura_rule(conn, factura_row, asiento_row=None, line_rows=N
             factura_numero,
             str(factura_row.get("descripcion") or ""),
             str(factura_row.get("doc_key") or ""),
+            str(factura_exento or ""),
+            str(factura_no_sujeta or ""),
+            factura_tipo_operacion,
         ]
     ).strip()
     if line_rows:
@@ -13498,6 +14803,8 @@ def apply_gestoria_import_document(conn, document_row, now):
         "nif": tercero_nif,
         "tercero": tercero_nombre,
         "base_imponible": base,
+        "base_exenta": 0.0,
+        "base_no_sujeta": 0.0,
         "cuota_iva": cuota_iva,
         "cuota_irpf": 0.0,
         "total": total,
@@ -13505,6 +14812,14 @@ def apply_gestoria_import_document(conn, document_row, now):
         "descripcion": concepto,
         "raw_text": document_row["raw_text"] or "",
     }
+    try:
+        parsed_doc = parse_invoice_text(document_row.get("raw_text") or "")
+        if parsed_doc:
+            parsed_factura["base_exenta"] = float(parsed_doc.get("base_exenta") or parsed_doc.get("exento") or 0.0)
+            parsed_factura["base_no_sujeta"] = float(parsed_doc.get("base_no_sujeta") or 0.0)
+            parsed_factura["tipo_operacion"] = str(parsed_doc.get("tipo_operacion") or "").strip()
+    except Exception:
+        pass
     archivo_hash = str(document_row.get("archivo_hash") or "").strip() or None
     dedupe_key = compute_gestoria_factura_dedupe_key(
         empresa_id=document_row["empresa_id"],
@@ -13568,6 +14883,7 @@ def apply_gestoria_import_document(conn, document_row, now):
                 fecha=fecha,
                 estado="Recibido",
                 notas=f"Importador facturas · lote {document_row['lote_id']} · documento {document_row['id']}",
+                campos_ocr=_factura_campos_ocr_payload(parsed_factura),
                 now=now,
             )
             return {
@@ -13596,10 +14912,11 @@ def apply_gestoria_import_document(conn, document_row, now):
         """
         INSERT INTO gestoria_facturas (
           id, empresa_id, cliente_id, tercero_id, tipo, numero, fecha_emision, descripcion,
-          base_imponible, cuota_iva, cuota_irpf, total, iva_pct, estado_ocr, doc_key, raw_text,
+          base_imponible, base_exenta, base_no_sujeta, cuota_iva, cuota_irpf, total, iva_pct,
+          tipo_operacion, estado_ocr, doc_key, raw_text,
           archivo_hash, dedupe_key, import_documento_id, origen_importacion, created_at, updated_at
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
         )
         """,
         (
@@ -13612,10 +14929,13 @@ def apply_gestoria_import_document(conn, document_row, now):
             fecha,
             concepto,
             base,
+            float(parsed_factura.get("base_exenta") or 0.0),
+            float(parsed_factura.get("base_no_sujeta") or 0.0),
             cuota_iva,
             0.0,
             total,
             iva_pct,
+            parsed_factura.get("tipo_operacion") or "",
             "importado",
             document_row["doc_key"],
             document_row["raw_text"],
@@ -13638,6 +14958,7 @@ def apply_gestoria_import_document(conn, document_row, now):
             fecha=fecha,
             estado="Recibido",
             notas=f"Importador facturas · lote {document_row['lote_id']} · documento {document_row['id']}",
+            campos_ocr=_factura_campos_ocr_payload(parsed_factura),
             now=now,
         )
     except Exception:
@@ -14291,7 +15612,7 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
                         estado="Recibido",
                         notas="OCR factura (duplicado)",
                         calidad_ocr=None,
-                        campos_ocr="",
+                        campos_ocr=_factura_campos_ocr_payload(parsed_factura),
                         now=now,
                     )
                 except Exception:
@@ -14311,11 +15632,12 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
             """
             INSERT INTO gestoria_facturas (
               id, empresa_id, cliente_id, tercero_id, tipo, numero, fecha_emision, descripcion,
-              base_imponible, cuota_iva, cuota_irpf, total, iva_pct, estado_ocr, doc_key, raw_text,
+              base_imponible, base_exenta, base_no_sujeta, cuota_iva, cuota_irpf, total, iva_pct,
+              tipo_operacion, estado_ocr, doc_key, raw_text,
               archivo_hash, dedupe_key,
               created_at, updated_at
             ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
             )
             """,
             (
@@ -14328,10 +15650,13 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
                 parsed_factura.get("fecha"),
                 parsed_factura.get("descripcion"),
                 parsed_factura.get("base_imponible") or 0.0,
+                parsed_factura.get("base_exenta") or 0.0,
+                parsed_factura.get("base_no_sujeta") or 0.0,
                 parsed_factura.get("cuota_iva") or 0.0,
                 parsed_factura.get("cuota_irpf") or 0.0,
                 parsed_factura.get("total") or 0.0,
                 parsed_factura.get("iva_pct") or 0.0,
+                parsed_factura.get("tipo_operacion") or "",
                 "ok",
                 doc_key,
                 parsed_factura.get("raw_text") or text,
@@ -14353,7 +15678,7 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
                 estado="Recibido",
                 notas="OCR factura",
                 calidad_ocr=None,
-                campos_ocr="",
+                campos_ocr=_factura_campos_ocr_payload(parsed_factura),
                 now=now,
             )
         except Exception:
@@ -34162,6 +35487,7 @@ def ensure_tables(db_path):
           id TEXT PRIMARY KEY,
           empresa_id TEXT,
           cliente_id TEXT,
+          repo_key TEXT,
           referencia_tipo TEXT,
           referencia_id TEXT,
           nombre TEXT,
@@ -34181,6 +35507,7 @@ def ensure_tables(db_path):
     try:
         ensure_column(conn, "gestoria_docs", "doc_key", "doc_key TEXT")
         ensure_column(conn, "gestoria_docs", "doc_url", "doc_url TEXT")
+        ensure_column(conn, "gestoria_docs", "repo_key", "repo_key TEXT")
         ensure_column(conn, "gestoria_docs", "referencia_tipo", "referencia_tipo TEXT")
         ensure_column(conn, "gestoria_docs", "referencia_id", "referencia_id TEXT")
         ensure_column(conn, "gestoria_docs", "calidad_ocr", "calidad_ocr TEXT")
@@ -34497,10 +35824,13 @@ def ensure_tables(db_path):
           fecha_emision TEXT,
           descripcion TEXT,
           base_imponible REAL,
+          base_exenta REAL,
+          base_no_sujeta REAL,
           cuota_iva REAL,
           cuota_irpf REAL,
           total REAL,
           iva_pct REAL,
+          tipo_operacion TEXT,
           estado_ocr TEXT,
           doc_key TEXT,
           archivo_hash TEXT,
@@ -34522,8 +35852,12 @@ def ensure_tables(db_path):
           concepto TEXT,
           diario TEXT,
           referencia TEXT,
-          total_debe REAL,
-          total_haber REAL,
+          total_debe NUMERIC(18,2),
+          total_haber NUMERIC(18,2),
+          punteado_banco INTEGER NOT NULL DEFAULT 0,
+          punteado_banco_at TEXT,
+          punteado_banco_by TEXT,
+          punteado_banco_notas TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         )
@@ -34537,12 +35871,96 @@ def ensure_tables(db_path):
           tercero_id TEXT,
           cuenta TEXT,
           descripcion TEXT,
-          debe REAL,
-          haber REAL,
+          debe NUMERIC(18,2),
+          haber NUMERIC(18,2),
           impuesto_tipo TEXT,
           impuesto_pct REAL,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gestoria_cuentas_bancarias (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT NOT NULL,
+          iban TEXT,
+          banco_nombre TEXT,
+          cuenta_contable TEXT,
+          titular TEXT,
+          es_principal INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE (empresa_id, iban)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gestoria_movimientos_bancarios (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT NOT NULL,
+          cuenta_bancaria_id TEXT,
+          fecha_operacion TEXT,
+          fecha_valor TEXT,
+          concepto TEXT,
+          importe REAL,
+          saldo REAL,
+          divisa TEXT,
+          codigo TEXT,
+          numero_documento TEXT,
+          referencia1 TEXT,
+          referencia2 TEXT,
+          info_adicional TEXT,
+          origen_fichero TEXT,
+          origen_hash TEXT,
+          punteado INTEGER NOT NULL DEFAULT 0,
+          punteado_at TEXT,
+          punteado_by TEXT,
+          punteado_notas TEXT,
+          asiento_id TEXT,
+          matched_score REAL,
+          matched_reason TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gestoria_banco_reglas (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT NOT NULL,
+          cuenta_bancaria_id TEXT,
+          texto_match TEXT,
+          cuenta_asiento TEXT,
+          cuenta_contraparte TEXT,
+          importe_objetivo REAL,
+          tolerancia_pct REAL,
+          prioridad INTEGER NOT NULL DEFAULT 100,
+          activo INTEGER NOT NULL DEFAULT 1,
+          auto_ok INTEGER NOT NULL DEFAULT 0,
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gestoria_conciliacion_validaciones (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT NOT NULL,
+          movimiento_id TEXT,
+          asiento_id TEXT,
+          factura_id TEXT,
+          estado TEXT NOT NULL,
+          confianza REAL,
+          regla_id TEXT,
+          validado_por TEXT,
+          notas TEXT,
+          created_at TEXT NOT NULL
         )
         """
     )
@@ -35223,9 +36641,35 @@ def ensure_tables(db_path):
     ensure_column(conn, "gestoria_contabilidad", "hipoteca_id", "hipoteca_id TEXT")
     ensure_column(conn, "gestoria_contabilidad", "poliza_numero", "poliza_numero TEXT")
     ensure_column(conn, "gestoria_contabilidad", "cliente_ids_json", "cliente_ids_json TEXT")
+    for col_name, col_sql in {
+        "valoracion_estado": "valoracion_estado TEXT",
+        "valoracion_json": "valoracion_json TEXT",
+        "valoracion_notas": "valoracion_notas TEXT",
+        "valoracion_total_asientos": "valoracion_total_asientos INTEGER NOT NULL DEFAULT 0",
+        "valoracion_total_terceros": "valoracion_total_terceros INTEGER NOT NULL DEFAULT 0",
+        "valoracion_total_cuentas": "valoracion_total_cuentas INTEGER NOT NULL DEFAULT 0",
+        "valoracion_total_pendientes": "valoracion_total_pendientes INTEGER NOT NULL DEFAULT 0",
+        "valoracion_cerrada_at": "valoracion_cerrada_at TEXT",
+        "valoracion_cerrada_by": "valoracion_cerrada_by TEXT",
+    }.items():
+        try:
+            ensure_column(conn, "gestoria_import_lotes", col_name, col_sql)
+        except Exception:
+            pass
+    for col_name, col_sql in {
+        "validado_manual_at": "validado_manual_at TEXT",
+        "validado_manual_by": "validado_manual_by TEXT",
+    }.items():
+        try:
+            ensure_column(conn, "gestoria_import_documentos", col_name, col_sql)
+        except Exception:
+            pass
     normalize_auto_seguro_commission_assignments(conn)
     ensure_column(conn, "gestoria_terceros", "cuenta_contable", "cuenta_contable TEXT")
     ensure_column(conn, "gestoria_facturas", "iva_pct", "iva_pct REAL")
+    ensure_column(conn, "gestoria_facturas", "base_exenta", "base_exenta REAL")
+    ensure_column(conn, "gestoria_facturas", "base_no_sujeta", "base_no_sujeta REAL")
+    ensure_column(conn, "gestoria_facturas", "tipo_operacion", "tipo_operacion TEXT")
     ensure_column(conn, "gestoria_facturas", "estado_ocr", "estado_ocr TEXT")
     ensure_column(conn, "gestoria_facturas", "doc_key", "doc_key TEXT")
     ensure_column(conn, "gestoria_facturas", "archivo_hash", "archivo_hash TEXT")
@@ -35233,6 +36677,47 @@ def ensure_tables(db_path):
     ensure_column(conn, "gestoria_facturas", "raw_text", "raw_text TEXT")
     ensure_column(conn, "gestoria_facturas", "import_documento_id", "import_documento_id TEXT")
     ensure_column(conn, "gestoria_facturas", "origen_importacion", "origen_importacion TEXT")
+    ensure_column(conn, "gestoria_asientos", "punteado_banco", "punteado_banco INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "gestoria_asientos", "punteado_banco_at", "punteado_banco_at TEXT")
+    ensure_column(conn, "gestoria_asientos", "punteado_banco_by", "punteado_banco_by TEXT")
+    ensure_column(conn, "gestoria_asientos", "punteado_banco_notas", "punteado_banco_notas TEXT")
+    ensure_column(conn, "gestoria_cuentas_bancarias", "iban", "iban TEXT")
+    ensure_column(conn, "gestoria_cuentas_bancarias", "banco_nombre", "banco_nombre TEXT")
+    ensure_column(conn, "gestoria_cuentas_bancarias", "cuenta_contable", "cuenta_contable TEXT")
+    ensure_column(conn, "gestoria_cuentas_bancarias", "titular", "titular TEXT")
+    ensure_column(conn, "gestoria_cuentas_bancarias", "es_principal", "es_principal INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "cuenta_bancaria_id", "cuenta_bancaria_id TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "fecha_operacion", "fecha_operacion TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "fecha_valor", "fecha_valor TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "concepto", "concepto TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "importe", "importe REAL")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "saldo", "saldo REAL")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "divisa", "divisa TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "codigo", "codigo TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "numero_documento", "numero_documento TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "referencia1", "referencia1 TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "referencia2", "referencia2 TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "info_adicional", "info_adicional TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "origen_fichero", "origen_fichero TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "origen_hash", "origen_hash TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "punteado", "punteado INTEGER NOT NULL DEFAULT 0")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "punteado_at", "punteado_at TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "punteado_by", "punteado_by TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "punteado_notas", "punteado_notas TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "asiento_id", "asiento_id TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "matched_score", "matched_score REAL")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "matched_reason", "matched_reason TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "conciliacion_estado", "conciliacion_estado TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "conciliacion_confianza", "conciliacion_confianza REAL")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "regla_aplicada", "regla_aplicada TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "validado_manual_at", "validado_manual_at TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "validado_manual_by", "validado_manual_by TEXT")
+    ensure_column(conn, "gestoria_movimientos_bancarios", "validado_manual_notas", "validado_manual_notas TEXT")
+    ensure_column(conn, "gestoria_asientos", "conciliacion_estado", "conciliacion_estado TEXT")
+    ensure_column(conn, "gestoria_asientos", "conciliacion_confianza", "conciliacion_confianza REAL")
+    ensure_column(conn, "gestoria_asientos", "validado_manual_at", "validado_manual_at TEXT")
+    ensure_column(conn, "gestoria_asientos", "validado_manual_by", "validado_manual_by TEXT")
+    ensure_column(conn, "gestoria_asientos", "validado_manual_notas", "validado_manual_notas TEXT")
     try:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_gestoria_facturas_cliente_fecha ON gestoria_facturas (empresa_id, cliente_id, fecha_emision)"
@@ -35242,6 +36727,18 @@ def ensure_tables(db_path):
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_gestoria_facturas_dedupe ON gestoria_facturas (empresa_id, cliente_id, dedupe_key)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gestoria_mov_banco_empresa_fecha ON gestoria_movimientos_bancarios (empresa_id, fecha_operacion, fecha_valor)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gestoria_mov_banco_asiento ON gestoria_movimientos_bancarios (asiento_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gestoria_banco_reglas_scope ON gestoria_banco_reglas (empresa_id, cuenta_bancaria_id, activo, prioridad)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_gestoria_conciliacion_validaciones_mov ON gestoria_conciliacion_validaciones (movimiento_id, created_at)"
         )
     except Exception:
         pass
@@ -36566,133 +38063,145 @@ def infer_workspace_doc_classification(nombre, tipo, servicio):
     return None
 
 
+def _rollback_best_effort(conn):
+    try:
+        if conn:
+            conn.rollback()
+    except Exception:
+        pass
+
+
 def fetch_workspace_company_ids(conn, workspace_id):
     ws_id = str(workspace_id or "").strip()
     if not ws_id:
         return []
+
+    def _safe_fetchall(sql, params=()):
+        try:
+            return conn.execute(sql, params).fetchall()
+        except Exception:
+            _rollback_best_effort(conn)
+            return []
+
     # Prefer v2: companies living inside the workspace.
     try:
         ensure_workspace_core_tables(conn)
-        rows_v2 = conn.execute(
-            """
-            SELECT legacy_empresa_id
-            FROM workspace_companies
-            WHERE workspace_id = ?
-              AND COALESCE(activo, 1) = 1
-              AND COALESCE(TRIM(legacy_empresa_id), '') <> ''
-            ORDER BY nombre COLLATE NOCASE ASC
-            """,
-            (ws_id,),
-        ).fetchall()
-        legacy_ids = [
-            str(row_value(r, "legacy_empresa_id") or row_value(r, 0) or "").strip()
-            for r in (rows_v2 or [])
-        ]
-        legacy_ids = [eid for eid in legacy_ids if eid]
-        if legacy_ids:
-            return legacy_ids
     except Exception:
-        pass
-    rows = conn.execute(
+        _rollback_best_effort(conn)
+    rows_v2 = _safe_fetchall(
+        """
+        SELECT legacy_empresa_id
+        FROM workspace_companies
+        WHERE workspace_id = ?
+          AND COALESCE(activo, 1) = 1
+          AND COALESCE(TRIM(legacy_empresa_id), '') <> ''
+        ORDER BY nombre COLLATE NOCASE ASC
+        """,
+        (ws_id,),
+    )
+    legacy_ids = [
+        str(row_value(r, "legacy_empresa_id") or row_value(r, 0) or "").strip()
+        for r in (rows_v2 or [])
+    ]
+    legacy_ids = [eid for eid in legacy_ids if eid]
+    if legacy_ids:
+        return legacy_ids
+
+    rows = _safe_fetchall(
         "SELECT empresa_id FROM workspace_empresas WHERE workspace_id = ?",
         (ws_id,),
-    ).fetchall()
+    )
     empresa_ids = [str(row_value(row, "empresa_id") or row_value(row, 0) or "").strip() for row in rows]
     empresa_ids = [eid for eid in empresa_ids if eid]
     if empresa_ids:
         return empresa_ids
+
     # Inferencia segura: si aún no hay vínculos en `workspace_empresas`, derivamos empresas
     # desde RRHH del propio workspace. Esto evita listados vacíos (p.ej. Agenda) hasta que
     # se complete el setup de compañías.
-    try:
-        persona_rows = conn.execute(
-            """
+    persona_rows = _safe_fetchall(
+        """
+        SELECT DISTINCT empresa_id
+        FROM workspace_registro_personal
+        WHERE workspace_id = ?
+          AND COALESCE(activo, 1) = 1
+          AND COALESCE(TRIM(empresa_id), '') <> ''
+        ORDER BY empresa_id
+        LIMIT 50
+        """,
+        (ws_id,),
+    )
+    inferred = [
+        str(row_value(r, "empresa_id") or row_value(r, 0) or "").strip()
+        for r in (persona_rows or [])
+    ]
+    inferred = [eid for eid in inferred if eid]
+    if inferred:
+        return inferred
+
+    # Inferencia segura (multi-workspace): deriva empresa_ids desde tablas que ya estén
+    # correctamente scopiadas por `workspace_id`. Esto NO mezcla workspaces y permite
+    # que listados legacy (p.ej. Agenda) funcionen aunque falten vínculos en `workspace_empresas`.
+    inferred_ids = []
+    seen = set()
+    candidate_tables = [
+        "clientes_empresas",
+        "inmuebles",
+        "captaciones",
+        "operaciones_inmobiliarias",
+        "demandas",
+        "visitas",
+        "acciones",
+        "hipotecas",
+        "seguros",
+    ]
+    for table in candidate_tables:
+        try:
+            cols = table_columns(conn, table) or set()
+        except Exception:
+            _rollback_best_effort(conn)
+            cols = set()
+        if "workspace_id" not in cols or "empresa_id" not in cols:
+            continue
+        rows2 = _safe_fetchall(
+            f"""
             SELECT DISTINCT empresa_id
-            FROM workspace_registro_personal
+            FROM {table}
             WHERE workspace_id = ?
-              AND COALESCE(activo, 1) = 1
               AND COALESCE(TRIM(empresa_id), '') <> ''
             ORDER BY empresa_id
             LIMIT 50
             """,
             (ws_id,),
-        ).fetchall()
-        inferred = [
-            str(row_value(r, "empresa_id") or row_value(r, 0) or "").strip()
-            for r in (persona_rows or [])
-        ]
-        inferred = [eid for eid in inferred if eid]
-        if inferred:
-            return inferred
-    except Exception:
-        pass
-    # Inferencia segura (multi-workspace): deriva empresa_ids desde tablas que ya estén
-    # correctamente scopiadas por `workspace_id`. Esto NO mezcla workspaces y permite
-    # que listados legacy (p.ej. Agenda) funcionen aunque falten vínculos en `workspace_empresas`.
-    try:
-        inferred_ids = []
-        seen = set()
-        candidate_tables = [
-            "clientes_empresas",
-            "inmuebles",
-            "captaciones",
-            "operaciones_inmobiliarias",
-            "demandas",
-            "visitas",
-            "acciones",
-            "hipotecas",
-            "seguros",
-        ]
-        for table in candidate_tables:
-            try:
-                cols = table_columns(conn, table) or set()
-            except Exception:
-                cols = set()
-            if "workspace_id" not in cols or "empresa_id" not in cols:
+        )
+        for r in rows2 or []:
+            eid = str(row_value(r, "empresa_id") or row_value(r, 0) or "").strip()
+            if not eid or eid in seen:
                 continue
-            try:
-                rows2 = conn.execute(
-                    f"""
-                    SELECT DISTINCT empresa_id
-                    FROM {table}
-                    WHERE workspace_id = ?
-                      AND COALESCE(TRIM(empresa_id), '') <> ''
-                    ORDER BY empresa_id
-                    LIMIT 50
-                    """,
-                    (ws_id,),
-                ).fetchall()
-            except Exception:
-                rows2 = []
-            for r in rows2 or []:
-                eid = str(row_value(r, "empresa_id") or row_value(r, 0) or "").strip()
-                if not eid or eid in seen:
-                    continue
-                seen.add(eid)
-                inferred_ids.append(eid)
-                if len(inferred_ids) >= 50:
-                    break
+            seen.add(eid)
+            inferred_ids.append(eid)
             if len(inferred_ids) >= 50:
                 break
-        if inferred_ids:
-            return inferred_ids
-    except Exception:
-        pass
+        if len(inferred_ids) >= 50:
+            break
+    if inferred_ids:
+        return inferred_ids
+
     if not WORKSPACE_AUTO_LINK_COMPANIES:
         return []
+
     # Safety: en entornos multi-workspace, nunca debemos auto-vincular "todas las empresas" a un
     # workspace vacío (crearía contaminación de datos entre clientes).
     # Solo permitimos el autolink en setups legacy de 1 workspace, o en el workspace legacy del "grupo".
+    ws_total_rows = _safe_fetchall("SELECT COUNT(*) AS total FROM workspaces")
+    ws_total_row = ws_total_rows[0] if ws_total_rows else None
     try:
-        ws_total_row = conn.execute("SELECT COUNT(*) AS total FROM workspaces").fetchone()
         ws_total = int(row_value(ws_total_row, "total") or row_value(ws_total_row, 0) or 0)
     except Exception:
         ws_total = 0
     if ws_total > 1:
-        try:
-            ws_row = conn.execute("SELECT slug, nombre FROM workspaces WHERE id = ? LIMIT 1", (ws_id,)).fetchone()
-        except Exception:
-            ws_row = None
+        ws_rows = _safe_fetchall("SELECT slug, nombre FROM workspaces WHERE id = ? LIMIT 1", (ws_id,))
+        ws_row = ws_rows[0] if ws_rows else None
         ws_slug = str(row_value(ws_row, "slug") or "") if ws_row else ""
         ws_name = str(row_value(ws_row, "nombre") or "") if ws_row else ""
         ws_key = normalize_workspace_slug(ws_slug or ws_name or "")
@@ -36706,14 +38215,10 @@ def fetch_workspace_company_ids(conn, workspace_id):
         }
         if ws_key not in legacy_group_keys:
             return []
+
     # Backfill: si el workspace no tiene empresas asociadas, no podemos mostrar RRHH/operativa.
     # Creamos los links por defecto usando empresas activas existentes.
-    try:
-        all_rows = conn.execute(
-            "SELECT id FROM empresas WHERE COALESCE(activo, 1) = 1 ORDER BY nombre",
-        ).fetchall()
-    except Exception:
-        all_rows = []
+    all_rows = _safe_fetchall("SELECT id FROM empresas WHERE COALESCE(activo, 1) = 1 ORDER BY nombre")
     fallback = [str(row_value(row, "id") or row_value(row, 0) or "").strip() for row in (all_rows or [])]
     fallback = [eid for eid in fallback if eid]
     if not fallback:
@@ -36730,11 +38235,11 @@ def fetch_workspace_company_ids(conn, workspace_id):
                 (os.urandom(16).hex(), ws_id, eid, now, now),
             )
         except Exception:
-            pass
+            _rollback_best_effort(conn)
     try:
         conn.commit()
     except Exception:
-        pass
+        _rollback_best_effort(conn)
     return fallback
 
 
@@ -36750,7 +38255,11 @@ def resolve_workspace_scope_empresa_ids(conn, workspace_id, *, empresa_id=""):
     ws_id = str(workspace_id or "").strip()
     if not ws_id:
         return []
-    ids = fetch_workspace_company_ids(conn, ws_id) or []
+    try:
+        ids = fetch_workspace_company_ids(conn, ws_id) or []
+    except Exception:
+        _rollback_best_effort(conn)
+        ids = []
     eid = str(empresa_id or "").strip()
     if eid and eid not in ids:
         ids.append(eid)
@@ -39892,6 +41401,7 @@ def workspace_actor_is_privileged(conn, session):
             (user_id,),
         ).fetchone()
     except Exception:
+        _rollback_best_effort(conn)
         row = None
     if not row:
         return False
@@ -39920,7 +41430,7 @@ def workspace_actor_can_manage_workspace(conn, session, workspace_id):
     try:
         ensure_workspace_core_tables(conn)
     except Exception:
-        pass
+        _rollback_best_effort(conn)
     member = fetch_workspace_member(conn, ws_id, user_id)
     if not member:
         return False
@@ -39981,7 +41491,7 @@ def ensure_workspace_member(conn, workspace_id, user_id, role="Miembro", now=Non
             (record_id, ws_id, uid, role_norm, now_ts, now_ts),
         )
     except Exception:
-        pass
+        _rollback_best_effort(conn)
     # Return existing id if it already existed.
     existing = conn.execute(
         "SELECT id FROM workspace_miembros WHERE workspace_id = ? AND usuario_id = ? LIMIT 1",
@@ -40125,6 +41635,7 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
                 (uid,),
             ).fetchone()
         except Exception:
+            _rollback_best_effort(conn)
             user_row = None
         if user_row and int(row_value(user_row, "activo", 0) or 0) == 1:
             user_email = normalize_email(row_value(user_row, "email") or "")
@@ -40153,6 +41664,7 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
                 ).fetchone():
                     has_persona = True
             except Exception:
+                _rollback_best_effort(conn)
                 has_persona = False
             if not has_persona and user_email:
                 try:
@@ -40169,7 +41681,7 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
                     ).fetchone():
                         has_persona = True
                 except Exception:
-                    pass
+                    _rollback_best_effort(conn)
             if not has_persona and user_full_name:
                 try:
                     if conn.execute(
@@ -40185,7 +41697,7 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
                     ).fetchone():
                         has_persona = True
                 except Exception:
-                    pass
+                    _rollback_best_effort(conn)
 
             # Si hay un único workspace, mantenemos comportamiento legacy (casi seguro en despliegues single-tenant).
             single_workspace = False
@@ -40194,6 +41706,7 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
                 ws_total = int(row_value(ws_count_row, "total", 0) or row_value(ws_count_row, 0) or 0)
                 single_workspace = ws_total == 1
             except Exception:
+                _rollback_best_effort(conn)
                 single_workspace = False
 
             # Además, permitimos auto-vincular en el workspace "default" si el usuario tiene servicios o fichaje activo.
@@ -40201,6 +41714,7 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
             try:
                 ws_row = conn.execute("SELECT nombre, slug FROM workspaces WHERE id = ? LIMIT 1", (ws_id,)).fetchone()
             except Exception:
+                _rollback_best_effort(conn)
                 ws_row = None
             try:
                 ws_slug = normalize_workspace_slug(row_value(ws_row, "slug") or row_value(ws_row, "nombre") or "")
@@ -40228,13 +41742,13 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
                 try:
                     ensure_workspace_core_tables(conn)
                 except Exception:
-                    pass
+                    _rollback_best_effort(conn)
                 now_ts = datetime.now(timezone.utc).isoformat()
                 ensure_workspace_member(conn, ws_id, uid, role="Miembro", now=now_ts)
                 try:
                     conn.commit()
                 except Exception:
-                    pass
+                    _rollback_best_effort(conn)
                 member = fetch_workspace_member(conn, ws_id, uid)
     if not member:
         return False, "No autorizado"
@@ -40268,6 +41782,7 @@ def enforce_empresa_membership(conn, session, empresa_id, *, write=False):
             (eid,),
         ).fetchall()
     except Exception:
+        _rollback_best_effort(conn)
         ws_rows = []
     workspace_ids = [
         str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip()
@@ -40280,12 +41795,14 @@ def enforce_empresa_membership(conn, session, empresa_id, *, write=False):
             ws_count_row = conn.execute("SELECT COUNT(*) AS total FROM workspaces").fetchone()
             ws_total = int(row_value(ws_count_row, "total", 0) or row_value(ws_count_row, 0) or 0)
         except Exception:
+            _rollback_best_effort(conn)
             ws_total = 0
         if ws_total == 1:
             try:
                 one = conn.execute("SELECT id FROM workspaces LIMIT 1").fetchone()
                 only_id = str(row_value(one, "id") or row_value(one, 0) or "").strip()
             except Exception:
+                _rollback_best_effort(conn)
                 only_id = ""
             if only_id:
                 return enforce_workspace_membership(conn, session, only_id, write=write)
@@ -40457,7 +41974,7 @@ def resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspa
     try:
         ensure_workspace_core_tables(conn)
     except Exception:
-        pass
+        _rollback_best_effort(conn)
     try:
         row = conn.execute(
             """
@@ -40469,6 +41986,7 @@ def resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspa
             (ws_id, wc_id),
         ).fetchone()
     except Exception:
+        _rollback_best_effort(conn)
         row = None
     legacy_id = str(row_value(row, "legacy_empresa_id") or row_value(row, 0) or "").strip() if row else ""
     return legacy_id
@@ -42499,6 +44017,820 @@ def parse_fincas_bank_extract(raw_bytes, filename=""):
     return parse_fincas_bank_extract_xlsx(raw_bytes)
 
 
+def _parse_bank_statement_amount(raw):
+    if raw is None or raw == "":
+        return None
+    if isinstance(raw, (int, float)):
+        return float(raw)
+    text = str(raw).replace("EUR", "").replace("€", "").replace("\xa0", " ").strip()
+    text = text.replace(".", "").replace(",", ".")
+    try:
+        return float(text)
+    except Exception:
+        return None
+
+
+def _parse_bank_statement_date(raw):
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        return text
+    m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4})", text)
+    if m:
+        return f"{int(m.group(3)):04d}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
+    return text[:10]
+
+
+def parse_gestoria_bank_extract_xlsx(raw_bytes):
+    try:
+        from openpyxl import load_workbook
+    except Exception as exc:
+        raise ValueError(f"No se pudo leer XLSX (openpyxl): {exc}")
+    wb = load_workbook(BytesIO(raw_bytes), data_only=True)
+    ws = wb[wb.sheetnames[0]]
+    header_row = 0
+    col_map = {}
+    for r in range(1, min(120, ws.max_row or 0) + 1):
+        values = [ws.cell(r, c).value for c in range(1, min(40, ws.max_column or 0) + 1)]
+        norm = [normalize_lookup_text(str(v or "")).lower() for v in values]
+        joined = " ".join(norm)
+        if "fecha operacion" in joined and "concepto" in joined and "importe" in joined:
+            header_row = r
+            for idx, name in enumerate(norm, start=1):
+                if "fecha operacion" in name or "fecha operación" in name:
+                    col_map["fecha_operacion"] = idx
+                elif "fecha valor" in name:
+                    col_map["fecha_valor"] = idx
+                elif "concepto" in name:
+                    col_map["concepto"] = idx
+                elif "importe" in name:
+                    col_map["importe"] = idx
+                elif "saldo" in name:
+                    col_map["saldo"] = idx
+                elif "divisa" in name:
+                    col_map["divisa"] = idx
+                elif "codigo" in name or "código" in name:
+                    col_map["codigo"] = idx
+                elif "numero de documento" in name or "número de documento" in name:
+                    col_map["numero_documento"] = idx
+                elif "referencia1" in name or "referencia 1" in name:
+                    col_map["referencia1"] = idx
+                elif "referencia2" in name or "referencia 2" in name:
+                    col_map["referencia2"] = idx
+                elif "informacion adicional" in name or "información adicional" in name:
+                    col_map["info_adicional"] = idx
+            break
+    if not header_row or not col_map.get("fecha_operacion") or not col_map.get("concepto") or not col_map.get("importe"):
+        raise ValueError("Formato XLSX no reconocido para extracto bancario.")
+    movements = []
+    for r in range(header_row + 1, min((ws.max_row or 0), header_row + 12000) + 1):
+        fecha = _parse_bank_statement_date(ws.cell(r, col_map["fecha_operacion"]).value)
+        concepto = str(ws.cell(r, col_map["concepto"]).value or "").strip()
+        if not fecha and not concepto:
+            continue
+        if not fecha or not concepto:
+            continue
+        importe = _parse_bank_statement_amount(ws.cell(r, col_map["importe"]).value)
+        if importe is None:
+            continue
+        saldo = _parse_bank_statement_amount(ws.cell(r, col_map["saldo"]).value) if col_map.get("saldo") else None
+        mov = {
+            "fecha_operacion": fecha,
+            "fecha_valor": _parse_bank_statement_date(ws.cell(r, col_map.get("fecha_valor", col_map["fecha_operacion"])).value) if col_map.get("fecha_valor") else fecha,
+            "concepto": concepto,
+            "importe": float(importe),
+            "saldo": saldo,
+            "divisa": str(ws.cell(r, col_map.get("divisa", 0)).value or "EUR").strip() if col_map.get("divisa") else "EUR",
+            "codigo": str(ws.cell(r, col_map.get("codigo", 0)).value or "").strip() if col_map.get("codigo") else "",
+            "numero_documento": str(ws.cell(r, col_map.get("numero_documento", 0)).value or "").strip() if col_map.get("numero_documento") else "",
+            "referencia1": str(ws.cell(r, col_map.get("referencia1", 0)).value or "").strip() if col_map.get("referencia1") else "",
+            "referencia2": str(ws.cell(r, col_map.get("referencia2", 0)).value or "").strip() if col_map.get("referencia2") else "",
+            "info_adicional": str(ws.cell(r, col_map.get("info_adicional", 0)).value or "").strip() if col_map.get("info_adicional") else "",
+        }
+        movements.append(mov)
+    return movements
+
+
+def parse_gestoria_bank_extract_pdf(raw_bytes):
+    text = ""
+    err = ""
+    if PdfReader is not None:
+        try:
+            reader = PdfReader(BytesIO(raw_bytes))
+            for page in reader.pages:
+                try:
+                    text += (page.extract_text() or "") + "\n"
+                except Exception:
+                    continue
+        except Exception as exc:
+            err = str(exc)
+    if not text.strip():
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+        try:
+            tmp.write(raw_bytes)
+            tmp.flush()
+            tmp.close()
+            text, err = pdftotext_extract(tmp.name, pages=None)
+        finally:
+            try:
+                os.unlink(tmp.name)
+            except Exception:
+                pass
+    if not text.strip():
+        raise ValueError(f"No se pudo extraer texto del PDF: {err or 'sin texto'}")
+    lines = [re.sub(r"\s+", " ", ln).strip() for ln in text.splitlines()]
+    lines = [ln for ln in lines if ln]
+    movements = []
+    current = None
+    date_re = re.compile(r"^(?P<fecha>\d{2}/\d{2}/\d{4})\s+(?P<resto>.+)$")
+    amt_re = re.compile(r"(?P<importe>-?\d[\d\.]*,\d{2})\s+(?P<saldo>-?\d[\d\.]*,\d{2})$")
+    for line in lines:
+        if line.lower().startswith(("movimientos desde", "fecha operación", "fecha operacion", "cuenta ", "titular", "saldo disponible", "saldo real", "retenciones", "saldo consolidado")):
+            continue
+        if line.startswith("F. Valor"):
+            continue
+        m = date_re.match(line)
+        if m:
+            if current and current.get("fecha_operacion") and current.get("concepto") and current.get("importe") is not None:
+                movements.append(current)
+            current = {
+                "fecha_operacion": _parse_bank_statement_date(m.group("fecha")),
+                "fecha_valor": _parse_bank_statement_date(m.group("fecha")),
+                "concepto": m.group("resto").strip(),
+                "importe": None,
+                "saldo": None,
+                "divisa": "EUR",
+                "codigo": "",
+                "numero_documento": "",
+                "referencia1": "",
+                "referencia2": "",
+                "info_adicional": "",
+            }
+            continue
+        if current is None:
+            continue
+        amt = amt_re.search(line)
+        if amt:
+            current["importe"] = _parse_bank_statement_amount(amt.group("importe"))
+            current["saldo"] = _parse_bank_statement_amount(amt.group("saldo"))
+            left = line[:amt.start()].strip()
+            if left:
+                current["concepto"] = (current.get("concepto") or "").strip()
+                if current["concepto"]:
+                    current["concepto"] = f"{current['concepto']} {left}".strip()
+                else:
+                    current["concepto"] = left
+            continue
+        # Continuación del concepto.
+        current["concepto"] = f"{current.get('concepto','').strip()} {line}".strip()
+    if current and current.get("fecha_operacion") and current.get("concepto") and current.get("importe") is not None:
+        movements.append(current)
+    # Normaliza sólo movimientos con importe.
+    out = []
+    for mv in movements:
+        importe = mv.get("importe")
+        if importe is None:
+            continue
+        out.append(mv)
+    return out
+
+
+def parse_gestoria_bank_extract(raw_bytes, filename=""):
+    name = str(filename or "").lower().strip()
+    if name.endswith(".xlsx"):
+        return parse_gestoria_bank_extract_xlsx(raw_bytes)
+    if name.endswith(".pdf"):
+        return parse_gestoria_bank_extract_pdf(raw_bytes)
+    if name.endswith(".csv"):
+        return parse_fincas_bank_extract_csv(raw_bytes)
+    try:
+        return parse_gestoria_bank_extract_xlsx(raw_bytes)
+    except Exception:
+        return parse_gestoria_bank_extract_pdf(raw_bytes)
+
+
+def detect_gestoria_bank_extract_ibans(raw_bytes, filename=""):
+    name = str(filename or "").lower().strip()
+    text_parts = []
+    if name.endswith(".xlsx"):
+        try:
+            from openpyxl import load_workbook
+            wb = load_workbook(BytesIO(raw_bytes), data_only=True)
+            for ws in wb.worksheets:
+                max_rows = min(120, ws.max_row or 0)
+                max_cols = min(40, ws.max_column or 0)
+                for row in ws.iter_rows(min_row=1, max_row=max_rows, min_col=1, max_col=max_cols):
+                    for cell in row:
+                        value = cell.value
+                        if value is not None:
+                            text_parts.append(str(value))
+        except Exception:
+            pass
+    elif name.endswith(".pdf"):
+        text = ""
+        if PdfReader is not None:
+            try:
+                reader = PdfReader(BytesIO(raw_bytes))
+                for page in reader.pages:
+                    try:
+                        text += (page.extract_text() or "") + "\n"
+                    except Exception:
+                        continue
+            except Exception:
+                text = ""
+        if not text.strip():
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
+            try:
+                tmp.write(raw_bytes)
+                tmp.flush()
+                tmp.close()
+                text, _err = pdftotext_extract(tmp.name, pages=None)
+            finally:
+                try:
+                    os.unlink(tmp.name)
+                except Exception:
+                    pass
+        if text.strip():
+            text_parts.append(text)
+    else:
+        try:
+            return detect_gestoria_bank_extract_ibans(raw_bytes, filename="extracto.xlsx")
+        except Exception:
+            try:
+                return detect_gestoria_bank_extract_ibans(raw_bytes, filename="extracto.pdf")
+            except Exception:
+                pass
+    return extract_gestoria_bank_accounts_from_text("\n".join(text_parts))
+
+
+def pick_gestoria_cuenta_bancaria_for_extract(cuentas, iban_detectados):
+    cuentas = [c for c in (cuentas or []) if c]
+    ibans = [normalize_gestoria_bank_account_number(iban) for iban in (iban_detectados or []) if normalize_gestoria_bank_account_number(iban)]
+    for iban in ibans:
+        for cuenta in cuentas:
+            if normalize_gestoria_bank_account_number(cuenta.get("iban") or "") == iban:
+                return cuenta
+    return next((c for c in cuentas if int(c.get("es_principal") or 0) == 1), cuentas[0] if cuentas else None)
+
+
+def fetch_gestoria_banco_reglas(conn, empresa_id, cuenta_bancaria_id=""):
+    empresa_id = str(empresa_id or "").strip()
+    if not empresa_id:
+        return []
+    cuenta_bancaria_id = str(cuenta_bancaria_id or "").strip()
+    where = ["empresa_id = ?", "COALESCE(activo, 1) = 1"]
+    values = [empresa_id]
+    if cuenta_bancaria_id:
+        where.append("(COALESCE(cuenta_bancaria_id, '') = '' OR COALESCE(cuenta_bancaria_id, '') = ?)")
+        values.append(cuenta_bancaria_id)
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM gestoria_banco_reglas
+        WHERE {' AND '.join(where)}
+        ORDER BY COALESCE(prioridad, 100) ASC, updated_at DESC
+        """,
+        values,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def score_gestoria_banco_regla(rule, movimiento_text="", asiento_text="", importe=0):
+    rule = rule or {}
+    texto_match = normalize_lookup_text(rule.get("texto_match") or "")
+    if not texto_match:
+        return 0, ""
+    movement_norm = normalize_lookup_text(movimiento_text or "")
+    asiento_norm = normalize_lookup_text(asiento_text or "")
+    score = 0
+    reason_parts = []
+    rule_tokens = [tok for tok in re.split(r"\s+", texto_match) if tok]
+    if rule_tokens:
+        if all(tok in movement_norm for tok in rule_tokens[:3]):
+            score += 18
+            reason_parts.append("texto")
+        elif any(tok in movement_norm for tok in rule_tokens):
+            score += 10
+            reason_parts.append("texto")
+        if asiento_norm and any(tok in asiento_norm for tok in rule_tokens):
+            score += 8
+            reason_parts.append("asiento")
+    objetivo = parse_money_value(rule.get("importe_objetivo") or 0)
+    tolerancia_pct = parse_money_value(rule.get("tolerancia_pct") or 0)
+    if objetivo > 0:
+        diff = abs(round(abs(importe), 2) - round(abs(objetivo), 2))
+        tolerance_abs = max(0.5, round(abs(objetivo) * (max(0.0, tolerancia_pct) / 100.0), 2))
+        if diff <= 0.01:
+            score += 22
+            reason_parts.append("importe")
+        elif diff <= tolerance_abs:
+            score += 14
+            reason_parts.append("importe")
+        elif diff <= max(1.0, tolerance_abs * 2):
+            score += 6
+            reason_parts.append("importe")
+    cuenta_asiento = str(rule.get("cuenta_asiento") or "").strip()
+    cuenta_contraparte = str(rule.get("cuenta_contraparte") or "").strip()
+    if cuenta_asiento and cuenta_asiento[:3] in movement_norm:
+        score += 4
+        reason_parts.append("cuenta")
+    if cuenta_contraparte and cuenta_contraparte[:3] in movimiento_text:
+        score += 4
+        reason_parts.append("contraparte")
+    return score, "+".join(dict.fromkeys(reason_parts))
+
+
+def upsert_gestoria_banco_regla_from_match(conn, movement_row, asiento_row=None, now=None):
+    if not movement_row:
+        return None
+    if not isinstance(movement_row, dict):
+        movement_row = dict(movement_row)
+    if asiento_row and not isinstance(asiento_row, dict):
+        asiento_row = dict(asiento_row)
+    empresa_id = str(movement_row.get("empresa_id") or "").strip()
+    if not empresa_id:
+        return None
+    now = now or datetime.utcnow().isoformat()
+    cuenta_bancaria_id = str(movement_row.get("cuenta_bancaria_id") or "").strip() or None
+    movimiento_text = " ".join(
+        [
+            str(movement_row.get("concepto") or ""),
+            str(movement_row.get("referencia1") or ""),
+            str(movement_row.get("referencia2") or ""),
+            str(movement_row.get("numero_documento") or ""),
+        ]
+    ).strip()
+    asiento_text = " ".join(
+        [
+            str((asiento_row or {}).get("concepto") or ""),
+            str((asiento_row or {}).get("referencia") or ""),
+        ]
+    ).strip()
+    importe = round(parse_money_value(movement_row.get("importe") or 0), 2)
+    existing = conn.execute(
+        """
+        SELECT id
+        FROM gestoria_banco_reglas
+        WHERE empresa_id = ?
+          AND COALESCE(cuenta_bancaria_id, '') = COALESCE(?, '')
+          AND COALESCE(texto_match, '') = COALESCE(?, '')
+          AND COALESCE(importe_objetivo, 0) = COALESCE(?, 0)
+        LIMIT 1
+        """,
+        (empresa_id, cuenta_bancaria_id or "", movimiento_text[:250], float(abs(importe))),
+    ).fetchone()
+    texto_match = " ".join(filter(None, [movimiento_text, asiento_text]))[:250]
+    cuenta_asiento = str((asiento_row or {}).get("cuenta") or "").strip()
+    if not cuenta_asiento and asiento_row:
+        cuenta_asiento = str((asiento_row or {}).get("referencia") or "").strip()[:20]
+    cuenta_contraparte = ""
+    if asiento_row and asiento_row.get("total_debe") is not None:
+        cuenta_contraparte = str(asiento_row.get("total_debe") or "").strip()[:20]
+    importe_objetivo = float(abs(importe)) if importe else None
+    tolerancia_pct = 15.0
+    notas_rule = f"Aprendida desde conciliación bancaria {str(movement_row.get('concepto') or '')[:80]}".strip()
+    if existing:
+        conn.execute(
+            """
+            UPDATE gestoria_banco_reglas
+            SET texto_match = COALESCE(NULLIF(?, ''), texto_match),
+                cuenta_asiento = COALESCE(NULLIF(?, ''), cuenta_asiento),
+                cuenta_contraparte = COALESCE(NULLIF(?, ''), cuenta_contraparte),
+                importe_objetivo = COALESCE(?, importe_objetivo),
+                tolerancia_pct = COALESCE(?, tolerancia_pct),
+                auto_ok = CASE WHEN ? = 1 THEN 1 ELSE auto_ok END,
+                notas = COALESCE(NULLIF(?, ''), notas),
+                updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (
+                texto_match or None,
+                cuenta_asiento or None,
+                cuenta_contraparte or None,
+                importe_objetivo,
+                tolerancia_pct,
+                1,
+                notas_rule,
+                now,
+                existing["id"],
+            ),
+        )
+        return existing["id"]
+    rule_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO gestoria_banco_reglas (
+          id, empresa_id, cuenta_bancaria_id, texto_match, cuenta_asiento, cuenta_contraparte,
+          importe_objetivo, tolerancia_pct, prioridad, activo, auto_ok, notas, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            rule_id,
+            empresa_id,
+            cuenta_bancaria_id,
+            texto_match or None,
+            cuenta_asiento or None,
+            cuenta_contraparte or None,
+            importe_objetivo,
+            tolerancia_pct,
+            100,
+            1,
+            1,
+            notas_rule,
+            now,
+            now,
+        ),
+    )
+    return rule_id
+
+
+def record_gestoria_conciliacion_validacion(conn, movimiento_id, asiento_id, factura_id, empresa_id, estado, confianza, regla_id, validado_por, notas, now):
+    if not empresa_id:
+        return None
+    validacion_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO gestoria_conciliacion_validaciones (
+          id, empresa_id, movimiento_id, asiento_id, factura_id, estado, confianza, regla_id, validado_por, notas, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?))
+        """,
+        (
+            validacion_id,
+            empresa_id,
+            movimiento_id or None,
+            asiento_id or None,
+            factura_id or None,
+            estado or "pendiente",
+            float(confianza or 0) if confianza is not None else None,
+            regla_id or None,
+            validado_por or None,
+            notas or None,
+            now,
+        ),
+    )
+    return validacion_id
+
+
+def fetch_gestoria_cuentas_bancarias(conn, empresa_id):
+    empresa_id = str(empresa_id or "").strip()
+    if not empresa_id:
+        return []
+    rows = conn.execute(
+        """
+        SELECT
+          b.id,
+          b.empresa_id,
+          COALESCE(b.iban, '') AS iban,
+          COALESCE(b.banco_nombre, '') AS banco_nombre,
+          COALESCE(b.cuenta_contable, '') AS cuenta_contable,
+          COALESCE(b.titular, '') AS titular,
+          COALESCE(b.es_principal, 0) AS es_principal,
+          b.created_at,
+          b.updated_at
+        FROM gestoria_cuentas_bancarias b
+        WHERE b.empresa_id = ?
+        ORDER BY COALESCE(b.es_principal, 0) DESC, COALESCE(b.banco_nombre, '') ASC, COALESCE(b.iban, '') ASC
+        """,
+        (empresa_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def normalize_gestoria_bank_account_number(raw):
+    text = normalize_lookup_text(str(raw or "")).replace(" ", "").upper()
+    iban = re.sub(r"[^A-Z0-9]", "", text)
+    return iban if iban else ""
+
+
+def extract_gestoria_bank_accounts_from_text(text):
+    out = []
+    seen = set()
+    for cand in re.findall(r"\bES[0-9]{22}\b", str(text or "").upper()):
+        iban = normalize_gestoria_bank_account_number(cand)
+        if iban and iban not in seen:
+            seen.add(iban)
+            out.append(iban)
+    return out
+
+
+def match_gestoria_movimiento_bancario_asiento(conn, movement_row, now=None, lookback_days=7):
+    now = now or datetime.utcnow().isoformat()
+    empresa_id = str(movement_row.get("empresa_id") or "").strip()
+    movimiento_id = str(movement_row.get("id") or "").strip()
+    cuenta_bancaria_id = str(movement_row.get("cuenta_bancaria_id") or "").strip()
+    if not empresa_id:
+        return {"matched": False, "linked": False, "score": 0, "reason": "sin_empresa"}
+    fecha = str(movement_row.get("fecha_operacion") or movement_row.get("fecha_valor") or "").strip()
+    importe = round(abs(parse_money_value(movement_row.get("importe") or 0)), 2)
+    concepto_raw = normalize_lookup_text(
+        " ".join(
+            [
+                movement_row.get("concepto") or "",
+                movement_row.get("referencia1") or "",
+                movement_row.get("referencia2") or "",
+                movement_row.get("numero_documento") or "",
+            ]
+        )
+    )
+    concepto_lower = concepto_raw.lower()
+    reglas_banco = fetch_gestoria_banco_reglas(conn, empresa_id, cuenta_bancaria_id)
+
+    def bank_keyword_bonus(text):
+        text = normalize_lookup_text(text).lower()
+        bonus = 0
+        reasons = []
+        keyword_groups = [
+            (["nomina", "nómina", "salario", "sueldo", "tgss", "seguridad social", "seguro social", "s.s."], 18),
+            (["comision", "comisiones", "mantenimiento", "cuota bancaria", "gasto bancario", "liquidacion tarjeta", "liquidación tarjeta", "tarjeta"], 12),
+            (["seguro", "aseguradora", "poliza", "póliza"], 10),
+            (["irpf", "retencion", "retención", "hacienda", "aeat", "modelo 111", "modelo 115"], 8),
+            (["alquiler", "arrendamiento", "leasing", "renting"], 8),
+        ]
+        for keywords, points in keyword_groups:
+            if any(k in text for k in keywords):
+                bonus += points
+                reasons.append("+".join(keywords[:1]))
+        rule_bonus = 0
+        rule_reasons = []
+        for rule in reglas_banco:
+            extra, reason = score_gestoria_banco_regla(rule, movement_row.get("concepto") or "", "", importe)
+            if extra:
+                rule_bonus += extra
+                if reason:
+                    rule_reasons.append(f"rule:{rule.get('id')}")
+        return bonus + rule_bonus, "+".join([part for part in reasons + rule_reasons if part])
+
+    fecha_desde = ""
+    fecha_hasta = ""
+    if fecha:
+        try:
+            dt = datetime.strptime(fecha[:10], "%Y-%m-%d")
+            fecha_desde = (dt - timedelta(days=max(0, int(lookback_days or 0)))).strftime("%Y-%m-%d")
+            fecha_hasta = (dt + timedelta(days=max(0, int(lookback_days or 0)))).strftime("%Y-%m-%d")
+        except Exception:
+            fecha_desde = fecha
+            fecha_hasta = fecha
+    where = ["a.empresa_id = ?", "COALESCE(a.factura_id, '') = ''"]
+    values = [empresa_id]
+    if fecha_desde:
+        where.append("a.fecha >= ?")
+        values.append(fecha_desde)
+    if fecha_hasta:
+        where.append("a.fecha <= ?")
+        values.append(fecha_hasta)
+    if importe > 0:
+        tolerance = max(0.01, round(importe * 0.01, 2))
+        where.append("(ABS(COALESCE(a.total_debe, 0) - ?) <= ? OR ABS(COALESCE(a.total_haber, 0) - ?) <= ?)")
+        values.extend([importe, tolerance, importe, tolerance])
+    candidates = conn.execute(
+        f"""
+        SELECT a.id, a.fecha, a.concepto, a.referencia, a.total_debe, a.total_haber, a.punteado_banco
+        FROM gestoria_asientos a
+        WHERE {' AND '.join(where)}
+        ORDER BY a.fecha ASC, a.created_at ASC
+        LIMIT 200
+        """,
+        values,
+    ).fetchall()
+    best = None
+    best_score = 0
+    best_reason = ""
+    for asiento in candidates:
+        score = 0
+        asiento_total = round(max(parse_money_value(asiento["total_debe"] or 0), parse_money_value(asiento["total_haber"] or 0)), 2)
+        if asiento_total > 0:
+            diff = abs(asiento_total - importe)
+            if diff <= 0.01:
+                score += 70
+            elif diff <= max(1.0, importe * 0.005):
+                score += 55
+            elif diff <= max(3.0, importe * 0.02):
+                score += 30
+        fecha_asiento = str(asiento["fecha"] or "").strip()
+        if fecha and fecha_asiento:
+            try:
+                d1 = datetime.strptime(fecha[:10], "%Y-%m-%d")
+                d2 = datetime.strptime(fecha_asiento[:10], "%Y-%m-%d")
+                days = abs((d1 - d2).days)
+                if days == 0:
+                    score += 15
+                elif days <= 1:
+                    score += 10
+                elif days <= 3:
+                    score += 5
+            except Exception:
+                pass
+        asiento_text = normalize_lookup_text(" ".join([asiento["concepto"] or "", asiento["referencia"] or ""]))
+        overlap = len(set(concepto_raw.split()) & set(asiento_text.split()))
+        if overlap:
+            score += min(20, overlap * 5)
+        bonus, reason = bank_keyword_bonus(concepto_lower)
+        score += bonus
+        candidate_reason = reason or ""
+        if score > best_score:
+            best = dict(asiento)
+            best_score = score
+            best_reason = candidate_reason
+    threshold = 55
+    if not best or best_score < threshold:
+        try:
+            conn.execute(
+                """
+                UPDATE gestoria_movimientos_bancarios
+                SET conciliacion_estado = COALESCE(conciliacion_estado, 'pendiente'),
+                    conciliacion_confianza = ?,
+                    matched_score = ?,
+                    matched_reason = ?,
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (best_score, best_score, "sin_match" if not best else "baja_confianza", now, movimiento_id),
+            )
+        except Exception:
+            pass
+        return {
+            "matched": False,
+            "linked": False,
+            "score": best_score,
+            "reason": "sin_match",
+            "asiento_id": "",
+        }
+    conn.execute(
+        """
+        UPDATE gestoria_asientos
+        SET punteado_banco = 1,
+            punteado_banco_at = COALESCE(punteado_banco_at, datetime(?)),
+            conciliacion_estado = COALESCE(conciliacion_estado, 'auto'),
+            conciliacion_confianza = ?,
+            updated_at = datetime(?)
+        WHERE id = ?
+        """,
+        (now, best_score, now, best["id"]),
+    )
+    conn.execute(
+        """
+        UPDATE gestoria_movimientos_bancarios
+        SET asiento_id = ?,
+            matched_score = ?,
+            matched_reason = ?,
+            conciliacion_estado = ?,
+            conciliacion_confianza = ?,
+            regla_aplicada = ?,
+            updated_at = datetime(?)
+        WHERE id = ?
+        """,
+        (
+            best["id"],
+            best_score,
+            "auto",
+            "auto" if best_score >= 55 else "sugerido",
+            best_score,
+            best_reason or None,
+            now,
+            movimiento_id,
+        ),
+    )
+    try:
+        record_gestoria_conciliacion_validacion(
+            conn,
+            movimiento_id,
+            best["id"],
+            None,
+            empresa_id,
+            "auto",
+            best_score,
+            None,
+            None,
+            best_reason or "auto_match",
+            now,
+        )
+    except Exception:
+        pass
+    return {
+        "matched": True,
+        "linked": True,
+        "score": best_score,
+        "reason": "auto",
+        "asiento_id": best["id"],
+        "asiento_fecha": best.get("fecha") or "",
+        "asiento_referencia": best.get("referencia") or "",
+        "asiento_concepto": best.get("concepto") or "",
+    }
+
+
+def run_gestoria_conciliacion_convergente(conn, empresa_id, now=None, *, cliente_id="", max_passes=5, lookback_days=10, historico_cerrado=False):
+    now = now or datetime.utcnow().isoformat()
+    empresa_id = str(empresa_id or "").strip()
+    cliente_id = str(cliente_id or "").strip()
+    if not empresa_id:
+        return {"passes": 0, "facturas": 0, "movimientos": 0, "linked": 0, "validated": 0}
+    changed_total = 0
+    linked_total = 0
+    validated_total = 0
+    passes_done = 0
+    for pass_no in range(max(1, int(max_passes or 1))):
+        passes_done += 1
+        changed_pass = 0
+        factura_where = ["f.empresa_id = ?"]
+        factura_values = [empresa_id]
+        if cliente_id:
+            factura_where.append("COALESCE(f.cliente_id, '') = ?")
+            factura_values.append(cliente_id)
+        facturas_rows = conn.execute(
+            f"""
+            SELECT
+              f.id, f.empresa_id, f.cliente_id, f.fecha_emision, f.numero, f.tipo,
+              f.total, f.iva_pct, f.base_imponible, f.base_exenta, f.base_no_sujeta,
+              f.cuota_iva, f.cuota_irpf, f.doc_key,
+              COALESCE(t.nombre, '') AS tercero_nombre,
+              COALESCE(t.nif, '') AS tercero_nif,
+              COALESCE(t.cuenta_contable, '') AS tercero_cuenta,
+              COALESCE(a.id, '') AS asiento_id,
+              COALESCE(a.fecha, '') AS asiento_fecha,
+              COALESCE(a.referencia, '') AS asiento_referencia,
+              COALESCE(a.concepto, '') AS asiento_concepto
+            FROM gestoria_facturas f
+            LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+            LEFT JOIN gestoria_asientos a ON a.factura_id = f.id
+            WHERE {' AND '.join(factura_where)}
+            ORDER BY f.created_at ASC
+            """,
+            factura_values,
+        ).fetchall()
+        for factura_row in facturas_rows:
+            factura_dict = dict(factura_row)
+            try:
+                result = reconcile_gestoria_factura_asiento(
+                    conn,
+                    factura_dict,
+                    now,
+                    auto_link=True,
+                    lookback_days=lookback_days,
+                    historico_cerrado=historico_cerrado,
+                )
+            except Exception:
+                continue
+            if result and (result.get("linked") or result.get("matched")):
+                changed_pass += 1
+                linked_total += 1 if result.get("linked") else 0
+                if result.get("matched"):
+                    validated_total += 1
+        movement_where = ["m.empresa_id = ?"]
+        movement_values = [empresa_id]
+        if cliente_id:
+            movement_where.append("EXISTS (SELECT 1 FROM gestoria_asientos a WHERE a.id = m.asiento_id AND COALESCE(a.cliente_id, '') = ?)")
+            movement_values.append(cliente_id)
+        movimientos_rows = conn.execute(
+            f"""
+            SELECT
+              m.id, m.empresa_id, m.cuenta_bancaria_id, m.fecha_operacion, m.fecha_valor, m.concepto,
+              m.importe, m.referencia1, m.referencia2, m.numero_documento,
+              COALESCE(m.asiento_id, '') AS asiento_id
+            FROM gestoria_movimientos_bancarios m
+            WHERE {' AND '.join(movement_where)}
+            ORDER BY CASE WHEN COALESCE(m.asiento_id, '') = '' THEN 0 ELSE 1 END, COALESCE(m.fecha_operacion, m.fecha_valor, m.created_at) ASC
+            """,
+            movement_values,
+        ).fetchall()
+        for movement_row in movimientos_rows:
+            movement_dict = dict(movement_row)
+            if str(movement_dict.get("asiento_id") or "").strip() and not historico_cerrado:
+                continue
+            try:
+                result = match_gestoria_movimiento_bancario_asiento(
+                    conn,
+                    movement_dict,
+                    now=now,
+                    lookback_days=lookback_days,
+                )
+            except Exception:
+                continue
+            if result and result.get("matched"):
+                changed_pass += 1
+                linked_total += 1
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        changed_total += changed_pass
+        if changed_pass <= 0:
+            break
+    facturas_count = len(facturas_rows) if "facturas_rows" in locals() else 0
+    movimientos_count = len(movimientos_rows) if "movimientos_rows" in locals() else 0
+    return {
+        "passes": passes_done,
+        "facturas": facturas_count,
+        "movimientos": movimientos_count,
+        "linked": linked_total,
+        "validated": validated_total,
+        "changed": changed_total,
+    }
+
+
 def fetch_workspace_fincas_vecinos(conn, workspace_id, comunidad_id, limit=200):
     comunidad_id = str(comunidad_id or "").strip()
     rows = conn.execute(
@@ -43349,7 +45681,7 @@ def get_platform_empresa_id(conn) -> str:
                 if exists:
                     return cached
         except Exception:
-            pass
+            _rollback_best_effort(conn)
 
         # 2) busca por nombre
         row2 = conn.execute(
@@ -43378,7 +45710,7 @@ def get_platform_empresa_id(conn) -> str:
                 try:
                     conn.commit()
                 except Exception:
-                    pass
+                    _rollback_best_effort(conn)
                 return eid
 
         # 3) crea
@@ -43415,9 +45747,13 @@ def get_platform_empresa_id(conn) -> str:
                 "INSERT OR REPLACE INTO crm_meta (key, value, updated_at) VALUES (?, ?, datetime('now'))",
                 ("platform_empresa_id", eid),
             )
-        conn.commit()
+        try:
+            conn.commit()
+        except Exception:
+            _rollback_best_effort(conn)
         return eid
     except Exception:
+        _rollback_best_effort(conn)
         return ""
 
 
@@ -50788,6 +53124,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_modelos",
             "/api/gestoria_modelos_update",
             "/api/gestoria_modelos_delete",
+            "/api/gestoria_asiento",
+            "/api/gestoria_asiento_update",
+            "/api/gestoria_facturas_reparse",
+            "/api/gestoria_import_lote_valoracion",
             "/api/cliente_profesional",
             "/api/cliente_profesional_update",
             "/api/cliente_profesional_delete",
@@ -50889,6 +53229,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_contabilidad",
             "/api/workspace_fincas_contabilidad_import_preview",
             "/api/workspace_fincas_contabilidad_import",
+            "/api/gestoria_import_diario_excel",
         ):
             json_response(self, {"error": "Endpoint no valido"}, status=404)
             return
@@ -51184,6 +53525,7 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/gestoria_contabilidad_update": "gestoria",
                         "/api/gestoria_contabilidad_delete": "gestoria",
                         "/api/gestoria_factura_ocr": "gestoria",
+                        "/api/gestoria_facturas_reparse": "gestoria",
                         "/api/renta_quick_ocr": "gestoria",
                         "/api/renta_quick_attach": "gestoria",
                         "/api/renta_entry_ocr_reprocess": "gestoria",
@@ -54475,20 +56817,22 @@ class Handler(BaseHTTPRequestHandler):
                 estado_norm = normalize_lookup_text(estado_doc)
                 if not estado_norm or estado_norm == "PENDIENTE":
                     estado_doc = "Recibido"
+            repo_key = str(payload.get("repo_key") or "").strip()
             conn.execute(
                 """
                 INSERT INTO gestoria_docs (
-                  id, empresa_id, cliente_id, referencia_tipo, referencia_id,
+                  id, empresa_id, cliente_id, repo_key, referencia_tipo, referencia_id,
                   nombre, tipo, fecha, estado, notas, doc_key, doc_url,
                   calidad_ocr, campos_ocr, created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
                     os.urandom(16).hex(),
                     empresa["id"],
                     payload.get("cliente_id"),
+                    repo_key or None,
                     payload.get("referencia_tipo"),
                     payload.get("referencia_id"),
                     payload.get("nombre"),
@@ -54511,6 +56855,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
             allowed = (
+                "repo_key",
                 "nombre",
                 "referencia_tipo",
                 "referencia_id",
@@ -54596,6 +56941,132 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "lote_id": lote_id})
             return
+        elif parsed.path == "/api/gestoria_import_lote_valoracion":
+            lote_id = str(payload.get("lote_id") or "").strip()
+            if not lote_id:
+                json_response(self, {"error": "lote_id requerido"}, status=400)
+                return
+            lote = conn.execute("SELECT * FROM gestoria_import_lotes WHERE id = ? LIMIT 1", (lote_id,)).fetchone()
+            if not lote:
+                json_response(self, {"error": "lote no encontrado"}, status=404)
+                return
+            estado = str(payload.get("valoracion_estado") or lote["valoracion_estado"] or "abierta").strip().lower() or "abierta"
+            notas = str(payload.get("valoracion_notas") or "").strip() or None
+            def _int_field(key, current):
+                raw = payload.get(key)
+                if raw in (None, ""):
+                    return int(current or 0)
+                try:
+                    return max(0, int(float(raw)))
+                except Exception:
+                    return int(current or 0)
+            total_asientos = _int_field("valoracion_total_asientos", lote["valoracion_total_asientos"])
+            total_terceros = _int_field("valoracion_total_terceros", lote["valoracion_total_terceros"])
+            total_cuentas = _int_field("valoracion_total_cuentas", lote["valoracion_total_cuentas"])
+            total_pendientes = _int_field("valoracion_total_pendientes", lote["valoracion_total_pendientes"])
+            current_json = {}
+            try:
+                current_json = json.loads(lote["valoracion_json"] or "{}") if lote["valoracion_json"] else {}
+                if not isinstance(current_json, dict):
+                    current_json = {}
+            except Exception:
+                current_json = {}
+            cerrar = _bool_param(payload, "cerrar", default=False)
+            cerrada_at = lote["valoracion_cerrada_at"]
+            cerrada_by = lote["valoracion_cerrada_by"]
+            if cerrar:
+                estado = "cerrada"
+                cerrada_at = now
+                cerrada_by = str((payload.get("valoracion_cerrada_by") or payload.get("usuario") or "").strip()) or None
+            current_json.update(
+                {
+                    "estado": estado,
+                    "asientos": total_asientos,
+                    "terceros": total_terceros,
+                    "cuentas": total_cuentas,
+                    "pendientes": total_pendientes,
+                    "notas": notas or current_json.get("notas") or "",
+                    "cerrada_at": cerrada_at,
+                    "cerrada_by": cerrada_by,
+                }
+            )
+            conn.execute(
+                """
+                UPDATE gestoria_import_lotes
+                SET valoracion_estado = ?,
+                    valoracion_json = ?,
+                    valoracion_notas = ?,
+                    valoracion_total_asientos = ?,
+                    valoracion_total_terceros = ?,
+                    valoracion_total_cuentas = ?,
+                    valoracion_total_pendientes = ?,
+                    valoracion_cerrada_at = ?,
+                    valoracion_cerrada_by = ?,
+                    estado = ?,
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (
+                    estado,
+                    json.dumps(current_json, ensure_ascii=False),
+                    notas,
+                    total_asientos,
+                    total_terceros,
+                    total_cuentas,
+                    total_pendientes,
+                    cerrada_at,
+                    cerrada_by,
+                    estado,
+                    now,
+                    lote_id,
+                ),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM gestoria_import_lotes WHERE id = ?", (lote_id,)).fetchone()
+            json_response(self, {"ok": True, "row": dict(row) if row else {}})
+            return
+        elif parsed.path == "/api/gestoria_import_diario_excel":
+            cliente_id = str(payload.get("cliente_id") or "").strip()
+            xlsx_b64 = str(payload.get("xlsx_b64") or "").strip()
+            if not cliente_id:
+                json_response(self, {"error": "cliente_id requerido"}, status=400)
+                return
+            if not xlsx_b64:
+                json_response(self, {"error": "xlsx_b64 requerido"}, status=400)
+                return
+            if not OPENPYXL_AVAILABLE:
+                json_response(self, {"error": "openpyxl no disponible en servidor"}, status=500)
+                return
+            if "," in xlsx_b64 and xlsx_b64.lower().startswith("data:"):
+                xlsx_b64 = xlsx_b64.split(",", 1)[1]
+            try:
+                xlsx_bytes = base64.b64decode(xlsx_b64, validate=True)
+            except Exception:
+                try:
+                    xlsx_bytes = base64.b64decode(xlsx_b64)
+                except Exception:
+                    json_response(self, {"error": "xlsx_b64 invalido"}, status=400)
+                    return
+            try:
+                result = _import_gestoria_diario_excel(
+                    conn,
+                    empresa_id=empresa["id"],
+                    cliente_id=cliente_id,
+                    xlsx_bytes=xlsx_bytes,
+                    filename=str(payload.get("filename") or ""),
+                    now=now,
+                    periodo=str(payload.get("periodo") or "2024").strip() or "2024",
+                )
+                conn.commit()
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            json_response(self, {"ok": True, **result})
+            return
         elif parsed.path == "/api/gestoria_import_documentos_bulk":
             lote_id = str(payload.get("lote_id") or "").strip()
             if not lote_id:
@@ -54657,6 +57128,8 @@ class Handler(BaseHTTPRequestHandler):
             allowed = (
                 "estado_revision",
                 "motivos_revision",
+                "validado_manual_at",
+                "validado_manual_by",
                 "categoria_detectada",
                 "subcategoria_detectada",
                 "cuenta_sugerida",
@@ -54686,6 +57159,10 @@ class Handler(BaseHTTPRequestHandler):
                 elif field in {"base_detectada", "cuota_iva_detectada", "total_detectado"}:
                     updates.append(f"{field} = ?")
                     values.append(round(parse_money_value(payload.get(field)), 2))
+                elif field in {"validado_manual_at", "validado_manual_by"}:
+                    updates.append(f"{field} = ?")
+                    raw_value = payload.get(field)
+                    values.append(str(raw_value).strip() if raw_value is not None else None)
                 else:
                     updates.append(f"{field} = ?")
                     raw_value = payload.get(field)
@@ -54713,6 +57190,84 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True, "lote": lote_row})
+            return
+        elif parsed.path == "/api/gestoria_import_documento_conciliar":
+            document_id = str(payload.get("id") or "").strip()
+            if not document_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT d.*, COALESCE(f.fecha_emision, '') AS factura_fecha, COALESCE(f.numero, '') AS factura_numero,
+                       COALESCE(f.total, 0) AS factura_total, COALESCE(f.tipo, '') AS factura_tipo,
+                       COALESCE(f.raw_text, '') AS factura_raw_text, COALESCE(t.nombre, '') AS tercero_nombre,
+                       COALESCE(t.nif, '') AS tercero_nif, COALESCE(a.id, '') AS asiento_id,
+                       COALESCE(a.fecha, '') AS asiento_fecha, COALESCE(a.referencia, '') AS asiento_referencia,
+                       COALESCE(a.concepto, '') AS asiento_concepto
+                FROM gestoria_import_documentos d
+                LEFT JOIN gestoria_facturas f ON f.id = d.factura_id
+                LEFT JOIN gestoria_terceros t ON t.id = COALESCE(d.tercero_id, f.tercero_id)
+                LEFT JOIN gestoria_asientos a ON a.factura_id = f.id
+                WHERE d.id = ? AND d.empresa_id = ?
+                LIMIT 1
+                """,
+                (document_id, empresa["id"]),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "documento no encontrado"}, status=404)
+                return
+            factura_id = str(row["factura_id"] or "").strip()
+            if not factura_id:
+                json_response(self, {"error": "documento sin factura vinculada"}, status=400)
+                return
+            factura = conn.execute(
+                """
+                SELECT
+                  f.*,
+                  COALESCE(t.nombre, '') AS tercero_nombre,
+                  COALESCE(t.nif, '') AS tercero_nif,
+                  COALESCE(t.cuenta_contable, '') AS tercero_cuenta
+                FROM gestoria_facturas f
+                LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                WHERE f.id = ?
+                LIMIT 1
+                """,
+                (factura_id,),
+            ).fetchone()
+            if not factura:
+                json_response(self, {"error": "factura no encontrada"}, status=404)
+                return
+            result = reconcile_gestoria_factura_asiento(
+                conn,
+                dict(factura),
+                now,
+                auto_link=True,
+                historico_cerrado=True,
+            )
+            if result and result.get("linked"):
+                conn.execute(
+                    """
+                    UPDATE gestoria_import_documentos
+                    SET estado_revision = CASE WHEN estado_revision = 'ERROR' THEN 'OK' ELSE estado_revision END,
+                        updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (now, document_id),
+                )
+            conn.commit()
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "documento_id": document_id,
+                    "factura_id": factura_id,
+                    "asiento_id": result.get("asiento_id") if result else row["asiento_id"],
+                    "score": result.get("score") if result else 0,
+                    "reason": result.get("reason") if result else "sin_resultado",
+                    "matched": bool(result and result.get("matched")),
+                    "linked": bool(result and result.get("linked")),
+                },
+            )
             return
         elif parsed.path == "/api/gestoria_import_aplicar":
             lote_id = str(payload.get("lote_id") or "").strip()
@@ -62268,7 +64823,53 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as exc:
                 json_response(self, {"error": str(exc)}, status=400)
                 return
+            try:
+                conn.commit()
+            except Exception:
+                pass
             json_response(self, result)
+            return
+        elif parsed.path == "/api/gestoria_facturas_reparse":
+            empresa_id = str(payload.get("empresa_id") or empresa.get("id") or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            cliente_id = str(payload.get("cliente_id") or "").strip()
+            factura_id = str(payload.get("factura_id") or "").strip()
+            try:
+                limit = max(1, int(payload.get("limit") or 100))
+            except Exception:
+                limit = 100
+            rebuild_asiento = _bool_param(payload, "rebuild_asiento", default=True)
+            where = ["f.empresa_id = ?", "COALESCE(f.raw_text, '') <> ''"]
+            values = [empresa_id]
+            if cliente_id:
+                where.append("f.cliente_id = ?")
+                values.append(cliente_id)
+            if factura_id:
+                where.append("f.id = ?")
+                values.append(factura_id)
+            rows = conn.execute(
+                f"""
+                SELECT f.*
+                FROM gestoria_facturas f
+                WHERE {' AND '.join(where)}
+                ORDER BY f.created_at DESC
+                LIMIT ?
+                """,
+                (*values, limit),
+            ).fetchall()
+            results = []
+            for row in rows:
+                try:
+                    results.append(rebuild_gestoria_factura_from_raw_text(conn, row, now, rebuild_asiento=rebuild_asiento))
+                except Exception as exc:
+                    results.append({"ok": False, "factura_id": row["id"], "error": str(exc)})
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            json_response(self, {"ok": True, "total": len(results), "rows": results})
             return
         elif parsed.path == "/api/gestoria_contabilidad_delete":
             record_id = payload.get("id")
@@ -78333,6 +80934,13 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id and not empresa_ids:
                 json_response(self, {"error": "cliente_id, empresa_id o workspace_id requerido"}, status=400)
                 return
+            try:
+                if cliente_id:
+                    sync_gestoria_modelos_from_contabilidad(conn, cliente_ids=[cliente_id], now=datetime.utcnow().isoformat())
+                elif empresa_ids:
+                    sync_gestoria_modelos_from_contabilidad(conn, empresa_ids=empresa_ids, now=datetime.utcnow().isoformat())
+            except Exception:
+                pass
             if cliente_id:
                 rows = conn.execute(
                     """
@@ -78604,7 +81212,7 @@ class Handler(BaseHTTPRequestHandler):
                 where_clause = " AND ".join(where)
                 rows = conn.execute(
                     f"""
-                    SELECT id, nombre, tipo, fecha, estado, notas, doc_key, doc_url,
+                    SELECT id, nombre, tipo, fecha, estado, notas, repo_key, doc_key, doc_url,
                            referencia_tipo, referencia_id
                     FROM gestoria_docs
                     WHERE {where_clause}
@@ -78686,7 +81294,7 @@ class Handler(BaseHTTPRequestHandler):
                 service_values.extend([service, service])
             rows = conn.execute(
                 f"""
-                SELECT d.id, d.nombre, d.tipo, d.fecha, d.estado, d.notas,
+                SELECT d.id, d.nombre, d.tipo, d.fecha, d.estado, d.notas, d.repo_key,
                        COALESCE(c.nombre, '') AS cliente
                 FROM gestoria_docs d
                 LEFT JOIN clientes c ON c.id = d.cliente_id
@@ -78899,7 +81507,13 @@ class Handler(BaseHTTPRequestHandler):
                 changed = False
                 for factura_row in facturas:
                     try:
-                        result = reconcile_gestoria_factura_asiento(conn, factura_row, datetime.utcnow().isoformat(), auto_link=True)
+                        result = reconcile_gestoria_factura_asiento(
+                            conn,
+                            factura_row,
+                            datetime.utcnow().isoformat(),
+                            auto_link=True,
+                            historico_cerrado=True,
+                        )
                         changed = changed or bool(result and result.get("linked"))
                     except Exception:
                         continue
@@ -78950,8 +81564,12 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT l.id, l.empresa_id, l.cliente_id, l.origen, l.estado, l.periodo,
                        l.carpeta_origen, l.template_path, l.total_documentos, l.total_ok,
-                       l.total_revisar, l.total_duplicado, l.total_error, l.notas,
-                       l.created_at, l.updated_at, COALESCE(c.nombre, '') AS cliente
+                       l.total_revisar, l.total_duplicado, l.total_error,
+                       l.valoracion_estado, l.valoracion_json, l.valoracion_notas,
+                       l.valoracion_total_asientos, l.valoracion_total_terceros,
+                       l.valoracion_total_cuentas, l.valoracion_total_pendientes,
+                       l.valoracion_cerrada_at, l.valoracion_cerrada_by,
+                       l.notas, l.created_at, l.updated_at, COALESCE(c.nombre, '') AS cliente
                 FROM gestoria_import_lotes l
                 LEFT JOIN clientes c ON c.id = l.cliente_id
                 WHERE l.empresa_id IN ({placeholders})
@@ -78962,6 +81580,91 @@ class Handler(BaseHTTPRequestHandler):
                 tuple([*empresa_ids, cliente_id, cliente_id]),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/gestoria_import_lote_valoracion":
+            lote_id = str(payload.get("lote_id") or "").strip()
+            if not lote_id:
+                json_response(self, {"error": "lote_id requerido"}, status=400)
+                return
+            lote = conn.execute("SELECT * FROM gestoria_import_lotes WHERE id = ? LIMIT 1", (lote_id,)).fetchone()
+            if not lote:
+                json_response(self, {"error": "lote no encontrado"}, status=404)
+                return
+            estado = str(payload.get("valoracion_estado") or lote["valoracion_estado"] or "abierta").strip().lower() or "abierta"
+            notas = str(payload.get("valoracion_notas") or "").strip() or None
+            def _int_field(key, current):
+                raw = payload.get(key)
+                if raw in (None, ""):
+                    return int(current or 0)
+                try:
+                    return max(0, int(float(raw)))
+                except Exception:
+                    return int(current or 0)
+            total_asientos = _int_field("valoracion_total_asientos", lote["valoracion_total_asientos"])
+            total_terceros = _int_field("valoracion_total_terceros", lote["valoracion_total_terceros"])
+            total_cuentas = _int_field("valoracion_total_cuentas", lote["valoracion_total_cuentas"])
+            total_pendientes = _int_field("valoracion_total_pendientes", lote["valoracion_total_pendientes"])
+            current_json = {}
+            try:
+                current_json = json.loads(lote["valoracion_json"] or "{}") if lote["valoracion_json"] else {}
+                if not isinstance(current_json, dict):
+                    current_json = {}
+            except Exception:
+                current_json = {}
+            cerrar = _bool_param(payload, "cerrar", default=False)
+            cerrada_at = lote["valoracion_cerrada_at"]
+            cerrada_by = lote["valoracion_cerrada_by"]
+            if cerrar:
+                estado = "cerrada"
+                cerrada_at = now
+                cerrada_by = str((payload.get("valoracion_cerrada_by") or payload.get("usuario") or "").strip()) or None
+            current_json.update(
+                {
+                    "estado": estado,
+                    "asientos": total_asientos,
+                    "terceros": total_terceros,
+                    "cuentas": total_cuentas,
+                    "pendientes": total_pendientes,
+                    "notas": notas or current_json.get("notas") or "",
+                    "cerrada_at": cerrada_at,
+                    "cerrada_by": cerrada_by,
+                }
+            )
+            conn.execute(
+                """
+                UPDATE gestoria_import_lotes
+                SET valoracion_estado = ?,
+                    valoracion_json = ?,
+                    valoracion_notas = ?,
+                    valoracion_total_asientos = ?,
+                    valoracion_total_terceros = ?,
+                    valoracion_total_cuentas = ?,
+                    valoracion_total_pendientes = ?,
+                    valoracion_cerrada_at = ?,
+                    valoracion_cerrada_by = ?,
+                    estado = ?,
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (
+                    estado,
+                    json.dumps(current_json, ensure_ascii=False),
+                    notas,
+                    total_asientos,
+                    total_terceros,
+                    total_cuentas,
+                    total_pendientes,
+                    cerrada_at,
+                    cerrada_by,
+                    estado,
+                    now,
+                    lote_id,
+                ),
+            )
+            conn.commit()
+            row = conn.execute("SELECT * FROM gestoria_import_lotes WHERE id = ?", (lote_id,)).fetchone()
+            json_response(self, {"ok": True, "row": dict(row) if row else {}})
             return
 
         if path == "/api/gestoria_import_documentos":
@@ -78981,10 +81684,16 @@ class Handler(BaseHTTPRequestHandler):
                 SELECT d.*, COALESCE(f.numero, '') AS factura_numero,
                        COALESCE(f.fecha_emision, '') AS factura_fecha,
                        COALESCE(f.total, 0) AS factura_total,
-                       COALESCE(t.nombre, '') AS tercero_nombre
+                       COALESCE(t.nombre, '') AS tercero_nombre,
+                       COALESCE(a.id, '') AS asiento_id,
+                       COALESCE(a.fecha, '') AS asiento_fecha,
+                       COALESCE(a.referencia, '') AS asiento_referencia,
+                       COALESCE(a.concepto, '') AS asiento_concepto,
+                       COALESCE(a.diario, '') AS asiento_diario
                 FROM gestoria_import_documentos d
                 LEFT JOIN gestoria_facturas f ON f.id = d.factura_id
                 LEFT JOIN gestoria_terceros t ON t.id = COALESCE(d.tercero_id, f.tercero_id)
+                LEFT JOIN gestoria_asientos a ON a.factura_id = f.id
                 WHERE d.lote_id = ?
                 {where_estado}
                 ORDER BY d.fecha_detectada DESC, d.created_at DESC
@@ -78992,6 +81701,50 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 values,
             ).fetchall()
+            rows = [dict(r) for r in rows]
+            for row in rows:
+                row.setdefault("validado_manual_at", "")
+                row.setdefault("validado_manual_by", "")
+                try:
+                    factura_id = str(row.get("factura_id") or "").strip()
+                    if factura_id:
+                        factura_row = conn.execute(
+                            """
+                            SELECT
+                              f.*,
+                              COALESCE(t.nombre, '') AS tercero_nombre,
+                              COALESCE(t.nif, '') AS tercero_nif,
+                              COALESCE(t.cuenta_contable, '') AS tercero_cuenta
+                            FROM gestoria_facturas f
+                            LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                            WHERE f.id = ?
+                            LIMIT 1
+                            """,
+                            (factura_id,),
+                        ).fetchone()
+                        if factura_row:
+                            result = reconcile_gestoria_factura_asiento(
+                                conn,
+                                dict(factura_row),
+                                now,
+                                auto_link=False,
+                                historico_cerrado=True,
+                            )
+                            row["compatibilidad_pct"] = max(0, min(100, int(round(float(result.get("score") or 0)))))
+                            row["compatibilidad_estado"] = str(result.get("reason") or "").strip() or ("matched" if result.get("matched") else "pendiente")
+                            row["asiento_id"] = result.get("asiento_id") or row.get("asiento_id") or ""
+                            row["asiento_fecha"] = result.get("asiento_fecha") or row.get("asiento_fecha") or ""
+                            row["asiento_referencia"] = result.get("asiento_referencia") or row.get("asiento_referencia") or ""
+                            row["asiento_concepto"] = result.get("asiento_concepto") or row.get("asiento_concepto") or ""
+                        else:
+                            row["compatibilidad_pct"] = 0
+                            row["compatibilidad_estado"] = "sin_factura"
+                    else:
+                        row["compatibilidad_pct"] = 0
+                        row["compatibilidad_estado"] = "pendiente"
+                except Exception:
+                    row["compatibilidad_pct"] = 0
+                    row["compatibilidad_estado"] = "error"
             summary = conn.execute(
                 """
                 SELECT
@@ -79008,7 +81761,7 @@ class Handler(BaseHTTPRequestHandler):
             json_response(
                 self,
                 {
-                    "rows": [dict(r) for r in rows],
+                    "rows": rows,
                     "summary": {
                         "total_documentos": int(summary["total_documentos"] or 0) if summary else 0,
                         "total_ok": int(summary["total_ok"] or 0) if summary else 0,
@@ -79152,7 +81905,17 @@ class Handler(BaseHTTPRequestHandler):
             rows = conn.execute(
                 f"""
                 SELECT a.id, a.fecha, a.concepto, a.referencia, a.total_debe, a.total_haber,
-                       COALESCE(f.numero, '') AS factura_numero, COALESCE(f.doc_key, '') AS factura_doc_key
+                       COALESCE(a.factura_id, '') AS factura_id,
+                       COALESCE(f.numero, '') AS factura_numero, COALESCE(f.doc_key, '') AS factura_doc_key,
+                       COALESCE(a.punteado_banco, 0) AS punteado_banco,
+                       COALESCE(a.punteado_banco_at, '') AS punteado_banco_at,
+                       COALESCE(a.punteado_banco_by, '') AS punteado_banco_by,
+                       COALESCE(a.punteado_banco_notas, '') AS punteado_banco_notas,
+                       COALESCE(a.conciliacion_estado, '') AS conciliacion_estado,
+                       COALESCE(a.conciliacion_confianza, 0) AS conciliacion_confianza,
+                       COALESCE(a.validado_manual_at, '') AS validado_manual_at,
+                       COALESCE(a.validado_manual_by, '') AS validado_manual_by,
+                       COALESCE(a.validado_manual_notas, '') AS validado_manual_notas
                 FROM gestoria_asientos a
                 LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
                 WHERE {where_clause}
@@ -79162,6 +81925,707 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/gestoria_asiento":
+            asiento_id = str(params.get("asiento_id", [""])[0] or "").strip()
+            if not asiento_id:
+                json_response(self, {"error": "asiento_id requerido"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT a.*, COALESCE(f.numero, '') AS factura_numero, COALESCE(f.doc_key, '') AS factura_doc_key
+                FROM gestoria_asientos a
+                LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
+                WHERE a.id = ?
+                LIMIT 1
+                """,
+                (asiento_id,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "asiento no encontrado"}, status=404)
+                return
+            lines = conn.execute(
+                """
+                SELECT l.*, COALESCE(t.nombre, '') AS tercero_nombre, COALESCE(t.nif, '') AS tercero_nif
+                FROM gestoria_asiento_lineas l
+                LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
+                WHERE l.asiento_id = ?
+                ORDER BY l.created_at ASC, l.id ASC
+                """,
+                (asiento_id,),
+            ).fetchall()
+            json_response(self, {"row": dict(row), "lineas": [dict(r) for r in lines]})
+            return
+
+        if path == "/api/gestoria_asiento_punteo_banco":
+            asiento_id = str(payload.get("asiento_id") or "").strip()
+            if not asiento_id:
+                json_response(self, {"error": "asiento_id requerido"}, status=400)
+                return
+            row = conn.execute("SELECT id FROM gestoria_asientos WHERE id = ? LIMIT 1", (asiento_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "asiento no encontrado"}, status=404)
+                return
+            punteado = 1 if _bool_param(payload, "punteado_banco", default=False) else 0
+            notas = str(payload.get("punteado_banco_notas") or "").strip() or None
+            punteado_at = str(payload.get("punteado_banco_at") or "").strip() or (now if punteado else None)
+            punteado_by = str(payload.get("punteado_banco_by") or payload.get("usuario") or "").strip() or None
+            conn.execute(
+                """
+                UPDATE gestoria_asientos
+                SET punteado_banco = ?,
+                    punteado_banco_at = ?,
+                    punteado_banco_by = ?,
+                    punteado_banco_notas = ?,
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (punteado, punteado_at if punteado else None, punteado_by if punteado else None, notas, now, asiento_id),
+            )
+            conn.commit()
+            updated = conn.execute(
+                """
+                SELECT a.*, COALESCE(f.numero, '') AS factura_numero, COALESCE(f.doc_key, '') AS factura_doc_key
+                FROM gestoria_asientos a
+                LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
+                WHERE a.id = ?
+                LIMIT 1
+                """,
+                (asiento_id,),
+            ).fetchone()
+            json_response(self, {"ok": True, "row": dict(updated) if updated else {}})
+            return
+
+        if path == "/api/gestoria_asiento_update":
+            asiento_id = str(payload.get("asiento_id") or "").strip()
+            if not asiento_id:
+                json_response(self, {"error": "asiento_id requerido"}, status=400)
+                return
+            row = conn.execute("SELECT * FROM gestoria_asientos WHERE id = ? LIMIT 1", (asiento_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "asiento no encontrado"}, status=404)
+                return
+            factura_id = str(payload.get("factura_id") or "").strip() or None
+            fecha = str(payload.get("fecha") or row["fecha"] or "").strip() or None
+            concepto = str(payload.get("concepto") or row["concepto"] or "").strip() or None
+            referencia = str(payload.get("referencia") or row["referencia"] or "").strip() or None
+            lines = payload.get("lineas") or []
+            if not isinstance(lines, list) or not lines:
+                json_response(self, {"error": "lineas requeridas"}, status=400)
+                return
+            has_banco_update = any(key in payload for key in ("punteado_banco", "punteado_banco_at", "punteado_banco_by", "punteado_banco_notas"))
+            punteado_banco = _bool_param(payload, "punteado_banco", default=False) if "punteado_banco" in payload else None
+            punteado_banco_at = None
+            punteado_banco_by = None
+            punteado_banco_notas = None
+            if has_banco_update:
+                try:
+                    current_banco = 1 if int(row["punteado_banco"] or 0) == 1 else 0
+                except Exception:
+                    current_banco = 0
+                if punteado_banco is None:
+                    punteado_banco = current_banco
+                if punteado_banco == current_banco:
+                    punteado_banco_at = str(row["punteado_banco_at"] or "").strip() or None
+                    punteado_banco_by = str(row["punteado_banco_by"] or "").strip() or None
+                elif punteado_banco:
+                    punteado_banco_at = str(payload.get("punteado_banco_at") or "").strip() or now
+                    punteado_banco_by = str(payload.get("punteado_banco_by") or payload.get("usuario") or "").strip() or None
+                else:
+                    punteado_banco_at = None
+                    punteado_banco_by = None
+                punteado_banco_notas = str(payload.get("punteado_banco_notas") or row["punteado_banco_notas"] or "").strip() or None
+            normalized_lines = []
+            for item in lines:
+                if not isinstance(item, dict):
+                    continue
+                cuenta = str(item.get("cuenta") or "").strip()
+                descripcion = str(item.get("descripcion") or "").strip() or None
+                if not cuenta:
+                    continue
+                try:
+                    debe = round(parse_money_value(item.get("debe")), 2)
+                    haber = round(parse_money_value(item.get("haber")), 2)
+                except Exception:
+                    debe = 0.0
+                    haber = 0.0
+                impuesto_tipo = str(item.get("impuesto_tipo") or "").strip() or None
+                try:
+                    impuesto_pct = float(item.get("impuesto_pct")) if str(item.get("impuesto_pct") or "").strip() != "" else None
+                except Exception:
+                    impuesto_pct = None
+                normalized_lines.append(
+                    {
+                        "id": str(item.get("id") or os.urandom(16).hex()),
+                        "cuenta": cuenta,
+                        "descripcion": descripcion,
+                        "debe": debe,
+                        "haber": haber,
+                        "impuesto_tipo": impuesto_tipo,
+                        "impuesto_pct": impuesto_pct,
+                        "tercero_id": str(item.get("tercero_id") or "").strip() or None,
+                    }
+                )
+            try:
+                normalized_lines, total_debe, total_haber = ensure_asiento_balanced(normalized_lines, allow_adjustment=True)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            conn.execute(
+                """
+                UPDATE gestoria_asientos
+                SET factura_id = ?, fecha = ?, concepto = ?, referencia = ?, total_debe = ?, total_haber = ?,
+                    punteado_banco = COALESCE(?, punteado_banco),
+                    punteado_banco_at = COALESCE(?, punteado_banco_at),
+                    punteado_banco_by = COALESCE(?, punteado_banco_by),
+                    punteado_banco_notas = COALESCE(?, punteado_banco_notas),
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (
+                    factura_id,
+                    fecha,
+                    concepto,
+                    referencia,
+                    total_debe,
+                    total_haber,
+                    punteado_banco if has_banco_update else None,
+                    punteado_banco_at if has_banco_update else None,
+                    punteado_banco_by if has_banco_update else None,
+                    punteado_banco_notas if has_banco_update else None,
+                    now,
+                    asiento_id,
+                ),
+            )
+            conn.execute("DELETE FROM gestoria_asiento_lineas WHERE asiento_id = ?", (asiento_id,))
+            for item in normalized_lines:
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_asiento_lineas (
+                      id, asiento_id, tercero_id, cuenta, descripcion, debe, haber, impuesto_tipo, impuesto_pct, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (
+                        item["id"],
+                        asiento_id,
+                        item["tercero_id"],
+                        item["cuenta"],
+                        item["descripcion"],
+                        item["debe"],
+                        item["haber"],
+                        item["impuesto_tipo"],
+                        item["impuesto_pct"],
+                        now,
+                        now,
+                    ),
+                )
+            conn.commit()
+            updated = conn.execute(
+                """
+                SELECT a.*, COALESCE(f.numero, '') AS factura_numero, COALESCE(f.doc_key, '') AS factura_doc_key
+                FROM gestoria_asientos a
+                LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
+                WHERE a.id = ?
+                LIMIT 1
+                """,
+                (asiento_id,),
+            ).fetchone()
+            json_response(self, {"ok": True, "row": dict(updated) if updated else {}, "lineas": normalized_lines})
+            return
+
+        if path == "/api/gestoria_cuentas_bancarias":
+            empresa_id = params.get("empresa_id", [""])[0]
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=params.get("workspace_id", [""])[0])
+            if not empresa_ids:
+                json_response(self, {"rows": []})
+                return
+            placeholders = ",".join(["?"] * len(empresa_ids))
+            rows = conn.execute(
+                f"""
+                SELECT
+                  b.id,
+                  b.empresa_id,
+                  COALESCE(e.nombre, '') AS empresa_nombre,
+                  COALESCE(b.iban, '') AS iban,
+                  COALESCE(b.banco_nombre, '') AS banco_nombre,
+                  COALESCE(b.cuenta_contable, '') AS cuenta_contable,
+                  COALESCE(b.titular, '') AS titular,
+                  COALESCE(b.es_principal, 0) AS es_principal,
+                  b.created_at,
+                  b.updated_at
+                FROM gestoria_cuentas_bancarias b
+                LEFT JOIN empresas e ON e.id = b.empresa_id
+                WHERE b.empresa_id IN ({placeholders})
+                ORDER BY COALESCE(b.es_principal, 0) DESC, COALESCE(b.banco_nombre, '') ASC, COALESCE(b.iban, '') ASC
+                """,
+                tuple(empresa_ids),
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/gestoria_cuentas_bancarias_save":
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            row_id = str(payload.get("id") or "").strip()
+            iban = normalize_gestoria_bank_account_number(payload.get("iban") or "")
+            banco_nombre = str(payload.get("banco_nombre") or "").strip() or None
+            cuenta_contable = str(payload.get("cuenta_contable") or "").strip() or None
+            titular = str(payload.get("titular") or "").strip() or None
+            es_principal = 1 if _bool_param(payload, "es_principal", default=False) else 0
+            if not row_id and not iban:
+                json_response(self, {"error": "iban requerido"}, status=400)
+                return
+            existing = None
+            if row_id:
+                existing = conn.execute("SELECT * FROM gestoria_cuentas_bancarias WHERE id = ? LIMIT 1", (row_id,)).fetchone()
+            elif iban:
+                existing = conn.execute(
+                    "SELECT * FROM gestoria_cuentas_bancarias WHERE empresa_id = ? AND UPPER(COALESCE(iban, '')) = UPPER(?) LIMIT 1",
+                    (empresa_id, iban),
+                ).fetchone()
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE gestoria_cuentas_bancarias
+                    SET iban = ?, banco_nombre = ?, cuenta_contable = ?, titular = ?, es_principal = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (iban or existing["iban"], banco_nombre, cuenta_contable, titular, es_principal, now, existing["id"]),
+                )
+                row_id = existing["id"]
+            else:
+                row_id = row_id or os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_cuentas_bancarias (
+                      id, empresa_id, iban, banco_nombre, cuenta_contable, titular, es_principal, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (row_id, empresa_id, iban, banco_nombre, cuenta_contable, titular, es_principal, now, now),
+                )
+            if es_principal:
+                conn.execute(
+                    """
+                    UPDATE gestoria_cuentas_bancarias
+                    SET es_principal = 0, updated_at = datetime(?)
+                    WHERE empresa_id = ? AND id <> ?
+                    """,
+                    (now, empresa_id, row_id),
+                )
+            conn.commit()
+            row = conn.execute("SELECT * FROM gestoria_cuentas_bancarias WHERE id = ? LIMIT 1", (row_id,)).fetchone()
+            json_response(self, {"ok": True, "row": dict(row) if row else {}})
+            return
+
+        if path == "/api/gestoria_movimientos_bancarios":
+            empresa_id = params.get("empresa_id", [""])[0]
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=params.get("workspace_id", [""])[0])
+            if not empresa_ids:
+                json_response(self, {"rows": []})
+                return
+            placeholders = ",".join(["?"] * len(empresa_ids))
+            rows = conn.execute(
+                f"""
+                SELECT
+                  m.id,
+                  m.empresa_id,
+                  COALESCE(c.banco_nombre, '') AS banco_nombre,
+                  COALESCE(c.cuenta_contable, '') AS cuenta_contable,
+                  COALESCE(c.iban, '') AS iban,
+                  COALESCE(m.fecha_operacion, '') AS fecha_operacion,
+                  COALESCE(m.fecha_valor, '') AS fecha_valor,
+                  COALESCE(m.concepto, '') AS concepto,
+                  COALESCE(m.importe, 0) AS importe,
+                  COALESCE(m.saldo, 0) AS saldo,
+                  COALESCE(m.divisa, 'EUR') AS divisa,
+                  COALESCE(m.codigo, '') AS codigo,
+                  COALESCE(m.numero_documento, '') AS numero_documento,
+                  COALESCE(m.referencia1, '') AS referencia1,
+                  COALESCE(m.referencia2, '') AS referencia2,
+                  COALESCE(m.info_adicional, '') AS info_adicional,
+                  COALESCE(m.origen_fichero, '') AS origen_fichero,
+                  COALESCE(m.punteado, 0) AS punteado,
+                  COALESCE(m.punteado_at, '') AS punteado_at,
+                  COALESCE(m.punteado_by, '') AS punteado_by,
+                  COALESCE(m.punteado_notas, '') AS punteado_notas,
+                  COALESCE(m.asiento_id, '') AS asiento_id,
+                  COALESCE(a.referencia, '') AS asiento_referencia,
+                  COALESCE(a.concepto, '') AS asiento_concepto,
+                  COALESCE(m.matched_score, 0) AS matched_score,
+                  COALESCE(m.matched_reason, '') AS matched_reason,
+                  COALESCE(m.conciliacion_estado, '') AS conciliacion_estado,
+                  COALESCE(m.conciliacion_confianza, 0) AS conciliacion_confianza,
+                  COALESCE(m.regla_aplicada, '') AS regla_aplicada,
+                  COALESCE(m.validado_manual_at, '') AS validado_manual_at,
+                  COALESCE(m.validado_manual_by, '') AS validado_manual_by,
+                  COALESCE(m.validado_manual_notas, '') AS validado_manual_notas
+                FROM gestoria_movimientos_bancarios m
+                LEFT JOIN gestoria_cuentas_bancarias c ON c.id = m.cuenta_bancaria_id
+                LEFT JOIN gestoria_asientos a ON a.id = m.asiento_id
+                WHERE m.empresa_id IN ({placeholders})
+                ORDER BY COALESCE(m.fecha_operacion, m.fecha_valor, m.created_at) DESC, m.created_at DESC
+                LIMIT 500
+                """,
+                tuple(empresa_ids),
+            ).fetchall()
+            json_response(self, {"rows": [dict(r) for r in rows]})
+            return
+
+        if path == "/api/gestoria_movimientos_bancarios_import_preview":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, payload.get("workspace_id") or "", write=False)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            try:
+                raw_bytes, _mime, _hint = decode_document_payload(payload, conn=conn, session=session)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            try:
+                movements = parse_gestoria_bank_extract(raw_bytes, filename=payload.get("filename") or "")
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            iban_detectados = detect_gestoria_bank_extract_ibans(raw_bytes, filename=payload.get("filename") or "")
+            preview = []
+            for mv in (movements or [])[:80]:
+                preview.append(
+                    {
+                        "fecha_operacion": mv.get("fecha_operacion") or "",
+                        "fecha_valor": mv.get("fecha_valor") or "",
+                        "concepto": mv.get("concepto") or "",
+                        "importe": mv.get("importe"),
+                        "saldo": mv.get("saldo"),
+                        "divisa": mv.get("divisa") or "EUR",
+                        "numero_documento": mv.get("numero_documento") or "",
+                        "referencia1": mv.get("referencia1") or "",
+                        "referencia2": mv.get("referencia2") or "",
+                    }
+                )
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "total": len(movements or []),
+                    "preview": preview,
+                    "iban_detectados": iban_detectados,
+                },
+            )
+            return
+
+        if path == "/api/gestoria_movimientos_bancarios_import":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, payload.get("workspace_id") or "", write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            try:
+                raw_bytes, _mime, _hint = decode_document_payload(payload, conn=conn, session=session)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            try:
+                movements = parse_gestoria_bank_extract(raw_bytes, filename=payload.get("filename") or "")
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            cuentas = fetch_gestoria_cuentas_bancarias(conn, empresa_id)
+            iban_detectados = detect_gestoria_bank_extract_ibans(raw_bytes, filename=payload.get("filename") or "")
+            cuenta_bancaria = pick_gestoria_cuenta_bancaria_for_extract(cuentas, iban_detectados)
+            cuenta_bancaria_id = cuenta_bancaria["id"] if cuenta_bancaria else None
+            origen_hash = hashlib.sha256(raw_bytes).hexdigest()
+            inserted = 0
+            skipped = 0
+            matched = 0
+            for mv in movements:
+                fecha_operacion = str(mv.get("fecha_operacion") or "").strip()
+                concepto = str(mv.get("concepto") or "").strip()
+                importe = round(parse_money_value(mv.get("importe") or 0), 2)
+                if not fecha_operacion or not concepto:
+                    continue
+                exists = conn.execute(
+                    """
+                    SELECT id FROM gestoria_movimientos_bancarios
+                    WHERE empresa_id = ?
+                      AND COALESCE(fecha_operacion, '') = COALESCE(?, '')
+                      AND ABS(COALESCE(importe, 0) - ?) < 0.009
+                      AND COALESCE(concepto, '') = ?
+                      AND COALESCE(origen_hash, '') = ?
+                    LIMIT 1
+                    """,
+                    (empresa_id, fecha_operacion, float(importe), concepto, origen_hash),
+                ).fetchone()
+                if exists:
+                    skipped += 1
+                    continue
+                mov_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_movimientos_bancarios (
+                      id, empresa_id, cuenta_bancaria_id, fecha_operacion, fecha_valor, concepto, importe, saldo, divisa,
+                      codigo, numero_documento, referencia1, referencia2, info_adicional, origen_fichero, origen_hash,
+                      created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (
+                        mov_id,
+                        empresa_id,
+                        cuenta_bancaria_id,
+                        fecha_operacion,
+                        str(mv.get("fecha_valor") or fecha_operacion).strip() or fecha_operacion,
+                        concepto,
+                        float(importe),
+                        round(parse_money_value(mv.get("saldo") or 0), 2) if mv.get("saldo") is not None else None,
+                        str(mv.get("divisa") or "EUR").strip() or "EUR",
+                        str(mv.get("codigo") or "").strip() or None,
+                        str(mv.get("numero_documento") or "").strip() or None,
+                        str(mv.get("referencia1") or "").strip() or None,
+                        str(mv.get("referencia2") or "").strip() or None,
+                        str(mv.get("info_adicional") or "").strip() or None,
+                        str(payload.get("filename") or "").strip() or None,
+                        origen_hash,
+                        now,
+                        now,
+                    ),
+                )
+                result = match_gestoria_movimiento_bancario_asiento(
+                    conn,
+                    {
+                        "id": mov_id,
+                        "empresa_id": empresa_id,
+                        "fecha_operacion": fecha_operacion,
+                        "concepto": concepto,
+                        "importe": float(importe),
+                        "referencia1": mv.get("referencia1") or "",
+                        "referencia2": mv.get("referencia2") or "",
+                        "numero_documento": mv.get("numero_documento") or "",
+                    },
+                    now=now,
+                    lookback_days=10,
+                )
+                if result.get("matched"):
+                    matched += 1
+                    conn.execute(
+                        """
+                        UPDATE gestoria_movimientos_bancarios
+                        SET asiento_id = ?, punteado = 1, punteado_at = datetime(?), punteado_by = ?, matched_score = ?, matched_reason = ?, conciliacion_estado = ?, conciliacion_confianza = ?, regla_aplicada = ?, updated_at = datetime(?)
+                        WHERE id = ?
+                        """,
+                        (
+                            result.get("asiento_id"),
+                            now,
+                            str(payload.get("usuario") or "").strip() or None,
+                            result.get("score") or 0,
+                            result.get("reason") or "auto",
+                            "auto" if (result.get("linked") or result.get("matched")) else "pendiente",
+                            result.get("score") or 0,
+                            result.get("reason") or "",
+                            now,
+                            mov_id,
+                        ),
+                    )
+                inserted += 1
+            try:
+                run_gestoria_conciliacion_convergente(
+                    conn,
+                    empresa_id,
+                    now,
+                    max_passes=4,
+                    lookback_days=10,
+                    historico_cerrado=True,
+                )
+            except Exception:
+                pass
+            final_counts = conn.execute(
+                """
+                SELECT
+                  COUNT(*) AS total_movimientos,
+                  SUM(CASE WHEN COALESCE(asiento_id, '') <> '' THEN 1 ELSE 0 END) AS conciliados,
+                  SUM(CASE WHEN COALESCE(asiento_id, '') = '' THEN 1 ELSE 0 END) AS pendientes,
+                  SUM(CASE WHEN COALESCE(conciliacion_confianza, matched_score, 0) < 55 THEN 1 ELSE 0 END) AS baja_confianza
+                FROM gestoria_movimientos_bancarios
+                WHERE empresa_id = ?
+                """,
+                (empresa_id,),
+            ).fetchone()
+            total_movimientos = int(final_counts["total_movimientos"] or 0) if final_counts else 0
+            conciliados_final = int(final_counts["conciliados"] or 0) if final_counts else 0
+            pendientes_final = int(final_counts["pendientes"] or 0) if final_counts else 0
+            baja_confianza = int(final_counts["baja_confianza"] or 0) if final_counts else 0
+            compatibilidad_pct = round((conciliados_final / total_movimientos) * 100.0, 2) if total_movimientos else 0.0
+            conn.commit()
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "inserted": inserted,
+                    "skipped": skipped,
+                    "matched": matched,
+                    "total_movimientos": total_movimientos,
+                    "conciliados": conciliados_final,
+                    "pendientes": pendientes_final,
+                    "baja_confianza": baja_confianza,
+                    "compatibilidad_pct": compatibilidad_pct,
+                    "cuenta_bancaria_id": cuenta_bancaria_id,
+                    "iban_detectados": iban_detectados,
+                    "cuenta_bancaria_iban": (cuenta_bancaria or {}).get("iban", ""),
+                },
+            )
+            return
+
+        if path == "/api/gestoria_conciliacion_validar":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            movimiento_id = str(payload.get("movimiento_id") or "").strip()
+            asiento_id = str(payload.get("asiento_id") or "").strip()
+            factura_id = str(payload.get("factura_id") or "").strip()
+            estado = str(payload.get("estado") or "validado").strip().lower() or "validado"
+            notas = str(payload.get("notas") or "").strip() or None
+            validado_por = str(payload.get("usuario") or payload.get("validado_por") or "").strip() or None
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            if not movimiento_id and not asiento_id:
+                json_response(self, {"error": "movimiento_id o asiento_id requerido"}, status=400)
+                return
+            movimiento_row = None
+            asiento_row = None
+            if movimiento_id:
+                movimiento_row = conn.execute(
+                    "SELECT * FROM gestoria_movimientos_bancarios WHERE id = ? AND empresa_id = ? LIMIT 1",
+                    (movimiento_id, empresa_id),
+                ).fetchone()
+                if not movimiento_row:
+                    json_response(self, {"error": "movimiento no encontrado"}, status=404)
+                    return
+                if not asiento_id:
+                    asiento_id = str(movimiento_row["asiento_id"] or "").strip()
+            if asiento_id:
+                asiento_row = conn.execute(
+                    "SELECT * FROM gestoria_asientos WHERE id = ? AND empresa_id = ? LIMIT 1",
+                    (asiento_id, empresa_id),
+                ).fetchone()
+                if not asiento_row:
+                    json_response(self, {"error": "asiento no encontrado"}, status=404)
+                    return
+                if not factura_id:
+                    factura_id = str(asiento_row["factura_id"] or "").strip()
+            confianza = parse_confidence_value(payload.get("confianza") or (movimiento_row and (movimiento_row["conciliacion_confianza"] or movimiento_row["matched_score"])) or 100)
+            now_iso = datetime.utcnow().isoformat()
+            regla_id = str(payload.get("regla_id") or (movimiento_row and movement_row["regla_aplicada"]) or "").strip() or None
+            if movimiento_row:
+                conn.execute(
+                    """
+                    UPDATE gestoria_movimientos_bancarios
+                    SET asiento_id = COALESCE(?, asiento_id),
+                        conciliacion_estado = ?,
+                        conciliacion_confianza = ?,
+                        validado_manual_at = datetime(?),
+                        validado_manual_by = ?,
+                        validado_manual_notas = ?,
+                        punteado = 1,
+                        punteado_at = COALESCE(punteado_at, datetime(?)),
+                        punteado_by = COALESCE(punteado_by, ?),
+                        updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (
+                        asiento_id or None,
+                        estado,
+                        float(confianza or 0),
+                        now_iso,
+                        validado_por,
+                        notas,
+                        now_iso,
+                        validado_por,
+                        now_iso,
+                        movimiento_id,
+                    ),
+                )
+            if asiento_row:
+                conn.execute(
+                    """
+                    UPDATE gestoria_asientos
+                    SET conciliacion_estado = ?,
+                        conciliacion_confianza = ?,
+                        validado_manual_at = datetime(?),
+                        validado_manual_by = ?,
+                        validado_manual_notas = ?,
+                        punteado_banco = 1,
+                        punteado_banco_at = COALESCE(punteado_banco_at, datetime(?)),
+                        punteado_banco_by = COALESCE(punteado_banco_by, ?),
+                        updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (
+                        estado,
+                        float(confianza or 0),
+                        now_iso,
+                        validado_por,
+                        notas,
+                        now_iso,
+                        validado_por,
+                        now_iso,
+                        asiento_id,
+                    ),
+                )
+            try:
+                if movimiento_row:
+                    upsert_gestoria_banco_regla_from_match(conn, dict(movimiento_row), dict(asiento_row) if asiento_row else None, now=now_iso)
+            except Exception:
+                pass
+            try:
+                record_gestoria_conciliacion_validacion(
+                    conn,
+                    movimiento_id,
+                    asiento_id,
+                    factura_id,
+                    empresa_id,
+                    estado,
+                    confianza,
+                    regla_id,
+                    validado_por,
+                    notas,
+                    now_iso,
+                )
+            except Exception:
+                pass
+            try:
+                conn.commit()
+            except Exception:
+                pass
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "estado": estado,
+                    "confianza": float(confianza or 0),
+                    "movimiento_id": movimiento_id,
+                    "asiento_id": asiento_id,
+                    "factura_id": factura_id,
+                },
+            )
             return
 
         if path == "/api/gestoria_libros":
@@ -79187,6 +82651,10 @@ class Handler(BaseHTTPRequestHandler):
                     },
                 )
                 return
+            try:
+                sync_gestoria_modelos_from_contabilidad(conn, empresa_ids=empresa_ids, cliente_ids=[cliente_id] if cliente_id else None, now=datetime.utcnow().isoformat())
+            except Exception:
+                pass
             placeholders = ",".join(["?"] * len(empresa_ids))
             date_clause = ""
             values = list(empresa_ids)
@@ -79222,9 +82690,12 @@ class Handler(BaseHTTPRequestHandler):
             mayor = conn.execute(
                 f"""
                 SELECT l.cuenta,
-                       ROUND(SUM(COALESCE(l.debe, 0)), 2) AS debe,
-                       ROUND(SUM(COALESCE(l.haber, 0)), 2) AS haber,
-                       ROUND(SUM(COALESCE(l.debe, 0) - COALESCE(l.haber, 0)), 2) AS saldo
+                       ROUND(SUM(ROUND(COALESCE(l.debe, 0) + 0, 2)), 2) AS debe,
+                       ROUND(SUM(ROUND(COALESCE(l.haber, 0) + 0, 2)), 2) AS haber,
+                       ROUND(
+                         SUM(ROUND(COALESCE(l.debe, 0) + 0, 2) - ROUND(COALESCE(l.haber, 0) + 0, 2)),
+                         2
+                       ) AS saldo
                 FROM gestoria_asientos a
                 JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
                 WHERE a.empresa_id IN ({placeholders}) {date_clause}
@@ -79236,13 +82707,16 @@ class Handler(BaseHTTPRequestHandler):
             balance = conn.execute(
                 f"""
                 SELECT l.cuenta,
-                       ROUND(SUM(COALESCE(l.debe, 0)), 2) AS debe,
-                       ROUND(SUM(COALESCE(l.haber, 0)), 2) AS haber,
-                       ROUND(SUM(COALESCE(l.debe, 0) - COALESCE(l.haber, 0)), 2) AS saldo
+                       ROUND(SUM(ROUND(COALESCE(l.debe, 0) + 0, 2)), 2) AS debe,
+                       ROUND(SUM(ROUND(COALESCE(l.haber, 0) + 0, 2)), 2) AS haber,
+                       ROUND(
+                         SUM(ROUND(COALESCE(l.debe, 0) + 0, 2) - ROUND(COALESCE(l.haber, 0) + 0, 2)),
+                         2
+                       ) AS saldo
                 FROM gestoria_asientos a
                 JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
                 WHERE a.empresa_id IN ({placeholders}) {date_clause}
-                  AND (l.cuenta GLOB '1*' OR l.cuenta GLOB '2*' OR l.cuenta GLOB '3*' OR l.cuenta GLOB '4*' OR l.cuenta GLOB '5*')
+                  AND SUBSTR(TRIM(COALESCE(l.cuenta, '')), 1, 1) IN ('1', '2', '3', '4', '5')
                 GROUP BY l.cuenta
                 ORDER BY l.cuenta ASC
                 """,
@@ -79251,13 +82725,16 @@ class Handler(BaseHTTPRequestHandler):
             pyg = conn.execute(
                 f"""
                 SELECT l.cuenta,
-                       ROUND(SUM(COALESCE(l.debe, 0)), 2) AS debe,
-                       ROUND(SUM(COALESCE(l.haber, 0)), 2) AS haber,
-                       ROUND(SUM(COALESCE(l.debe, 0) - COALESCE(l.haber, 0)), 2) AS saldo
+                       ROUND(SUM(ROUND(COALESCE(l.debe, 0) + 0, 2)), 2) AS debe,
+                       ROUND(SUM(ROUND(COALESCE(l.haber, 0) + 0, 2)), 2) AS haber,
+                       ROUND(
+                         SUM(ROUND(COALESCE(l.debe, 0) + 0, 2) - ROUND(COALESCE(l.haber, 0) + 0, 2)),
+                         2
+                       ) AS saldo
                 FROM gestoria_asientos a
                 JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
                 WHERE a.empresa_id IN ({placeholders}) {date_clause}
-                  AND (l.cuenta GLOB '6*' OR l.cuenta GLOB '7*')
+                  AND SUBSTR(TRIM(COALESCE(l.cuenta, '')), 1, 1) IN ('6', '7')
                 GROUP BY l.cuenta
                 ORDER BY l.cuenta ASC
                 """,
@@ -79337,66 +82814,68 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchall()
             facturas = [dict(r) for r in facturas_rows]
             if conciliar and facturas:
-                changed = False
-                for factura_row in facturas:
-                    try:
-                        result = reconcile_gestoria_factura_asiento(conn, factura_row, datetime.utcnow().isoformat(), auto_link=True)
-                        changed = changed or bool(result and result.get("linked"))
-                    except Exception:
-                        continue
-                if changed:
-                    try:
-                        conn.commit()
-                    except Exception:
-                        pass
-                    diario = conn.execute(
-                        f"""
-                        SELECT a.id AS asiento_id, a.fecha, a.concepto, a.referencia,
-                               l.cuenta, l.descripcion, l.debe, l.haber,
-                               l.impuesto_tipo, l.impuesto_pct,
-                               COALESCE(t.nombre, '') AS tercero,
-                               COALESCE(t.nif, '') AS tercero_nif,
-                               COALESCE(f.numero, '') AS factura_numero,
-                               COALESCE(f.fecha_emision, '') AS factura_fecha,
-                               COALESCE(f.total, 0) AS factura_total,
-                               COALESCE(f.tipo, '') AS tipo_factura
-                        FROM gestoria_asientos a
-                        JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
-                        LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
-                        LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
-                        WHERE a.empresa_id IN ({placeholders}) {date_clause}
-                        ORDER BY a.fecha ASC, a.created_at ASC, l.cuenta ASC
-                        """,
-                        values,
-                    ).fetchall()
-                    facturas_rows = conn.execute(
-                        f"""
-                        SELECT
-                          f.id,
-                          f.fecha_emision,
-                          f.numero,
-                          f.tipo,
-                          COALESCE(t.nombre, '') AS tercero,
-                          COALESCE(t.nif, '') AS tercero_nif,
-                          f.base_imponible,
-                          f.cuota_iva,
-                          f.cuota_irpf,
-                          f.total,
-                          f.iva_pct,
-                          f.doc_key,
-                          COALESCE(a.id, '') AS asiento_id,
-                          COALESCE(a.fecha, '') AS asiento_fecha,
-                          COALESCE(a.referencia, '') AS asiento_referencia,
-                          COALESCE(a.concepto, '') AS asiento_concepto
-                        FROM gestoria_facturas f
-                        LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
-                        LEFT JOIN gestoria_asientos a ON a.factura_id = f.id
-                        WHERE f.empresa_id IN ({placeholders}) {fact_clause}
-                        ORDER BY f.fecha_emision ASC, f.created_at ASC
-                        """,
-                        fact_values,
-                    ).fetchall()
-                    facturas = [dict(r) for r in facturas_rows]
+                try:
+                    for empresa_scope_id in empresa_ids:
+                        run_gestoria_conciliacion_convergente(
+                            conn,
+                            empresa_scope_id,
+                            datetime.utcnow().isoformat(),
+                            cliente_id=cliente_id,
+                            max_passes=5,
+                            lookback_days=10,
+                            historico_cerrado=True,
+                        )
+                    conn.commit()
+                except Exception:
+                    pass
+                diario = conn.execute(
+                    f"""
+                    SELECT a.id AS asiento_id, a.fecha, a.concepto, a.referencia,
+                           l.cuenta, l.descripcion, l.debe, l.haber,
+                           l.impuesto_tipo, l.impuesto_pct,
+                           COALESCE(t.nombre, '') AS tercero,
+                           COALESCE(t.nif, '') AS tercero_nif,
+                           COALESCE(f.numero, '') AS factura_numero,
+                           COALESCE(f.fecha_emision, '') AS factura_fecha,
+                           COALESCE(f.total, 0) AS factura_total,
+                           COALESCE(f.tipo, '') AS tipo_factura
+                    FROM gestoria_asientos a
+                    JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+                    LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
+                    LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
+                    WHERE a.empresa_id IN ({placeholders}) {date_clause}
+                    ORDER BY a.fecha ASC, a.created_at ASC, l.cuenta ASC
+                    """,
+                    values,
+                ).fetchall()
+                facturas_rows = conn.execute(
+                    f"""
+                    SELECT
+                      f.id,
+                      f.fecha_emision,
+                      f.numero,
+                      f.tipo,
+                      COALESCE(t.nombre, '') AS tercero,
+                      COALESCE(t.nif, '') AS tercero_nif,
+                      f.base_imponible,
+                      f.cuota_iva,
+                      f.cuota_irpf,
+                      f.total,
+                      f.iva_pct,
+                      f.doc_key,
+                      COALESCE(a.id, '') AS asiento_id,
+                      COALESCE(a.fecha, '') AS asiento_fecha,
+                      COALESCE(a.referencia, '') AS asiento_referencia,
+                      COALESCE(a.concepto, '') AS asiento_concepto
+                    FROM gestoria_facturas f
+                    LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                    LEFT JOIN gestoria_asientos a ON a.factura_id = f.id
+                    WHERE f.empresa_id IN ({placeholders}) {fact_clause}
+                    ORDER BY f.fecha_emision ASC, f.created_at ASC
+                    """,
+                    fact_values,
+                ).fetchall()
+                facturas = [dict(r) for r in facturas_rows]
             facturas_total = len(facturas)
             facturas_conciliadas = sum(1 for row in facturas if str(row.get("asiento_id") or "").strip())
             facturas_pendientes = max(0, facturas_total - facturas_conciliadas)
@@ -87126,6 +90605,7 @@ class Handler(BaseHTTPRequestHandler):
                     if legacy:
                         empresa_id = legacy
                 except Exception:
+                    _rollback_best_effort(conn)
                     pass
             q = params.get("q", [""])[0].strip()
             uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")

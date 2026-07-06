@@ -2063,6 +2063,16 @@ const state = {
   gestoriaClienteContaTab: "operativa",
   gestoriaClienteLibroTab: "diario",
   gestoriaClienteLibrosCache: null,
+  gestoriaClienteContaResultadosCache: null,
+  gestoriaModelosCache: null,
+  workspaceCompanyContabilidadCache: {
+    companyId: "",
+    books: null,
+    modelos: null,
+    resultados: null,
+  },
+  workspaceCompanyContabilidadBalanceTab: "balance-situacion",
+  workspaceCompanyContabilidadSelectedAsientoId: "",
   gestoriaImportSelectedLoteId: "",
   gestoriaImportSelectedDocumentoId: "",
   gestoriaImportEstadoFilter: "",
@@ -10404,7 +10414,659 @@ const renderWorkspaceCompanyFichaDashboard = (company) => {
   `;
 };
 
+const normalizeWorkspaceCompanyContaTab = (tabName = "dashboard") => {
+  const raw = normalizeSimple(String(tabName || ""));
+  if (raw.includes("diario")) return "diario";
+  if (raw.includes("mayor")) return "mayor";
+  if (raw.includes("balance") || raw.includes("balances") || raw.includes("situacion") || raw.includes("pyg") || raw.includes("pg")) {
+    return "balances";
+  }
+  if (raw.includes("modelo")) return "modelos";
+  if (raw.includes("asiento")) return "asientos";
+  return "dashboard";
+};
+
+const normalizeWorkspaceCompanyContaBalanceTab = (tabName = "balance-situacion") => {
+  const raw = normalizeSimple(String(tabName || ""));
+  if (raw.includes("pyg") || raw.includes("pg")) return "pyg";
+  return "balance-situacion";
+};
+const normalizeWorkspaceCompanyContabilidadBalanceTab = normalizeWorkspaceCompanyContaBalanceTab;
+
+const getWorkspaceCompanyContabilidadCompanyId = () => {
+  const company = getWorkspaceCompanyById(state.currentWorkspaceCompanyWsId || state.currentWorkspaceCompanyId || "");
+  const legacyId = String(resolveLegacyEmpresaId(company) || "").trim();
+  return legacyId || String(state.currentWorkspaceCompanyId || "").trim();
+};
+
+const ensureWorkspaceCompanyContabilidadCache = (companyId = "") => {
+  const resolved = String(companyId || "").trim();
+  const cache = state.workspaceCompanyContabilidadCache;
+  if (!cache || typeof cache !== "object") {
+    state.workspaceCompanyContabilidadCache = {
+      companyId: resolved,
+      books: null,
+      modelos: null,
+      resultados: null,
+    };
+    return state.workspaceCompanyContabilidadCache;
+  }
+  const currentCompanyId = String(cache.companyId || "").trim();
+  if (resolved && currentCompanyId && currentCompanyId !== resolved) {
+    state.workspaceCompanyContabilidadCache = {
+      companyId: resolved,
+      books: null,
+      modelos: null,
+      resultados: null,
+    };
+    return state.workspaceCompanyContabilidadCache;
+  }
+  if (resolved && !currentCompanyId) cache.companyId = resolved;
+  if (!("books" in cache)) cache.books = null;
+  if (!("modelos" in cache)) cache.modelos = null;
+  if (!("resultados" in cache)) cache.resultados = null;
+  return cache;
+};
+
+const resetWorkspaceCompanyContabilidadCache = (companyId = "") => {
+  state.workspaceCompanyContabilidadCache = {
+    companyId: String(companyId || "").trim(),
+    books: null,
+    modelos: null,
+    resultados: null,
+  };
+  state.workspaceCompanyContabilidadBalanceTab = "balance-situacion";
+  state.workspaceCompanyContabilidadSelectedAsientoId = "";
+  return state.workspaceCompanyContabilidadCache;
+};
+
+const formatWorkspaceCompanyContaMoney = (value) => {
+  const num = parseMoneyValue(value);
+  return Number.isFinite(num) ? euroFormatter.format(num) : "-";
+};
+
+const renderWorkspaceCompanyContabilidadMetricCards = (container, items = [], emptyText = "") => {
+  if (!container) return;
+  const cards = Array.isArray(items) ? items.filter(Boolean) : [];
+  if (!cards.length) {
+    container.innerHTML = emptyText ? `<p class="muted">${escapeHtml(emptyText)}</p>` : "";
+    return;
+  }
+  container.innerHTML = `
+    <div class="grid crm-kpis">
+      ${cards
+        .map(
+          (card) => `
+            <div class="kpi-card">
+              <div class="kpi-title">${escapeHtml(String(card.label || ""))}</div>
+              <div class="kpi-value">${escapeHtml(String(card.value ?? ""))}</div>
+              ${card.note ? `<div class="muted">${escapeHtml(String(card.note || ""))}</div>` : ""}
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+};
+
+const renderWorkspaceCompanyContabilidadTable = (container, columns, rows = [], emptyText = "Sin datos.") => {
+  if (!container) return;
+  const cols = Array.isArray(columns) ? columns : [];
+  const data = Array.isArray(rows) ? rows : [];
+  if (!data.length) {
+    container.innerHTML = `<p class="muted">${escapeHtml(emptyText)}</p>`;
+    return;
+  }
+  container.innerHTML = `
+    <div style="overflow:auto;">
+      <table>
+        <thead>
+          <tr>${cols.map((col) => `<th>${escapeHtml(String(col || ""))}</th>`).join("")}</tr>
+        </thead>
+        <tbody>
+          ${data
+            .map(
+              (row) => `
+                <tr>
+                  ${row.map((cell) => `<td>${cell == null ? "" : escapeHtml(String(cell))}</td>`).join("")}
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+};
+
+const groupWorkspaceCompanyContabilidadDiaryRows = (rows = []) => {
+  const grouped = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const key = String(row?.asiento_id || "").trim() || `${String(row?.fecha || "").trim()}-${String(row?.referencia || "").trim()}`;
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        asiento_id: String(row?.asiento_id || "").trim(),
+        fecha: String(row?.fecha || "").trim(),
+        referencia: String(row?.referencia || "").trim(),
+        concepto: String(row?.concepto || "").trim(),
+        factura_numero: String(row?.factura_numero || "").trim(),
+        factura_fecha: String(row?.factura_fecha || "").trim(),
+        factura_total: row?.factura_total,
+        tipo_factura: String(row?.tipo_factura || "").trim(),
+        lines: [],
+      });
+    }
+    const item = grouped.get(key);
+    if (!item.fecha && row?.fecha) item.fecha = String(row.fecha || "").trim();
+    if (!item.referencia && row?.referencia) item.referencia = String(row.referencia || "").trim();
+    if (!item.concepto && row?.concepto) item.concepto = String(row.concepto || "").trim();
+    item.lines.push(row);
+  });
+  return Array.from(grouped.values())
+    .map((item) => {
+      const debe = item.lines.reduce((sum, line) => sum + parseMoneyValue(line?.debe), 0);
+      const haber = item.lines.reduce((sum, line) => sum + parseMoneyValue(line?.haber), 0);
+      const cuentas = item.lines.map((line) => String(line?.cuenta || "").trim()).filter(Boolean);
+      return {
+        ...item,
+        debe,
+        haber,
+        lineas: item.lines.length,
+        cuentas: cuentas.slice(0, 4).join(", "),
+      };
+    })
+    .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")) || String(b.referencia || "").localeCompare(String(a.referencia || "")));
+};
+
+const getWorkspaceCompanyContabilidadBooks = () => {
+  const companyId = getWorkspaceCompanyContabilidadCompanyId();
+  const cache = ensureWorkspaceCompanyContabilidadCache(companyId);
+  return cache.books || null;
+};
+
+const getWorkspaceCompanyContabilidadModelos = () => {
+  const companyId = getWorkspaceCompanyContabilidadCompanyId();
+  const cache = ensureWorkspaceCompanyContabilidadCache(companyId);
+  return cache.modelos || null;
+};
+
+const getWorkspaceCompanyContabilidadResultados = () => {
+  const companyId = getWorkspaceCompanyContabilidadCompanyId();
+  const cache = ensureWorkspaceCompanyContabilidadCache(companyId);
+  return cache.resultados || null;
+};
+
+const syncWorkspaceCompanyContabilidadTabs = () => {
+  const shell = ensureWorkspaceCompanyContabilidadShell();
+  if (!shell) return;
+  const tab = normalizeWorkspaceCompanyContaTab(_companyContaActiveTab || "dashboard");
+  shell.querySelectorAll("[data-company-conta-tab]").forEach((btn) => {
+    const key = normalizeWorkspaceCompanyContaTab(btn.dataset.companyContaTab || "");
+    const active = key === tab;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  shell.querySelectorAll('[data-company-conta-pane][data-company-conta-scope="main"]').forEach((pane) => {
+    const key = normalizeWorkspaceCompanyContaTab(pane.dataset.companyContaPane || "");
+    const show = key === tab;
+    pane.classList.toggle("hidden", !show);
+    pane.hidden = !show;
+  });
+  const status = shell.querySelector("[data-company-conta-status]");
+  if (status) {
+    const labels = {
+      dashboard: "Dashboard",
+      diario: "Libro diario",
+      mayor: "Libro mayor",
+      balances: "Balances",
+      modelos: "Modelos fiscales",
+      asientos: "Asientos",
+    };
+    const balanceLabel = state.workspaceCompanyContabilidadBalanceTab === "pyg" ? "P&G" : "Balance de situación";
+    status.textContent = `Sección activa: ${labels[tab] || "Dashboard"}${tab === "balances" ? ` · ${balanceLabel}` : ""}`;
+  }
+};
+
+const syncWorkspaceCompanyContabilidadBalanceTabs = () => {
+  const shell = ensureWorkspaceCompanyContabilidadShell();
+  if (!shell) return;
+  const tab = normalizeWorkspaceCompanyContabilidadBalanceTab(state.workspaceCompanyContabilidadBalanceTab || "balance-situacion");
+  shell.querySelectorAll("[data-company-conta-balance-tab]").forEach((btn) => {
+    const key = normalizeWorkspaceCompanyContabilidadBalanceTab(btn.dataset.companyContaBalanceTab || "");
+    const active = key === tab;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+  shell.querySelectorAll('[data-company-conta-pane][data-company-conta-scope="balance"]').forEach((pane) => {
+    const key = normalizeWorkspaceCompanyContabilidadBalanceTab(pane.dataset.companyContaPane || "");
+    const show = key === tab;
+    pane.classList.toggle("hidden", !show);
+    pane.hidden = !show;
+  });
+};
+
+const renderCompanyContaDashboard = () => {
+  const companyId = getWorkspaceCompanyContabilidadCompanyId();
+  const shell = ensureWorkspaceCompanyContabilidadShell();
+  if (!shell) return;
+  const pane = shell.querySelector('[data-company-conta-pane="dashboard"]');
+  if (!pane) return;
+  const cache = ensureWorkspaceCompanyContabilidadCache(companyId);
+  const books = cache.books || null;
+  const modelos = cache.modelos || null;
+  const resultados = cache.resultados || null;
+  const company = getWorkspaceCompanyById(state.currentWorkspaceCompanyWsId || state.currentWorkspaceCompanyId || companyId);
+  const name = String(company?.nombre || company?.razon_social || state.currentWorkspaceCompanyName || companyId || "Empresa").trim() || "Empresa";
+  const companyNif = String(company?.nif || "").trim();
+  const companyDireccion = String(company?.direccion || "").trim();
+  const booksReady = Boolean(books);
+  const modelosReady = Boolean(modelos);
+  const resultadosReady = Boolean(resultados);
+  const diaryRows = booksReady ? groupWorkspaceCompanyContabilidadDiaryRows(books.diarioRaw || []) : [];
+  const latestDiaryRows = diaryRows.slice(0, 4);
+  const latestModelRows = modelosReady ? (Array.isArray(modelos.rows) ? modelos.rows : []) : [];
+  const latestAsientos = resultadosReady ? (Array.isArray(resultados.asientos) ? resultados.asientos : []) : [];
+  const summaryCards = [
+    { label: "Libro diario", value: booksReady ? numberFormatter.format((books.diarioRaw || []).length) : "Cargando", note: "Apuntes agrupados" },
+    { label: "Libro mayor", value: booksReady ? numberFormatter.format((books.mayorRaw || []).length) : "Cargando", note: "Cuentas" },
+    { label: "Balances", value: booksReady ? numberFormatter.format((books.balanceRaw || []).length) : "Cargando", note: "Situación" },
+    { label: "Modelos", value: modelosReady ? numberFormatter.format((modelos.rows || []).length) : "Cargando", note: "Fiscales" },
+    { label: "Asientos", value: resultadosReady ? numberFormatter.format((resultados.asientos || []).length) : "Cargando", note: "Contabilizados" },
+    { label: "Banco", value: resultadosReady ? numberFormatter.format((resultados.movimientosBanco || []).length) : "Cargando", note: "Movimientos" },
+  ];
+  pane.innerHTML = `
+    <div class="form-card">
+      <div class="section-head">
+        <div>
+          <h3>Dashboard contable</h3>
+          <p class="muted">Visión resumida de la contabilidad de ${escapeHtml(name)}.</p>
+        </div>
+      </div>
+      <div class="grid crm-kpis" data-company-conta-dashboard-metrics></div>
+      <div class="grid cols-2 gap-3" style="margin-top:16px;">
+        <div class="card-soft">
+          <div class="section-head">
+            <div>
+              <strong>Últimos apuntes</strong>
+              <div class="muted">Libro diario agrupado por asiento.</div>
+            </div>
+          </div>
+          <div data-company-conta-dashboard-diario></div>
+        </div>
+        <div class="card-soft">
+          <div class="section-head">
+            <div>
+              <strong>Modelos fiscales</strong>
+              <div class="muted">Próximas obligaciones del cliente activo.</div>
+            </div>
+          </div>
+          <div data-company-conta-dashboard-modelos></div>
+        </div>
+      </div>
+      <div class="grid cols-2 gap-3" style="margin-top:16px;">
+        <div class="card-soft">
+          <div class="section-head">
+            <div>
+              <strong>Facturas y asientos</strong>
+              <div class="muted">${companyNif ? `CIF/NIF: ${escapeHtml(companyNif)}` : "Sin CIF/NIF"}${companyDireccion ? ` · ${escapeHtml(companyDireccion)}` : ""}</div>
+            </div>
+          </div>
+          <div class="muted" style="margin-bottom:10px;">${resultadosReady ? `Facturas conciliadas: ${numberFormatter.format(Number(resultados.resumen?.facturasConciliadas || 0))} · Pendientes: ${numberFormatter.format(Number(resultados.resumen?.facturasPendientes || 0))}` : "Cargando conciliación..."}</div>
+          <div data-company-conta-dashboard-asientos></div>
+        </div>
+        <div class="card-soft">
+          <div class="section-head">
+            <div>
+              <strong>Estado de carga</strong>
+              <div class="muted">Datos cargados desde la empresa activa.</div>
+            </div>
+          </div>
+          <ul class="muted" style="margin:0; padding-left:18px; line-height:1.8;">
+            <li>${booksReady ? "Libro diario, mayor, balances y P&G listos." : "Libro contable pendiente de cargar."}</li>
+            <li>${modelosReady ? "Modelos fiscales disponibles." : "Modelos fiscales pendientes de cargar."}</li>
+            <li>${resultadosReady ? "Facturas, asientos y movimientos bancarios listos." : "Conciliación pendiente de cargar."}</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  `;
+  renderWorkspaceCompanyContabilidadMetricCards(pane.querySelector("[data-company-conta-dashboard-metrics]"), summaryCards);
+  renderWorkspaceCompanyContabilidadTable(
+    pane.querySelector("[data-company-conta-dashboard-diario]"),
+    ["Fecha", "Asiento", "Referencia", "Concepto", "Cuentas", "Líneas", "Debe", "Haber", "Factura"],
+    latestDiaryRows.map((row) => [
+      row.fecha || "-",
+      row.asiento_id || "-",
+      row.referencia || "-",
+      row.concepto || "-",
+      row.cuentas || "-",
+      numberFormatter.format(Number(row.lineas || 0)),
+      formatWorkspaceCompanyContaMoney(row.debe),
+      formatWorkspaceCompanyContaMoney(row.haber),
+      row.factura_numero || "-",
+    ]),
+    booksReady ? "Sin asientos en el libro diario." : "Cargando libro diario..."
+  );
+  renderWorkspaceCompanyContabilidadTable(
+    pane.querySelector("[data-company-conta-dashboard-modelos]"),
+    ["Modelo", "Periodicidad", "Próxima fecha", "Responsable", "Estado", "Notas"],
+    latestModelRows.slice(0, 4).map((row) => [
+      row.modelo || "-",
+      row.periodicidad || "-",
+      row.proxima_fecha || "-",
+      row.responsable || "-",
+      row.estado || "-",
+      row.notas || "-",
+    ]),
+    modelosReady ? "Sin modelos fiscales." : "Cargando modelos fiscales..."
+  );
+  renderWorkspaceCompanyContabilidadTable(
+    pane.querySelector("[data-company-conta-dashboard-asientos]"),
+    ["Fecha", "Referencia", "Concepto", "Debe", "Haber", "Factura", "Banco"],
+    latestAsientos.slice(0, 4).map((row) => [
+      row.fecha || "-",
+      row.referencia || "-",
+      row.concepto || "-",
+      formatWorkspaceCompanyContaMoney(row.total_debe),
+      formatWorkspaceCompanyContaMoney(row.total_haber),
+      row.factura_numero || (row.factura_id ? "Sí" : "-"),
+      Number(row.punteado_banco || 0) === 1 ? "Punteado" : "Sin puntear",
+    ]),
+    resultadosReady ? "Sin asientos vinculados." : "Cargando asientos..."
+  );
+};
+
+const renderCompanyContaDiario = () => {
+  const companyId = getWorkspaceCompanyContabilidadCompanyId();
+  const shell = ensureWorkspaceCompanyContabilidadShell();
+  if (!shell) return;
+  const pane = shell.querySelector('[data-company-conta-pane="diario"]');
+  if (!pane) return;
+  const books = getWorkspaceCompanyContabilidadBooks();
+  const diaryRows = books ? groupWorkspaceCompanyContabilidadDiaryRows(books.diarioRaw || []) : [];
+  pane.innerHTML = `
+    <div class="form-card">
+      <div class="section-head">
+        <div>
+          <h3>Libro diario</h3>
+          <p class="muted">Asientos agrupados por movimiento para la empresa ${escapeHtml(String(state.currentWorkspaceCompanyName || companyId || "activa"))}.</p>
+        </div>
+      </div>
+      <div class="grid crm-kpis" data-company-conta-diario-metrics></div>
+      <div class="card-soft" style="margin-top:16px;">
+        <div data-company-conta-diario-table></div>
+      </div>
+    </div>
+  `;
+  renderWorkspaceCompanyContabilidadMetricCards(pane.querySelector("[data-company-conta-diario-metrics]"), [
+    { label: "Asientos", value: books ? numberFormatter.format(diaryRows.length) : "Cargando", note: "Agrupados" },
+    { label: "Líneas", value: books ? numberFormatter.format((books.diarioRaw || []).length) : "Cargando", note: "Detalle de líneas" },
+    { label: "Facturas", value: books ? numberFormatter.format((books.facturasRaw || []).length) : "Cargando", note: "Conciliadas" },
+  ]);
+  renderWorkspaceCompanyContabilidadTable(
+    pane.querySelector("[data-company-conta-diario-table]"),
+    ["Fecha", "Asiento", "Referencia", "Concepto", "Cuentas", "Líneas", "Debe", "Haber", "Factura"],
+    diaryRows.map((row) => [
+      row.fecha || "-",
+      row.asiento_id || "-",
+      row.referencia || "-",
+      row.concepto || "-",
+      row.cuentas || "-",
+      numberFormatter.format(Number(row.lineas || 0)),
+      formatWorkspaceCompanyContaMoney(row.debe),
+      formatWorkspaceCompanyContaMoney(row.haber),
+      row.factura_numero || "-",
+    ]),
+    books ? "Sin asientos en el libro diario." : "Cargando libro diario..."
+  );
+};
+
+const renderCompanyContaMayor = () => {
+  const shell = ensureWorkspaceCompanyContabilidadShell();
+  if (!shell) return;
+  const pane = shell.querySelector('[data-company-conta-pane="mayor"]');
+  if (!pane) return;
+  const books = getWorkspaceCompanyContabilidadBooks();
+  const mayorRows = books ? (Array.isArray(books.mayorRaw) ? books.mayorRaw : []) : [];
+  pane.innerHTML = `
+    <div class="form-card">
+      <div class="section-head">
+        <div>
+          <h3>Libro mayor</h3>
+          <p class="muted">Saldo por cuenta y acumulados del ejercicio.</p>
+        </div>
+      </div>
+      <div class="grid crm-kpis" data-company-conta-mayor-metrics></div>
+      <div class="card-soft" style="margin-top:16px;">
+        <div data-company-conta-mayor-table></div>
+      </div>
+    </div>
+  `;
+  renderWorkspaceCompanyContabilidadMetricCards(pane.querySelector("[data-company-conta-mayor-metrics]"), [
+    { label: "Cuentas", value: books ? numberFormatter.format(mayorRows.length) : "Cargando", note: "Con saldo" },
+    { label: "Total debe", value: books ? formatWorkspaceCompanyContaMoney(mayorRows.reduce((sum, row) => sum + parseMoneyValue(row.debe), 0)) : "Cargando", note: "Acumulado" },
+    { label: "Total haber", value: books ? formatWorkspaceCompanyContaMoney(mayorRows.reduce((sum, row) => sum + parseMoneyValue(row.haber), 0)) : "Cargando", note: "Acumulado" },
+  ]);
+  renderWorkspaceCompanyContabilidadTable(
+    pane.querySelector("[data-company-conta-mayor-table]"),
+    ["Cuenta", "Debe", "Haber", "Saldo"],
+    mayorRows.map((row) => [
+      row.cuenta || "-",
+      formatWorkspaceCompanyContaMoney(row.debe),
+      formatWorkspaceCompanyContaMoney(row.haber),
+      formatWorkspaceCompanyContaMoney(row.saldo),
+    ]),
+    books ? "Sin cuentas en el libro mayor." : "Cargando libro mayor..."
+  );
+};
+
+const renderCompanyContaBalances = () => {
+  const shell = ensureWorkspaceCompanyContabilidadShell();
+  if (!shell) return;
+  const pane = shell.querySelector('[data-company-conta-pane="balances"]');
+  if (!pane) return;
+  const books = getWorkspaceCompanyContabilidadBooks();
+  const balanceRows = books ? (Array.isArray(books.balanceRaw) ? books.balanceRaw : []) : [];
+  const pygRows = books ? (Array.isArray(books.pygRaw) ? books.pygRaw : []) : [];
+  pane.innerHTML = `
+    <div class="form-card">
+      <div class="section-head">
+        <div>
+          <h3>Balances</h3>
+          <p class="muted">Balance de situación y P&amp;G de la empresa activa.</p>
+        </div>
+      </div>
+      <div class="tabs crm-lightning-subbar" data-company-conta-balance-tabs>
+        <button class="tab active" type="button" data-company-conta-balance-tab="balance-situacion">Balance de situación</button>
+        <button class="tab" type="button" data-company-conta-balance-tab="pyg">P&amp;G</button>
+      </div>
+      <div class="grid crm-kpis" data-company-conta-balance-metrics></div>
+      <div class="card-soft" style="margin-top:16px;">
+        <div data-company-conta-pane="balance-situacion" data-company-conta-scope="balance"></div>
+        <div data-company-conta-pane="pyg" data-company-conta-scope="balance" class="hidden"></div>
+      </div>
+    </div>
+  `;
+  renderWorkspaceCompanyContabilidadMetricCards(pane.querySelector("[data-company-conta-balance-metrics]"), [
+    { label: "Balance situación", value: books ? numberFormatter.format(balanceRows.length) : "Cargando", note: "Cuentas" },
+    { label: "P&G", value: books ? numberFormatter.format(pygRows.length) : "Cargando", note: "Resultados" },
+  ]);
+  renderWorkspaceCompanyContabilidadTable(
+    pane.querySelector('[data-company-conta-pane="balance-situacion"]'),
+    ["Cuenta", "Debe", "Haber", "Saldo"],
+    balanceRows.map((row) => [
+      row.cuenta || "-",
+      formatWorkspaceCompanyContaMoney(row.debe),
+      formatWorkspaceCompanyContaMoney(row.haber),
+      formatWorkspaceCompanyContaMoney(row.saldo),
+    ]),
+    books ? "Sin cuentas de balance." : "Cargando balance de situación..."
+  );
+  renderWorkspaceCompanyContabilidadTable(
+    pane.querySelector('[data-company-conta-pane="pyg"]'),
+    ["Cuenta", "Debe", "Haber", "Saldo"],
+    pygRows.map((row) => [
+      row.cuenta || "-",
+      formatWorkspaceCompanyContaMoney(row.debe),
+      formatWorkspaceCompanyContaMoney(row.haber),
+      formatWorkspaceCompanyContaMoney(row.saldo),
+    ]),
+    books ? "Sin cuentas de P&G." : "Cargando P&G..."
+  );
+  syncWorkspaceCompanyContabilidadBalanceTabs();
+};
+
+const renderCompanyContaModelos = () => {
+  const shell = ensureWorkspaceCompanyContabilidadShell();
+  if (!shell) return;
+  const pane = shell.querySelector('[data-company-conta-pane="modelos"]');
+  if (!pane) return;
+  const modelos = getWorkspaceCompanyContabilidadModelos();
+  const rows = modelos && Array.isArray(modelos.rows) ? modelos.rows : [];
+  pane.innerHTML = `
+    <div class="form-card">
+      <div class="section-head">
+        <div>
+          <h3>Modelos fiscales</h3>
+          <p class="muted">Obligaciones fiscales vinculadas a la empresa activa.</p>
+        </div>
+      </div>
+      <div class="grid crm-kpis" data-company-conta-modelos-metrics></div>
+      <div class="card-soft" style="margin-top:16px;">
+        <div data-company-conta-modelos-table></div>
+      </div>
+    </div>
+  `;
+  renderWorkspaceCompanyContabilidadMetricCards(pane.querySelector("[data-company-conta-modelos-metrics]"), [
+    { label: "Modelos", value: modelos ? numberFormatter.format(rows.length) : "Cargando", note: "Fiscal" },
+    { label: "Próximos 30 días", value: modelos ? numberFormatter.format(rows.filter((row) => {
+      const fecha = String(row.proxima_fecha || "").trim();
+      if (!fecha) return false;
+      const parsed = new Date(fecha);
+      if (Number.isNaN(parsed.getTime())) return false;
+      const limit = new Date();
+      limit.setDate(limit.getDate() + 30);
+      return parsed <= limit;
+    }).length) : "Cargando", note: "Vencimiento" },
+  ]);
+  renderWorkspaceCompanyContabilidadTable(
+    pane.querySelector("[data-company-conta-modelos-table]"),
+    ["Cliente", "Modelo", "Periodicidad", "Próxima fecha", "Responsable", "Estado", "Notas"],
+    rows.map((row) => [
+      row.cliente || "-",
+      row.modelo || "-",
+      row.periodicidad || "-",
+      row.proxima_fecha || "-",
+      row.responsable || "-",
+      row.estado || "-",
+      row.notas || "-",
+    ]),
+    modelos ? "Sin modelos fiscales." : "Cargando modelos fiscales..."
+  );
+};
+
+const renderCompanyContaAsientos = () => {
+  const shell = ensureWorkspaceCompanyContabilidadShell();
+  if (!shell) return;
+  const pane = shell.querySelector('[data-company-conta-pane="asientos"]');
+  if (!pane) return;
+  const resultados = getWorkspaceCompanyContabilidadResultados();
+  const asientos = resultados && Array.isArray(resultados.asientos) ? resultados.asientos : [];
+  const resumen = resultados?.resumen || {};
+  pane.innerHTML = `
+    <div class="form-card">
+      <div class="section-head">
+        <div>
+          <h3>Asientos</h3>
+          <p class="muted">Asientos contables y conciliación de la empresa activa.</p>
+        </div>
+      </div>
+      <div class="grid crm-kpis" data-company-conta-asientos-metrics></div>
+      <div class="card-soft" style="margin-top:16px;">
+        <div data-company-conta-asientos-table></div>
+      </div>
+    </div>
+  `;
+  renderWorkspaceCompanyContabilidadMetricCards(pane.querySelector("[data-company-conta-asientos-metrics]"), [
+    { label: "Facturas", value: resultados ? numberFormatter.format(Number(resumen.facturasTotal || 0)) : "Cargando", note: "Registradas" },
+    { label: "Conciliadas", value: resultados ? numberFormatter.format(Number(resumen.facturasConciliadas || 0)) : "Cargando", note: "Con asiento" },
+    { label: "Pendientes", value: resultados ? numberFormatter.format(Number(resumen.facturasPendientes || 0)) : "Cargando", note: "Sin enlace" },
+    { label: "Mov. banco", value: resultados ? numberFormatter.format((resultados.movimientosBanco || []).length) : "Cargando", note: "Importados" },
+    { label: "Punteados", value: resultados ? numberFormatter.format((resultados.movimientosBanco || []).filter((row) => Number(row.punteado || 0) === 1).length) : "Cargando", note: "Banco" },
+    { label: "Descuadrados", value: resultados ? numberFormatter.format((resultados.asientos || []).filter((row) => Math.abs(parseMoneyValue(row.total_debe) - parseMoneyValue(row.total_haber)) > 0.01).length) : "Cargando", note: "Control" },
+  ]);
+  renderWorkspaceCompanyContabilidadTable(
+    pane.querySelector("[data-company-conta-asientos-table]"),
+    ["Fecha", "Referencia", "Concepto", "Debe", "Haber", "Factura", "Banco"],
+    asientos.map((row) => [
+      row.fecha || "-",
+      row.referencia || "-",
+      row.concepto || "-",
+      formatWorkspaceCompanyContaMoney(row.total_debe),
+      formatWorkspaceCompanyContaMoney(row.total_haber),
+      row.factura_numero || (row.factura_id ? "Sí" : "-"),
+      Number(row.punteado_banco || 0) === 1 ? "Punteado" : "Sin puntear",
+    ]),
+    resultados ? "Sin asientos vinculados." : "Cargando asientos..."
+  );
+};
+
+const renderWorkspaceCompanyContabilidadShellPanes = () => {
+  renderCompanyContaDashboard();
+  renderCompanyContaDiario();
+  renderCompanyContaMayor();
+  renderCompanyContaBalances();
+  renderCompanyContaModelos();
+  renderCompanyContaAsientos();
+};
+
+const setWorkspaceCompanyContabilidadBalanceTab = (tabKey = "balance-situacion", opts = {}) => {
+  state.workspaceCompanyContabilidadBalanceTab = normalizeWorkspaceCompanyContaBalanceTab(tabKey);
+  syncWorkspaceCompanyContabilidadBalanceTabs();
+  renderCompanyContaBalances();
+  syncWorkspaceCompanyContabilidadTabs();
+  if (opts.syncUrl !== false) {
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+      params.set("conta", "balances");
+      params.set("conta_balance", state.workspaceCompanyContabilidadBalanceTab);
+      if (state.currentWorkspaceCompanyId) {
+        params.set("empresa", slugify(String(state.currentWorkspaceCompanyName || state.currentWorkspaceCompanyId || "")));
+      }
+      setUrlParams(params);
+    } catch (e) {}
+  }
+};
+
+const ensureWorkspaceCompanyContabilidadBooks = async (companyId = "", opts = {}) => {
+  const resolved = String(companyId || getWorkspaceCompanyContabilidadCompanyId() || "").trim();
+  if (!resolved) return null;
+  const cache = ensureWorkspaceCompanyContabilidadCache(resolved);
+  if (!opts.force && cache.books) return cache.books;
+  await Promise.resolve(loadGestoriaClienteLibros("", resolved));
+  return ensureWorkspaceCompanyContabilidadCache(resolved).books;
+};
+
+const ensureWorkspaceCompanyContabilidadModelos = async (companyId = "", opts = {}) => {
+  const resolved = String(companyId || getWorkspaceCompanyContabilidadCompanyId() || "").trim();
+  if (!resolved) return null;
+  const cache = ensureWorkspaceCompanyContabilidadCache(resolved);
+  if (!opts.force && cache.modelos) return cache.modelos;
+  await Promise.resolve(loadGestoriaModelos("", resolved));
+  return ensureWorkspaceCompanyContabilidadCache(resolved).modelos;
+};
+
+const ensureWorkspaceCompanyContabilidadResultados = async (companyId = "", opts = {}) => {
+  const resolved = String(companyId || getWorkspaceCompanyContabilidadCompanyId() || "").trim();
+  if (!resolved) return null;
+  const cache = ensureWorkspaceCompanyContabilidadCache(resolved);
+  if (!opts.force && cache.resultados) return cache.resultados;
+  await Promise.resolve(loadGestoriaClienteContaResultados("", resolved));
+  return ensureWorkspaceCompanyContabilidadCache(resolved).resultados;
+};
+
 let _companyContaActiveTab = "dashboard";
+let _companyContaLoadSeq = 0;
 let _companyContaMovedNodes = [];
 
 const ensureWorkspaceCompanyContabilidadShell = () => {
@@ -10419,129 +11081,141 @@ const ensureWorkspaceCompanyContabilidadShell = () => {
     <div class="section-head">
       <div>
         <h3>Contabilidad de la empresa</h3>
-        <p class="muted">Dashboard, diarios, modelos fiscales, balances y asiento/importación.</p>
+        <p class="muted">Dashboard, libro diario, mayor, balances, modelos fiscales y asientos de la empresa activa.</p>
       </div>
     </div>
+    <div class="footer" data-company-conta-status style="margin:8px 0 12px;"></div>
     <div class="tabs crm-lightning-subbar" data-company-conta-tabs>
       <button class="tab active" type="button" data-company-conta-tab="dashboard">Dashboard</button>
-      <button class="tab" type="button" data-company-conta-tab="diarios">Diarios</button>
-      <button class="tab" type="button" data-company-conta-tab="modelos">Modelos</button>
+      <button class="tab" type="button" data-company-conta-tab="diario">Libro diario</button>
+      <button class="tab" type="button" data-company-conta-tab="mayor">Libro mayor</button>
       <button class="tab" type="button" data-company-conta-tab="balances">Balances</button>
+      <button class="tab" type="button" data-company-conta-tab="modelos">Modelos</button>
       <button class="tab" type="button" data-company-conta-tab="asientos">Asientos</button>
     </div>
-    <div data-company-conta-pane="dashboard"></div>
-    <div data-company-conta-pane="modelos" class="hidden"></div>
-    <div data-company-conta-pane="workbench" class="hidden"></div>
+    <div class="stack" style="gap:16px; margin-top:12px;">
+      <div data-company-conta-pane="dashboard" data-company-conta-scope="main"></div>
+      <div data-company-conta-pane="diario" data-company-conta-scope="main" class="hidden"></div>
+      <div data-company-conta-pane="mayor" data-company-conta-scope="main" class="hidden"></div>
+      <div data-company-conta-pane="balances" data-company-conta-scope="main" class="hidden">
+        <div class="tabs crm-lightning-subbar" data-company-conta-balance-tabs style="margin-bottom:12px;">
+          <button class="tab active" type="button" data-company-conta-balance-tab="balance-situacion">Balance de situación</button>
+          <button class="tab" type="button" data-company-conta-balance-tab="pyg">P&amp;G</button>
+        </div>
+        <div data-company-conta-pane="balance-situacion" data-company-conta-scope="balance"></div>
+        <div data-company-conta-pane="pyg" data-company-conta-scope="balance" class="hidden"></div>
+      </div>
+      <div data-company-conta-pane="modelos" data-company-conta-scope="main" class="hidden"></div>
+      <div data-company-conta-pane="asientos" data-company-conta-scope="main" class="hidden"></div>
+    </div>
   `;
   panel.appendChild(shell);
-  shell.querySelectorAll("[data-company-conta-tab]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      setWorkspaceCompanyContabilidadTab(String(btn.dataset.companyContaTab || "dashboard").trim());
-    });
-  });
-  return shell;
-};
-
-const moveNodeToCompanyContaPane = (node, paneKey) => {
-  if (!node || !workspaceCompanyFichaBody) return;
-  const shell = workspaceCompanyFichaBody.querySelector('[data-company-conta-shell="1"]');
-  if (!shell) return;
-  const pane = shell.querySelector(`[data-company-conta-pane="${paneKey}"]`);
-  if (!pane) return;
-  if (_companyContaMovedNodes.some((row) => row.node === node)) return;
-  _companyContaMovedNodes.push({ node, parent: node.parentNode, next: node.nextSibling });
-  pane.appendChild(node);
-};
-
-const restoreCompanyContaNodes = () => {
-  if (!_companyContaMovedNodes.length) return;
-  for (let i = _companyContaMovedNodes.length - 1; i >= 0; i -= 1) {
-    const item = _companyContaMovedNodes[i];
-    try {
-      if (!item?.node || !item?.parent) continue;
-      if (item.next && item.next.parentNode === item.parent) {
-        item.parent.insertBefore(item.node, item.next);
-      } else {
-        item.parent.appendChild(item.node);
+  if (shell.dataset.companyContaBound !== "1") {
+    shell.dataset.companyContaBound = "1";
+    shell.addEventListener("click", (ev) => {
+      const mainBtn = ev?.target?.closest ? ev.target.closest("[data-company-conta-tab]") : null;
+      if (mainBtn && shell.contains(mainBtn)) {
+        ev.preventDefault();
+        const nextTab = normalizeWorkspaceCompanyContaTab(mainBtn.dataset.companyContaTab || "dashboard");
+        void setWorkspaceCompanyContabilidadTab(nextTab, { scroll: false });
+        return;
       }
-    } catch (e) {}
+      const balanceBtn = ev?.target?.closest ? ev.target.closest("[data-company-conta-balance-tab]") : null;
+      if (balanceBtn && shell.contains(balanceBtn)) {
+        ev.preventDefault();
+        const nextBalanceTab = normalizeWorkspaceCompanyContabilidadBalanceTab(balanceBtn.dataset.companyContaBalanceTab || "balance-situacion");
+        void setWorkspaceCompanyContabilidadBalanceTab(nextBalanceTab);
+      }
+    });
   }
-  _companyContaMovedNodes = [];
+  return shell;
 };
 
 const setWorkspaceCompanyContabilidadTab = async (tabKey = "dashboard", opts = {}) => {
   restoreWorkspaceCompanyContextFromStorage();
   const shell = ensureWorkspaceCompanyContabilidadShell();
   if (!shell) return;
-  const tab = String(tabKey || "dashboard").trim().toLowerCase();
+  const tab = normalizeWorkspaceCompanyContaTab(tabKey || "dashboard");
   _companyContaActiveTab = tab;
-  try {
-    if (typeof setGestoriaClientModuleTab === "function") {
-      setGestoriaClientModuleTab("contabilidad");
-    }
-  } catch (e) {}
+  const loadSeq = ++_companyContaLoadSeq;
+  const companyId = String(getWorkspaceCompanyContabilidadCompanyId() || "").trim();
+  if (tab === "balances") {
+    state.workspaceCompanyContabilidadBalanceTab = normalizeWorkspaceCompanyContabilidadBalanceTab(
+      state.workspaceCompanyContabilidadBalanceTab || "balance-situacion"
+    );
+  }
+  shell.dataset.companyContaActiveTab = tab;
+
   shell.querySelectorAll("[data-company-conta-tab]").forEach((btn) => {
-    const key = String(btn.dataset.companyContaTab || "");
+    const key = normalizeWorkspaceCompanyContaTab(btn.dataset.companyContaTab || "");
     const active = key === tab;
     btn.classList.toggle("active", active);
     btn.setAttribute("aria-pressed", active ? "true" : "false");
   });
-  shell.querySelectorAll("[data-company-conta-pane]").forEach((pane) => {
-    const key = String(pane.dataset.companyContaPane || "");
-    const show = key === "dashboard"
-      ? tab === "dashboard"
-      : key === "modelos"
-        ? tab === "modelos"
-        : key === "workbench"
-          ? ["diarios", "balances", "asientos"].includes(tab)
-          : false;
+  shell.querySelectorAll('[data-company-conta-pane][data-company-conta-scope="main"]').forEach((pane) => {
+    const key = normalizeWorkspaceCompanyContaTab(pane.dataset.companyContaPane || "");
+    const show = key === tab;
     pane.classList.toggle("hidden", !show);
     pane.hidden = !show;
   });
-  const scrollTo = (selector) => {
-    const targetNode = shell.querySelector(selector) || document.querySelector(selector);
-    if (targetNode && typeof targetNode.scrollIntoView === "function") {
-      window.requestAnimationFrame(() => {
-        try {
-          targetNode.scrollIntoView({ behavior: "smooth", block: "start" });
-        } catch (e) {}
-      });
-    }
-  };
-  if (tab === "diarios" || tab === "balances") {
+  syncWorkspaceCompanyContabilidadTabs();
+  if (tab === "balances") {
+    syncWorkspaceCompanyContabilidadBalanceTabs();
+  }
+
+  if (opts.syncUrl !== false) {
     try {
-      setGestoriaClienteContaTab("libros");
-      setGestoriaClienteLibroTab(tab === "balances" ? "balance" : "diario");
-      const companyId = String(state.currentWorkspaceCompanyId || "").trim();
-      await Promise.resolve(loadGestoriaClienteLibros("", companyId));
-      hydrateGestoriaBooksFromCache(companyId);
-      scrollTo(tab === "balances" ? "#gestoriaClienteLibroBalancePanel" : "#gestoriaClienteLibroDiarioPanel");
+      const params = new URLSearchParams(window.location.search || "");
+      params.set("conta", tab);
+      if (tab === "balances") {
+        params.set("conta_balance", state.workspaceCompanyContabilidadBalanceTab || "balance-situacion");
+      } else {
+        params.delete("conta_balance");
+      }
+      if (state.currentWorkspaceCompanyId) {
+        params.set("empresa", slugify(String(state.currentWorkspaceCompanyName || state.currentWorkspaceCompanyId || "")));
+      }
+      setUrlParams(params);
     } catch (e) {}
   }
-  if (tab === "asientos") {
-    try {
-      setGestoriaClienteContaTab("libros");
-      setGestoriaClienteLibroTab("diario");
-      const companyId = String(state.currentWorkspaceCompanyId || "").trim();
-      await Promise.resolve(loadGestoriaClienteLibros("", companyId));
-      scrollTo("#gestoriaAsientoFicha");
-    } catch (e) {}
+
+  const shouldLoadBooks = ["dashboard", "diario", "mayor", "balances"].includes(tab);
+  const shouldLoadResultados = ["dashboard", "asientos"].includes(tab);
+  const shouldLoadModelos = ["dashboard", "modelos"].includes(tab);
+  const forceLoad = opts.force === true;
+  const tasks = [];
+  if (companyId && shouldLoadBooks) {
+    tasks.push(ensureWorkspaceCompanyContabilidadBooks(companyId, { force: forceLoad }));
   }
-  if (tab === "modelos") {
-    try {
-      const companyId = String(state.currentWorkspaceCompanyId || "").trim();
-      if (companyId) await Promise.resolve(loadGestoriaModelos(companyId));
-      scrollTo("#gestoriaModelosTable");
-    } catch (e) {}
+  if (companyId && shouldLoadResultados) {
+    tasks.push(ensureWorkspaceCompanyContabilidadResultados(companyId, { force: forceLoad }));
   }
-  if (tab === "dashboard") {
-    try {
-      await loadGestoriaDashboardContabilidad({ force: true }).catch(() => {});
-      scrollTo('[data-company-conta-pane="dashboard"]');
-    } catch (e) {}
+  if (companyId && shouldLoadModelos) {
+    tasks.push(ensureWorkspaceCompanyContabilidadModelos(companyId, { force: forceLoad }));
   }
-  if (opts.scroll !== false && typeof workspaceCompanyFicha?.scrollIntoView === "function") {
-    workspaceCompanyFicha.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  renderWorkspaceCompanyContabilidadShellPanes();
+  if (tab === "balances") {
+    syncWorkspaceCompanyContabilidadBalanceTabs();
+  }
+
+  try {
+    await Promise.all(tasks);
+  } catch (e) {}
+  if (loadSeq !== _companyContaLoadSeq) return;
+
+  renderWorkspaceCompanyContabilidadShellPanes();
+  syncWorkspaceCompanyContabilidadTabs();
+  if (tab === "balances") {
+    syncWorkspaceCompanyContabilidadBalanceTabs();
+  }
+
+  if (opts.scroll !== false && typeof shell.scrollIntoView === "function") {
+    window.requestAnimationFrame(() => {
+      try {
+        shell.scrollIntoView({ behavior: "smooth", block: "start" });
+      } catch (e) {}
+    });
   }
 };
 
@@ -10646,9 +11320,28 @@ function openWorkspaceCompanyFicha(companyId, initialTab = "dashboard") {
 
   // Resetea UI previa
   restoreCompanyFichaNodes();
-  restoreCompanyContaNodes();
   ensureWorkspaceCompanyFichaPanels();
   ensureWorkspaceCompanyContabilidadShell();
+  resetWorkspaceCompanyContabilidadCache(explicitLegacyId || String(company.id || "").trim());
+
+  const urlContaTab = (() => {
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+      return normalizeWorkspaceCompanyContaTab(params.get("conta") || initialTab || "dashboard");
+    } catch (e) {
+      return normalizeWorkspaceCompanyContaTab(initialTab || "dashboard");
+    }
+  })();
+  const urlContaBalance = (() => {
+    try {
+      const params = new URLSearchParams(window.location.search || "");
+      return normalizeWorkspaceCompanyContabilidadBalanceTab(params.get("conta_balance") || "balance-situacion");
+    } catch (e) {
+      return "balance-situacion";
+    }
+  })();
+  _companyContaActiveTab = urlContaTab;
+  state.workspaceCompanyContabilidadBalanceTab = urlContaBalance;
 
   // Título/subtítulo
   if (workspaceCompanyFichaTitle) workspaceCompanyFichaTitle.textContent = String(company.nombre || company.razon_social || "Empresa");
@@ -10662,36 +11355,13 @@ function openWorkspaceCompanyFicha(companyId, initialTab = "dashboard") {
   // Dashboard HTML
   renderWorkspaceCompanyFichaDashboard(company);
 
-  // Mover paneles de Motores a la ficha (contabilidad/OCR/facturación/etc.)
-  const contaPanel = document.querySelector('[data-workspace-view="motores"][data-workspace-engine="contabilidad"]');
+  // Mover documentos a la ficha.
   const documentalPanel = document.querySelector('[data-workspace-view="motores"][data-workspace-engine="documental"]');
-  const companyModelsCard = gestoriaModelosTable ? gestoriaModelosTable.closest(".form-card") : null;
-  const companyModulesCard = gestoriaModuleContabilidad ? gestoriaModuleContabilidad : null;
-
-  if (contaPanel) moveNodeToCompanyContaPane(contaPanel, "dashboard");
-  if (companyModelsCard) moveNodeToCompanyContaPane(companyModelsCard, "modelos");
-  if (companyModulesCard) moveNodeToCompanyContaPane(companyModulesCard, "workbench");
   if (documentalPanel) moveNodeToCompanyFicha(documentalPanel, "documentos");
 
-  // La ficha de empresa no depende de abrir previamente la ficha de un cliente de Gestoría.
-  // Cargamos los datos con el `empresa_id` de la empresa activa para que Contabilidad y Documentos
-  // no queden vacíos cuando se entra desde workspace.
-  const companyLegacyId = String(resolveLegacyEmpresaId(company) || "").trim();
-  const urlContaTab = (() => {
-    try {
-      const params = new URLSearchParams(window.location.search || "");
-      return String(params.get("conta") || "").trim().toLowerCase();
-    } catch (e) {
-      return "";
-    }
-  })();
-  loadGestoriaContabilidad();
   loadGestoriaDocsWorkspace();
-  if (companyLegacyId) {
-    loadGestoriaClienteContaResultados("", companyLegacyId);
-    loadGestoriaDocs("", companyLegacyId);
-    loadGestoriaClienteLibros("", companyLegacyId);
-    loadGestoriaModelos(companyLegacyId);
+  if (explicitLegacyId) {
+    loadGestoriaDocs("", explicitLegacyId);
   }
 
   // Ajustes: editor (se mueve bajo demanda al cambiar tab, pero lo dejamos listo)
@@ -10700,12 +11370,7 @@ function openWorkspaceCompanyFicha(companyId, initialTab = "dashboard") {
   workspaceCompanyFicha.classList.remove("hidden");
   workspaceCompanyFicha.hidden = false;
 
-  const nextTab = urlContaTab && ["dashboard", "validacion", "diarios", "modelos", "balances", "asientos"].includes(urlContaTab)
-    ? urlContaTab
-    : initialTab || "dashboard";
   setWorkspaceCompanyFichaTab("contabilidad", { scroll: true });
-  setWorkspaceCompanyContabilidadTab(nextTab === "documentos" ? "dashboard" : (nextTab || "dashboard"));
-  hydrateGestoriaBooksFromCache(explicitLegacyId || company.id || "");
   let revealRoot = workspaceCompanyFicha.parentElement;
   while (revealRoot && revealRoot !== document.body) {
     if (revealRoot.classList?.contains("crm-workspace-view") || revealRoot.classList?.contains("hidden")) {
@@ -10713,32 +11378,6 @@ function openWorkspaceCompanyFicha(companyId, initialTab = "dashboard") {
       revealRoot.hidden = false;
     }
     revealRoot = revealRoot.parentElement;
-  }
-  if (companyLegacyId) {
-    window.setTimeout(() => {
-      const qs = new URLSearchParams({ conciliar: "1", empresa_id: companyLegacyId });
-      fetch(`/api/gestoria_libros?${qs.toString()}`)
-        .then((response) => response.json())
-        .then((data) => {
-          try {
-            applyGestoriaClienteLibrosData(data || {}, companyLegacyId);
-          } catch (e) {
-            const raw = data || {};
-            state.gestoriaClienteLibrosCache = {
-              diarioRaw: raw.diario || [],
-              mayorRaw: raw.mayor || [],
-              balanceRaw: raw.balance || [],
-              pygRaw: raw.pyg || [],
-              facturasRaw: raw.facturas || [],
-              facturasResumenRaw: raw.facturas_resumen || {},
-            };
-            window.__gestoriaClienteLibrosCache = state.gestoriaClienteLibrosCache;
-            writeGestoriaBooksCache(companyLegacyId, state.gestoriaClienteLibrosCache);
-            syncGestoriaBooksDownloadButtons();
-          }
-        })
-        .catch(() => {});
-    }, 0);
   }
   hydrateWorkspaceCompanySelects();
 }
@@ -68468,13 +69107,14 @@ const loadGestoriaClienteDashboard = (clienteId) => {
 };
 
 const loadGestoriaClienteContaResultados = (clienteIdOrOpts, empresaId = "") => {
-  if (!gestoriaClienteFacturasTable || !gestoriaClienteAsientosTable) return;
   const scope = resolveGestoriaScopeParams(clienteIdOrOpts, empresaId);
   const clienteId = scope.clienteId;
   const empresaScopeId = scope.empresaId;
   if (!clienteId && !empresaScopeId) {
-    gestoriaClienteFacturasTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
-    gestoriaClienteAsientosTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
+    state.gestoriaClienteContaResultadosCache = null;
+    window.__gestoriaClienteContaResultadosCache = null;
+    if (gestoriaClienteFacturasTable) gestoriaClienteFacturasTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
+    if (gestoriaClienteAsientosTable) gestoriaClienteAsientosTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
     if (gestoriaClienteConciliacionResumen) gestoriaClienteConciliacionResumen.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
     if (gestoriaClienteConciliacionInfo) gestoriaClienteConciliacionInfo.textContent = "";
     if (gestoriaClienteFacturasInfo) gestoriaClienteFacturasInfo.textContent = "";
@@ -68512,6 +69152,32 @@ const loadGestoriaClienteContaResultados = (clienteIdOrOpts, empresaId = "") => 
     const asientosPunteadosBanco = asientos.filter((row) => Number(row.punteado_banco || 0) === 1);
     const asientosSinBanco = asientos.filter((row) => Number(row.punteado_banco || 0) !== 1);
     const movimientosPunteados = movimientosBanco.filter((row) => Number(row.punteado || 0) === 1);
+    const resultadosCache = {
+      clienteId,
+      empresaId: empresaScopeId || "",
+      facturas,
+      asientos,
+      movimientosBanco,
+      resumen: {
+        facturasTotal: facturas.length,
+        facturasConciliadas: facturasConciliadas.length,
+        facturasPendientes: facturasPendientes.length,
+        asientosTotal: asientos.length,
+        asientosConFactura: asientosConFactura.length,
+        asientosSinFactura: asientosSinFactura.length,
+        asientosPunteadosBanco: asientosPunteadosBanco.length,
+        asientosSinBanco: asientosSinBanco.length,
+        asientosDescuadrados: asientosDescuadrados.length,
+        movimientosBancoTotal: movimientosBanco.length,
+        movimientosBancoPunteados: movimientosPunteados.length,
+      },
+    };
+    state.gestoriaClienteContaResultadosCache = resultadosCache;
+    window.__gestoriaClienteContaResultadosCache = resultadosCache;
+    const activeCompanyId = String(state.currentWorkspaceCompanyId || "").trim();
+    if (empresaScopeId && (!activeCompanyId || activeCompanyId === empresaScopeId)) {
+      ensureWorkspaceCompanyContabilidadCache(empresaScopeId).resultados = resultadosCache;
+    }
 
     renderGestoriaFacturasGrouped(gestoriaClienteFacturasTable, facturas);
     if (gestoriaClienteFacturasInfo) {
@@ -70255,12 +70921,15 @@ const applyGestoriaClienteLibrosData = (data = {}, empresaId = "") => {
     plantillaRows: buildPlantillaConversorRows(diario),
   };
   window.__gestoriaClienteLibrosCache = state.gestoriaClienteLibrosCache;
+  const activeCompanyId = String(state.currentWorkspaceCompanyId || "").trim();
+  if (resolvedEmpresaId && (!activeCompanyId || activeCompanyId === resolvedEmpresaId)) {
+    ensureWorkspaceCompanyContabilidadCache(resolvedEmpresaId).books = state.gestoriaClienteLibrosCache;
+  }
   writeGestoriaBooksCache(resolvedEmpresaId, state.gestoriaClienteLibrosCache);
   syncGestoriaBooksDownloadButtons();
 };
 
 const loadGestoriaClienteLibros = async (clienteIdOrOpts, empresaId = "") => {
-  if (!gestoriaClienteLibroDiarioTable) return;
   const scope = resolveGestoriaScopeParams(clienteIdOrOpts, empresaId);
   const clienteId = scope.clienteId;
   let resolvedEmpresaId = scope.empresaId || resolveLegacyEmpresaId(resolveCrmGestoriaEmpresa());
@@ -70318,6 +70987,10 @@ const loadGestoriaClienteLibros = async (clienteIdOrOpts, empresaId = "") => {
         facturasResumenRaw: facturasResumen,
       };
       window.__gestoriaClienteLibrosCache = state.gestoriaClienteLibrosCache;
+      const activeCompanyId = String(state.currentWorkspaceCompanyId || "").trim();
+      if (resolvedEmpresaId && (!activeCompanyId || activeCompanyId === resolvedEmpresaId)) {
+        ensureWorkspaceCompanyContabilidadCache(resolvedEmpresaId).books = state.gestoriaClienteLibrosCache;
+      }
       writeGestoriaBooksCache(resolvedEmpresaId, state.gestoriaClienteLibrosCache);
 
       if (diario.length > 500) {
@@ -72275,19 +72948,28 @@ const loadClienteGestoria = (clienteId) => {
 };
 
 const loadGestoriaModelos = (clienteIdOrOpts, empresaId = "") => {
-  if (!gestoriaModelosTable) return;
   const scope = resolveGestoriaScopeParams(clienteIdOrOpts, empresaId);
   const qs = new URLSearchParams();
   if (scope.clienteId) qs.set("cliente_id", scope.clienteId);
   if (scope.empresaId) qs.set("empresa_id", scope.empresaId);
   if (!qs.toString()) {
-    gestoriaModelosTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
+    state.gestoriaModelosCache = null;
+    window.__gestoriaModelosCache = null;
+    if (gestoriaModelosTable) gestoriaModelosTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
     return;
   }
   return api(`/api/gestoria_modelos?${qs.toString()}`).then((data) => {
     const rows = data.rows || [];
     state.gestoriaModelosCache = { clienteId: scope.clienteId || "", empresaId: scope.empresaId || "", rows };
+    window.__gestoriaModelosCache = state.gestoriaModelosCache;
+    const activeCompanyId = String(state.currentWorkspaceCompanyId || "").trim();
+    if (scope.empresaId && (!activeCompanyId || activeCompanyId === scope.empresaId)) {
+      ensureWorkspaceCompanyContabilidadCache(scope.empresaId).modelos = state.gestoriaModelosCache;
+    }
     syncGestoriaModelosDownloadButton();
+    if (!gestoriaModelosTable) {
+      return;
+    }
     if (!rows.length) {
       gestoriaModelosTable.innerHTML = "<p class='muted'>Sin modelos asignados.</p>";
       return;
@@ -81020,7 +81702,6 @@ if (workspaceCompanyFichaClose && workspaceCompanyFicha) {
   workspaceCompanyFichaClose.addEventListener("click", () => {
     try {
       restoreCompanyFichaNodes();
-      restoreCompanyContaNodes();
     } catch (e) {}
     try {
       if (workspaceCompanyEditor) workspaceCompanyEditor.classList.add("hidden");
