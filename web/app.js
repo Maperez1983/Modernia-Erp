@@ -10462,7 +10462,7 @@ const restoreCompanyContaNodes = () => {
   _companyContaMovedNodes = [];
 };
 
-const setWorkspaceCompanyContabilidadTab = (tabKey = "dashboard", opts = {}) => {
+const setWorkspaceCompanyContabilidadTab = async (tabKey = "dashboard", opts = {}) => {
   restoreWorkspaceCompanyContextFromStorage();
   const shell = ensureWorkspaceCompanyContabilidadShell();
   if (!shell) return;
@@ -10502,7 +10502,9 @@ const setWorkspaceCompanyContabilidadTab = (tabKey = "dashboard", opts = {}) => 
     try {
       setGestoriaClienteContaTab("libros");
       setGestoriaClienteLibroTab(tab === "balances" ? "balance" : "diario");
-      hydrateGestoriaBooksFromCache(String(state.currentWorkspaceCompanyId || "").trim());
+      const companyId = String(state.currentWorkspaceCompanyId || "").trim();
+      await Promise.resolve(loadGestoriaClienteLibros("", companyId));
+      hydrateGestoriaBooksFromCache(companyId);
       scrollTo(tab === "balances" ? "#gestoriaClienteLibroBalancePanel" : "#gestoriaClienteLibroDiarioPanel");
     } catch (e) {}
   }
@@ -10510,19 +10512,21 @@ const setWorkspaceCompanyContabilidadTab = (tabKey = "dashboard", opts = {}) => 
     try {
       setGestoriaClienteContaTab("libros");
       setGestoriaClienteLibroTab("diario");
+      const companyId = String(state.currentWorkspaceCompanyId || "").trim();
+      await Promise.resolve(loadGestoriaClienteLibros("", companyId));
       scrollTo("#gestoriaAsientoFicha");
     } catch (e) {}
   }
   if (tab === "modelos") {
     try {
       const companyId = String(state.currentWorkspaceCompanyId || "").trim();
-      if (companyId) loadGestoriaModelos(companyId);
+      if (companyId) await Promise.resolve(loadGestoriaModelos(companyId));
       scrollTo("#gestoriaModelosTable");
     } catch (e) {}
   }
   if (tab === "dashboard") {
     try {
-      loadGestoriaDashboardContabilidad({ force: true }).catch(() => {});
+      await loadGestoriaDashboardContabilidad({ force: true }).catch(() => {});
       scrollTo('[data-company-conta-pane="dashboard"]');
     } catch (e) {}
   }
@@ -27237,7 +27241,7 @@ const renderClienteContabilidadPanel = () => {
         setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
       }
     };
-    const activateTab = (tabKey) => {
+    const activateTab = async (tabKey) => {
       const tab = String(tabKey || "dashboard").trim();
       setMainTab(tab);
       try {
@@ -27251,32 +27255,32 @@ const renderClienteContabilidadPanel = () => {
       try {
         if (tab === "importacion") {
           if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("importador");
-          if (companyScopeId) loadGestoriaClienteImportador("", companyScopeId);
+          if (companyScopeId) await Promise.resolve(loadGestoriaClienteImportador("", companyScopeId));
           jumpTo("#gestoriaModuleContabilidad");
         } else if (tab === "validacion") {
           if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("control");
-          if (companyScopeId) loadGestoriaClienteContaResultados("", companyScopeId);
+          if (companyScopeId) await Promise.resolve(loadGestoriaClienteContaResultados("", companyScopeId));
           jumpTo("#clienteContaValidacionResumen");
         } else if (tab === "banco") {
           if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("banco");
-          if (companyScopeId) loadGestoriaClienteBanco("", companyScopeId);
+          if (companyScopeId) await Promise.resolve(loadGestoriaClienteBanco("", companyScopeId));
           jumpTo("#gestoriaModuleContabilidad");
         } else if (tab === "diarios" || tab === "balances") {
           if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("libros");
           if (typeof setGestoriaClienteLibroTab === "function") setGestoriaClienteLibroTab(tab === "balances" ? "balance" : "diario");
-          if (companyScopeId) loadGestoriaClienteLibros("", companyScopeId);
+          if (companyScopeId) await Promise.resolve(loadGestoriaClienteLibros("", companyScopeId));
           jumpTo(tab === "balances" ? "#gestoriaClienteLibroBalancePanel" : "#gestoriaClienteLibroDiarioPanel");
         } else if (tab === "modelos") {
-          if (companyScopeId) loadGestoriaModelos(companyScopeId);
+          if (companyScopeId) await Promise.resolve(loadGestoriaModelos(companyScopeId));
           jumpTo("#gestoriaModuleFiscal");
         } else if (tab === "asientos") {
           if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("operativa");
-          if (companyScopeId) loadGestoriaClienteContaResultados("", companyScopeId);
+          if (companyScopeId) await Promise.resolve(loadGestoriaClienteContaResultados("", companyScopeId));
           jumpTo("#gestoriaModuleContabilidad");
         } else {
           if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("libros");
           if (typeof setGestoriaClienteLibroTab === "function") setGestoriaClienteLibroTab("diario");
-          if (companyScopeId) loadGestoriaClienteContaResultados("", companyScopeId);
+          if (companyScopeId) await Promise.resolve(loadGestoriaClienteContaResultados("", companyScopeId));
           jumpTo("#gestoriaClienteConciliacionFicha");
         }
       } catch (e) {}
@@ -56298,7 +56302,7 @@ const openInmuebleDetail = (id, originView = "") => {
   // Evita que “Nueva actividad” herede datos del inmueble anterior.
   resetInmuebleActividadForm();
   window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
-  Promise.all([
+  return Promise.all([
     api(`/api/inmueble?id=${id}`),
     loadClientesList().catch(() => null),
   ])
@@ -69911,7 +69915,7 @@ const loadGestoriaClienteLibros = async (clienteIdOrOpts, empresaId = "") => {
   const qs = new URLSearchParams({ conciliar: "1" });
   if (resolvedEmpresaId) qs.set("empresa_id", resolvedEmpresaId);
   if (clienteId) qs.set("cliente_id", clienteId);
-  api(`/api/gestoria_libros?${qs.toString()}`)
+  return api(`/api/gestoria_libros?${qs.toString()}`)
     .then((data) => {
       const diario = data.diario || [];
       const mayor = data.mayor || [];
@@ -71895,7 +71899,7 @@ const loadGestoriaModelos = (clienteIdOrOpts, empresaId = "") => {
     gestoriaModelosTable.innerHTML = "<p class='muted'>Sin cliente o empresa seleccionada.</p>";
     return;
   }
-  api(`/api/gestoria_modelos?${qs.toString()}`).then((data) => {
+  return api(`/api/gestoria_modelos?${qs.toString()}`).then((data) => {
     const rows = data.rows || [];
     state.gestoriaModelosCache = { clienteId: scope.clienteId || "", empresaId: scope.empresaId || "", rows };
     syncGestoriaModelosDownloadButton();
