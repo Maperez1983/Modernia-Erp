@@ -10430,6 +10430,9 @@ const ensureWorkspaceCompanyContabilidadShell = () => {
       <button class="tab" type="button" data-company-conta-tab="asientos">Asientos</button>
     </div>
     <div data-company-conta-pane="dashboard"></div>
+    <div data-company-conta-pane="diarios" class="hidden"></div>
+    <div data-company-conta-pane="balances" class="hidden"></div>
+    <div data-company-conta-pane="asientos" class="hidden"></div>
     <div data-company-conta-pane="modelos" class="hidden"></div>
     <div data-company-conta-pane="workbench" class="hidden"></div>
   `;
@@ -10448,9 +10451,28 @@ const moveNodeToCompanyContaPane = (node, paneKey) => {
   if (!shell) return;
   const pane = shell.querySelector(`[data-company-conta-pane="${paneKey}"]`);
   if (!pane) return;
+  const mount = pane.querySelector(`[data-company-conta-mount="${paneKey}"]`) || pane;
   if (_companyContaMovedNodes.some((row) => row.node === node)) return;
   _companyContaMovedNodes.push({ node, parent: node.parentNode, next: node.nextSibling });
-  pane.appendChild(node);
+  mount.appendChild(node);
+};
+
+const ensureCompanyContaPaneHeader = (paneKey, title, description = "") => {
+  if (!workspaceCompanyFichaBody) return null;
+  const shell = workspaceCompanyFichaBody.querySelector('[data-company-conta-shell="1"]');
+  if (!shell) return null;
+  const pane = shell.querySelector(`[data-company-conta-pane="${paneKey}"]`);
+  if (!pane || pane.dataset.companyContaHeading === "1") return pane;
+  pane.dataset.companyContaHeading = "1";
+  pane.innerHTML = `
+    <div class="section-head">
+      <div>
+        <h3>${escapeHtml(String(title || "").trim() || "Sección")}</h3>
+        ${description ? `<p class="muted">${escapeHtml(String(description || ""))}</p>` : ""}
+      </div>
+    </div>
+  `;
+  return pane;
 };
 
 const restoreCompanyContaNodes = () => {
@@ -10488,13 +10510,7 @@ const setWorkspaceCompanyContabilidadTab = async (tabKey = "dashboard", opts = {
   });
   shell.querySelectorAll("[data-company-conta-pane]").forEach((pane) => {
     const key = String(pane.dataset.companyContaPane || "");
-    const show = key === "dashboard"
-      ? tab === "dashboard"
-      : key === "modelos"
-        ? tab === "modelos"
-        : key === "workbench"
-          ? ["diarios", "balances", "asientos"].includes(tab)
-          : false;
+    const show = key === tab;
     pane.classList.toggle("hidden", !show);
     pane.hidden = !show;
   });
@@ -10513,8 +10529,19 @@ const setWorkspaceCompanyContabilidadTab = async (tabKey = "dashboard", opts = {
       setGestoriaClienteContaTab("libros");
       setGestoriaClienteLibroTab(tab === "balances" ? "balance" : "diario");
       const companyId = String(state.currentWorkspaceCompanyId || "").trim();
+      ensureCompanyContaPaneHeader(
+        tab === "balances" ? "balances" : "diarios",
+        tab === "balances" ? "Balance" : "Libro diario",
+        tab === "balances"
+          ? "Saldos agrupados por cuenta para la empresa activa."
+          : "Asientos agrupados por fecha y referencia de la empresa activa."
+      );
       await Promise.resolve(loadGestoriaClienteLibros("", companyId));
       hydrateGestoriaBooksFromCache(companyId);
+      moveNodeToCompanyContaPane(
+        tab === "balances" ? gestoriaClienteLibroBalancePanel : gestoriaClienteLibroDiarioPanel,
+        tab === "balances" ? "balances" : "diarios"
+      );
       scrollTo(tab === "balances" ? "#gestoriaClienteLibroBalancePanel" : "#gestoriaClienteLibroDiarioPanel");
     } catch (e) {}
   }
@@ -10523,7 +10550,19 @@ const setWorkspaceCompanyContabilidadTab = async (tabKey = "dashboard", opts = {
       setGestoriaClienteContaTab("libros");
       setGestoriaClienteLibroTab("diario");
       const companyId = String(state.currentWorkspaceCompanyId || "").trim();
-      await Promise.resolve(loadGestoriaClienteLibros("", companyId));
+      ensureCompanyContaPaneHeader(
+        "asientos",
+        "Asientos",
+        "Consulta los asientos recientes y la ficha de asiento sin subpestañas internas."
+      );
+      await Promise.all([
+        Promise.resolve(loadGestoriaClienteLibros("", companyId)),
+        Promise.resolve(loadGestoriaClienteContaResultados("", companyId)),
+      ]);
+      moveNodeToCompanyContaPane(gestoriaClienteAsientosTable, "asientos");
+      moveNodeToCompanyContaPane(gestoriaClienteAsientosInfo, "asientos");
+      moveNodeToCompanyContaPane(gestoriaClienteConciliacionFicha, "asientos");
+      moveNodeToCompanyContaPane(gestoriaAsientoFicha, "asientos");
       scrollTo("#gestoriaAsientoFicha");
     } catch (e) {}
   }
