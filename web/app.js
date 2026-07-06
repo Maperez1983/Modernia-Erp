@@ -27326,9 +27326,15 @@ const renderClienteContabilidadPanel = () => {
           if (companyScopeId) await Promise.resolve(loadGestoriaModelos(companyScopeId));
           jumpTo("#gestoriaModuleFiscal");
         } else if (tab === "asientos") {
-          if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("operativa");
-          if (companyScopeId) await Promise.resolve(loadGestoriaClienteContaResultados("", companyScopeId));
-          jumpTo("#gestoriaModuleContabilidad");
+          if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("libros");
+          if (typeof setGestoriaClienteLibroTab === "function") setGestoriaClienteLibroTab("diario");
+          if (companyScopeId) {
+            await Promise.all([
+              Promise.resolve(loadGestoriaClienteLibros("", companyScopeId)),
+              Promise.resolve(loadGestoriaClienteContaResultados("", companyScopeId)),
+            ]);
+          }
+          jumpTo("#gestoriaAsientoFicha");
         } else {
           if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("libros");
           if (typeof setGestoriaClienteLibroTab === "function") setGestoriaClienteLibroTab("diario");
@@ -27441,7 +27447,12 @@ const renderClienteContabilidadPanel = () => {
     addRouterPane("asientos", "Asientos", "Ficha de asiento, conciliación y edición contable completa.", "Abrir asientos", () => {
       if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("libros");
       if (typeof setGestoriaClienteLibroTab === "function") setGestoriaClienteLibroTab("diario");
-      if (companyScopeId) loadGestoriaClienteContaResultados("", companyScopeId);
+      if (companyScopeId) {
+        void Promise.all([
+          Promise.resolve(loadGestoriaClienteLibros("", companyScopeId)),
+          Promise.resolve(loadGestoriaClienteContaResultados("", companyScopeId)),
+        ]);
+      }
     });
     clienteEconomicosPanel.innerHTML = "";
     clienteEconomicosPanel.appendChild(root);
@@ -69393,6 +69404,97 @@ const renderSimpleTable = (container, columns, rows) => {
   container.appendChild(table);
 };
 
+const renderGestoriaLibroDiarioGrouped = (container, rows = [], infoEl = null) => {
+  if (!container) return;
+  const items = Array.isArray(rows) ? rows : [];
+  if (!items.length) {
+    container.innerHTML = "<p class='muted'>Sin apuntes contables.</p>";
+    if (infoEl) infoEl.textContent = "";
+    return;
+  }
+
+  const grouped = new Map();
+  items.forEach((row) => {
+    const key = String(row?.asiento_id || row?.referencia || row?.fecha || "").trim() || `asiento-${grouped.size}`;
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(row);
+  });
+
+  let totalDebe = 0;
+  let totalHaber = 0;
+  const escapeOrDash = (value) => escapeHtml(String(value ?? "").trim() || "-");
+  const html = Array.from(grouped.entries())
+    .map(([key, lines]) => {
+      const sample = lines[0] || {};
+      const debe = lines.reduce((sum, line) => sum + parseMoneyValue(line?.debe), 0);
+      const haber = lines.reduce((sum, line) => sum + parseMoneyValue(line?.haber), 0);
+      totalDebe += debe;
+      totalHaber += haber;
+      const delta = Math.abs(debe - haber);
+      const deltaBadge = delta <= 0.01
+        ? `<span class="ocr-badge ok">Cuadrado</span>`
+        : `<span class="ocr-badge danger">Δ ${escapeHtml(euroFormatter.format(delta))}</span>`;
+      const rowsHtml = lines
+        .map((line) => {
+          const pctValue = Number(line?.impuesto_pct);
+          const pctLabel = Number.isFinite(pctValue) && String(line?.impuesto_pct ?? "").trim() !== ""
+            ? `${pctValue.toFixed(2)} %`
+            : "-";
+          return `
+          <tr>
+            <td>${escapeOrDash(line?.cuenta)}</td>
+            <td>${escapeOrDash(line?.descripcion)}</td>
+            <td>${escapeOrDash(line?.tercero || line?.tercero_nif)}</td>
+            <td>${line?.debe ? escapeHtml(euroFormatter.format(parseMoneyValue(line.debe))) : "-"}</td>
+            <td>${line?.haber ? escapeHtml(euroFormatter.format(parseMoneyValue(line.haber))) : "-"}</td>
+            <td>${escapeOrDash(line?.impuesto_tipo)}</td>
+            <td>${escapeHtml(pctLabel)}</td>
+          </tr>
+          `;
+        })
+        .join("");
+      return `
+        <details open class="card-soft" style="margin-top:12px;">
+          <summary style="cursor:pointer; display:flex; justify-content:space-between; gap:12px; align-items:flex-start;">
+            <div>
+              <strong>${escapeOrDash(sample.fecha)} · ${escapeOrDash(sample.asiento_id || key)}</strong>
+              <div class="muted">${escapeOrDash(sample.referencia || sample.factura_numero)} · ${escapeOrDash(sample.concepto)}</div>
+              ${sample.factura_numero || sample.tercero || sample.tercero_nif ? `<div class="muted">${escapeOrDash(sample.factura_numero || "Sin factura")} · ${escapeOrDash(sample.tercero || sample.tercero_nif || "Sin tercero")}</div>` : ""}
+            </div>
+            <div style="text-align:right;">
+              <div><strong>${escapeHtml(euroFormatter.format(debe))}</strong> / <strong>${escapeHtml(euroFormatter.format(haber))}</strong></div>
+              <div class="muted">${lines.length} líneas · ${deltaBadge}</div>
+            </div>
+          </summary>
+          <div style="overflow:auto; margin-top:10px;">
+            <table>
+              <thead>
+                <tr>
+                  <th>Cuenta</th>
+                  <th>Descripción</th>
+                  <th>Tercero</th>
+                  <th>Debe</th>
+                  <th>Haber</th>
+                  <th>IVA</th>
+                  <th>% IVA</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      `;
+    })
+    .join("");
+
+  container.innerHTML = html;
+  if (infoEl) {
+    infoEl.textContent = `${grouped.size} asientos · ${items.length} apuntes · Debe ${euroFormatter.format(totalDebe)} · Haber ${euroFormatter.format(totalHaber)}`;
+  }
+};
+
 const getGestoriaMonthLabel = (dateStr) => {
   const months = [
     "Enero",
@@ -70119,6 +70221,9 @@ const applyGestoriaClienteLibrosData = (data = {}, empresaId = "") => {
     if (gestoriaClienteLibroDiarioTable) {
       gestoriaClienteLibroDiarioTable.innerHTML = `<p class="muted">Libro cargado: ${diario.length} apuntes. Usa descarga CSV/PDF para el detalle completo.</p>`;
     }
+    if (gestoriaClienteLibroDiarioInfo) {
+      gestoriaClienteLibroDiarioInfo.textContent = `Mostrando ${diario.length} apuntes.`;
+    }
     if (gestoriaClienteLibroMayorTable) {
       gestoriaClienteLibroMayorTable.innerHTML = `<p class="muted">Libro mayor cargado: ${mayor.length} cuentas.</p>`;
     }
@@ -70149,8 +70254,7 @@ const applyGestoriaClienteLibrosData = (data = {}, empresaId = "") => {
     row.debe ? euroFormatter.format(parseMoneyValue(row.debe)) : "-",
     row.haber ? euroFormatter.format(parseMoneyValue(row.haber)) : "-",
   ]);
-  renderSimpleTable(gestoriaClienteLibroDiarioTable, ["Fecha", "Referencia", "Concepto", "Tercero", "Factura", "Cuenta", "Descripción", "Debe", "Haber"], diarioRows);
-  if (gestoriaClienteLibroDiarioInfo) gestoriaClienteLibroDiarioInfo.textContent = `Mostrando ${diarioRows.length} apuntes.`;
+  renderGestoriaLibroDiarioGrouped(gestoriaClienteLibroDiarioTable, diario, gestoriaClienteLibroDiarioInfo);
 
   const mayorRows = mayor.map((row) => [
     row.cuenta || "-",
@@ -70327,6 +70431,9 @@ const loadGestoriaClienteLibros = async (clienteIdOrOpts, empresaId = "") => {
         if (gestoriaClienteLibroDiarioTable) {
           gestoriaClienteLibroDiarioTable.innerHTML = `<p class='muted'>Libro cargado: ${diario.length} apuntes. Usa descarga CSV/PDF para el detalle completo.</p>`;
         }
+        if (gestoriaClienteLibroDiarioInfo) {
+          gestoriaClienteLibroDiarioInfo.textContent = `Mostrando ${diario.length} apuntes.`;
+        }
         if (gestoriaClienteLibroMayorTable) {
           gestoriaClienteLibroMayorTable.innerHTML = `<p class='muted'>Libro mayor cargado: ${mayor.length} cuentas.</p>`;
         }
@@ -70357,14 +70464,7 @@ const loadGestoriaClienteLibros = async (clienteIdOrOpts, empresaId = "") => {
         row.debe ? euroFormatter.format(parseMoneyValue(row.debe)) : "-",
         row.haber ? euroFormatter.format(parseMoneyValue(row.haber)) : "-",
       ]);
-      renderSimpleTable(
-        gestoriaClienteLibroDiarioTable,
-        ["Fecha", "Referencia", "Concepto", "Tercero", "Factura", "Cuenta", "Descripción", "Debe", "Haber"],
-        diarioRows
-      );
-      if (gestoriaClienteLibroDiarioInfo) {
-        gestoriaClienteLibroDiarioInfo.textContent = `Mostrando ${diarioRows.length} apuntes.`;
-      }
+      renderGestoriaLibroDiarioGrouped(gestoriaClienteLibroDiarioTable, diario, gestoriaClienteLibroDiarioInfo);
 
       const mayorRows = mayor.map((row) => [
         row.cuenta || "-",
