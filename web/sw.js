@@ -5,7 +5,7 @@
  * - Never caches /api or /uploads
  */
 
-const CACHE_VERSION = "v363";
+const CACHE_VERSION = "v365";
 const SHELL_CACHE = `verifika2-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `verifika2-runtime-${CACHE_VERSION}`;
 const FONTS_CACHE = `verifika2-fonts-${CACHE_VERSION}`;
@@ -17,7 +17,7 @@ const SHELL_URLS = [
   "/ui-foundation.js?v=4",
   "/app-auth.js?v=15",
   "/app-routing.js?v=11",
-  "/app.js?v=774",
+  "/app.js?v=781",
   "/manifest.webmanifest?v=17",
   "/icons/catastro.png?v=28",
   "/assets/verifika2/verifika2_mark.svg",
@@ -54,7 +54,7 @@ const isCacheablePath = (pathname) => {
 };
 
 const normalizeCacheKey = (request) => {
-  // Keep versioned URLs for CSS/JS so deployments (e.g. app.js?v=378) bust caches reliably.
+  // Keep versioned URLs for CSS/JS so deployments (e.g. app.js?v=781) bust caches reliably.
   // We only normalize images/icons where query params are usually irrelevant.
   try {
     const url = new URL(request.url);

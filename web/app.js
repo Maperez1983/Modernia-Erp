@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v363";
+const APP_SW_VERSION = "v365";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -10474,7 +10474,10 @@ const setWorkspaceCompanyContabilidadTab = async (tabKey = "dashboard", opts = {
     }
   } catch (e) {}
   shell.querySelectorAll("[data-company-conta-tab]").forEach((btn) => {
-    btn.classList.toggle("active", String(btn.dataset.companyContaTab || "") === tab);
+    const key = String(btn.dataset.companyContaTab || "");
+    const active = key === tab;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-pressed", active ? "true" : "false");
   });
   shell.querySelectorAll("[data-company-conta-pane]").forEach((pane) => {
     const key = String(pane.dataset.companyContaPane || "");
@@ -27232,7 +27235,10 @@ const renderClienteContabilidadPanel = () => {
     const setMainTab = (tabKey) => {
       state.clienteContaMainTab = tabKey;
       root.querySelectorAll("[data-company-conta-main-tab]").forEach((btn) => {
-        btn.classList.toggle("active", String(btn.dataset.companyContaMainTab || "") === tabKey);
+        const key = String(btn.dataset.companyContaMainTab || "");
+        const active = key === tabKey;
+        btn.classList.toggle("active", active);
+        btn.setAttribute("aria-pressed", active ? "true" : "false");
       });
       root.querySelectorAll("[data-company-conta-main-pane]").forEach((pane) => {
         const key = String(pane.dataset.companyContaMainPane || "");
@@ -27324,10 +27330,14 @@ const renderClienteContabilidadPanel = () => {
         <div class="form-card" style="margin-bottom:12px;">
           <h4>Dashboard</h4>
           <div class="muted">Resumen general de la contabilidad de la empresa, con accesos a los libros y al control.</div>
+          <div class="grid cols-3 gap-2" id="clienteContaDashboardSummary" style="margin-top:12px;"></div>
+          <div id="clienteContaDashboardActions" style="margin-top:12px;"></div>
         </div>
         <div class="form-card" style="margin-bottom:12px;">
           <h4>Importación</h4>
           <div class="muted">Lotes y documentos importados por la gestoria o el cliente. Aquí se concilian y validan antes de pasar a contabilidad.</div>
+          <div class="grid cols-3 gap-2" id="clienteContaImportacionSummary" style="margin-top:12px;"></div>
+          <div id="clienteContaImportacionActions" style="margin-top:12px;"></div>
           <div class="form-actions" style="margin-top:10px;">
             <button type="button" class="secondary" data-company-conta-main-tab="importacion">Abrir importador</button>
           </div>
@@ -27349,6 +27359,8 @@ const renderClienteContabilidadPanel = () => {
       const pane = document.createElement("div");
       pane.className = "form-card hidden";
       pane.dataset.companyContaMainPane = tabKey;
+      const prettyKey = String(tabKey || "").trim();
+      const sectionPrefix = prettyKey ? prettyKey.charAt(0).toUpperCase() + prettyKey.slice(1) : "Section";
       pane.innerHTML = `
         <div class="section-head">
           <div>
@@ -27356,6 +27368,8 @@ const renderClienteContabilidadPanel = () => {
             <p class="muted">${text}</p>
           </div>
         </div>
+        <div class="grid cols-3 gap-2" id="clienteConta${sectionPrefix}Summary" style="margin-top:12px;"></div>
+        <div id="clienteConta${sectionPrefix}Actions" style="margin-top:12px;"></div>
         <div class="form-actions">
           <button type="button" class="secondary" data-company-conta-open="${tabKey}">${actionLabel}</button>
         </div>
@@ -27399,10 +27413,142 @@ const renderClienteContabilidadPanel = () => {
     });
     setMainTab(mainTab);
     mountCompanyMainContent(mainTab);
+    const dashboardSummaryEl = root.querySelector("#clienteContaDashboardSummary");
+    const dashboardActionsEl = root.querySelector("#clienteContaDashboardActions");
+    const importacionSummaryEl = root.querySelector("#clienteContaImportacionSummary");
+    const importacionActionsEl = root.querySelector("#clienteContaImportacionActions");
+    const bancoSummaryEl = root.querySelector("#clienteContaBancoSummary");
+    const bancoActionsEl = root.querySelector("#clienteContaBancoActions");
+    const diariosSummaryEl = root.querySelector("#clienteContaDiariosSummary");
+    const diariosActionsEl = root.querySelector("#clienteContaDiariosActions");
+    const modelosSummaryEl = root.querySelector("#clienteContaModelosSummary");
+    const modelosActionsEl = root.querySelector("#clienteContaModelosActions");
+    const balancesSummaryEl = root.querySelector("#clienteContaBalancesSummary");
+    const balancesActionsEl = root.querySelector("#clienteContaBalancesActions");
+    const asientosSummaryEl = root.querySelector("#clienteContaAsientosSummary");
+    const asientosActionsEl = root.querySelector("#clienteContaAsientosActions");
+    const renderMetricCards = (container, items = [], emptyText = "") => {
+      if (!container) return;
+      const tiles = Array.isArray(items) ? items : [];
+      if (!tiles.length) {
+        container.innerHTML = emptyText ? `<p class="muted">${escapeHtml(emptyText)}</p>` : "";
+        return;
+      }
+      container.innerHTML = tiles
+        .map((item) => `
+          <div class="card-soft">
+            <div class="muted">${escapeHtml(String(item.label || ""))}</div>
+            <div style="font-size:1.4rem; font-weight:800;">${escapeHtml(String(item.value ?? ""))}</div>
+            ${item.note ? `<div class="muted" style="margin-top:4px;">${escapeHtml(String(item.note || ""))}</div>` : ""}
+          </div>
+        `)
+        .join("");
+    };
+    const renderActionRows = (container, items = []) => {
+      if (!container) return;
+      const rows = Array.isArray(items) ? items : [];
+      if (!rows.length) {
+        container.innerHTML = "";
+        return;
+      }
+      const wrapper = document.createElement("div");
+      wrapper.className = "inline-list";
+      rows.forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "inline-row";
+        const copy = document.createElement("div");
+        copy.innerHTML = `
+          <strong>${escapeHtml(String(item.label || ""))}</strong>
+          ${item.note ? `<div class="muted">${escapeHtml(String(item.note || ""))}</div>` : ""}
+        `;
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = item.primary ? "secondary" : "ghost";
+        btn.textContent = String(item.actionLabel || item.label || "Abrir");
+        btn.addEventListener("click", () => {
+          try {
+            item.onClick?.();
+          } catch (e) {}
+        });
+        row.appendChild(copy);
+        row.appendChild(btn);
+        wrapper.appendChild(row);
+      });
+      container.innerHTML = "";
+      container.appendChild(wrapper);
+    };
+    const openCompanyTab = (tabKey, afterLoad = null) => {
+      void activateTab(tabKey);
+      if (typeof afterLoad === "function") {
+        window.setTimeout(() => {
+          try {
+            afterLoad();
+          } catch (e) {}
+        }, 0);
+      }
+    };
+    renderMetricCards(dashboardSummaryEl, [], "Cargando resumen contable...");
+    renderMetricCards(importacionSummaryEl, [], "Cargando estado del importador...");
+    renderMetricCards(bancoSummaryEl, [], "Cargando datos bancarios...");
+    renderMetricCards(diariosSummaryEl, [], "Cargando libro diario...");
+    renderMetricCards(modelosSummaryEl, [], "Cargando modelos fiscales...");
+    renderMetricCards(balancesSummaryEl, [], "Cargando balances...");
+    renderMetricCards(asientosSummaryEl, [], "Cargando asientos...");
+    renderActionRows(dashboardActionsEl, [
+      { label: "Importación", note: "Revisar lotes y OCR.", actionLabel: "Abrir", primary: true, onClick: () => openCompanyTab("importacion") },
+      { label: "Validación", note: "Ver incidencias de conciliación.", actionLabel: "Abrir", onClick: () => openCompanyTab("validacion") },
+      { label: "Banco", note: "Cuentas y movimientos conciliables.", actionLabel: "Abrir", onClick: () => openCompanyTab("banco") },
+      { label: "Diarios", note: "Libro diario y balance.", actionLabel: "Abrir", onClick: () => openCompanyTab("diarios") },
+    ]);
+    renderActionRows(importacionActionsEl, [
+      { label: "Abrir importador", note: "Lotes, documentos y OCR.", actionLabel: "Importador", primary: true, onClick: () => openCompanyTab("importacion") },
+      { label: "Ir a validación", note: "Revisar facturas y asientos.", actionLabel: "Validación", onClick: () => openCompanyTab("validacion") },
+      { label: "Ir a asientos", note: "Revisar la propuesta contable.", actionLabel: "Asientos", onClick: () => openCompanyTab("asientos") },
+    ]);
+    renderActionRows(bancoActionsEl, [
+      { label: "Abrir banco", note: "Cuentas y conciliación bancaria.", actionLabel: "Banco", primary: true, onClick: () => openCompanyTab("banco") },
+      { label: "Ir a validación", note: "Revisar incidencias contables.", actionLabel: "Validación", onClick: () => openCompanyTab("validacion") },
+      { label: "Ir a asientos", note: "Ver la propuesta contable.", actionLabel: "Asientos", onClick: () => openCompanyTab("asientos") },
+    ]);
+    renderActionRows(diariosActionsEl, [
+      { label: "Abrir diario", note: "Apuntes y asientos agrupados.", actionLabel: "Diario", primary: true, onClick: () => openCompanyTab("diarios") },
+      { label: "Abrir mayor", note: "Analítica por cuentas.", actionLabel: "Mayor", onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("mayor")) },
+      { label: "Ver facturas", note: "Cruce de facturas y asiento.", actionLabel: "Facturas", onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("facturas")) },
+      { label: "Ver IVA", note: "Desglose fiscal asociado.", actionLabel: "IVA", onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("iva")) },
+    ]);
+    renderActionRows(modelosActionsEl, [
+      { label: "Abrir modelos", note: "Obligaciones fiscales de la empresa.", actionLabel: "Modelos", primary: true, onClick: () => openCompanyTab("modelos") },
+      { label: "Ver dashboard", note: "Volver al resumen general.", actionLabel: "Dashboard", onClick: () => openCompanyTab("dashboard") },
+      { label: "Ir a validación", note: "Cruzar incidencias contables.", actionLabel: "Validación", onClick: () => openCompanyTab("validacion") },
+    ]);
+    renderActionRows(balancesActionsEl, [
+      { label: "Abrir balance", note: "Sumas y saldos.", actionLabel: "Balance", primary: true, onClick: () => openCompanyTab("balances") },
+      { label: "Ver PyG", note: "Resultado del ejercicio.", actionLabel: "PyG", onClick: () => openCompanyTab("balances", () => setGestoriaClienteLibroTab("pyg")) },
+      { label: "Volver al diario", note: "Cruce con apuntes.", actionLabel: "Diario", onClick: () => openCompanyTab("diarios") },
+    ]);
+    renderActionRows(asientosActionsEl, [
+      { label: "Abrir asientos", note: "Ficha y edición contable.", actionLabel: "Asientos", primary: true, onClick: () => openCompanyTab("asientos") },
+      { label: "Ir a banco", note: "Conciliar movimientos.", actionLabel: "Banco", onClick: () => openCompanyTab("banco") },
+      { label: "Ir a validación", note: "Revisar incidencias.", actionLabel: "Validación", onClick: () => openCompanyTab("validacion") },
+    ]);
     const resumenEl = root.querySelector("#clienteContaValidacionResumen");
     const infoEl = root.querySelector("#clienteContaValidacionInfo");
     const accionesEl = root.querySelector("#clienteContaValidacionAcciones");
     if (!companyScopeId) {
+      if (dashboardSummaryEl) dashboardSummaryEl.innerHTML = "<p class='muted'>Sin empresa activa.</p>";
+      if (dashboardActionsEl) dashboardActionsEl.innerHTML = "";
+      if (importacionSummaryEl) importacionSummaryEl.innerHTML = "<p class='muted'>Sin empresa activa.</p>";
+      if (importacionActionsEl) importacionActionsEl.innerHTML = "";
+      if (bancoSummaryEl) bancoSummaryEl.innerHTML = "<p class='muted'>Sin empresa activa.</p>";
+      if (bancoActionsEl) bancoActionsEl.innerHTML = "";
+      if (diariosSummaryEl) diariosSummaryEl.innerHTML = "<p class='muted'>Sin empresa activa.</p>";
+      if (diariosActionsEl) diariosActionsEl.innerHTML = "";
+      if (modelosSummaryEl) modelosSummaryEl.innerHTML = "<p class='muted'>Sin empresa activa.</p>";
+      if (modelosActionsEl) modelosActionsEl.innerHTML = "";
+      if (balancesSummaryEl) balancesSummaryEl.innerHTML = "<p class='muted'>Sin empresa activa.</p>";
+      if (balancesActionsEl) balancesActionsEl.innerHTML = "";
+      if (asientosSummaryEl) asientosSummaryEl.innerHTML = "<p class='muted'>Sin empresa activa.</p>";
+      if (asientosActionsEl) asientosActionsEl.innerHTML = "";
       if (resumenEl) resumenEl.innerHTML = "<p class='muted'>Sin empresa activa para validar.</p>";
       return;
     }
@@ -27412,18 +27558,149 @@ const renderClienteContabilidadPanel = () => {
       api(`/api/gestoria_asientos?${new URLSearchParams({ empresa_id: companyScopeId }).toString()}`).catch(() => ({ rows: [] })),
       api(`/api/gestoria_docs?${new URLSearchParams({ empresa_id: companyScopeId }).toString()}`).catch(() => ({ rows: [] })),
       api(`/api/gestoria_movimientos_bancarios?${new URLSearchParams({ empresa_id: companyScopeId }).toString()}`).catch(() => ({ rows: [] })),
-    ]).then(([facturasData, asientosData, docsData, movimientosData]) => {
+      api(`/api/gestoria_cuentas_bancarias?${new URLSearchParams({ empresa_id: companyScopeId }).toString()}`).catch(() => ({ rows: [] })),
+      api(`/api/gestoria_modelos?${new URLSearchParams({ empresa_id: companyScopeId }).toString()}`).catch(() => ({ rows: [] })),
+      api(`/api/gestoria_libros?${qs.toString()}`).catch(() => ({ diario: [], mayor: [], balance: [], pyg: [], facturas: [], facturas_resumen: {} })),
+    ]).then(([facturasData, asientosData, docsData, movimientosData, cuentasData, modelosData, librosData]) => {
       const facturas = Array.isArray(facturasData.rows) ? facturasData.rows : [];
       const asientos = Array.isArray(asientosData.rows) ? asientosData.rows : [];
       const docs = Array.isArray(docsData.rows) ? docsData.rows : [];
       const movimientos = Array.isArray(movimientosData.rows) ? movimientosData.rows : [];
+      const cuentas = Array.isArray(cuentasData.rows) ? cuentasData.rows : [];
+      const modelos = Array.isArray(modelosData.rows) ? modelosData.rows : [];
+      const diario = Array.isArray(librosData?.diario) ? librosData.diario : [];
+      const mayor = Array.isArray(librosData?.mayor) ? librosData.mayor : [];
+      const balance = Array.isArray(librosData?.balance) ? librosData.balance : [];
+      const pyg = Array.isArray(librosData?.pyg) ? librosData.pyg : [];
+      const facturasLibro = Array.isArray(librosData?.facturas) ? librosData.facturas : [];
+      const facturasResumen = librosData?.facturas_resumen && typeof librosData.facturas_resumen === "object" ? librosData.facturas_resumen : {};
       const facturasConciliadas = facturas.filter((row) => Boolean(row.conciliada));
       const facturasPendientes = facturas.filter((row) => !row.conciliada);
       const asientosSinFactura = asientos.filter((row) => !String(row.factura_id || "").trim());
       const asientosDescuadrados = asientos.filter((row) => Math.abs(parseMoneyValue(row.total_debe) - parseMoneyValue(row.total_haber)) > 0.01);
+      const asientosConFactura = asientos.filter((row) => String(row.factura_id || "").trim());
+      const asientosPunteadosBanco = asientos.filter((row) => Number(row.punteado_banco || 0) === 1);
       const docsPendientes = docs.filter((row) => String(row.estado || "").toLowerCase() === "pendiente");
       const movimientosConciliados = movimientos.filter((row) => String(row.asiento_id || "").trim());
       const movimientosPendientes = movimientos.filter((row) => !String(row.asiento_id || "").trim());
+      const movimientosPunteados = movimientos.filter((row) => Number(row.punteado || 0) === 1);
+      const cuentasPrincipales = cuentas.filter((row) => Number(row.es_principal || 0) === 1);
+      const diariosAsientos = new Set(
+        diario.map((row) => String(row.asiento_id || "").trim() || `${String(row.fecha || "").trim()}-${String(row.referencia || "").trim()}`)
+      ).size;
+      const diariosTerceros = new Set(diario.map((row) => String(row.tercero || "").trim()).filter(Boolean)).size;
+      const facturasLibroConciliadas = facturasLibro.filter((row) => Boolean(row.conciliada));
+      const cuentasConSaldo = balance.filter((row) => Math.abs(parseMoneyValue(row.saldo)) > 0.01).length;
+      const balanceNeto = balance.reduce((sum, row) => sum + parseMoneyValue(row.saldo), 0);
+      const modelosPendientes = modelos.filter((row) => String(row.estado || "").toLowerCase() !== "presentado").length;
+      const modelosVencen = modelos.filter((row) => {
+        const fecha = String(row.proxima_fecha || "").trim();
+        if (!fecha) return false;
+        const d = new Date(fecha);
+        if (Number.isNaN(d.getTime())) return false;
+        const limit = new Date();
+        limit.setDate(limit.getDate() + 30);
+        return d <= limit;
+      }).length;
+      const modelosPresentados = modelos.filter((row) => String(row.estado || "").toLowerCase() === "presentado").length;
+      const modelosConFecha = modelos.filter((row) => String(row.proxima_fecha || "").trim()).length;
+      state.gestoriaClienteLibrosCache = {
+        diarioRaw: diario,
+        mayorRaw: mayor,
+        balanceRaw: balance,
+        pygRaw: pyg,
+        facturasRaw: facturasLibro,
+        facturasResumenRaw: facturasResumen,
+      };
+      window.__gestoriaClienteLibrosCache = state.gestoriaClienteLibrosCache;
+      try {
+        writeGestoriaBooksCache(companyScopeId, state.gestoriaClienteLibrosCache);
+      } catch (e) {}
+      renderMetricCards(dashboardSummaryEl, [
+        { label: "Documentos", value: numberFormatter.format(docs.length), note: "Total en la empresa" },
+        { label: "Pendientes", value: numberFormatter.format(docsPendientes.length), note: "Documentos por revisar" },
+        { label: "Facturas", value: numberFormatter.format(facturas.length), note: "OCR y control" },
+        { label: "Sin conciliar", value: numberFormatter.format(facturasPendientes.length), note: "Aún sin asiento" },
+        { label: "Asientos", value: numberFormatter.format(asientos.length), note: "Libro contable" },
+        { label: "Sin factura", value: numberFormatter.format(asientosSinFactura.length), note: "Control manual" },
+        { label: "Descuadrados", value: numberFormatter.format(asientosDescuadrados.length), note: "Debe / Haber" },
+        { label: "Mov. banco", value: numberFormatter.format(movimientos.length), note: "Extractos importados" },
+        { label: "Sin asiento", value: numberFormatter.format(movimientosPendientes.length), note: "Pendiente de puntear" },
+        { label: "Modelos", value: numberFormatter.format(modelos.length), note: "Obligaciones fiscales" },
+        { label: "Vencen 30 días", value: numberFormatter.format(modelosVencen), note: "Próximos vencimientos" },
+        { label: "Pendientes modelos", value: numberFormatter.format(modelosPendientes), note: "No presentados" },
+      ]);
+      renderMetricCards(importacionSummaryEl, [
+        { label: "Docs pendientes", value: numberFormatter.format(docsPendientes.length), note: "OCR / revisión" },
+        { label: "Facturas sin conciliar", value: numberFormatter.format(facturasPendientes.length), note: "Faltan asientos" },
+        { label: "Asientos sin factura", value: numberFormatter.format(asientosSinFactura.length), note: "Revisión manual" },
+        { label: "Mov. sin asiento", value: numberFormatter.format(movimientosPendientes.length), note: "Banco por puntear" },
+      ]);
+      renderMetricCards(bancoSummaryEl, [
+        { label: "Cuentas", value: numberFormatter.format(cuentas.length), note: "Cuentas bancarias" },
+        { label: "Principales", value: numberFormatter.format(cuentasPrincipales.length), note: "Cuenta operativa" },
+        { label: "Movimientos", value: numberFormatter.format(movimientos.length), note: "Extractos importados" },
+        { label: "Punteados", value: numberFormatter.format(movimientosPunteados.length), note: "Ya conciliados" },
+        { label: "Pendientes", value: numberFormatter.format(movimientosPendientes.length), note: "Sin asiento" },
+        { label: "Con asiento", value: numberFormatter.format(movimientosConciliados.length), note: "Movimientos enlazados" },
+      ]);
+      renderMetricCards(diariosSummaryEl, [
+        { label: "Líneas diario", value: numberFormatter.format(diario.length), note: "Apuntes cargados" },
+        { label: "Asientos", value: numberFormatter.format(diariosAsientos), note: "Agrupación contable" },
+        { label: "Terceros", value: numberFormatter.format(diariosTerceros), note: "Relaciones detectadas" },
+        { label: "Facturas", value: numberFormatter.format(facturasLibro.length), note: "Libro de facturas" },
+        { label: "Conciliadas", value: numberFormatter.format(facturasLibroConciliadas.length), note: "Con asiento" },
+        { label: "Pendientes", value: numberFormatter.format(Math.max(0, facturasLibro.length - facturasLibroConciliadas.length)), note: "Sin asiento" },
+      ]);
+      renderMetricCards(modelosSummaryEl, [
+        { label: "Modelos", value: numberFormatter.format(modelos.length), note: "Obligaciones fiscales" },
+        { label: "Presentados", value: numberFormatter.format(modelosPresentados), note: "Ya enviados" },
+        { label: "Pendientes", value: numberFormatter.format(modelosPendientes), note: "No presentados" },
+        { label: "Vencen 30 días", value: numberFormatter.format(modelosVencen), note: "Próximos vencimientos" },
+        { label: "Con fecha", value: numberFormatter.format(modelosConFecha), note: "Programados" },
+      ]);
+      renderMetricCards(balancesSummaryEl, [
+        { label: "Balance", value: numberFormatter.format(balance.length), note: "Saldos procesados" },
+        { label: "Mayor", value: numberFormatter.format(mayor.length), note: "Cuentas analíticas" },
+        { label: "PyG", value: numberFormatter.format(pyg.length), note: "Resultado del periodo" },
+        { label: "Con saldo", value: numberFormatter.format(cuentasConSaldo), note: "Cuentas activas" },
+        { label: "Saldo neto", value: euroFormatter.format(balanceNeto), note: "Suma del balance" },
+        { label: "Facturas", value: numberFormatter.format(facturasLibro.length), note: "Soporte documental" },
+      ]);
+      renderMetricCards(asientosSummaryEl, [
+        { label: "Asientos", value: numberFormatter.format(asientos.length), note: "Libro contable" },
+        { label: "Con factura", value: numberFormatter.format(asientos.filter((row) => String(row.factura_id || "").trim()).length), note: "OCR enlazado" },
+        { label: "Sin factura", value: numberFormatter.format(asientosSinFactura.length), note: "Revisión manual" },
+        { label: "Descuadrados", value: numberFormatter.format(asientosDescuadrados.length), note: "Debe / Haber" },
+        { label: "Punteados banco", value: numberFormatter.format(asientosPunteadosBanco.length), note: "Conciliados con banco" },
+        { label: "Mov. sin asiento", value: numberFormatter.format(movimientosPendientes.length), note: "Pendiente de puntear" },
+      ]);
+      renderActionRows(modelosActionsEl, [
+        { label: "Abrir modelos", note: "Obligaciones fiscales de la empresa.", actionLabel: "Modelos", primary: true, onClick: () => openCompanyTab("modelos") },
+        { label: "Ver dashboard", note: "Volver al resumen general.", actionLabel: "Dashboard", onClick: () => openCompanyTab("dashboard") },
+        { label: "Ir a validación", note: "Cruzar incidencias contables.", actionLabel: "Validación", onClick: () => openCompanyTab("validacion") },
+      ]);
+      renderActionRows(bancoActionsEl, [
+        { label: "Abrir banco", note: "Cuentas y conciliación bancaria.", actionLabel: "Banco", primary: true, onClick: () => openCompanyTab("banco") },
+        { label: "Ir a validación", note: "Revisar incidencias contables.", actionLabel: "Validación", onClick: () => openCompanyTab("validacion") },
+        { label: "Ir a asientos", note: "Ver la propuesta contable.", actionLabel: "Asientos", onClick: () => openCompanyTab("asientos") },
+      ]);
+      renderActionRows(diariosActionsEl, [
+        { label: "Abrir diario", note: "Apuntes y asientos agrupados.", actionLabel: "Diario", primary: true, onClick: () => openCompanyTab("diarios") },
+        { label: "Abrir mayor", note: "Analítica por cuentas.", actionLabel: "Mayor", onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("mayor")) },
+        { label: "Ver facturas", note: "Cruce de facturas y asiento.", actionLabel: "Facturas", onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("facturas")) },
+        { label: "Ver IVA", note: "Desglose fiscal asociado.", actionLabel: "IVA", onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("iva")) },
+      ]);
+      renderActionRows(balancesActionsEl, [
+        { label: "Abrir balance", note: "Sumas y saldos.", actionLabel: "Balance", primary: true, onClick: () => openCompanyTab("balances") },
+        { label: "Ver PyG", note: "Resultado del ejercicio.", actionLabel: "PyG", onClick: () => openCompanyTab("balances", () => setGestoriaClienteLibroTab("pyg")) },
+        { label: "Volver al diario", note: "Cruce con apuntes.", actionLabel: "Diario", onClick: () => openCompanyTab("diarios") },
+      ]);
+      renderActionRows(asientosActionsEl, [
+        { label: "Abrir asientos", note: "Ficha y edición contable.", actionLabel: "Asientos", primary: true, onClick: () => openCompanyTab("asientos") },
+        { label: "Ir a banco", note: "Conciliar movimientos.", actionLabel: "Banco", onClick: () => openCompanyTab("banco") },
+        { label: "Ir a validación", note: "Revisar incidencias.", actionLabel: "Validación", onClick: () => openCompanyTab("validacion") },
+      ]);
       if (resumenEl) {
         const tiles = [
           ["Documentos", docs.length],
