@@ -27247,9 +27247,19 @@ const renderClienteContabilidadPanel = () => {
         setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
       }
     };
+    const mountCompanyMainContent = (tabKey) => {
+      const targetPane = root.querySelector(`[data-company-conta-main-pane="${tabKey}"]`);
+      if (!targetPane) return;
+      if (tabKey === "modelos" && gestoriaModuleFiscal) {
+        targetPane.appendChild(gestoriaModuleFiscal);
+      } else if (["importacion", "banco", "diarios", "balances", "asientos"].includes(tabKey) && gestoriaModuleContabilidad) {
+        targetPane.appendChild(gestoriaModuleContabilidad);
+      }
+    };
     const activateTab = async (tabKey) => {
       const tab = String(tabKey || "dashboard").trim();
       setMainTab(tab);
+      mountCompanyMainContent(tab);
       try {
         const params = new URLSearchParams(window.location.search || "");
         if (companyId) {
@@ -27388,6 +27398,7 @@ const renderClienteContabilidadPanel = () => {
       btn.addEventListener("click", () => activateTab(String(btn.dataset.companyContaMainTab || "validacion").trim()));
     });
     setMainTab(mainTab);
+    mountCompanyMainContent(mainTab);
     const resumenEl = root.querySelector("#clienteContaValidacionResumen");
     const infoEl = root.querySelector("#clienteContaValidacionInfo");
     const accionesEl = root.querySelector("#clienteContaValidacionAcciones");
