@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v365";
+const APP_SW_VERSION = "v366";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -1874,6 +1874,13 @@ const state = {
   pendingClienteOpen: null,
   clienteContabView: "dashboard",
   clienteContabServiceTab: "",
+  clienteContaMainTab: (() => {
+    try {
+      return localStorage.getItem("crm.clienteContaMainTab") || "dashboard";
+    } catch {
+      return "dashboard";
+    }
+  })(),
   clienteContabResponsable: "",
   clienteLedgerCobroFilter: "priced",
   clienteLedgerEjercicio: "",
@@ -27230,10 +27237,19 @@ const renderClienteContabilidadPanel = () => {
     tipoPersona.includes("s.l") ||
     tipoPersona.includes("s.a");
   if (isEmpresaContable) {
-    const mainTab = String(state.clienteContaMainTab || "dashboard").trim();
+    const contaTabs = ["dashboard", "importacion", "validacion", "banco", "diarios", "modelos", "balances", "asientos"];
+    const mainTabFromUrl = normalizeSimple(new URLSearchParams(window.location.search || "").get("conta") || "");
+    const savedMainTab = normalizeSimple(state.clienteContaMainTab || "");
+    const mainTab = contaTabs.includes(mainTabFromUrl)
+      ? mainTabFromUrl
+      : (contaTabs.includes(savedMainTab) ? savedMainTab : "dashboard");
+    state.clienteContaMainTab = mainTab;
     const companyId = String(state.currentWorkspaceCompanyId || companyScopeId || "").trim();
     const setMainTab = (tabKey) => {
       state.clienteContaMainTab = tabKey;
+      try {
+        localStorage.setItem("crm.clienteContaMainTab", String(tabKey || "dashboard"));
+      } catch (e) {}
       root.querySelectorAll("[data-company-conta-main-tab]").forEach((btn) => {
         const key = String(btn.dataset.companyContaMainTab || "");
         const active = key === tabKey;
@@ -27246,6 +27262,19 @@ const renderClienteContabilidadPanel = () => {
         pane.classList.toggle("hidden", !show);
         pane.hidden = !show;
       });
+      if (contaStatusEl) {
+        const labels = {
+          dashboard: "Dashboard",
+          importacion: "Importación",
+          validacion: "Validación",
+          banco: "Banco",
+          diarios: "Diarios",
+          modelos: "Modelos",
+          balances: "Balances",
+          asientos: "Asientos",
+        };
+        contaStatusEl.textContent = `Sección activa: ${labels[tabKey] || tabKey || "Dashboard"}`;
+      }
     };
     const jumpTo = (selector) => {
       const el = typeof selector === "string" ? document.querySelector(selector) : selector;
@@ -27306,6 +27335,9 @@ const renderClienteContabilidadPanel = () => {
           jumpTo("#gestoriaClienteConciliacionFicha");
         }
       } catch (e) {}
+      try {
+        jumpTo(`[data-company-conta-main-pane="${tab}"]`);
+      } catch (e) {}
     };
     const root = document.createElement("div");
     root.className = "stack";
@@ -27327,6 +27359,7 @@ const renderClienteContabilidadPanel = () => {
             <button type="button" class="tab" data-company-conta-main-tab="asientos">Asientos</button>
           </div>
         </div>
+        <div class="footer" id="clienteContaMainTabStatus" style="margin:8px 0 12px;"></div>
         <div class="form-card" style="margin-bottom:12px;">
           <h4>Dashboard</h4>
           <div class="muted">Resumen general de la contabilidad de la empresa, con accesos a los libros y al control.</div>
@@ -27408,8 +27441,12 @@ const renderClienteContabilidadPanel = () => {
     });
     clienteEconomicosPanel.innerHTML = "";
     clienteEconomicosPanel.appendChild(root);
-    root.querySelectorAll("[data-company-conta-main-tab]").forEach((btn) => {
-      btn.addEventListener("click", () => activateTab(String(btn.dataset.companyContaMainTab || "validacion").trim()));
+    root.addEventListener("click", (event) => {
+      const btn = event.target?.closest?.("[data-company-conta-main-tab]");
+      if (!btn || !root.contains(btn)) return;
+      try {
+        activateTab(String(btn.dataset.companyContaMainTab || "validacion").trim());
+      } catch (e) {}
     });
     setMainTab(mainTab);
     mountCompanyMainContent(mainTab);
@@ -27427,6 +27464,7 @@ const renderClienteContabilidadPanel = () => {
     const balancesActionsEl = root.querySelector("#clienteContaBalancesActions");
     const asientosSummaryEl = root.querySelector("#clienteContaAsientosSummary");
     const asientosActionsEl = root.querySelector("#clienteContaAsientosActions");
+    const contaStatusEl = root.querySelector("#clienteContaMainTabStatus");
     const renderMetricCards = (container, items = [], emptyText = "") => {
       if (!container) return;
       const tiles = Array.isArray(items) ? items : [];
