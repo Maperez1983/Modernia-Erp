@@ -27234,6 +27234,12 @@ const renderClienteContabilidadPanel = () => {
       root.querySelectorAll("[data-company-conta-main-tab]").forEach((btn) => {
         btn.classList.toggle("active", String(btn.dataset.companyContaMainTab || "") === tabKey);
       });
+      root.querySelectorAll("[data-company-conta-main-pane]").forEach((pane) => {
+        const key = String(pane.dataset.companyContaMainPane || "");
+        const show = key === tabKey;
+        pane.classList.toggle("hidden", !show);
+        pane.hidden = !show;
+      });
     };
     const jumpTo = (selector) => {
       const el = typeof selector === "string" ? document.querySelector(selector) : selector;
@@ -27325,6 +27331,57 @@ const renderClienteContabilidadPanel = () => {
         <div id="clienteContaValidacionAcciones" style="margin-top:10px;"></div>
       </div>
     `;
+    const mainPanes = Array.from(root.querySelectorAll(":scope > .form-card"));
+    if (mainPanes[0]) mainPanes[0].dataset.companyContaMainPane = "dashboard";
+    if (mainPanes[1]) mainPanes[1].dataset.companyContaMainPane = "importacion";
+    if (mainPanes[2]) mainPanes[2].dataset.companyContaMainPane = "validacion";
+    const addRouterPane = (tabKey, title, text, actionLabel, actionHandler) => {
+      const pane = document.createElement("div");
+      pane.className = "form-card hidden";
+      pane.dataset.companyContaMainPane = tabKey;
+      pane.innerHTML = `
+        <div class="section-head">
+          <div>
+            <h3>${title}</h3>
+            <p class="muted">${text}</p>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="secondary" data-company-conta-open="${tabKey}">${actionLabel}</button>
+        </div>
+      `;
+      pane.querySelectorAll("[data-company-conta-open]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          try {
+            actionHandler?.();
+          } catch (e) {}
+        });
+      });
+      root.appendChild(pane);
+      return pane;
+    };
+    addRouterPane("banco", "Banco", "Importación y conciliación bancaria de la empresa.", "Abrir banco", () => {
+      if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("banco");
+      if (companyScopeId) loadGestoriaClienteBanco("", companyScopeId);
+    });
+    addRouterPane("diarios", "Libro diario", "Consulta el diario contable y sus asientos vinculados.", "Abrir libro diario", () => {
+      if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("libros");
+      if (typeof setGestoriaClienteLibroTab === "function") setGestoriaClienteLibroTab("diario");
+      if (companyScopeId) loadGestoriaClienteLibros("", companyScopeId);
+    });
+    addRouterPane("balances", "Balance", "Consulta el balance de sumas y saldos de la empresa.", "Abrir balance", () => {
+      if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("libros");
+      if (typeof setGestoriaClienteLibroTab === "function") setGestoriaClienteLibroTab("balance");
+      if (companyScopeId) loadGestoriaClienteLibros("", companyScopeId);
+    });
+    addRouterPane("modelos", "Modelos fiscales", "Obligaciones y modelos generados a partir de la contabilidad.", "Abrir modelos", () => {
+      if (companyScopeId) loadGestoriaModelos(companyScopeId);
+    });
+    addRouterPane("asientos", "Asientos", "Ficha de asiento, conciliación y edición contable completa.", "Abrir asientos", () => {
+      if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("libros");
+      if (typeof setGestoriaClienteLibroTab === "function") setGestoriaClienteLibroTab("diario");
+      if (companyScopeId) loadGestoriaClienteContaResultados("", companyScopeId);
+    });
     clienteEconomicosPanel.innerHTML = "";
     clienteEconomicosPanel.appendChild(root);
     root.querySelectorAll("[data-company-conta-main-tab]").forEach((btn) => {
