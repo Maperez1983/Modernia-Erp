@@ -27379,13 +27379,16 @@ const renderClienteContabilidadPanel = () => {
         <div class="form-card" style="margin-bottom:12px;">
           <h4>Validación</h4>
           <div class="muted">Control de importaciones, facturas pendientes, asientos descuadrados y conciliación.</div>
+          <div id="clienteContaValidacionResumen"></div>
+          <div class="footer" id="clienteContaValidacionInfo"></div>
+          <div id="clienteContaValidacionAcciones" style="margin-top:10px;"></div>
         </div>
-        <div id="clienteContaValidacionResumen"></div>
-        <div class="footer" id="clienteContaValidacionInfo"></div>
-        <div id="clienteContaValidacionAcciones" style="margin-top:10px;"></div>
       </div>
     `;
-    const mainPanes = Array.from(root.children).filter((node) => node?.classList?.contains("form-card"));
+    const shellCard = root.firstElementChild;
+    const mainPanes = shellCard
+      ? Array.from(shellCard.children).filter((node) => node?.classList?.contains("form-card"))
+      : [];
     if (mainPanes[0]) mainPanes[0].dataset.companyContaMainPane = "dashboard";
     if (mainPanes[1]) mainPanes[1].dataset.companyContaMainPane = "importacion";
     if (mainPanes[2]) mainPanes[2].dataset.companyContaMainPane = "validacion";
