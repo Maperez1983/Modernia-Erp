@@ -43,6 +43,7 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
         now = _now_iso()
         workspace_id = "6e63e1d1205c4c2a85dde7e20d5409f0"
         company_id = "emp-conta-e2e"
+        blank_company_id = "emp-conta-e2e-empty"
         client_id = "95cb8f5aea3494a08c9a12028312d88b"
         supplier_id = "ter-conta-e2e-sup"
         customer_id = "ter-conta-e2e-cust"
@@ -53,6 +54,7 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
 
         self.workspace_id = workspace_id
         self.company_id = company_id
+        self.blank_company_id = blank_company_id
         self.client_id = client_id
 
         admin_row = self.conn.execute(
@@ -86,10 +88,24 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
         )
         self.conn.execute(
             """
+            INSERT INTO empresas (id, nombre, activo, created_at, updated_at)
+            VALUES (?, ?, 1, datetime(?), datetime(?))
+            """,
+            (blank_company_id, "Empresa Vacía E2E", now, now),
+        )
+        self.conn.execute(
+            """
             INSERT INTO workspace_empresas (id, workspace_id, empresa_id, rol, created_at, updated_at)
             VALUES (?, ?, ?, 'operativa', datetime(?), datetime(?))
             """,
             ("we-conta-e2e-1", workspace_id, company_id, now, now),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_empresas (id, workspace_id, empresa_id, rol, created_at, updated_at)
+            VALUES (?, ?, ?, 'operativa', datetime(?), datetime(?))
+            """,
+            ("we-conta-e2e-empty-1", workspace_id, blank_company_id, now, now),
         )
         self.conn.execute(
             """
@@ -105,6 +121,27 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
                 "Estudio Velazquez 2012 SL",
                 "12345678Z",
                 "Calle E2E 1",
+                "",
+                "",
+                "",
+                now,
+                now,
+            ),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_companies (
+              id, workspace_id, legacy_empresa_id, nombre, nif, direccion, logo_url,
+              primary_color, accent_color, activo, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime(?), datetime(?))
+            """,
+            (
+                "wc-conta-e2e-empty-1",
+                workspace_id,
+                blank_company_id,
+                "Empresa Vacía E2E",
+                "",
+                "",
                 "",
                 "",
                 "",
@@ -427,7 +464,8 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
         self.assertTrue(bool(login_data.get("ok")), msg=f"Login no OK · {login_data}")
         page.wait_for_function("() => !document.body.classList.contains('auth-locked')", timeout=60000)
 
-    def _ensure_companies_loaded(self, page):
+    def _ensure_companies_loaded(self, page, company_id=None):
+        company_id = company_id or self.company_id
         page.wait_for_function("() => typeof state !== 'undefined'", timeout=60000)
         page.evaluate(
             """
@@ -439,7 +477,7 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
               return state.empresas.some((row) => String(row.id || '').trim() === String(companyId || '').trim());
             }
             """,
-            self.company_id,
+            company_id,
         )
         page.wait_for_function(
             """
@@ -451,7 +489,7 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
               }
             }
             """,
-            arg=self.company_id,
+            arg=company_id,
             timeout=60000,
         )
 
@@ -475,6 +513,30 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
               return !!pane && !(pane.classList.contains('hidden') || pane.hidden) && (pane.innerText || '').includes('Resumen contable');
             }
             """,
+            timeout=60000,
+        )
+
+    def _assert_company_top_tab_active(self, page, tab_key):
+        page.wait_for_function(
+            """
+            (tabKey) => {
+              const btn = document.querySelector(`#workspaceCompanyFicha [data-company-conta-tabs] button[data-company-conta-tab="${tabKey}"]`);
+              return !!btn && btn.classList.contains('active');
+            }
+            """,
+            arg=tab_key,
+            timeout=60000,
+        )
+
+    def _assert_company_balance_tab_active(self, page, tab_key):
+        page.wait_for_function(
+            """
+            (tabKey) => {
+              const btn = document.querySelector(`#workspaceCompanyFicha [data-company-conta-balance-tabs] button[data-company-conta-balance-tab="${tabKey}"]`);
+              return !!btn && btn.classList.contains('active');
+            }
+            """,
+            arg=tab_key,
             timeout=60000,
         )
 
@@ -589,6 +651,84 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
                 self.assertIn('Asientos', asientos_text)
                 self.assertIn('Asiento compra E2E', asientos_text)
                 self.assertIn('Asiento venta E2E', asientos_text)
+            finally:
+                browser.close()
+
+    def test_empresa_contabilidad_tabs_muestran_estado_vacio_y_activo(self):
+        chrome_binary = self._find_chrome_binary()
+        if sync_playwright is None:
+            self.skipTest('Playwright no está instalado en este entorno.')
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, executable_path=chrome_binary)
+            try:
+                context = browser.new_context()
+                page = context.new_page()
+                page.set_default_navigation_timeout(120000)
+                page.set_default_timeout(60000)
+
+                self._login(page)
+                page.goto(f"{self.base_url}/?cliente={self.client_id}&workspace={self.workspace_id}&mode=tenant&holding=1", wait_until="commit")
+                self._ensure_companies_loaded(page, self.blank_company_id)
+
+                page.evaluate(
+                    """
+                    ({ companyId }) => {
+                      if (typeof openWorkspaceCompanyFicha === 'function') {
+                        openWorkspaceCompanyFicha(companyId, 'dashboard');
+                      }
+                    }
+                    """,
+                    {"companyId": self.blank_company_id},
+                )
+                page.wait_for_selector("#workspaceCompanyFicha:not(.hidden)", timeout=60000)
+                page.wait_for_function(
+                    """
+                    (companyId) => {
+                      const title = document.querySelector('#workspaceCompanyFichaTitle');
+                      const shell = document.querySelector('#workspaceCompanyFichaBody [data-company-conta-shell="1"]');
+                      return !!title && title.textContent.includes('Empresa Vacía E2E') && !!shell;
+                    }
+                    """,
+                    arg=self.blank_company_id,
+                    timeout=60000,
+                )
+                self._assert_company_top_tab_active(page, "dashboard")
+                dashboard = page.locator('#workspaceCompanyFichaBody [data-company-conta-pane="dashboard"]')
+                self.assertIn('Resumen contable', dashboard.inner_text())
+
+                tab_checks = [
+                    ("diario", "diario", "Sin apuntes en libro diario para esta empresa"),
+                    ("mayor", "mayor", "Sin cuentas en libro mayor para esta empresa"),
+                    ("modelos", "modelos", "Sin modelos fiscales para esta empresa"),
+                    ("asientos", "asientos", "Sin asientos para esta empresa"),
+                ]
+                for tab_key, pane_key, expected_text in tab_checks:
+                    page.click(f'#workspaceCompanyFicha [data-company-conta-tabs] button[data-company-conta-tab="{tab_key}"]')
+                    self._assert_company_top_tab_active(page, tab_key)
+                    self._wait_company_pane_text(page, pane_key, expected_text)
+                    pane = page.locator(f'#workspaceCompanyFichaBody [data-company-conta-pane="{pane_key}"]')
+                    self.assertIn(expected_text, pane.inner_text())
+
+                page.click('#workspaceCompanyFicha [data-company-conta-tabs] button[data-company-conta-tab="balances"]')
+                self._assert_company_top_tab_active(page, "balances")
+                self._wait_company_pane_text(page, 'balances', 'Sin balance ni P&G para esta empresa')
+                balances = page.locator('#workspaceCompanyFichaBody [data-company-conta-pane="balances"]')
+                balances_text = balances.inner_text()
+                self.assertIn('Balances', balances_text)
+                self.assertIn('Sin balance ni P&G para esta empresa', balances_text)
+
+                self._assert_company_balance_tab_active(page, "balance-situacion")
+                self._wait_company_pane_text(page, 'balance-situacion', 'Sin balance de situación para esta empresa')
+                balance = page.locator('#workspaceCompanyFichaBody [data-company-conta-pane="balance-situacion"]')
+                self.assertIn('Balance de situación', balance.inner_text())
+                self.assertIn('Sin balance de situación para esta empresa', balance.inner_text())
+
+                page.click('#workspaceCompanyFicha [data-company-conta-balance-tabs] button[data-company-conta-balance-tab="pyg"]')
+                self._assert_company_balance_tab_active(page, "pyg")
+                self._wait_company_pane_text(page, 'pyg', 'Sin P&G para esta empresa')
+                pyg = page.locator('#workspaceCompanyFichaBody [data-company-conta-pane="pyg"]')
+                self.assertIn('P&G', pyg.inner_text())
+                self.assertIn('Sin P&G para esta empresa', pyg.inner_text())
             finally:
                 browser.close()
 
