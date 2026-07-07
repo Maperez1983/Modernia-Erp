@@ -10701,12 +10701,15 @@ const renderCompanyContaDiario = () => {
   ).size;
   const tercerosCount = new Set(diario.map((row) => String(row.tercero || "").trim()).filter(Boolean)).size;
   const facturasCount = new Set(diario.map((row) => String(row.factura_numero || "").trim()).filter(Boolean)).size;
+  const cuentasCount = new Set(diario.map((row) => String(row.cuenta || "").trim()).filter(Boolean)).size;
+  const totalDebe = diario.reduce((sum, row) => sum + parseMoneyValue(row.debe), 0);
+  const totalHaber = diario.reduce((sum, row) => sum + parseMoneyValue(row.haber), 0);
   pane.innerHTML = `
     <div class="form-card">
       <div class="section-head">
         <div>
           <h3>Libro diario</h3>
-          <p class="muted">Apuntes agrupados por asiento para la empresa activa.</p>
+          <p class="muted">Apuntes de la empresa activa en formato de libro diario, sin agrupar en tarjetas ni micropestañas.</p>
         </div>
       </div>
       <div class="grid crm-kpis" style="margin-top:8px;">
@@ -10730,14 +10733,56 @@ const renderCompanyContaDiario = () => {
           <div class="kpi-value">${numberFormatter.format(facturasCount)}</div>
           <div class="muted">Enlazadas al libro</div>
         </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Cuentas</div>
+          <div class="kpi-value">${numberFormatter.format(cuentasCount)}</div>
+          <div class="muted">Distintas en el diario</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Debe / Haber</div>
+          <div class="kpi-value" style="font-size:1.1rem;">${escapeHtml(euroFormatter.format(totalDebe))} / ${escapeHtml(euroFormatter.format(totalHaber))}</div>
+          <div class="muted">Totales del diario</div>
+        </div>
       </div>
-      <div data-company-conta-diario-table style="margin-top:14px;"></div>
+      <div data-company-conta-diario-table style="margin-top:14px; overflow:auto;"></div>
       <div class="footer" data-company-conta-diario-info></div>
     </div>
   `;
   const table = pane.querySelector("[data-company-conta-diario-table]");
   const info = pane.querySelector("[data-company-conta-diario-info]");
-  renderGestoriaLibroDiarioGrouped(table, diario, info);
+  if (!table) return;
+  if (!diario.length) {
+    table.innerHTML = "<p class='muted'>Sin apuntes contables.</p>";
+    if (info) info.textContent = "";
+    return;
+  }
+  const rows = diario.map((row) => {
+    const pctValue = Number(row?.impuesto_pct);
+    const pctLabel = Number.isFinite(pctValue) && String(row?.impuesto_pct ?? "").trim() !== ""
+      ? `${pctValue.toFixed(2)} %`
+      : "-";
+    return [
+      row.fecha || "-",
+      row.asiento_id || row.referencia || "-",
+      row.referencia || "-",
+      row.concepto || "-",
+      row.cuenta || "-",
+      row.descripcion || "-",
+      row.tercero || row.tercero_nif || "-",
+      row.debe ? euroFormatter.format(parseMoneyValue(row.debe)) : "-",
+      row.haber ? euroFormatter.format(parseMoneyValue(row.haber)) : "-",
+      row.impuesto_tipo || "-",
+      pctLabel,
+    ];
+  });
+  renderSimpleTable(
+    table,
+    ["Fecha", "Asiento", "Referencia", "Concepto", "Cuenta", "Descripción", "Tercero", "Debe", "Haber", "IVA", "% IVA"],
+    rows
+  );
+  if (info) {
+    info.textContent = `Mostrando ${rows.length} líneas · ${numberFormatter.format(asientosCount)} asientos · ${numberFormatter.format(tercerosCount)} terceros.`;
+  }
 };
 
 const renderCompanyContaMayor = () => {

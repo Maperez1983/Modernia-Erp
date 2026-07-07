@@ -469,6 +469,12 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
                 self.assertIn('Factura E2E venta', diario_text)
                 self.assertIn('600000', diario_text)
                 self.assertIn('700000', diario_text)
+                self.assertEqual(diario.locator('details').count(), 0)
+                diario_table = diario.locator('table')
+                self.assertGreaterEqual(diario_table.locator('tbody tr').count(), 2)
+                headers = diario_table.locator('thead th').all_inner_texts()
+                self.assertIn('Cuenta', headers)
+                self.assertIn('Debe', headers)
 
                 page.click('#workspaceCompanyFicha [data-company-conta-tabs] button[data-company-conta-tab="mayor"]')
                 self._wait_company_pane_text(page, 'mayor', 'Libro mayor')
