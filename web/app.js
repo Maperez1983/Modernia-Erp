@@ -69513,7 +69513,7 @@ const loadGestoriaClienteImportador = (clienteIdOrOpts, empresaId = "") => {
     });
 };
 
-const setGestoriaClienteLibroTab = (tabName = "diario") => {
+const syncGestoriaClienteLibroTab = (tabName = "diario") => {
   if (!gestoriaClienteLibrosTabs) return;
   const target = tabName || "diario";
   state.gestoriaClienteLibroTab = target;
@@ -75733,7 +75733,7 @@ const openClienteDetail = (id) => {
       loadGestoriaClienteContaResultados(id);
       loadGestoriaClienteImportador(id);
       loadGestoriaClienteLibros(id);
-      setGestoriaClienteLibroTab(state.gestoriaClienteLibroTab || "diario");
+      syncGestoriaClienteLibroTab(state.gestoriaClienteLibroTab || "diario");
       loadGestoriaModelos(id);
       loadGestoriaTrabajos(id);
       loadGestoriaDocs(id);
@@ -86668,7 +86668,7 @@ if (gestoriaClienteLibrosTabs) {
   gestoriaClienteLibrosTabs.addEventListener("click", (event) => {
     const btn = closestFromEvent(event, "[data-libro-tab]");
     if (!btn) return;
-    setGestoriaClienteLibroTab(btn.dataset.libroTab || "diario");
+    syncGestoriaClienteLibroTab(btn.dataset.libroTab || "diario");
   });
 }
 
