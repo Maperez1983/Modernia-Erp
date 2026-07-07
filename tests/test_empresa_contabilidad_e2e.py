@@ -506,6 +506,7 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
             {"companyId": self.company_id},
         )
         page.wait_for_selector("#workspaceCompanyFicha:not(.hidden)", timeout=60000)
+        self._assert_company_ficha_visible_and_home_hidden(page)
         page.wait_for_function(
             """
             () => {
@@ -552,6 +553,20 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
             }
             """,
             arg={"paneKey": pane_key, "expectedText": expected_text},
+            timeout=60000,
+        )
+
+    def _assert_company_ficha_visible_and_home_hidden(self, page):
+        page.wait_for_function(
+            """
+            () => {
+              const ficha = document.querySelector('#workspaceCompanyFicha');
+              const home = document.querySelector('#homeSection');
+              const fichaVisible = !!ficha && !ficha.classList.contains('hidden') && !ficha.hidden;
+              const homeHidden = !!home && (home.classList.contains('hidden') || home.hidden || getComputedStyle(home).display === 'none');
+              return fichaVisible && homeHidden;
+            }
+            """,
             timeout=60000,
         )
 
@@ -614,6 +629,7 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
                 self.assertIn('Debe', headers)
 
                 page.click('#workspaceCompanyFicha [data-company-conta-tabs] button[data-company-conta-tab="mayor"]')
+                self._assert_company_ficha_visible_and_home_hidden(page)
                 self._wait_company_pane_text(page, 'mayor', 'Libro mayor')
                 mayor = page.locator('#workspaceCompanyFichaBody [data-company-conta-pane="mayor"]')
                 mayor_text = mayor.inner_text()
@@ -622,6 +638,7 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
                 self.assertIn('430000', mayor_text)
 
                 page.click('#workspaceCompanyFicha [data-company-conta-tabs] button[data-company-conta-tab="balances"]')
+                self._assert_company_ficha_visible_and_home_hidden(page)
                 self._wait_company_pane_text(page, 'balance-situacion', 'Balance de situación')
                 balance = page.locator('#workspaceCompanyFichaBody [data-company-conta-pane="balance-situacion"]')
                 balance_text = balance.inner_text()
@@ -630,6 +647,7 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
                 self.assertIn('400000', balance_text)
 
                 page.click('#workspaceCompanyFicha [data-company-conta-balance-tabs] button[data-company-conta-balance-tab="pyg"]')
+                self._assert_company_ficha_visible_and_home_hidden(page)
                 self._wait_company_pane_text(page, 'pyg', 'P&G')
                 pyg = page.locator('#workspaceCompanyFichaBody [data-company-conta-pane="pyg"]')
                 pyg_text = pyg.inner_text()
@@ -638,6 +656,7 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
                 self.assertIn('700000', pyg_text)
 
                 page.click('#workspaceCompanyFicha [data-company-conta-tabs] button[data-company-conta-tab="modelos"]')
+                self._assert_company_ficha_visible_and_home_hidden(page)
                 self._wait_company_pane_text(page, 'modelos', 'Modelos fiscales')
                 modelos = page.locator('#workspaceCompanyFichaBody [data-company-conta-pane="modelos"]')
                 modelos_text = modelos.inner_text()
@@ -645,6 +664,7 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
                 self.assertIn('Modelo 303', modelos_text)
 
                 page.click('#workspaceCompanyFicha [data-company-conta-tabs] button[data-company-conta-tab="asientos"]')
+                self._assert_company_ficha_visible_and_home_hidden(page)
                 self._wait_company_pane_text(page, 'asientos', 'Asientos')
                 asientos = page.locator('#workspaceCompanyFichaBody [data-company-conta-pane="asientos"]')
                 asientos_text = asientos.inner_text()
@@ -681,6 +701,7 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
                     {"companyId": self.blank_company_id},
                 )
                 page.wait_for_selector("#workspaceCompanyFicha:not(.hidden)", timeout=60000)
+                self._assert_company_ficha_visible_and_home_hidden(page)
                 page.wait_for_function(
                     """
                     (companyId) => {
@@ -705,12 +726,14 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
                 for tab_key, pane_key, expected_text in tab_checks:
                     page.click(f'#workspaceCompanyFicha [data-company-conta-tabs] button[data-company-conta-tab="{tab_key}"]')
                     self._assert_company_top_tab_active(page, tab_key)
+                    self._assert_company_ficha_visible_and_home_hidden(page)
                     self._wait_company_pane_text(page, pane_key, expected_text)
                     pane = page.locator(f'#workspaceCompanyFichaBody [data-company-conta-pane="{pane_key}"]')
                     self.assertIn(expected_text, pane.inner_text())
 
                 page.click('#workspaceCompanyFicha [data-company-conta-tabs] button[data-company-conta-tab="balances"]')
                 self._assert_company_top_tab_active(page, "balances")
+                self._assert_company_ficha_visible_and_home_hidden(page)
                 self._wait_company_pane_text(page, 'balances', 'Sin balance ni P&G para esta empresa')
                 balances = page.locator('#workspaceCompanyFichaBody [data-company-conta-pane="balances"]')
                 balances_text = balances.inner_text()
@@ -725,6 +748,7 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
 
                 page.click('#workspaceCompanyFicha [data-company-conta-balance-tabs] button[data-company-conta-balance-tab="pyg"]')
                 self._assert_company_balance_tab_active(page, "pyg")
+                self._assert_company_ficha_visible_and_home_hidden(page)
                 self._wait_company_pane_text(page, 'pyg', 'Sin P&G para esta empresa')
                 pyg = page.locator('#workspaceCompanyFichaBody [data-company-conta-pane="pyg"]')
                 self.assertIn('P&G', pyg.inner_text())

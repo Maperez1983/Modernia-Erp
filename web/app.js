@@ -10520,11 +10520,15 @@ const ensureWorkspaceCompanyContabilidadShell = () => {
   shell.addEventListener("click", (event) => {
     const tabBtn = event.target?.closest?.("[data-company-conta-tab]");
     if (tabBtn && shell.contains(tabBtn)) {
+      event.preventDefault();
+      event.stopPropagation();
       void setWorkspaceCompanyContabilidadTab(String(tabBtn.dataset.companyContaTab || "dashboard").trim());
       return;
     }
     const balanceBtn = event.target?.closest?.("[data-company-conta-balance-tab]");
     if (!balanceBtn || !shell.contains(balanceBtn)) return;
+    event.preventDefault();
+    event.stopPropagation();
     void setWorkspaceCompanyContabilidadBalanceTab(String(balanceBtn.dataset.companyContaBalanceTab || "balance-situacion").trim());
   });
 
@@ -11406,14 +11410,6 @@ const setWorkspaceCompanyContabilidadTab = async (tabKey = "dashboard", opts = {
       ? `Pestaña activa: ${meta.title} · empresaLegacyId: ${companyId}`
       : `Pestaña activa: ${meta.title} · sin empresa activa`
   );
-  try {
-    const params = new URLSearchParams(window.location.search || "");
-    params.set("conta", tab);
-    if (state.currentWorkspaceCompanyName) {
-      params.set("empresa", slugify(String(state.currentWorkspaceCompanyName || companyId || "")));
-    }
-    setUrlParams(params, { replace: true });
-  } catch (e) {}
   try {
     if (tab === "dashboard") {
       await Promise.all([
