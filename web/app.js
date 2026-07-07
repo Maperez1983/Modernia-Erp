@@ -10327,6 +10327,34 @@ const getWorkspaceCompanyBySlug = (slug) => {
   return fromGlobal;
 };
 
+let _workspaceCompanyFichaOpenSeq = 0;
+
+const waitWorkspaceCompanyFicha = (ms = 0) =>
+  new Promise((resolve) => {
+    window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+  });
+
+const resolveWorkspaceCompanyForFicha = async (companyKey = "") => {
+  const wanted = String(companyKey || "").trim();
+  if (!wanted) return null;
+  let company = getWorkspaceCompanyById(wanted);
+  if (company) return company;
+  try {
+    const empresas = await api("/api/empresas");
+    if (Array.isArray(empresas) && empresas.length) {
+      state.empresas = empresas;
+    }
+  } catch (e) {}
+  company = getWorkspaceCompanyById(wanted);
+  if (company) return company;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await waitWorkspaceCompanyFicha(attempt < 2 ? 100 : 200);
+    company = getWorkspaceCompanyById(wanted);
+    if (company) return company;
+  }
+  return null;
+};
+
 const ensureWorkspaceCompanyFichaPanels = () => {
   if (!workspaceCompanyFichaBody) return null;
   if (workspaceCompanyFichaBody.dataset.companyFichaReady === "1") return workspaceCompanyFichaBody;
@@ -11116,6 +11144,7 @@ const ensureWorkspaceCompanyContabilidadShell = () => {
       const mainBtn = ev?.target?.closest ? ev.target.closest("[data-company-conta-tab]") : null;
       if (mainBtn && shell.contains(mainBtn)) {
         ev.preventDefault();
+        ev.stopPropagation();
         const nextTab = normalizeWorkspaceCompanyContaTab(mainBtn.dataset.companyContaTab || "dashboard");
         void setWorkspaceCompanyContabilidadTab(nextTab, { scroll: false });
         return;
@@ -11123,6 +11152,7 @@ const ensureWorkspaceCompanyContabilidadShell = () => {
       const balanceBtn = ev?.target?.closest ? ev.target.closest("[data-company-conta-balance-tab]") : null;
       if (balanceBtn && shell.contains(balanceBtn)) {
         ev.preventDefault();
+        ev.stopPropagation();
         const nextBalanceTab = normalizeWorkspaceCompanyContabilidadBalanceTab(balanceBtn.dataset.companyContaBalanceTab || "balance-situacion");
         void setWorkspaceCompanyContabilidadBalanceTab(nextBalanceTab);
       }
@@ -11297,10 +11327,37 @@ const setWorkspaceCompanyFichaTab = (tabKey, opts = {}) => {
   }
 };
 
-function openWorkspaceCompanyFicha(companyId, initialTab = "dashboard") {
+async function openWorkspaceCompanyFicha(companyId, initialTab = "dashboard") {
+  const openSeq = ++_workspaceCompanyFichaOpenSeq;
   if (!workspaceCompanyFicha) return;
   restoreWorkspaceCompanyContextFromStorage();
-  const company = getWorkspaceCompanyById(companyId);
+  const requestedCompanyId = String(companyId || "").trim();
+  // Muestra el shell de inmediato para evitar pantallas en blanco mientras resolvemos la empresa.
+  ensureWorkspaceCompanyFichaPanels();
+  ensureWorkspaceCompanyContabilidadShell();
+  workspaceCompanyFicha.classList.remove("hidden");
+  workspaceCompanyFicha.hidden = false;
+  if (workspaceCompanyFichaTitle) workspaceCompanyFichaTitle.textContent = "Cargando empresa...";
+  if (workspaceCompanyFichaSubtitle) {
+    workspaceCompanyFichaSubtitle.textContent = "Resolviendo datos de la empresa activa...";
+  }
+  renderWorkspaceCompanyFichaDashboard({ nombre: "Cargando..." });
+  try {
+    setWorkspaceCompanyFichaTab("contabilidad", { scroll: false });
+  } catch (e) {}
+  let revealRoot = workspaceCompanyFicha.parentElement;
+  while (revealRoot && revealRoot !== document.body) {
+    if (revealRoot.classList?.contains("crm-workspace-view") || revealRoot.classList?.contains("hidden")) {
+      revealRoot.classList.remove("hidden");
+      revealRoot.hidden = false;
+    }
+    revealRoot = revealRoot.parentElement;
+  }
+  let company = getWorkspaceCompanyById(requestedCompanyId);
+  if (!company) {
+    company = await resolveWorkspaceCompanyForFicha(requestedCompanyId);
+  }
+  if (openSeq !== _workspaceCompanyFichaOpenSeq) return;
   if (!company) {
     setUiToast("Empresa no encontrada", "No se pudo abrir la ficha de empresa.");
     return;
@@ -11371,16 +11428,17 @@ function openWorkspaceCompanyFicha(companyId, initialTab = "dashboard") {
   workspaceCompanyFicha.hidden = false;
 
   setWorkspaceCompanyFichaTab("contabilidad", { scroll: true });
-  let revealRoot = workspaceCompanyFicha.parentElement;
-  while (revealRoot && revealRoot !== document.body) {
-    if (revealRoot.classList?.contains("crm-workspace-view") || revealRoot.classList?.contains("hidden")) {
-      revealRoot.classList.remove("hidden");
-      revealRoot.hidden = false;
-    }
-    revealRoot = revealRoot.parentElement;
-  }
   hydrateWorkspaceCompanySelects();
 }
+
+try {
+  Object.assign(window, {
+    openWorkspaceCompanyFicha,
+    setWorkspaceCompanyFichaTab,
+    setWorkspaceCompanyContabilidadTab,
+    setWorkspaceCompanyContabilidadBalanceTab,
+  });
+} catch (e) {}
 
 const renderWorkspaceCompanies = (rows = []) => {
   if (!workspaceCompanies) return;
@@ -24868,10 +24926,9 @@ const loadWorkspaceDetail = async (workspaceId) => {
         const slug = String(params.get("empresa") || "").trim();
         if (!slug) return;
         const company = typeof getWorkspaceCompanyBySlug === "function" ? getWorkspaceCompanyBySlug(slug) : null;
-        if (!company) return;
         if (typeof openWorkspaceCompanyFicha === "function") {
           openWorkspaceCompanyFicha(
-            String(company.id || company.legacy_empresa_id || company.nombre || "").trim(),
+            String(company?.id || company?.legacy_empresa_id || company?.nombre || slug).trim(),
             params.get("conta") || "dashboard"
           );
         }
@@ -30682,15 +30739,11 @@ const handleRoute = () => {
     const slug = params.get("empresa");
     if (slug) {
       const empresa = getWorkspaceCompanyBySlug(slug);
-      if (empresa) {
-        if (typeof openWorkspaceCompanyFicha === "function") {
-          openWorkspaceCompanyFicha(
-            String(empresa.id || empresa.legacy_empresa_id || empresa.nombre || "").trim(),
-            params.get("conta") || "dashboard"
-          );
-        } else {
-          openCompany(empresa.nombre);
-        }
+      if (typeof openWorkspaceCompanyFicha === "function") {
+        openWorkspaceCompanyFicha(
+          String(empresa?.id || empresa?.legacy_empresa_id || empresa?.nombre || slug).trim(),
+          params.get("conta") || "dashboard"
+        );
         UI?.refreshContext(state);
         return;
       }
