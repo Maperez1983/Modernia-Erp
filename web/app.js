@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v367";
+const APP_SW_VERSION = "v369";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -10812,12 +10812,14 @@ const renderCompanyContaDiario = () => {
   if (!pane) return;
   const books = getWorkspaceCompanyContabilidadBooks();
   const diaryRows = books ? groupWorkspaceCompanyContabilidadDiaryRows(books.diarioRaw || []) : [];
+  const diaryEmptyText = "Sin apuntes en libro diario para esta empresa";
+  const diarySubtitle = diaryRows.length ? "Asientos agrupados por movimiento para la empresa activa." : diaryEmptyText;
   pane.innerHTML = `
     <div class="form-card">
       <div class="section-head">
         <div>
           <h3>Libro diario</h3>
-          <p class="muted">Asientos agrupados por movimiento para la empresa ${escapeHtml(String(state.currentWorkspaceCompanyName || companyId || "activa"))}.</p>
+          <p class="muted">${escapeHtml(diarySubtitle)}</p>
         </div>
       </div>
       <div class="grid crm-kpis" data-company-conta-diario-metrics></div>
@@ -10845,7 +10847,7 @@ const renderCompanyContaDiario = () => {
       formatWorkspaceCompanyContaMoney(row.haber),
       row.factura_numero || "-",
     ]),
-    books ? "Sin asientos en el libro diario." : "Cargando libro diario..."
+    books ? diaryEmptyText : "Cargando libro diario..."
   );
 };
 
@@ -10856,12 +10858,14 @@ const renderCompanyContaMayor = () => {
   if (!pane) return;
   const books = getWorkspaceCompanyContabilidadBooks();
   const mayorRows = books ? (Array.isArray(books.mayorRaw) ? books.mayorRaw : []) : [];
+  const mayorEmptyText = "Sin cuentas en libro mayor para esta empresa";
+  const mayorSubtitle = mayorRows.length ? "Saldo por cuenta y acumulados del ejercicio." : mayorEmptyText;
   pane.innerHTML = `
     <div class="form-card">
       <div class="section-head">
         <div>
           <h3>Libro mayor</h3>
-          <p class="muted">Saldo por cuenta y acumulados del ejercicio.</p>
+          <p class="muted">${escapeHtml(mayorSubtitle)}</p>
         </div>
       </div>
       <div class="grid crm-kpis" data-company-conta-mayor-metrics></div>
@@ -10884,7 +10888,7 @@ const renderCompanyContaMayor = () => {
       formatWorkspaceCompanyContaMoney(row.haber),
       formatWorkspaceCompanyContaMoney(row.saldo),
     ]),
-    books ? "Sin cuentas en el libro mayor." : "Cargando libro mayor..."
+    books ? mayorEmptyText : "Cargando libro mayor..."
   );
 };
 
@@ -10896,12 +10900,17 @@ const renderCompanyContaBalances = () => {
   const books = getWorkspaceCompanyContabilidadBooks();
   const balanceRows = books ? (Array.isArray(books.balanceRaw) ? books.balanceRaw : []) : [];
   const pygRows = books ? (Array.isArray(books.pygRaw) ? books.pygRaw : []) : [];
+  const balancesEmpty = balanceRows.length === 0 && pygRows.length === 0;
+  const balancesEmptyText = "Sin balance ni P&G para esta empresa";
+  const balanceSituacionEmptyText = balancesEmpty ? balancesEmptyText : "Sin cuentas en balance de situación para esta empresa";
+  const pygEmptyText = balancesEmpty ? balancesEmptyText : "Sin cuentas en P&G para esta empresa";
+  const balancesSubtitle = balancesEmpty ? balancesEmptyText : "Balance de situación y P&G de la empresa activa.";
   pane.innerHTML = `
     <div class="form-card">
       <div class="section-head">
         <div>
           <h3>Balances</h3>
-          <p class="muted">Balance de situación y P&amp;G de la empresa activa.</p>
+          <p class="muted">${escapeHtml(balancesSubtitle)}</p>
         </div>
       </div>
       <div class="tabs crm-lightning-subbar" data-company-conta-balance-tabs>
@@ -10928,7 +10937,7 @@ const renderCompanyContaBalances = () => {
       formatWorkspaceCompanyContaMoney(row.haber),
       formatWorkspaceCompanyContaMoney(row.saldo),
     ]),
-    books ? "Sin cuentas de balance." : "Cargando balance de situación..."
+    books ? balanceSituacionEmptyText : "Cargando balance de situación..."
   );
   renderWorkspaceCompanyContabilidadTable(
     pane.querySelector('[data-company-conta-pane="pyg"]'),
@@ -10939,7 +10948,7 @@ const renderCompanyContaBalances = () => {
       formatWorkspaceCompanyContaMoney(row.haber),
       formatWorkspaceCompanyContaMoney(row.saldo),
     ]),
-    books ? "Sin cuentas de P&G." : "Cargando P&G..."
+    books ? pygEmptyText : "Cargando P&G..."
   );
   syncWorkspaceCompanyContabilidadBalanceTabs();
 };
@@ -10951,12 +10960,14 @@ const renderCompanyContaModelos = () => {
   if (!pane) return;
   const modelos = getWorkspaceCompanyContabilidadModelos();
   const rows = modelos && Array.isArray(modelos.rows) ? modelos.rows : [];
+  const modelosEmptyText = "Sin modelos fiscales para esta empresa";
+  const modelosSubtitle = rows.length ? "Obligaciones fiscales vinculadas a la empresa activa." : modelosEmptyText;
   pane.innerHTML = `
     <div class="form-card">
       <div class="section-head">
         <div>
           <h3>Modelos fiscales</h3>
-          <p class="muted">Obligaciones fiscales vinculadas a la empresa activa.</p>
+          <p class="muted">${escapeHtml(modelosSubtitle)}</p>
         </div>
       </div>
       <div class="grid crm-kpis" data-company-conta-modelos-metrics></div>
@@ -10989,7 +11000,7 @@ const renderCompanyContaModelos = () => {
       row.estado || "-",
       row.notas || "-",
     ]),
-    modelos ? "Sin modelos fiscales." : "Cargando modelos fiscales..."
+    modelos ? modelosEmptyText : "Cargando modelos fiscales..."
   );
 };
 
@@ -11001,12 +11012,14 @@ const renderCompanyContaAsientos = () => {
   const resultados = getWorkspaceCompanyContabilidadResultados();
   const asientos = resultados && Array.isArray(resultados.asientos) ? resultados.asientos : [];
   const resumen = resultados?.resumen || {};
+  const asientosEmptyText = "Sin asientos para esta empresa";
+  const asientosSubtitle = asientos.length ? "Asientos contables y conciliación de la empresa activa." : asientosEmptyText;
   pane.innerHTML = `
     <div class="form-card">
       <div class="section-head">
         <div>
           <h3>Asientos</h3>
-          <p class="muted">Asientos contables y conciliación de la empresa activa.</p>
+          <p class="muted">${escapeHtml(asientosSubtitle)}</p>
         </div>
       </div>
       <div class="grid crm-kpis" data-company-conta-asientos-metrics></div>
@@ -11035,7 +11048,7 @@ const renderCompanyContaAsientos = () => {
       row.factura_numero || (row.factura_id ? "Sí" : "-"),
       Number(row.punteado_banco || 0) === 1 ? "Punteado" : "Sin puntear",
     ]),
-    resultados ? "Sin asientos vinculados." : "Cargando asientos..."
+    resultados ? asientosEmptyText : "Cargando asientos..."
   );
 };
 
@@ -11068,29 +11081,106 @@ const setWorkspaceCompanyContabilidadBalanceTab = (tabKey = "balance-situacion",
 
 const ensureWorkspaceCompanyContabilidadBooks = async (companyId = "", opts = {}) => {
   const resolved = String(companyId || getWorkspaceCompanyContabilidadCompanyId() || "").trim();
-  if (!resolved) return null;
+  if (!resolved) {
+    console.warn("[conta tab warn] falta empresaLegacyId para libro diario/mayor/balances", { tab: _companyContaActiveTab });
+    return null;
+  }
   const cache = ensureWorkspaceCompanyContabilidadCache(resolved);
-  if (!opts.force && cache.books) return cache.books;
-  await Promise.resolve(loadGestoriaClienteLibros("", resolved));
-  return ensureWorkspaceCompanyContabilidadCache(resolved).books;
+  if (!opts.force && !cache.books) {
+    hydrateGestoriaBooksFromCache(resolved);
+  }
+  const hydratedCache = ensureWorkspaceCompanyContabilidadCache(resolved);
+  if (!opts.force && hydratedCache.books) return hydratedCache.books;
+  try {
+    await Promise.resolve(loadGestoriaClienteLibros("", resolved));
+  } catch (error) {
+    console.warn("[conta tab warn] fallo al cargar libro diario/mayor/balances", {
+      tab: _companyContaActiveTab,
+      empresaLegacyId: resolved,
+      error: String(error?.message || error || ""),
+    });
+  }
+  const books = ensureWorkspaceCompanyContabilidadCache(resolved).books;
+  if (!books || (
+    (!Array.isArray(books.diarioRaw) || !books.diarioRaw.length) &&
+    (!Array.isArray(books.mayorRaw) || !books.mayorRaw.length) &&
+    (!Array.isArray(books.balanceRaw) || !books.balanceRaw.length) &&
+    (!Array.isArray(books.pygRaw) || !books.pygRaw.length)
+  )) {
+    console.warn("[conta tab warn] libro diario/mayor/balances vacío", {
+      tab: _companyContaActiveTab,
+      empresaLegacyId: resolved,
+      registros: {
+        diario: Array.isArray(books?.diarioRaw) ? books.diarioRaw.length : 0,
+        mayor: Array.isArray(books?.mayorRaw) ? books.mayorRaw.length : 0,
+        balance: Array.isArray(books?.balanceRaw) ? books.balanceRaw.length : 0,
+        pyg: Array.isArray(books?.pygRaw) ? books.pygRaw.length : 0,
+      },
+    });
+  }
+  return books;
 };
 
 const ensureWorkspaceCompanyContabilidadModelos = async (companyId = "", opts = {}) => {
   const resolved = String(companyId || getWorkspaceCompanyContabilidadCompanyId() || "").trim();
-  if (!resolved) return null;
+  if (!resolved) {
+    console.warn("[conta tab warn] falta empresaLegacyId para modelos fiscales", { tab: _companyContaActiveTab });
+    return null;
+  }
   const cache = ensureWorkspaceCompanyContabilidadCache(resolved);
   if (!opts.force && cache.modelos) return cache.modelos;
-  await Promise.resolve(loadGestoriaModelos("", resolved));
-  return ensureWorkspaceCompanyContabilidadCache(resolved).modelos;
+  try {
+    await Promise.resolve(loadGestoriaModelos("", resolved));
+  } catch (error) {
+    console.warn("[conta tab warn] fallo al cargar modelos fiscales", {
+      tab: _companyContaActiveTab,
+      empresaLegacyId: resolved,
+      error: String(error?.message || error || ""),
+    });
+  }
+  const modelos = ensureWorkspaceCompanyContabilidadCache(resolved).modelos;
+  if (!modelos || !Array.isArray(modelos.rows) || !modelos.rows.length) {
+    console.warn("[conta tab warn] modelos fiscales vacíos", {
+      tab: _companyContaActiveTab,
+      empresaLegacyId: resolved,
+      registros: Array.isArray(modelos?.rows) ? modelos.rows.length : 0,
+    });
+  }
+  return modelos;
 };
 
 const ensureWorkspaceCompanyContabilidadResultados = async (companyId = "", opts = {}) => {
   const resolved = String(companyId || getWorkspaceCompanyContabilidadCompanyId() || "").trim();
-  if (!resolved) return null;
+  if (!resolved) {
+    console.warn("[conta tab warn] falta empresaLegacyId para asientos", { tab: _companyContaActiveTab });
+    return null;
+  }
   const cache = ensureWorkspaceCompanyContabilidadCache(resolved);
   if (!opts.force && cache.resultados) return cache.resultados;
-  await Promise.resolve(loadGestoriaClienteContaResultados("", resolved));
-  return ensureWorkspaceCompanyContabilidadCache(resolved).resultados;
+  try {
+    await Promise.resolve(loadGestoriaClienteContaResultados("", resolved));
+  } catch (error) {
+    console.warn("[conta tab warn] fallo al cargar asientos", {
+      tab: _companyContaActiveTab,
+      empresaLegacyId: resolved,
+      error: String(error?.message || error || ""),
+    });
+  }
+  const resultados = ensureWorkspaceCompanyContabilidadCache(resolved).resultados;
+  if (!resultados || (
+    (!Array.isArray(resultados.asientos) || !resultados.asientos.length) &&
+    (!Array.isArray(resultados.movimientosBanco) || !resultados.movimientosBanco.length)
+  )) {
+    console.warn("[conta tab warn] asientos vacíos", {
+      tab: _companyContaActiveTab,
+      empresaLegacyId: resolved,
+      registros: {
+        asientos: Array.isArray(resultados?.asientos) ? resultados.asientos.length : 0,
+        movimientosBanco: Array.isArray(resultados?.movimientosBanco) ? resultados.movimientosBanco.length : 0,
+      },
+    });
+  }
+  return resultados;
 };
 
 let _companyContaActiveTab = "dashboard";
@@ -11145,6 +11235,7 @@ const ensureWorkspaceCompanyContabilidadShell = () => {
       if (mainBtn && shell.contains(mainBtn)) {
         ev.preventDefault();
         ev.stopPropagation();
+        ev.stopImmediatePropagation();
         const nextTab = normalizeWorkspaceCompanyContaTab(mainBtn.dataset.companyContaTab || "dashboard");
         void setWorkspaceCompanyContabilidadTab(nextTab, { scroll: false });
         return;
@@ -11153,12 +11244,23 @@ const ensureWorkspaceCompanyContabilidadShell = () => {
       if (balanceBtn && shell.contains(balanceBtn)) {
         ev.preventDefault();
         ev.stopPropagation();
+        ev.stopImmediatePropagation();
         const nextBalanceTab = normalizeWorkspaceCompanyContabilidadBalanceTab(balanceBtn.dataset.companyContaBalanceTab || "balance-situacion");
         void setWorkspaceCompanyContabilidadBalanceTab(nextBalanceTab);
       }
     });
   }
   return shell;
+};
+
+const isWorkspaceCompanyContabilidadClick = (event) => {
+  const target = event?.target;
+  if (!target || typeof target.closest !== "function") return false;
+  return Boolean(
+    target.closest(
+      "#workspaceCompanyFicha [data-company-conta-tab], #workspaceCompanyFicha [data-company-conta-balance-tab], [data-company-conta-shell='1'] [data-company-conta-tab], [data-company-conta-shell='1'] [data-company-conta-balance-tab]"
+    )
+  );
 };
 
 const setWorkspaceCompanyContabilidadTab = async (tabKey = "dashboard", opts = {}) => {
@@ -11169,6 +11271,7 @@ const setWorkspaceCompanyContabilidadTab = async (tabKey = "dashboard", opts = {
   _companyContaActiveTab = tab;
   const loadSeq = ++_companyContaLoadSeq;
   const companyId = String(getWorkspaceCompanyContabilidadCompanyId() || "").trim();
+  console.warn("[conta tab active]", { tab, empresaLegacyId: companyId || "" });
   if (tab === "balances") {
     state.workspaceCompanyContabilidadBalanceTab = normalizeWorkspaceCompanyContabilidadBalanceTab(
       state.workspaceCompanyContabilidadBalanceTab || "balance-situacion"
@@ -11239,6 +11342,21 @@ const setWorkspaceCompanyContabilidadTab = async (tabKey = "dashboard", opts = {
   if (tab === "balances") {
     syncWorkspaceCompanyContabilidadBalanceTabs();
   }
+  const books = getWorkspaceCompanyContabilidadBooks();
+  const modelos = getWorkspaceCompanyContabilidadModelos();
+  const resultados = getWorkspaceCompanyContabilidadResultados();
+  console.warn("[conta tab loaded]", {
+    tab,
+    empresaLegacyId: companyId || "",
+    registros: {
+      diario: Array.isArray(books?.diarioRaw) ? books.diarioRaw.length : 0,
+      mayor: Array.isArray(books?.mayorRaw) ? books.mayorRaw.length : 0,
+      balance: Array.isArray(books?.balanceRaw) ? books.balanceRaw.length : 0,
+      pyg: Array.isArray(books?.pygRaw) ? books.pygRaw.length : 0,
+      modelos: Array.isArray(modelos?.rows) ? modelos.rows.length : 0,
+      asientos: Array.isArray(resultados?.asientos) ? resultados.asientos.length : 0,
+    },
+  });
 
   if (opts.scroll !== false && typeof shell.scrollIntoView === "function") {
     window.requestAnimationFrame(() => {
@@ -76931,6 +77049,7 @@ if (crmExitBtn) {
 }
 
 viewTabs.addEventListener("click", (event) => {
+  if (isWorkspaceCompanyContabilidadClick(event)) return;
   const btn = closestFromEvent(event, ".tab");
   if (!btn) return;
   const requestedTab = String(btn.dataset.tab || "").trim();
@@ -81686,7 +81805,8 @@ if (irpfRentalForm) {
 }
 
 workspaceViewButtons.forEach((button) => {
-  button.addEventListener("click", () => {
+  button.addEventListener("click", (event) => {
+    if (isWorkspaceCompanyContabilidadClick(event)) return;
     const view = String(button.dataset.workspaceViewTab || "overview").trim() || "overview";
     const tenantMode = (state.currentWorkspaceEntryMode || "platform") === "tenant";
     if (normalizeSimple(view) === "rrhh") {
