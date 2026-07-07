@@ -41,8 +41,9 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
         self.conn = self.server.open_sqlite_conn(str(self.db_path), with_row_factory=True)
 
         now = _now_iso()
+        workspace_id = "6e63e1d1205c4c2a85dde7e20d5409f0"
         company_id = "emp-conta-e2e"
-        client_id = "cli-conta-e2e"
+        client_id = "95cb8f5aea3494a08c9a12028312d88b"
         supplier_id = "ter-conta-e2e-sup"
         customer_id = "ter-conta-e2e-cust"
         compra_factura_id = "fac-conta-e2e-compra"
@@ -50,15 +51,66 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
         compra_asiento_id = "asi-conta-e2e-compra"
         venta_asiento_id = "asi-conta-e2e-venta"
 
+        self.workspace_id = workspace_id
         self.company_id = company_id
         self.client_id = client_id
 
+        admin_row = self.conn.execute(
+            "SELECT id FROM usuarios WHERE LOWER(TRIM(usuario)) = 'admin' LIMIT 1"
+        ).fetchone()
+        admin_user_id = str(admin_row[0]).strip() if admin_row else ""
+
+        self.conn.execute(
+            """
+            INSERT INTO workspaces (
+              id, nombre, slug, estado, plan, kind, descripcion, logo_url,
+              primary_color, accent_color, kiosk_pin_hash, kiosk_pin_required, created_at, updated_at
+            ) VALUES (?, ?, ?, 'Activo', 'Enterprise', 'Directo', ?, '', '', '', '', 0, datetime(?), datetime(?))
+            """,
+            (workspace_id, "Workspace E2E Contabilidad", "workspace-conta-e2e", "E2E contable para la ficha de empresa", now, now),
+        )
+        if admin_user_id:
+            self.conn.execute(
+                """
+                INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
+                VALUES (?, ?, ?, 'Admin', datetime(?), datetime(?))
+                """,
+                ("wm-conta-e2e-admin", workspace_id, admin_user_id, now, now),
+            )
         self.conn.execute(
             """
             INSERT INTO empresas (id, nombre, activo, created_at, updated_at)
             VALUES (?, ?, 1, datetime(?), datetime(?))
             """,
-            (company_id, "EMPRESA CONTA E2E", now, now),
+            (company_id, "Estudio Velazquez 2012 SL", now, now),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_empresas (id, workspace_id, empresa_id, rol, created_at, updated_at)
+            VALUES (?, ?, ?, 'operativa', datetime(?), datetime(?))
+            """,
+            ("we-conta-e2e-1", workspace_id, company_id, now, now),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_companies (
+              id, workspace_id, legacy_empresa_id, nombre, nif, direccion, logo_url,
+              primary_color, accent_color, activo, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime(?), datetime(?))
+            """,
+            (
+                "wc-conta-e2e-1",
+                workspace_id,
+                company_id,
+                "Estudio Velazquez 2012 SL",
+                "12345678Z",
+                "Calle E2E 1",
+                "",
+                "",
+                "",
+                now,
+                now,
+            ),
         )
         self.conn.execute(
             """
@@ -454,14 +506,37 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
                 page.set_default_timeout(60000)
 
                 self._login(page)
-                self._ensure_companies_loaded(page)
-                self._open_company_ficha(page)
+                exact_url = (
+                    f"{self.base_url}/?cliente={self.client_id}"
+                    f"&workspace={self.workspace_id}"
+                    f"&mode=tenant&holding=1&conta=diarios&empresa=estudio-velazquez-2012-sl"
+                )
+                page.goto(exact_url, wait_until="commit")
+                page.wait_for_function(
+                    """
+                    () => {
+                      const ficha = document.querySelector('#workspaceCompanyFicha:not(.hidden)');
+                      const shell = document.querySelector('#workspaceCompanyFichaBody [data-company-conta-shell="1"]');
+                      return !!ficha && !!shell && typeof setWorkspaceCompanyContabilidadTab === 'function';
+                    }
+                    """,
+                    timeout=60000,
+                )
+                page.evaluate("setWorkspaceCompanyContabilidadTab('diarios')")
+                page.wait_for_function(
+                    """
+                    () => {
+                      const pane = document.querySelector('#workspaceCompanyFichaBody [data-company-conta-pane="diario"]');
+                      return !!pane && !(pane.classList.contains('hidden') || pane.hidden);
+                    }
+                    """,
+                    timeout=60000,
+                )
 
                 dashboard = page.locator('#workspaceCompanyFichaBody [data-company-conta-pane="dashboard"]')
                 self.assertIn('Resumen contable', dashboard.inner_text())
-                self.assertIn('EMPRESA CONTA E2E', dashboard.inner_text())
+                self.assertIn('Estudio Velazquez 2012 SL', dashboard.inner_text())
 
-                page.click('#workspaceCompanyFicha [data-company-conta-tabs] button[data-company-conta-tab="diario"]')
                 self._wait_company_pane_text(page, 'diario', 'Libro diario')
                 diario = page.locator('#workspaceCompanyFichaBody [data-company-conta-pane="diario"]')
                 diario_text = diario.inner_text()

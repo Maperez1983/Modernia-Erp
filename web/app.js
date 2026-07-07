@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v367";
+const APP_SW_VERSION = "v374";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -10694,8 +10694,13 @@ const renderCompanyContaDiario = () => {
   if (!shell) return;
   const pane = shell.querySelector('[data-company-conta-pane="diario"]');
   if (!pane) return;
-  const books = getWorkspaceCompanyContabilidadBooks() || {};
-  const diario = Array.isArray(books.diarioRaw) ? books.diarioRaw : [];
+  const cache = getWorkspaceCompanyContabilidadCache();
+  const books = cache.books || state.gestoriaClienteLibrosCache || {};
+  const diario = Array.isArray(books.diarioRaw)
+    ? books.diarioRaw
+    : Array.isArray(state.gestoriaClienteLibrosCache?.diarioRaw)
+      ? state.gestoriaClienteLibrosCache.diarioRaw
+      : [];
   const asientosCount = new Set(
     diario.map((row) => String(row.asiento_id || row.referencia || row.fecha || "").trim()).filter(Boolean)
   ).size;
@@ -10752,8 +10757,31 @@ const renderCompanyContaDiario = () => {
   const info = pane.querySelector("[data-company-conta-diario-info]");
   if (!table) return;
   if (!diario.length) {
-    table.innerHTML = "<p class='muted'>Sin apuntes contables.</p>";
-    if (info) info.textContent = "";
+    table.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Asiento</th>
+            <th>Referencia</th>
+            <th>Concepto</th>
+            <th>Cuenta</th>
+            <th>Descripción</th>
+            <th>Tercero</th>
+            <th>Debe</th>
+            <th>Haber</th>
+            <th>IVA</th>
+            <th>% IVA</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td colspan="11" class="muted">Sin apuntes en libro diario para esta empresa</td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+    if (info) info.textContent = "Sin apuntes en libro diario para esta empresa.";
     return;
   }
   const rows = diario.map((row) => {
@@ -11102,7 +11130,13 @@ const renderWorkspaceCompanyContabilidadShellPanes = () => {
 
 const ensureWorkspaceCompanyContabilidadBooks = async ({ force = false } = {}) => {
   const companyId = getWorkspaceCompanyContabilidadCompanyId();
-  if (!companyId) return null;
+  if (!companyId) {
+    console.warn("[conta] No hay empresaLegacyId para cargar el libro diario", {
+      currentWorkspaceCompanyId: state.currentWorkspaceCompanyId || "",
+      currentWorkspaceCompanyWsId: state.currentWorkspaceCompanyWsId || "",
+    });
+    return null;
+  }
   const cache = getWorkspaceCompanyContabilidadCache();
   if (!force && cache.companyId === companyId && cache.books && Array.isArray(cache.books.diarioRaw)) {
     return cache.books;
@@ -11197,6 +11231,20 @@ const setWorkspaceCompanyContabilidadTab = async (tabKey = "dashboard", opts = {
   if (loadSeq !== _companyContaLoadSeq) return;
   renderWorkspaceCompanyContabilidadShellPanes();
   syncWorkspaceCompanyContabilidadTabs(shell, tab);
+  const activePane = shell.querySelector(`[data-company-conta-pane="${tab}"]`);
+  if (!activePane) {
+    console.warn("[conta] No se encontró el pane de contabilidad", {
+      tab,
+      companyId,
+      companyName: state.currentWorkspaceCompanyName || "",
+    });
+  } else if (activePane.hidden || activePane.classList.contains("hidden")) {
+    console.warn("[conta] El pane de contabilidad sigue oculto tras el sync", {
+      tab,
+      companyId,
+      companyName: state.currentWorkspaceCompanyName || "",
+    });
+  }
   if (tab === "balances") {
     setWorkspaceCompanyContabilidadBalanceTab(state.workspaceCompanyContabilidadBalanceTab || "balance-situacion");
   }
@@ -11361,32 +11409,6 @@ function openWorkspaceCompanyFicha(companyId, initialTab = "dashboard") {
       revealRoot.hidden = false;
     }
     revealRoot = revealRoot.parentElement;
-  }
-  if (companyLegacyId) {
-    window.setTimeout(() => {
-      const qs = new URLSearchParams({ conciliar: "1", empresa_id: companyLegacyId });
-      fetch(`/api/gestoria_libros?${qs.toString()}`)
-        .then((response) => response.json())
-        .then((data) => {
-          try {
-            applyGestoriaClienteLibrosData(data || {}, companyLegacyId);
-          } catch (e) {
-            const raw = data || {};
-            state.gestoriaClienteLibrosCache = {
-              diarioRaw: raw.diario || [],
-              mayorRaw: raw.mayor || [],
-              balanceRaw: raw.balance || [],
-              pygRaw: raw.pyg || [],
-              facturasRaw: raw.facturas || [],
-              facturasResumenRaw: raw.facturas_resumen || {},
-            };
-            window.__gestoriaClienteLibrosCache = state.gestoriaClienteLibrosCache;
-            writeGestoriaBooksCache(companyLegacyId, state.gestoriaClienteLibrosCache);
-            syncGestoriaBooksDownloadButtons();
-          }
-        })
-        .catch(() => {});
-    }, 0);
   }
   hydrateWorkspaceCompanySelects();
 }
@@ -70559,7 +70581,6 @@ const applyGestoriaClienteLibrosData = (data = {}, empresaId = "") => {
 };
 
 const loadGestoriaClienteLibros = async (clienteIdOrOpts, empresaId = "") => {
-  if (!gestoriaClienteLibroDiarioTable) return;
   const scope = resolveGestoriaScopeParams(clienteIdOrOpts, empresaId);
   const clienteId = scope.clienteId;
   let resolvedEmpresaId = scope.empresaId || resolveLegacyEmpresaId(resolveCrmGestoriaEmpresa());
@@ -70595,7 +70616,15 @@ const loadGestoriaClienteLibros = async (clienteIdOrOpts, empresaId = "") => {
       } catch (e) {}
     }
   }
-  if (!clienteId && !resolvedEmpresaId) return;
+  if (!clienteId && !resolvedEmpresaId) {
+    console.warn("[conta] loadGestoriaClienteLibros sin empresaLegacyId", {
+      clienteId,
+      empresaId: scope.empresaId || "",
+      currentWorkspaceCompanyId: state.currentWorkspaceCompanyId || "",
+      currentWorkspaceCompanyWsId: state.currentWorkspaceCompanyWsId || "",
+    });
+    return;
+  }
   const qs = new URLSearchParams({ conciliar: "1" });
   if (resolvedEmpresaId) qs.set("empresa_id", resolvedEmpresaId);
   if (clienteId) qs.set("cliente_id", clienteId);
@@ -70607,6 +70636,12 @@ const loadGestoriaClienteLibros = async (clienteIdOrOpts, empresaId = "") => {
       const pyg = data.pyg || [];
       const facturas = data.facturas || [];
       const facturasResumen = data.facturas_resumen || {};
+      if (!diario.length) {
+        console.warn("[conta] API /api/gestoria_libros devolvió diario vacío", {
+          clienteId,
+          empresaId: resolvedEmpresaId,
+        });
+      }
 
       state.gestoriaClienteLibrosCache = {
         diarioRaw: diario,
