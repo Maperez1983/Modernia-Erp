@@ -27885,6 +27885,79 @@ const renderClienteContabilidadPanel = () => {
     tipoPersona.includes("s.l") ||
     tipoPersona.includes("s.a");
   if (isEmpresaContable) {
+    const company = getWorkspaceCompanyById(state.currentWorkspaceCompanyWsId || state.currentWorkspaceCompanyId || companyScopeId) || {};
+    const companyId = String(state.currentWorkspaceCompanyId || companyScopeId || "").trim();
+    const companyName = String(
+      state.currentWorkspaceCompanyName
+      || company.nombre
+      || company.razon_social
+      || "Empresa"
+    ).trim() || "Empresa";
+    const bridge = document.createElement("div");
+    bridge.className = "stack";
+    bridge.innerHTML = `
+      <div class="form-card">
+        <div class="section-head">
+          <div>
+            <h3>Contabilidad de empresa</h3>
+            <p class="muted">${escapeHtml(companyName)} · shell independiente.</p>
+          </div>
+        </div>
+        <p class="muted">
+          La ficha de empresa ya tiene su propio shell contable. Este acceso evita reutilizar el router legado de gestoría.
+        </p>
+        <div class="grid cols-3 gap-2" id="workspaceCompanyContaBridgeSummary"></div>
+        <div class="form-actions" style="margin-top:12px; flex-wrap:wrap;">
+          <button type="button" class="secondary" data-company-conta-bridge-open="dashboard">Dashboard</button>
+          <button type="button" class="secondary" data-company-conta-bridge-open="diario">Libro diario</button>
+          <button type="button" class="secondary" data-company-conta-bridge-open="mayor">Libro mayor</button>
+          <button type="button" class="secondary" data-company-conta-bridge-open="balances">Balances</button>
+          <button type="button" class="secondary" data-company-conta-bridge-open="modelos">Modelos fiscales</button>
+          <button type="button" class="secondary" data-company-conta-bridge-open="asientos">Asientos</button>
+        </div>
+      </div>
+    `;
+    clienteEconomicosPanel.innerHTML = "";
+    clienteEconomicosPanel.appendChild(bridge);
+    const summary = bridge.querySelector("#workspaceCompanyContaBridgeSummary");
+    const renderBridgeSummary = () => {
+      const books = getWorkspaceCompanyContabilidadBooks() || {};
+      const modelos = getWorkspaceCompanyContabilidadModelos() || {};
+      const resultados = getWorkspaceCompanyContabilidadResultados() || {};
+      renderCompanyContaMetricCards(summary, [
+        { label: "Libro diario", value: numberFormatter.format(Array.isArray(books.diarioRaw) ? books.diarioRaw.length : 0), note: "Líneas cargadas" },
+        { label: "Libro mayor", value: numberFormatter.format(Array.isArray(books.mayorRaw) ? books.mayorRaw.length : 0), note: "Cuentas" },
+        { label: "Balances", value: numberFormatter.format(Array.isArray(books.balanceRaw) ? books.balanceRaw.length : 0), note: "Saldos" },
+        { label: "Modelos", value: numberFormatter.format(Array.isArray(modelos.rows) ? modelos.rows.length : 0), note: "Obligaciones" },
+        { label: "Asientos", value: numberFormatter.format(Array.isArray(resultados.asientos) ? resultados.asientos.length : 0), note: "Propuesta contable" },
+        { label: "Banco", value: numberFormatter.format(Array.isArray(resultados.movimientosBanco) ? resultados.movimientosBanco.length : 0), note: "Movimientos" },
+      ], "Cargando datos contables...");
+    };
+    renderBridgeSummary();
+    bridge.querySelectorAll("[data-company-conta-bridge-open]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const tab = String(btn.dataset.companyContaBridgeOpen || "dashboard").trim();
+        if (companyId && typeof openWorkspaceCompanyFicha === "function") {
+          openWorkspaceCompanyFicha(companyId, tab);
+        }
+      });
+    });
+    if (companyId) {
+      void Promise.all([
+        ensureWorkspaceCompanyContabilidadBooks(),
+        ensureWorkspaceCompanyContabilidadModelos(),
+        ensureWorkspaceCompanyContabilidadResultados(),
+      ])
+        .then(() => {
+          if (bridge.isConnected) renderBridgeSummary();
+        })
+        .catch(() => {});
+    }
+    return;
+  }
+
+  // Legacy company router disabled: la contabilidad de empresa se resuelve ahora en `workspaceCompanyFicha`.
+  if (false && isEmpresaContable) {
     const contaTabs = ["dashboard", "importacion", "validacion", "banco", "diarios", "modelos", "balances", "asientos"];
     const mainTabFromUrl = normalizeSimple(new URLSearchParams(window.location.search || "").get("conta") || "");
     const savedMainTab = normalizeSimple(state.clienteContaMainTab || "");
