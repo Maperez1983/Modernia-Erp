@@ -1,0 +1,244 @@
+import json
+import sqlite3
+import unittest
+from io import BytesIO
+
+from web import server
+
+
+class HipotecasFichaPdfTests(unittest.TestCase):
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        self.conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              nombre TEXT,
+              nif TEXT,
+              direccion TEXT,
+              telefono TEXT,
+              email TEXT,
+              created_at TEXT
+            );
+            CREATE TABLE hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              porcentaje REAL,
+              entrada REAL,
+              comision REAL,
+              oficina TEXT,
+              fecha_encargo TEXT,
+              encargo TEXT,
+              tipo_hipoteca TEXT,
+              fecha_firma TEXT,
+              cesion REAL,
+              comision_juan REAL,
+              comision_modernia REAL,
+              inmobiliaria_compra TEXT,
+              asesor TEXT,
+              estado TEXT,
+              anio INTEGER,
+              cliente_inmueble_json TEXT,
+              hipoteca_detalle_json TEXT,
+              liquidacion_json TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO clientes (
+              id, nombre, nif, direccion, telefono, email, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "c1",
+                "Ana López",
+                "12345678A",
+                "Calle Test 1",
+                "600000000",
+                "ana@example.com",
+                "2026-06-20",
+            ),
+        )
+        cliente_inmueble = {
+            "inmueble": {
+                "direccion": "Calle Test 1",
+                "localidad": "Málaga",
+                "provincia": "Málaga",
+            },
+            "intervinientes": [{"rol": "Avalista", "nombre": "Juan Pérez", "nif": "87654321B"}],
+            "comprador": {
+                "c1": {
+                    "nombre": "Ana López",
+                    "nif": "12345678A",
+                    "email": "ana@example.com",
+                    "telefono": "600000000",
+                    "domicilio": "Calle Test 1",
+                },
+                "c2": {
+                    "nombre": "Luis López",
+                    "nif": "22345678B",
+                    "email": "luis@example.com",
+                    "telefono": "611111111",
+                    "domicilio": "Calle Test 2",
+                    "mismo_domicilio": "No",
+                },
+            },
+            "prestataria": {
+                "p1": {"source": "c1", "nombre": "Ana López", "nif": "12345678A"},
+                "p2": {"source": "manual", "nombre": "Luis López", "nif": "22345678B"},
+            },
+        }
+        hipoteca_detalle = {
+            "condiciones": {"interes": 3.05, "cuota": 850},
+            "preferencias": {
+                "plazo_anos": 30,
+                "tipo_interes": "Fijo",
+                "garantia_vivienda_habitual": "Sí",
+                "comision_apertura_max": 1.0,
+                "otras": "Sin carencia",
+            },
+            "precontractual": {"registro": "BDE-123", "seguro_rc": "Seguro RC Profesional"},
+            "comentarios": "Revisar tasación",
+        }
+        liquidacion = {
+            "comprador": {
+                "cliente": "Ana López",
+                "vivienda": "Calle Test 1",
+                "localidad": "Málaga",
+                "provincia": "Málaga",
+                "precio_compra": 250000,
+                "escriturado": 250000,
+                "gastos_compraventa": {"notaria": 1200, "registro": 700, "itp": 17500, "gestoria": 500},
+                "hipoteca": {
+                    "notaria_impuestos_gestoria": 1400,
+                    "comision_apertura": 500,
+                    "cuota_socio": 250,
+                    "comision_cheques": 60,
+                    "seguro_proteccion_pago": 0,
+                    "seguro_hogar": 0,
+                    "seguro_vida": 0,
+                },
+                "entregas": {
+                    "senal": 10000,
+                    "transf_modernia": 5000,
+                    "ingresar_banco": 30000,
+                    "prestamo_concedido": 200000,
+                },
+                "gestion_inmobiliaria": 1000,
+                "gestion_financiacion": 750,
+            },
+            "vendedor": {
+                "cliente": "Ana López",
+                "direccion": "Calle Test 1",
+                "localidad": "Málaga",
+                "precio_vivienda": 250000,
+                "deducciones": {
+                    "senal": 10000,
+                    "cancelacion_economica": 0,
+                    "cancelacion_registral": 0,
+                    "deuda_ibi": 0,
+                    "plusvalia": 0,
+                    "retencion_no_residente": 0,
+                    "gestion_no_residente": 0,
+                },
+                "vendedores": {"v1": {"nombre": "Ana López", "nif": "12345678A"}},
+            },
+            "cuadre": {
+                "cheque1": {"beneficiario": "OMF Ana", "importe": 50000},
+                "cheque2": {"beneficiario": "OMF Luis", "importe": 30000},
+                "seguros": 0,
+            },
+            "notaria": {
+                "nombre": "Notaría Centro",
+                "contacto": "José",
+                "atencion": "Dpto Hipotecas",
+                "entidad": "CaixaBank",
+                "op_referencia": "OP-1",
+                "fecha_hora_firma": "20/06/2026 10:00",
+                "forma_pago": "Transferencia",
+                "observaciones": "Sin incidencias",
+            },
+            "prestamo": {
+                "tipo_salida": "Euribor",
+                "revision": 12,
+                "interes": 3.05,
+                "plazo_anos": 30,
+                "numero_cuotas": 360,
+                "cuota_inicial": 850,
+                "apertura": 1.0,
+                "cancelacion_parcial": 0.25,
+                "cancelacion": 0.25,
+            },
+        }
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
+              oficina, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan, comision_modernia,
+              inmobiliaria_compra, asesor, estado, anio, cliente_inmueble_json, hipoteca_detalle_json, liquidacion_json,
+              created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            """,
+            (
+                "h1",
+                "e1",
+                "Ana López",
+                "c1",
+                "CaixaBank",
+                250000,
+                200000,
+                80,
+                50000,
+                3000,
+                "Modernia Centro",
+                "2026-06-12",
+                "Sí",
+                "Compra",
+                "2026-06-20",
+                600,
+                600,
+                1800,
+                "Inmo Sur",
+                "María",
+                "Firmada",
+                2026,
+                json.dumps(cliente_inmueble, ensure_ascii=False),
+                json.dumps(hipoteca_detalle, ensure_ascii=False),
+                json.dumps(liquidacion, ensure_ascii=False),
+                "2026-06-20",
+                "2026-06-20",
+            ),
+        )
+        self.conn.commit()
+
+    def tearDown(self):
+        self.conn.close()
+
+    def test_build_hipoteca_ficha_pdf_generates_full_and_sectioned_docs(self):
+        row = self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone()
+        payload = server.build_hipoteca_ficha_payload(self.conn, row)
+
+        full_pdf = server.build_hipoteca_ficha_pdf(payload)
+        comprador_pdf = server.build_hipoteca_ficha_pdf(payload, section="comprador")
+
+        self.assertTrue(full_pdf.startswith(b"%PDF"))
+        self.assertTrue(comprador_pdf.startswith(b"%PDF"))
+        self.assertGreater(len(full_pdf), len(comprador_pdf))
+        self.assertIn("liquidacion_print", payload)
+        self.assertIn("liq", payload["liquidacion_print"])
+        self.assertGreater(payload["liquidacion_print"]["liq"]["comprador"]["suma_total_necesaria"], 0)
+
+        if server.PdfReader is not None:
+            reader = server.PdfReader(BytesIO(full_pdf))
+            self.assertGreaterEqual(len(reader.pages), 1)

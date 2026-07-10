@@ -6417,6 +6417,398 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
 </html>"""
 
 
+def _hipoteca_ficha_row_text(row, key, default=""):
+    if row is None:
+        return default
+    try:
+        if isinstance(row, dict):
+            value = row.get(key)
+        elif hasattr(row, "keys") and key in row.keys():
+            value = row[key]
+        else:
+            return default
+    except Exception:
+        return default
+    text = str(value or "").strip()
+    return text or default
+
+
+def _hipoteca_ficha_bool_text(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return "—"
+    normalized = normalize_lookup_text(raw)
+    if normalized in {"SI", "S", "TRUE", "1", "YES", "Y"}:
+        return "Sí"
+    if normalized in {"NO", "FALSE", "0", "N"}:
+        return "No"
+    return raw
+
+
+def _hipoteca_ficha_money(value, default="—"):
+    if value in (None, ""):
+        return default
+    try:
+        amount = parse_money_value(value)
+    except Exception:
+        amount = None
+    if amount is None:
+        text = str(value or "").strip()
+        return text or default
+    return format_eur(amount)
+
+
+def _hipoteca_ficha_num(value, decimals=2, default="—"):
+    if value in (None, ""):
+        return default
+    parsed = parse_optional_float(value)
+    if parsed is None:
+        text = str(value or "").strip()
+        return text or default
+    try:
+        amount = float(parsed)
+    except Exception:
+        text = str(value or "").strip()
+        return text or default
+    raw = f"{amount:,.{int(decimals)}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    if int(decimals) > 0:
+        raw = raw.rstrip("0").rstrip(",")
+    return raw
+
+
+def _hipoteca_ficha_json_lines(raw_value):
+    text = str(raw_value or "").strip()
+    if not text:
+        return ["{}"]
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return text.splitlines() or [text]
+    try:
+        return json.dumps(parsed, ensure_ascii=False, indent=2, sort_keys=True).splitlines()
+    except Exception:
+        return text.splitlines() or [text]
+
+
+def _hipoteca_ficha_intervinientes_text(cliente_inmueble):
+    intervinientes = _get_nested(cliente_inmueble or {}, "intervinientes", [])
+    if not isinstance(intervinientes, list):
+        return "—"
+    parts = []
+    for item in intervinientes:
+        if not isinstance(item, dict):
+            continue
+        rol = str(item.get("rol") or item.get("tipo") or "Interviniente").strip()
+        nombre = str(item.get("nombre") or item.get("name") or "").strip()
+        nif = str(item.get("nif") or item.get("dni") or "").strip()
+        chunk = " · ".join([part for part in [rol, nombre, nif] if part])
+        if chunk:
+            parts.append(chunk)
+    return " | ".join(parts) if parts else "—"
+
+
+def build_hipoteca_ficha_payload(conn, row):
+    payload = build_hipoteca_export_row(conn, row)
+    payload["empresa_id"] = _hipoteca_ficha_row_text(row, "empresa_id")
+    payload["created_at"] = _hipoteca_ficha_row_text(row, "created_at")
+    payload["updated_at"] = _hipoteca_ficha_row_text(row, "updated_at")
+    payload["cliente_inmueble_json"] = _hipoteca_ficha_row_text(row, "cliente_inmueble_json")
+    payload["hipoteca_detalle_json"] = _hipoteca_ficha_row_text(row, "hipoteca_detalle_json")
+    payload["liquidacion_json"] = _hipoteca_ficha_row_text(row, "liquidacion_json")
+    liquidacion_raw = _safe_json_object(payload.get("liquidacion_json") or "{}")
+    payload["liquidacion_print"] = compute_hipoteca_liquidacion_print_data(payload, liquidacion_raw)
+    return payload
+
+
+def build_hipoteca_ficha_pdf(payload, section=None):
+    payload = payload or {}
+    liq_payload = payload.get("liquidacion_print")
+    if not isinstance(liq_payload, dict) or not liq_payload:
+        liq_payload = compute_hipoteca_liquidacion_print_data(payload, _safe_json_object(payload.get("liquidacion_json") or "{}"))
+    liq = liq_payload.get("liq") if isinstance(liq_payload.get("liq"), dict) else {}
+    flags = liq_payload.get("flags") if isinstance(liq_payload.get("flags"), dict) else {}
+
+    cliente_inmueble = _safe_json_object(payload.get("cliente_inmueble_json") or "{}")
+    hipoteca_detalle = _safe_json_object(payload.get("hipoteca_detalle_json") or "{}")
+    liquidacion_raw = _safe_json_object(payload.get("liquidacion_json") or "{}")
+
+    comprador = liq.get("comprador") if isinstance(liq.get("comprador"), dict) else {}
+    gastos_cv = comprador.get("gastos_compraventa") if isinstance(comprador.get("gastos_compraventa"), dict) else {}
+    hip = comprador.get("hipoteca") if isinstance(comprador.get("hipoteca"), dict) else {}
+    entregas = comprador.get("entregas") if isinstance(comprador.get("entregas"), dict) else {}
+    vendedor = liq.get("vendedor") if isinstance(liq.get("vendedor"), dict) else {}
+    vendedor_ded = vendedor.get("deducciones") if isinstance(vendedor.get("deducciones"), dict) else {}
+    vendedor_vendedores = vendedor.get("vendedores") if isinstance(vendedor.get("vendedores"), dict) else {}
+    vend_v1 = vendedor_vendedores.get("v1") if isinstance(vendedor_vendedores.get("v1"), dict) else {}
+    vend_v2 = vendedor_vendedores.get("v2") if isinstance(vendedor_vendedores.get("v2"), dict) else {}
+    cuadre = liq.get("cuadre") if isinstance(liq.get("cuadre"), dict) else {}
+    cuadre_cheq1 = cuadre.get("cheque1") if isinstance(cuadre.get("cheque1"), dict) else {}
+    cuadre_cheq2 = cuadre.get("cheque2") if isinstance(cuadre.get("cheque2"), dict) else {}
+    cuadre_gastos = cuadre.get("gastos_escrituras") if isinstance(cuadre.get("gastos_escrituras"), dict) else {}
+    notaria = liq.get("notaria") if isinstance(liq.get("notaria"), dict) else {}
+    prestamo = liq.get("prestamo") if isinstance(liq.get("prestamo"), dict) else {}
+
+    def text(value, default="—"):
+        raw = str(value or "").strip()
+        return raw if raw else default
+
+    def money(value, default="—"):
+        return _hipoteca_ficha_money(value, default=default)
+
+    def num(value, decimals=2, default="—"):
+        return _hipoteca_ficha_num(value, decimals=decimals, default=default)
+
+    def pct(value, decimals=2, default="—"):
+        raw = _hipoteca_ficha_num(value, decimals=decimals, default=default)
+        if raw == default:
+            return default
+        return f"{raw} %"
+
+    def date_text(value):
+        parsed = parse_iso_date(value)
+        if parsed:
+            return parsed.strftime("%d/%m/%Y")
+        return text(value)
+
+    def nested(obj, path, default="—"):
+        raw = _get_nested(obj or {}, path, default)
+        if raw in (None, ""):
+            return default
+        if isinstance(raw, (dict, list)):
+            return default
+        return str(raw).strip() or default
+
+    resumen_cards = {
+        "kind": "kpi_cards",
+        "columns": 3,
+        "items": [
+            {"label": "Cliente", "value": text(payload.get("cliente")), "accent": True},
+            {"label": "Banco", "value": text(payload.get("banco"))},
+            {"label": "Importe hipoteca", "value": money(payload.get("importe_hipoteca"))},
+            {"label": "Precio compra", "value": money(payload.get("precio"))},
+            {"label": "% financiación", "value": pct(payload.get("porcentaje"))},
+            {"label": "Comisión cliente", "value": money(payload.get("honorarios"))},
+        ],
+    }
+
+    general_lines = [
+        ("ID operación", text(payload.get("id"))),
+        ("Empresa ID", text(payload.get("empresa_id"))),
+        ("Cliente ID", text(payload.get("cliente_id"))),
+        ("Cliente", text(payload.get("cliente"))),
+        ("NIF cliente", text(payload.get("cliente_nif"))),
+        ("Teléfono", text(payload.get("cliente_telefono"))),
+        ("Email", text(payload.get("cliente_email"))),
+        ("Banco", text(payload.get("banco"))),
+        ("Oficina", text(payload.get("oficina"))),
+        ("Inmobiliaria compra", text(payload.get("inmobiliaria"))),
+        ("Asesor", text(payload.get("asesor"))),
+        ("Estado", text(payload.get("estado"))),
+        ("Encargo", text(payload.get("encargo"))),
+        ("Tipo hipoteca", text(payload.get("tipo_hipoteca"))),
+        ("Fecha encargo", date_text(payload.get("fecha_encargo"))),
+        ("Fecha firma", date_text(payload.get("fecha_firma"))),
+        ("Año", text(payload.get("anio"))),
+        ("Creado", text(payload.get("created_at"))),
+        ("Actualizado", text(payload.get("updated_at"))),
+    ]
+
+    importes_lines = [
+        ("Precio compra", money(payload.get("precio"))),
+        ("Importe hipoteca", money(payload.get("importe_hipoteca"))),
+        ("% financiación", pct(payload.get("porcentaje"))),
+        ("Entrada", money(payload.get("entrada"))),
+        ("Comisión cliente", money(payload.get("honorarios"))),
+        ("Cesión banco", money(payload.get("cesion"))),
+        ("Comisión Juan", money(payload.get("comision_juan"))),
+        ("Comisión Modernia", money(payload.get("comision_modernia"))),
+    ]
+
+    cliente_lines = [
+        ("Inmueble · Dirección", nested(cliente_inmueble, "inmueble.direccion")),
+        ("Inmueble · Localidad", nested(cliente_inmueble, "inmueble.localidad")),
+        ("Inmueble · Provincia", nested(cliente_inmueble, "inmueble.provincia")),
+        ("Intervinientes", _hipoteca_ficha_intervinientes_text(cliente_inmueble)),
+        ("C1 · Nombre", nested(cliente_inmueble, "comprador.c1.nombre")),
+        ("C1 · NIF/NIE", nested(cliente_inmueble, "comprador.c1.nif")),
+        ("C1 · Email", nested(cliente_inmueble, "comprador.c1.email")),
+        ("C1 · Teléfono", nested(cliente_inmueble, "comprador.c1.telefono")),
+        ("C1 · Domicilio", nested(cliente_inmueble, "comprador.c1.domicilio")),
+        ("C2 · Nombre", nested(cliente_inmueble, "comprador.c2.nombre")),
+        ("C2 · NIF/NIE", nested(cliente_inmueble, "comprador.c2.nif")),
+        ("C2 · Email", nested(cliente_inmueble, "comprador.c2.email")),
+        ("C2 · Teléfono", nested(cliente_inmueble, "comprador.c2.telefono")),
+        ("C2 · Domicilio", nested(cliente_inmueble, "comprador.c2.domicilio")),
+        ("C2 · Mismo domicilio", _hipoteca_ficha_bool_text(nested(cliente_inmueble, "comprador.c2.mismo_domicilio"))),
+        ("Prestatario 1 · Fuente", nested(cliente_inmueble, "prestataria.p1.source")),
+        ("Prestatario 1 · Nombre", nested(cliente_inmueble, "prestataria.p1.nombre")),
+        ("Prestatario 1 · NIF/NIE", nested(cliente_inmueble, "prestataria.p1.nif")),
+        ("Prestatario 2 · Fuente", nested(cliente_inmueble, "prestataria.p2.source")),
+        ("Prestatario 2 · Nombre", nested(cliente_inmueble, "prestataria.p2.nombre")),
+        ("Prestatario 2 · NIF/NIE", nested(cliente_inmueble, "prestataria.p2.nif")),
+    ]
+
+    hipoteca_lines = [
+        ("Condiciones · Interés", num(nested(hipoteca_detalle, "condiciones.interes"), 4)),
+        ("Condiciones · Cuota", money(nested(hipoteca_detalle, "condiciones.cuota"))),
+        ("Preferencias · Plazo amortización (años)", num(nested(hipoteca_detalle, "preferencias.plazo_anos"), 0)),
+        ("Preferencias · Tipo interés", nested(hipoteca_detalle, "preferencias.tipo_interes")),
+        ("Preferencias · Garantía vivienda habitual", _hipoteca_ficha_bool_text(nested(hipoteca_detalle, "preferencias.garantia_vivienda_habitual"))),
+        ("Preferencias · Comisión apertura máx.", money(nested(hipoteca_detalle, "preferencias.comision_apertura_max"))),
+        ("Preferencias · Otras", nested(hipoteca_detalle, "preferencias.otras")),
+        ("Precontractual · Registro", nested(hipoteca_detalle, "precontractual.registro")),
+        ("Precontractual · Seguro RC", nested(hipoteca_detalle, "precontractual.seguro_rc")),
+        ("Comentarios", nested(hipoteca_detalle, "comentarios")),
+    ]
+
+    comprador_lines = [
+        ("Cliente", text(nested(comprador, "cliente", payload.get("cliente")))),
+        ("Vivienda", nested(comprador, "vivienda")),
+        ("Localidad", nested(comprador, "localidad")),
+        ("Provincia", nested(comprador, "provincia")),
+        ("Precio compra vivienda", money(nested(comprador, "precio_compra"))),
+        ("Escriturado", money(nested(comprador, "escriturado"))),
+        ("Notaría (compraventa)", money(nested(gastos_cv, "notaria"))),
+        ("Registro propiedad", money(nested(gastos_cv, "registro"))),
+        ("Impuesto transmisiones", money(nested(gastos_cv, "itp"))),
+        ("Gestoría", money(nested(gastos_cv, "gestoria"))),
+        ("Total gastos compraventa", money(nested(gastos_cv, "total"))),
+        ("Notaría, impuestos y gestoría (hipoteca)", money(nested(hip, "notaria_impuestos_gestoria"))),
+        ("Comisión apertura", money(nested(hip, "comision_apertura"))),
+        ("Cuota socio caja", money(nested(hip, "cuota_socio"))),
+        ("Comisión cheques/OMF", money(nested(hip, "comision_cheques"))),
+        ("Seguro protección de pago", money(nested(hip, "seguro_proteccion_pago"))),
+        ("Seguro hogar", money(nested(hip, "seguro_hogar"))),
+        ("Seguro vida", money(nested(hip, "seguro_vida"))),
+        ("Total gastos bloque", money(nested(hip, "total_bloque"))),
+        ("Total necesario", money(nested(hip, "total_necesario"))),
+        ("Gestión inmobiliaria", money(nested(comprador, "gestion_inmobiliaria"))),
+        ("Gestión financiación", money(nested(comprador, "gestion_financiacion"))),
+        ("Suma total necesaria", money(nested(comprador, "suma_total_necesaria"))),
+        ("Señal", money(nested(entregas, "senal"))),
+        ("Transf. a Modernia", money(nested(entregas, "transf_modernia"))),
+        ("A ingresar en banco", money(nested(entregas, "ingresar_banco"))),
+        ("Préstamo concedido", money(nested(entregas, "prestamo_concedido"))),
+        ("Suma total entregada", money(nested(comprador, "suma_total_entregada"))),
+        ("Sobran en cuenta", money(nested(comprador, "sobran_en_cuenta"))),
+        ("Protección financiada", _hipoteca_ficha_bool_text(flags.get("proteccion_financiado"))),
+        ("Hogar financiado", _hipoteca_ficha_bool_text(flags.get("hogar_financiado"))),
+        ("Vida financiada", _hipoteca_ficha_bool_text(flags.get("vida_financiado"))),
+    ]
+
+    vendedor_lines = [
+        ("Cliente", text(nested(vendedor, "cliente", payload.get("cliente")))),
+        ("Dirección", nested(vendedor, "direccion")),
+        ("Localidad", nested(vendedor, "localidad")),
+        ("Precio vivienda", money(nested(vendedor, "precio_vivienda"))),
+        ("Deducciones (texto)", nested(vendedor, "deducciones_nota")),
+        ("Señal", money(nested(vendedor_ded, "senal"))),
+        ("Cancelación económica préstamo", money(nested(vendedor_ded, "cancelacion_economica"))),
+        ("Cancelación registral préstamo", money(nested(vendedor_ded, "cancelacion_registral"))),
+        ("Deuda IBI", money(nested(vendedor_ded, "deuda_ibi"))),
+        ("Plusvalía municipal", money(nested(vendedor_ded, "plusvalia"))),
+        ("Retención 3% no residente", money(nested(vendedor_ded, "retencion_no_residente"))),
+        ("Gestión no residente", money(nested(vendedor_ded, "gestion_no_residente"))),
+        ("Subtotal pte. percibir", money(nested(vendedor, "subtotal_pte_percibir"))),
+        ("Total a percibir", money(nested(vendedor, "total_a_percibir"))),
+        ("Vendedor 1", " · ".join([part for part in [text(nested(vend_v1, "nombre")), text(nested(vend_v1, "nif"))] if part and part != "—"]) or "—"),
+        ("Vendedor 2", " · ".join([part for part in [text(nested(vend_v2, "nombre")), text(nested(vend_v2, "nif"))] if part and part != "—"]) or "—"),
+        ("Registro", nested(vendedor, "registro")),
+        ("Finca", nested(vendedor, "finca")),
+        ("Notas", nested(vendedor, "notas")),
+    ]
+
+    cheques_lines = [
+        ("Préstamo concedido", money(nested(cuadre, "prestamo_concedido"))),
+        ("Ingreso en cuenta", money(nested(cuadre, "ingreso_en_cuenta"))),
+        ("Seguros", money(nested(cuadre, "seguros"))),
+        ("Cheque 1 · Beneficiario", nested(cuadre_cheq1, "beneficiario")),
+        ("Cheque 1 · Importe", money(nested(cuadre_cheq1, "importe"))),
+        ("Cheque 2 · Beneficiario", nested(cuadre_cheq2, "beneficiario")),
+        ("Cheque 2 · Importe", money(nested(cuadre_cheq2, "importe"))),
+        ("Cancelación económica préstamo", money(nested(cuadre, "cancelacion_economica"))),
+        ("Retención cancelación registral", money(nested(cuadre, "retencion_cancelacion_registral"))),
+        ("Retención deuda IBI", money(nested(cuadre, "retencion_ibi"))),
+        ("Retención 3% no residente", money(nested(cuadre, "retencion_no_residente"))),
+        ("Gestión no residente", money(nested(cuadre, "gestion_no_residente"))),
+        ("Gastos escrituras · Compraventa", money(nested(cuadre_gastos, "compraventa"))),
+        ("Gastos escrituras · Hipoteca", money(nested(cuadre_gastos, "hipoteca"))),
+        ("Gastos escrituras · Com. apertura", money(nested(cuadre_gastos, "com_apertura"))),
+        ("Comisión cheques/OMF", money(nested(cuadre, "comision_cheques"))),
+        ("Cuota socio caja", money(nested(cuadre, "cuota_socio"))),
+        ("Total salidas", money(nested(cuadre, "total_salidas"))),
+        ("Total medios de pago", money(nested(cuadre, "total_medios_pago"))),
+        ("Diferencia vs escriturado", money(nested(cuadre, "diferencia_medios_pago"))),
+        ("Sobran en cuenta (auto)", money(nested(cuadre, "sobran_en_cuenta"))),
+        ("Cuadre sobrante OK", _hipoteca_ficha_bool_text(flags.get("cuadre_sobrante_ok"))),
+        ("Δ sobrante", _hipoteca_ficha_num(flags.get("cuadre_sobrante_delta"), 2)),
+    ]
+
+    notaria_lines = [
+        ("Notaría", nested(notaria, "nombre")),
+        ("Contacto", nested(notaria, "contacto")),
+        ("Atención", nested(notaria, "atencion")),
+        ("Entidad hipoteca", nested(notaria, "entidad")),
+        ("Op. referencia", nested(notaria, "op_referencia")),
+        ("Fecha y hora firma", nested(notaria, "fecha_hora_firma")),
+        ("Forma de pago", nested(notaria, "forma_pago")),
+        ("Observaciones", nested(notaria, "observaciones")),
+        ("Tipo salida", nested(prestamo, "tipo_salida")),
+        ("Revisión", _hipoteca_ficha_num(nested(prestamo, "revision"), 4)),
+        ("Interés", _hipoteca_ficha_num(nested(prestamo, "interes"), 6)),
+        ("Plazo (años)", _hipoteca_ficha_num(nested(prestamo, "plazo_anos"), 0)),
+        ("Nº cuotas", _hipoteca_ficha_num(nested(prestamo, "numero_cuotas"), 0)),
+        ("Cuota inicial", money(nested(prestamo, "cuota_inicial"))),
+        ("Apertura", _hipoteca_ficha_num(nested(prestamo, "apertura"), 4)),
+        ("Ca. parcial", _hipoteca_ficha_num(nested(prestamo, "cancelacion_parcial"), 4)),
+        ("Cancelación", _hipoteca_ficha_num(nested(prestamo, "cancelacion"), 4)),
+    ]
+
+    sections = [
+        ("Resumen", resumen_cards),
+        ("Datos generales", general_lines),
+        ("Importes de operación", importes_lines),
+        ("Cliente e inmueble", cliente_lines),
+        ("Hipoteca y condiciones", hipoteca_lines),
+        ("Liquidación comprador", comprador_lines),
+        ("Liquidación vendedor", vendedor_lines),
+        ("Cuadre de cheques", cheques_lines),
+        ("Notaría y préstamo", notaria_lines),
+        ("JSON · cliente e inmueble", _hipoteca_ficha_json_lines(payload.get("cliente_inmueble_json") or "{}")),
+        ("JSON · hipoteca detalle", _hipoteca_ficha_json_lines(payload.get("hipoteca_detalle_json") or "{}")),
+        ("JSON · liquidación", _hipoteca_ficha_json_lines(payload.get("liquidacion_json") or "{}")),
+    ]
+
+    section_key = normalize_lookup_text(section or "")
+    if section_key in {"COMPRADOR", "VENDEDOR", "CHEQUES", "NOTARIA"}:
+        keep_map = {
+            "COMPRADOR": {"Resumen", "Datos generales", "Importes de operación", "Liquidación comprador"},
+            "VENDEDOR": {"Resumen", "Datos generales", "Importes de operación", "Liquidación vendedor"},
+            "CHEQUES": {"Resumen", "Datos generales", "Importes de operación", "Cuadre de cheques"},
+            "NOTARIA": {"Resumen", "Datos generales", "Importes de operación", "Notaría y préstamo"},
+        }
+        sections = [item for item in sections if item[0] in keep_map[section_key]]
+
+    subtitle_parts = [text(payload.get("cliente")), text(payload.get("banco"))]
+    fecha_firma_text = date_text(payload.get("fecha_firma"))
+    if fecha_firma_text and fecha_firma_text != "—":
+        subtitle_parts.append(f"Firma {fecha_firma_text}")
+    subtitle = " · ".join([part for part in subtitle_parts if part and part != "—"])
+    subtitle = subtitle or text(payload.get("id"))
+    footer = [
+        "Documento interno generado por el CRM Financiaciones.",
+        "Revisar la liquidación y los datos técnicos antes de usarlo fuera del expediente.",
+    ]
+    return build_modernia_branded_document_pdf(
+        "FICHA DE HIPOTECA",
+        subtitle,
+        sections,
+        footer_lines=footer,
+        company={},
+        brand_logo_url="/assets/grupo_modernia_logo.png",
+    )
+
+
 def derive_hipoteca_inmobiliaria_cost(row):
     total = parse_money_value((row.get("comision") if isinstance(row, dict) else row["comision"]) or 0)
     juan = parse_money_value((row.get("comision_juan") if isinstance(row, dict) else row["comision_juan"]) or 0)
@@ -87469,6 +87861,33 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"counts": counts, "items": items})
             return
 
+        if path == "/api/hipoteca_ficha_pdf":
+            record_id = (params.get("id", [""])[0] or "").strip()
+            section = (params.get("section", [""])[0] or "").strip()
+            if not record_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT *
+                FROM hipotecas
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (record_id,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "Hipoteca no encontrada"}, status=404)
+                return
+            try:
+                payload = build_hipoteca_ficha_payload(conn, row)
+                pdf_bytes = build_hipoteca_ficha_pdf(payload, section=section)
+            except Exception as exc:
+                json_response(self, {"error": str(exc) or "No se pudo generar el PDF"}, status=500)
+                return
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=None)
+            return
+
         if path == "/api/hipoteca_ficha_print":
             record_id = (params.get("id", [""])[0] or "").strip()
             section = (params.get("section", [""])[0] or "").strip()
@@ -87488,14 +87907,7 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Hipoteca no encontrada"}, status=404)
                 return
-            liquidacion_raw = {}
-            try:
-                if "liquidacion_json" in row.keys():
-                    liquidacion_raw = _safe_json_object(row["liquidacion_json"] or "{}")
-            except Exception:
-                liquidacion_raw = {}
-            export_row = build_hipoteca_export_row(conn, row)
-            export_row["liquidacion_print"] = compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw)
+            export_row = build_hipoteca_ficha_payload(conn, row)
             content = render_hipoteca_print_html(
                 export_row,
                 auto_print=auto_print,

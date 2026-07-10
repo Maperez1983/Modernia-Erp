@@ -42605,7 +42605,7 @@ const ensureHipotecaFichaPanel = () => {
         if (!ok) return;
       }
       const recordId = String(panel.dataset.recordId || "").trim();
-      if (recordId) openHipotecaFichaPrint(recordId, section);
+      if (recordId) openHipotecaFichaPdf(recordId, section);
     });
   };
   bindPdf("#hipotecaFichaPdfComprador", "comprador");
@@ -43653,6 +43653,19 @@ const openHipotecaFichaPrint = (recordId, section = "") => {
   }
 };
 
+const openHipotecaFichaPdf = (recordId, section = "") => {
+  const id = String(recordId || "").trim();
+  if (!id) return;
+  const params = new URLSearchParams({ id });
+  const normalized = String(section || "").trim();
+  if (normalized) params.set("section", normalized);
+  const url = `/api/hipoteca_ficha_pdf?${params.toString()}`;
+  const w = window.open(url, "_blank", "noopener");
+  if (!w) {
+    alert("No se pudo abrir el PDF. Revisa si el navegador está bloqueando pop-ups para este sitio.");
+  }
+};
+
 const downloadHipotecasFirmadasExcel = () => {
   const empresa = resolveCrmFinEmpresa();
   const empresaId = resolveLegacyEmpresaId(empresa);
@@ -44486,7 +44499,7 @@ const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
 	    pdfBtn.textContent = "PDF";
     pdfBtn.disabled = !canGeneratePdf;
     pdfBtn.title = canGeneratePdf ? "" : "Disponible solo para firmadas con fecha de firma.";
-    pdfBtn.addEventListener("click", () => openHipotecaFichaPrint(recordId));
+    pdfBtn.addEventListener("click", () => openHipotecaFichaPdf(recordId));
 
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
@@ -44578,7 +44591,7 @@ const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
     pdfBtn.disabled = !canGeneratePdf;
     pdfBtn.title = canGeneratePdf ? "" : "Disponible solo para firmadas con fecha de firma.";
     pdfBtn.addEventListener("click", () => {
-      openHipotecaFichaPrint(recordId);
+      openHipotecaFichaPdf(recordId);
     });
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
