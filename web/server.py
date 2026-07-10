@@ -3840,6 +3840,89 @@ def find_existing_seguro_id(conn, empresa_id, poliza_numero, compania, exclude_i
     return ""
 
 
+def find_reusable_hipoteca_open_record(
+    conn,
+    empresa_id,
+    *,
+    cliente=None,
+    cliente_id=None,
+    fecha_encargo=None,
+    precio=None,
+    importe_hipoteca=None,
+    banco=None,
+    oficina=None,
+    exclude_id=None,
+):
+    cols = table_columns(conn, "hipotecas") or set()
+    if not empresa_id or "empresa_id" not in cols:
+        return None
+    where = ["empresa_id = ?"]
+    values = [empresa_id]
+    if "estado" in cols:
+        where.append("LOWER(TRIM(COALESCE(estado, ''))) IN (?, ?, ?)")
+        values.extend(["estudio", "encargo", "pendiente"])
+    fecha_encargo_text = str(fecha_encargo or "").strip()
+    if fecha_encargo_text and "fecha_encargo" in cols:
+        where.append("NULLIF(TRIM(COALESCE(fecha_encargo, '')), '') = NULLIF(TRIM(?), '')")
+        values.append(fecha_encargo_text)
+    precio_val = parse_optional_float(precio)
+    if precio_val is not None and "precio" in cols:
+        where.append("precio = ?")
+        values.append(precio_val)
+    importe_val = parse_optional_float(importe_hipoteca)
+    if importe_val is not None and "importe_hipoteca" in cols:
+        where.append("importe_hipoteca = ?")
+        values.append(importe_val)
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM hipotecas
+        WHERE {" AND ".join(where)}
+        ORDER BY COALESCE(NULLIF(updated_at, ''), NULLIF(created_at, '')) DESC
+        """,
+        values,
+    ).fetchall()
+    cliente_id_norm = str(cliente_id or "").strip()
+    cliente_norm = normalize_lookup_text(cliente)
+    banco_norm = normalize_lookup_text(banco)
+    oficina_norm = normalize_lookup_text(oficina)
+    for row in rows or []:
+        row_id = str(row_value(row, "id") or "").strip()
+        if exclude_id and row_id == str(exclude_id or "").strip():
+            continue
+        row_cliente_id = str(row_value(row, "cliente_id") or "").strip() if "cliente_id" in cols else ""
+        row_cliente_norm = normalize_lookup_text(row_value(row, "cliente") or "") if "cliente" in cols else ""
+        if cliente_id_norm:
+            if row_cliente_id:
+                if row_cliente_id != cliente_id_norm:
+                    continue
+            elif cliente_norm:
+                if row_cliente_norm != cliente_norm:
+                    continue
+            else:
+                continue
+        elif cliente_norm:
+            if row_cliente_norm != cliente_norm:
+                continue
+        else:
+            continue
+        if banco_norm and "banco" in cols:
+            row_banco_norm = normalize_lookup_text(row_value(row, "banco") or "")
+            if row_banco_norm and row_banco_norm != banco_norm:
+                continue
+        if oficina_norm:
+            row_oficina_raw = ""
+            if "oficina" in cols:
+                row_oficina_raw = str(row_value(row, "oficina") or "").strip()
+            if not row_oficina_raw and "inmobiliaria_compra" in cols:
+                row_oficina_raw = str(row_value(row, "inmobiliaria_compra") or "").strip()
+            row_oficina_norm = normalize_lookup_text(row_oficina_raw)
+            if row_oficina_norm and row_oficina_norm != oficina_norm:
+                continue
+        return row
+    return None
+
+
 def normalize_lookup_text(value):
     if not value:
         return ""
@@ -4943,6 +5026,9 @@ MALAGA_BONUS_OFFICES = {
     "MODERNIA NORTE",
     "MODERNIA OESTE",
     "MODERNIA CENTRO",
+    "VERIFIKA2 NORTE",
+    "VERIFIKA2 OESTE",
+    "VERIFIKA2 CENTRO",
     "MALAGA NORTE",
     "MALAGA OESTE",
     "MALAGA CENTRO",
@@ -26925,23 +27011,6 @@ def ensure_fin_followup_action(
 def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
     if not row:
         return None
-    existing = conn.execute(
-        """
-        SELECT id
-        FROM hipotecas
-        WHERE empresa_id = ?
-          AND cliente_id = ?
-          AND fecha_encargo = ?
-        LIMIT 1
-        """,
-        (empresa_id, row["cliente1_id"], row["fecha"]),
-    ).fetchone()
-    if existing:
-        conn.execute(
-            "UPDATE asesoramientos_financiacion SET estado = ?, updated_at = datetime(?) WHERE id = ?",
-            ("Convertido", now, row["id"]),
-        )
-        return existing["id"]
     precio_inmueble = None
     inmueble_id = ""
     try:
@@ -26980,6 +27049,7 @@ def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
     except Exception:
         ocr_text = ""
     ocr_clean = re.sub(r"\s+", " ", (ocr_text or "").replace("\u00a0", " ")).strip()
+    ocr_fields = {}
 
     def _pick_float(patterns):
         for pat in patterns:
@@ -27033,7 +27103,17 @@ def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
             now,
             {"telefono": ocr_fields.get("cliente1_telefono"), "email": ocr_fields.get("cliente1_email")},
         )
-    cliente_nombre = row["cliente1_nombre"] or ""
+    if cliente1_id and not str(row["cliente1_id"] or "").strip():
+        try:
+            conn.execute(
+                "UPDATE asesoramientos_financiacion SET cliente1_id = ?, updated_at = datetime(?) WHERE id = ?",
+                (cliente1_id, now, row["id"]),
+            )
+        except Exception:
+            pass
+    cliente_nombre = str(row["cliente1_nombre"] or "").strip()
+    if not cliente_nombre and ocr_fields:
+        cliente_nombre = str(ocr_fields.get("cliente1_nombre") or "").strip()
     if row["cliente2_nombre"]:
         cliente_nombre = f"{cliente_nombre} / {row['cliente2_nombre']}".strip(" /")
     fecha = row["fecha"] or ""
@@ -27041,6 +27121,21 @@ def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
         anio = int(fecha.split("/")[-1]) if "/" in fecha else int(fecha.split("-")[0])
     except Exception:
         anio = None
+    existing = find_reusable_hipoteca_open_record(
+        conn,
+        empresa_id,
+        cliente=cliente_nombre,
+        cliente_id=cliente1_id,
+        fecha_encargo=fecha,
+        precio=precio_inmueble if precio_inmueble not in (None, "", 0, 0.0) else ocr_precio,
+        importe_hipoteca=ocr_importe,
+    )
+    if existing:
+        conn.execute(
+            "UPDATE asesoramientos_financiacion SET estado = ?, updated_at = datetime(?) WHERE id = ?",
+            ("Convertido", now, row["id"]),
+        )
+        return existing["id"]
     hipoteca_id = os.urandom(16).hex()
     conn.execute(
         """
@@ -32874,6 +32969,81 @@ def compute_gestoria_renta_campaigns_total(conn, empresa_id, ejercicio=""):
         latest_year = max(year_counts.keys())
         return {"ejercicio": latest_year, "count": int(year_counts.get(latest_year, 0))}
     return {"ejercicio": ejercicio_val, "count": int(total)}
+
+
+def compute_gestoria_dashboard_segmentacion_trabajos(conn, empresa_ids):
+    empresa_ids = empresa_ids if isinstance(empresa_ids, (list, tuple, set)) else [empresa_ids]
+    empresa_ids = [str(eid or "").strip() for eid in empresa_ids]
+    empresa_ids = [eid for eid in empresa_ids if eid]
+    if not empresa_ids:
+        return {
+            "herencias_total": 0,
+            "trafico_total": 0,
+            "expedientes_total": 0,
+            "tasaciones_total": 0,
+            "rentas_total": 0,
+            "abiertos_total": 0,
+        }
+
+    placeholders_emp = ",".join(["?"] * len(empresa_ids))
+    seg = conn.execute(
+        f"""
+            SELECT
+              SUM(
+                CASE
+                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'herencias' THEN 1
+                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%herenc%' THEN 1
+                  ELSE 0
+                END
+              ) AS herencias_total,
+              SUM(
+                CASE
+                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'trafico' THEN 1
+                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
+                    LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%trafic%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%transfer%'
+                  ) THEN 1
+                  ELSE 0
+                END
+              ) AS trafico_total,
+              SUM(
+                CASE
+                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'expedientes' THEN 1
+                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
+                    LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%expedient%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%administrat%'
+                  ) THEN 1
+                  ELSE 0
+                END
+              ) AS expedientes_total,
+              SUM(
+                CASE
+                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'tasaciones' THEN 1
+                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%tasaci%' THEN 1
+                  ELSE 0
+                END
+              ) AS tasaciones_total,
+              SUM(
+                CASE
+                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'rentas' THEN 1
+                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%renta%' THEN 1
+                  ELSE 0
+                END
+              ) AS rentas_total,
+              SUM(CASE WHEN (LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado')) THEN 0 ELSE 1 END) AS abiertos_total
+            FROM gestoria_trabajos gt
+            WHERE gt.empresa_id IN ({placeholders_emp})
+        """,
+        tuple(empresa_ids),
+    ).fetchone()
+    return {
+        "herencias_total": int(row_value(seg, "herencias_total", 0) or 0),
+        "trafico_total": int(row_value(seg, "trafico_total", 0) or 0),
+        "expedientes_total": int(row_value(seg, "expedientes_total", 0) or 0),
+        "tasaciones_total": int(row_value(seg, "tasaciones_total", 0) or 0),
+        "rentas_total": int(row_value(seg, "rentas_total", 0) or 0),
+        "abiertos_total": int(row_value(seg, "abiertos_total", 0) or 0),
+    }
+
+
 def serialize_renta_detalles_payload(raw_value, existing_value=""):
     current = parse_renta_detalles_payload(existing_value)
     if isinstance(raw_value, dict):
@@ -75267,30 +75437,21 @@ class Handler(BaseHTTPRequestHandler):
             entrada = parse_optional_float(payload.get("entrada"))
             comision = parse_optional_float(payload.get("comision"))
             anio = parse_optional_int(payload.get("anio"))
-            estado_busqueda = ("estudio", "encargo", "pendiente")
             existing = None
-            if (not force_new) and cliente:
-                where = "empresa_id = ? AND LOWER(TRIM(estado)) IN (?, ?, ?) AND LOWER(TRIM(cliente)) = LOWER(TRIM(?))"
-                values = [empresa["id"], *estado_busqueda, cliente]
-                if fecha_encargo:
-                    where += " AND fecha_encargo = ?"
-                    values.append(fecha_encargo)
-                if precio is not None:
-                    where += " AND precio = ?"
-                    values.append(precio)
-                if importe_hipoteca is not None:
-                    where += " AND importe_hipoteca = ?"
-                    values.append(importe_hipoteca)
-                existing = conn.execute(
-                    f"SELECT id FROM hipotecas WHERE {where} LIMIT 1",
-                    values,
-                ).fetchone()
-            existing_row = None
-            if existing:
-                existing_row = conn.execute(
-                    "SELECT * FROM hipotecas WHERE id = ?",
-                    (existing["id"],),
-                ).fetchone()
+            oficina_candidate = str(payload.get("oficina") or "").strip() or str(payload.get("inmobiliaria_compra") or "").strip()
+            if (not force_new) and (cliente or cliente_id):
+                existing = find_reusable_hipoteca_open_record(
+                    conn,
+                    empresa["id"],
+                    cliente=cliente,
+                    cliente_id=cliente_id,
+                    fecha_encargo=fecha_encargo,
+                    precio=precio,
+                    importe_hipoteca=importe_hipoteca,
+                    banco=payload.get("banco") or "",
+                    oficina=oficina_candidate,
+                )
+            existing_row = existing
 
             effective_comision = (
                 comision if comision is not None else (existing_row["comision"] if existing_row else 0)
@@ -86460,7 +86621,7 @@ class Handler(BaseHTTPRequestHandler):
             firmadas_mes = conn.execute(
                 """
                 SELECT COUNT(*) AS total
-                FROM hipotecas
+                FROM hipotecas h
                 WHERE """
                 + scope_clause
                 + """
@@ -86490,7 +86651,7 @@ class Handler(BaseHTTPRequestHandler):
                     END
                   ) AS porcentaje_medio,
                   AVG(COALESCE(comision, 0)) AS comision_media
-                FROM hipotecas
+                FROM hipotecas h
                 WHERE """
                 + scope_clause
                 + """
