@@ -6530,7 +6530,6 @@ def build_hipoteca_ficha_pdf(payload, section=None):
 
     cliente_inmueble = _safe_json_object(payload.get("cliente_inmueble_json") or "{}")
     hipoteca_detalle = _safe_json_object(payload.get("hipoteca_detalle_json") or "{}")
-    liquidacion_raw = _safe_json_object(payload.get("liquidacion_json") or "{}")
 
     comprador = liq.get("comprador") if isinstance(liq.get("comprador"), dict) else {}
     gastos_cv = comprador.get("gastos_compraventa") if isinstance(comprador.get("gastos_compraventa"), dict) else {}
@@ -6578,30 +6577,76 @@ def build_hipoteca_ficha_pdf(payload, section=None):
             return default
         return str(raw).strip() or default
 
+    def amount_value(raw):
+        try:
+            return float(parse_money_value(raw or 0) or 0.0)
+        except Exception:
+            return 0.0
+
+    coste_asociado = round(
+        sum(
+            [
+                amount_value(payload.get("honorarios")),
+                amount_value(payload.get("cesion")),
+                amount_value(payload.get("comision_juan")),
+                amount_value(payload.get("comision_modernia")),
+                amount_value(nested(hip, "notaria_impuestos_gestoria")),
+                amount_value(nested(hip, "comision_apertura")),
+                amount_value(nested(hip, "cuota_socio")),
+                amount_value(nested(hip, "comision_cheques")),
+                amount_value(nested(hip, "seguro_proteccion_pago")),
+                amount_value(nested(hip, "seguro_hogar")),
+                amount_value(nested(hip, "seguro_vida")),
+            ]
+        ),
+        2,
+    )
+
+    hero_card = {
+        "kind": "feature_card",
+        "eyebrow": "Resumen comercial",
+        "title": text(payload.get("cliente")),
+        "subtitle": " · ".join(
+            [
+                part
+                for part in [
+                    text(payload.get("banco")),
+                    text(payload.get("oficina")),
+                    text(payload.get("asesor")),
+                ]
+                if part and part != "—"
+            ]
+        ),
+        "badge": text(payload.get("estado")),
+        "columns": 3,
+        "items": [
+            {"label": "Tipo hipoteca", "value": text(payload.get("tipo_hipoteca")), "accent": True},
+            {"label": "Encargo", "value": text(payload.get("encargo")), "accent": True},
+            {"label": "Inmobiliaria compra", "value": text(payload.get("inmobiliaria"))},
+            {"label": "Fecha encargo", "value": date_text(payload.get("fecha_encargo"))},
+            {"label": "Fecha firma", "value": date_text(payload.get("fecha_firma")), "accent": True},
+            {"label": "Año", "value": text(payload.get("anio"))},
+        ],
+        "note": "Documento interno de seguimiento comercial y cierre de operación.",
+    }
+
     resumen_cards = {
         "kind": "kpi_cards",
         "columns": 3,
         "items": [
-            {"label": "Cliente", "value": text(payload.get("cliente")), "accent": True},
-            {"label": "Banco", "value": text(payload.get("banco"))},
-            {"label": "Importe hipoteca", "value": money(payload.get("importe_hipoteca"))},
+            {"label": "Importe hipoteca", "value": money(payload.get("importe_hipoteca")), "accent": True},
+            {"label": "% financiación", "value": pct(payload.get("porcentaje")), "accent": True},
+            {"label": "Cuota estimada", "value": money(nested(prestamo, "cuota_inicial")), "accent": True},
             {"label": "Precio compra", "value": money(payload.get("precio"))},
-            {"label": "% financiación", "value": pct(payload.get("porcentaje"))},
-            {"label": "Comisión cliente", "value": money(payload.get("honorarios"))},
+            {"label": "Entrada", "value": money(payload.get("entrada"))},
+            {"label": "Total necesario", "value": money(nested(hip, "total_necesario"))},
         ],
     }
 
-    general_lines = [
-        ("ID operación", text(payload.get("id"))),
-        ("Empresa ID", text(payload.get("empresa_id"))),
-        ("Cliente ID", text(payload.get("cliente_id"))),
+    operativa_lines = [
         ("Cliente", text(payload.get("cliente"))),
-        ("NIF cliente", text(payload.get("cliente_nif"))),
-        ("Teléfono", text(payload.get("cliente_telefono"))),
-        ("Email", text(payload.get("cliente_email"))),
         ("Banco", text(payload.get("banco"))),
         ("Oficina", text(payload.get("oficina"))),
-        ("Inmobiliaria compra", text(payload.get("inmobiliaria"))),
         ("Asesor", text(payload.get("asesor"))),
         ("Estado", text(payload.get("estado"))),
         ("Encargo", text(payload.get("encargo"))),
@@ -6609,6 +6654,12 @@ def build_hipoteca_ficha_pdf(payload, section=None):
         ("Fecha encargo", date_text(payload.get("fecha_encargo"))),
         ("Fecha firma", date_text(payload.get("fecha_firma"))),
         ("Año", text(payload.get("anio"))),
+    ]
+
+    trazabilidad_lines = [
+        ("ID operación", text(payload.get("id"))),
+        ("Empresa ID", text(payload.get("empresa_id"))),
+        ("Cliente ID", text(payload.get("cliente_id"))),
         ("Creado", text(payload.get("created_at"))),
         ("Actualizado", text(payload.get("updated_at"))),
     ]
@@ -6764,16 +6815,28 @@ def build_hipoteca_ficha_pdf(payload, section=None):
         ("Cancelación", _hipoteca_ficha_num(nested(prestamo, "cancelacion"), 4)),
     ]
 
+    structure_bar = {
+        "kind": "split_bar",
+        "label": "Estructura de fondos",
+        "items": [
+            {"label": "Hipoteca", "value": amount_value(payload.get("importe_hipoteca"))},
+            {"label": "Entrada", "value": amount_value(payload.get("entrada"))},
+            {"label": "Costes asociados", "value": coste_asociado},
+        ],
+    }
+
     sections = [
-        ("Resumen", resumen_cards),
-        ("Datos generales", general_lines),
-        ("Importes de operación", importes_lines),
+        ("Resumen comercial", hero_card),
+        ("Importes clave", resumen_cards),
+        ("Estructura de fondos", structure_bar),
+        ("Datos operativos", operativa_lines),
         ("Cliente e inmueble", cliente_lines),
         ("Hipoteca y condiciones", hipoteca_lines),
         ("Liquidación comprador", comprador_lines),
         ("Liquidación vendedor", vendedor_lines),
         ("Cuadre de cheques", cheques_lines),
         ("Notaría y préstamo", notaria_lines),
+        ("Trazabilidad", trazabilidad_lines),
         ("JSON · cliente e inmueble", _hipoteca_ficha_json_lines(payload.get("cliente_inmueble_json") or "{}")),
         ("JSON · hipoteca detalle", _hipoteca_ficha_json_lines(payload.get("hipoteca_detalle_json") or "{}")),
         ("JSON · liquidación", _hipoteca_ficha_json_lines(payload.get("liquidacion_json") or "{}")),
@@ -6782,25 +6845,25 @@ def build_hipoteca_ficha_pdf(payload, section=None):
     section_key = normalize_lookup_text(section or "")
     if section_key in {"COMPRADOR", "VENDEDOR", "CHEQUES", "NOTARIA"}:
         keep_map = {
-            "COMPRADOR": {"Resumen", "Datos generales", "Importes de operación", "Liquidación comprador"},
-            "VENDEDOR": {"Resumen", "Datos generales", "Importes de operación", "Liquidación vendedor"},
-            "CHEQUES": {"Resumen", "Datos generales", "Importes de operación", "Cuadre de cheques"},
-            "NOTARIA": {"Resumen", "Datos generales", "Importes de operación", "Notaría y préstamo"},
+            "COMPRADOR": {"Resumen comercial", "Importes clave", "Estructura de fondos", "Datos operativos", "Liquidación comprador"},
+            "VENDEDOR": {"Resumen comercial", "Importes clave", "Estructura de fondos", "Datos operativos", "Liquidación vendedor"},
+            "CHEQUES": {"Resumen comercial", "Importes clave", "Estructura de fondos", "Datos operativos", "Cuadre de cheques"},
+            "NOTARIA": {"Resumen comercial", "Importes clave", "Estructura de fondos", "Datos operativos", "Notaría y préstamo"},
         }
         sections = [item for item in sections if item[0] in keep_map[section_key]]
 
-    subtitle_parts = [text(payload.get("cliente")), text(payload.get("banco"))]
+    subtitle_parts = [text(payload.get("cliente")), text(payload.get("banco")), text(payload.get("estado"))]
     fecha_firma_text = date_text(payload.get("fecha_firma"))
     if fecha_firma_text and fecha_firma_text != "—":
         subtitle_parts.append(f"Firma {fecha_firma_text}")
     subtitle = " · ".join([part for part in subtitle_parts if part and part != "—"])
     subtitle = subtitle or text(payload.get("id"))
     footer = [
-        "Documento interno generado por el CRM Financiaciones.",
+        "Documento comercial interno generado por el CRM Financiaciones.",
         "Revisar la liquidación y los datos técnicos antes de usarlo fuera del expediente.",
     ]
     return build_modernia_branded_document_pdf(
-        "FICHA DE HIPOTECA",
+        "FICHA COMERCIAL DE HIPOTECA",
         subtitle,
         sections,
         footer_lines=footer,
@@ -50057,6 +50120,10 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
     font_body_bold = _document_font(17, bold=True)
     font_kpi_value = _document_font(26, bold=True)
     font_kpi_label = _document_font(14, bold=False)
+    font_feature_eyebrow = _document_font(13, bold=True)
+    font_feature_title = _document_font(28, bold=True)
+    font_feature_subtitle = _document_font(16, bold=False)
+    font_feature_note = _document_font(14, bold=False)
     font_footer = _document_font(15, bold=False)
     font_header_small = _document_font(14, bold=False)
 
@@ -50075,6 +50142,12 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
         company_meta_parts.append(f"Tlf: {company_tel}")
 
     pages = []
+
+    def _draw_card_box(draw_obj, box, *, outline=None, fill=None, width=2, radius=18):
+        try:
+            draw_obj.rounded_rectangle(box, radius=radius, outline=outline, fill=fill, width=width)
+        except Exception:
+            draw_obj.rectangle(box, outline=outline, fill=fill, width=width)
 
     def new_page():
         image = Image.new("RGB", (page_width, page_height), bg)
@@ -50121,6 +50194,8 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
         heading_box = draw.textbbox((margin_x, y), heading, font=font_section)
         ensure_space((heading_box[3] - heading_box[1]) + 20)
         draw.text((margin_x, y), heading, fill=ink, font=font_section)
+        underline_w = max(120, min(content_width, int((heading_box[2] - heading_box[0]) + 40)))
+        draw.line((margin_x, heading_box[3] + 4, margin_x + underline_w, heading_box[3] + 4), fill=gold, width=3)
         y = heading_box[3] + 12
         kind = str(lines.get("kind") or "").strip().lower() if isinstance(lines, dict) else ""
 
@@ -50133,18 +50208,12 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
             cols = max(2, min(4, cols))
             gap = 18
             card_w = int((content_width - gap * (cols - 1)) / cols)
-            card_h = 98
-            radius = 18
+            card_h = 102
+            radius = 20
             border = (225, 228, 232)
             fill = (250, 250, 250)
             accent_border = gold
             accent_fill = (252, 248, 235)
-
-            def _rounded(box, *, outline=None, fill=None, width=2, r=18):
-                try:
-                    draw.rounded_rectangle(box, radius=r, outline=outline, fill=fill, width=width)
-                except Exception:
-                    draw.rectangle(box, outline=outline, fill=fill, width=width)
 
             row = 0
             col = 0
@@ -50168,16 +50237,19 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
                 x1 = x0 + card_w
                 y1 = y0 + card_h
                 ensure_space((row + 1) * (card_h + gap) + 10)
-                _rounded(
+                _draw_card_box(
+                    draw,
                     (x0, y0, x1, y1),
                     outline=accent_border if accent else border,
                     fill=accent_fill if accent else fill,
                     width=3 if accent else 2,
-                    r=radius,
+                    radius=radius,
                 )
+                stripe_fill = accent_border if accent else (214, 219, 223)
+                draw.rectangle((x0 + 1, y0 + 1, x1 - 1, y0 + 8), fill=stripe_fill)
                 pad_x = 18
-                draw.text((x0 + pad_x, y0 + 16), label, fill=muted, font=font_kpi_label)
-                draw.text((x0 + pad_x, y0 + 44), value, fill=ink, font=font_kpi_value)
+                draw.text((x0 + pad_x, y0 + 20), label, fill=muted, font=font_kpi_label)
+                draw.multiline_text((x0 + pad_x, y0 + 48), value, fill=ink, font=font_kpi_value, spacing=3)
 
                 col += 1
                 if col >= cols:
@@ -50187,6 +50259,128 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
             if used_rows <= 0:
                 used_rows = 1
             y += used_rows * card_h + (used_rows - 1) * gap + 10
+        elif kind == "feature_card":
+            card = lines if isinstance(lines, dict) else {}
+            eyebrow = str(card.get("eyebrow") or "").strip()
+            title_text = str(card.get("title") or "").strip()
+            subtitle_text = str(card.get("subtitle") or "").strip()
+            badge = str(card.get("badge") or "").strip()
+            note = str(card.get("note") or "").strip()
+            raw_items = card.get("items") or []
+            metric_items = []
+            for item in raw_items:
+                if isinstance(item, dict):
+                    label = str(item.get("label") or "").strip()
+                    value = str(item.get("value") or "").strip()
+                    accent = bool(item.get("accent") or False)
+                elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                    label = str(item[0] or "").strip()
+                    value = str(item[1] or "").strip()
+                    accent = False
+                else:
+                    label = ""
+                    value = str(item or "").strip()
+                    accent = False
+                if label or value:
+                    metric_items.append((label, value, accent))
+            try:
+                cols = int(card.get("columns") or 3)
+            except Exception:
+                cols = 3
+            cols = max(2, min(4, cols))
+            metric_gap = 14
+            metric_h = 78
+            metric_w = int((content_width - metric_gap * (cols - 1)) / cols)
+            metric_rows = max(1, math.ceil(len(metric_items) / cols)) if metric_items else 0
+            title_lines, _, title_h = _pil_multiline(draw, title_text or "—", font_feature_title, width=72, line_gap=4)
+            if subtitle_text:
+                subtitle_lines, _, subtitle_h = _pil_multiline(draw, subtitle_text, font_feature_subtitle, width=84, line_gap=5)
+            else:
+                subtitle_lines, subtitle_h = [], 0
+            if note:
+                note_lines, _, note_h = _pil_multiline(draw, note, font_feature_note, width=90, line_gap=4)
+            else:
+                note_lines, note_h = [], 0
+
+            eyebrow_h = 18 if eyebrow else 0
+            card_h = 24 + eyebrow_h + title_h + (6 if subtitle_lines else 0) + subtitle_h + 16
+            if metric_items:
+                card_h += metric_rows * metric_h + max(0, metric_rows - 1) * metric_gap + 16
+            if note_lines:
+                card_h += 10 + note_h
+            card_h += 18
+
+            ensure_space(card_h + 12)
+            x0 = margin_x
+            y0 = y
+            x1 = x0 + content_width
+            y1 = y0 + card_h
+            _draw_card_box(draw, (x0, y0, x1, y1), outline=(225, 228, 232), fill=(253, 252, 248), width=2, radius=24)
+            draw.rectangle((x0, y0, x1, y0 + 8), fill=gold)
+
+            inner_x = x0 + 24
+            cur_y = y0 + 20
+
+            if badge:
+                badge_font = font_header_small
+                badge_box = draw.textbbox((0, 0), badge.upper(), font=badge_font)
+                badge_w = (badge_box[2] - badge_box[0]) + 18
+                badge_h = 26
+                badge_x1 = x1 - 24
+                badge_x0 = max(inner_x, badge_x1 - badge_w)
+                _draw_card_box(
+                    draw,
+                    (badge_x0, cur_y - 2, badge_x1, cur_y + badge_h - 2),
+                    outline=gold,
+                    fill=(252, 248, 235),
+                    width=2,
+                    radius=13,
+                )
+                draw.text((badge_x0 + (badge_w / 2), cur_y + 10), badge.upper(), fill=ink, font=badge_font, anchor="mm")
+
+            if eyebrow:
+                draw.text((inner_x, cur_y), eyebrow.upper(), fill=gold, font=font_feature_eyebrow)
+                cur_y += eyebrow_h
+
+            draw.multiline_text((inner_x, cur_y), "\n".join(title_lines), fill=ink, font=font_feature_title, spacing=4)
+            cur_y += title_h
+
+            if subtitle_lines:
+                cur_y += 6
+                draw.multiline_text((inner_x, cur_y), "\n".join(subtitle_lines), fill=muted, font=font_feature_subtitle, spacing=5)
+                cur_y += subtitle_h
+
+            if metric_items:
+                cur_y += 16
+                draw.line((inner_x, cur_y, x1 - 24, cur_y), fill=(228, 231, 236), width=2)
+                cur_y += 16
+                for idx, (label, value, accent) in enumerate(metric_items):
+                    row = idx // cols
+                    col = idx % cols
+                    box_x0 = inner_x + col * (metric_w + metric_gap)
+                    box_y0 = cur_y + row * (metric_h + metric_gap)
+                    box_x1 = box_x0 + metric_w
+                    box_y1 = box_y0 + metric_h
+                    _draw_card_box(
+                        draw,
+                        (box_x0, box_y0, box_x1, box_y1),
+                        outline=(gold if accent else (227, 231, 235)),
+                        fill=(252, 248, 235) if accent else (255, 255, 255),
+                        width=3 if accent else 2,
+                        radius=18,
+                    )
+                    stripe_fill = gold if accent else (219, 224, 228)
+                    draw.rectangle((box_x0 + 1, box_y0 + 1, box_x1 - 1, box_y0 + 8), fill=stripe_fill)
+                    draw.text((box_x0 + 14, box_y0 + 18), label, fill=muted, font=font_kpi_label)
+                    draw.multiline_text((box_x0 + 14, box_y0 + 42), value, fill=ink, font=font_kpi_value, spacing=3)
+
+                cur_y += metric_rows * metric_h + max(0, metric_rows - 1) * metric_gap
+
+            if note_lines:
+                cur_y += 14
+                draw.multiline_text((inner_x, cur_y), "\n".join(note_lines), fill=muted, font=font_feature_note, spacing=4)
+
+            y = y1 + 18
         elif kind == "split_bar":
             # Horizontal split bar (e.g. Exenta vs Sujeta)
             label = str(lines.get("label") or "").strip()
