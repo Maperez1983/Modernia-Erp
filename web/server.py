@@ -6604,7 +6604,8 @@ def build_hipoteca_ficha_pdf(payload, section=None):
 
     hero_card = {
         "kind": "feature_card",
-        "eyebrow": "Resumen comercial",
+        "layout": "hero",
+        "eyebrow": "Presentación comercial",
         "title": text(payload.get("cliente")),
         "subtitle": " · ".join(
             [
@@ -6618,16 +6619,18 @@ def build_hipoteca_ficha_pdf(payload, section=None):
             ]
         ),
         "badge": text(payload.get("estado")),
-        "columns": 3,
+        "chips": [
+            text(payload.get("banco")),
+            text(payload.get("oficina")),
+            text(payload.get("encargo")),
+            text(payload.get("fecha_firma")),
+        ],
         "items": [
             {"label": "Tipo hipoteca", "value": text(payload.get("tipo_hipoteca")), "accent": True},
-            {"label": "Encargo", "value": text(payload.get("encargo")), "accent": True},
-            {"label": "Inmobiliaria compra", "value": text(payload.get("inmobiliaria"))},
-            {"label": "Fecha encargo", "value": date_text(payload.get("fecha_encargo"))},
-            {"label": "Fecha firma", "value": date_text(payload.get("fecha_firma")), "accent": True},
-            {"label": "Año", "value": text(payload.get("anio"))},
+            {"label": "Importe hipoteca", "value": money(payload.get("importe_hipoteca")), "accent": True},
+            {"label": "% financiación", "value": pct(payload.get("porcentaje")), "accent": True},
         ],
-        "note": "Documento interno de seguimiento comercial y cierre de operación.",
+        "note": "Ficha interna para presentar la operación de forma clara, rápida y comercial.",
     }
 
     resumen_cards = {
@@ -6643,18 +6646,18 @@ def build_hipoteca_ficha_pdf(payload, section=None):
         ],
     }
 
-    operativa_lines = [
-        ("Cliente", text(payload.get("cliente"))),
-        ("Banco", text(payload.get("banco"))),
-        ("Oficina", text(payload.get("oficina"))),
-        ("Asesor", text(payload.get("asesor"))),
-        ("Estado", text(payload.get("estado"))),
-        ("Encargo", text(payload.get("encargo"))),
-        ("Tipo hipoteca", text(payload.get("tipo_hipoteca"))),
-        ("Fecha encargo", date_text(payload.get("fecha_encargo"))),
-        ("Fecha firma", date_text(payload.get("fecha_firma"))),
-        ("Año", text(payload.get("anio"))),
-    ]
+    operativa_cards = {
+        "kind": "kpi_cards",
+        "columns": 3,
+        "items": [
+            {"label": "Cliente", "value": text(payload.get("cliente")), "accent": True},
+            {"label": "Banco", "value": text(payload.get("banco"))},
+            {"label": "Oficina", "value": text(payload.get("oficina"))},
+            {"label": "Asesor", "value": text(payload.get("asesor"))},
+            {"label": "Estado", "value": text(payload.get("estado")), "accent": True},
+            {"label": "Fecha firma", "value": date_text(payload.get("fecha_firma"))},
+        ],
+    }
 
     trazabilidad_lines = [
         ("ID operación", text(payload.get("id"))),
@@ -6829,7 +6832,7 @@ def build_hipoteca_ficha_pdf(payload, section=None):
         ("Resumen comercial", hero_card),
         ("Importes clave", resumen_cards),
         ("Estructura de fondos", structure_bar),
-        ("Datos operativos", operativa_lines),
+        ("Datos operativos", operativa_cards),
         ("Cliente e inmueble", cliente_lines),
         ("Hipoteca y condiciones", hipoteca_lines),
         ("Liquidación comprador", comprador_lines),
@@ -50143,7 +50146,24 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
 
     pages = []
 
-    def _draw_card_box(draw_obj, box, *, outline=None, fill=None, width=2, radius=18):
+    def _draw_card_box(
+        draw_obj,
+        box,
+        *,
+        outline=None,
+        fill=None,
+        width=2,
+        radius=18,
+        shadow=False,
+        shadow_offset=4,
+        shadow_fill=(234, 236, 239),
+    ):
+        if shadow:
+            sx0, sy0, sx1, sy1 = box[0] + shadow_offset, box[1] + shadow_offset, box[2] + shadow_offset, box[3] + shadow_offset
+            try:
+                draw_obj.rounded_rectangle((sx0, sy0, sx1, sy1), radius=radius, outline=None, fill=shadow_fill, width=1)
+            except Exception:
+                draw_obj.rectangle((sx0, sy0, sx1, sy1), outline=None, fill=shadow_fill, width=1)
         try:
             draw_obj.rounded_rectangle(box, radius=radius, outline=outline, fill=fill, width=width)
         except Exception:
@@ -50244,6 +50264,7 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
                     fill=accent_fill if accent else fill,
                     width=3 if accent else 2,
                     radius=radius,
+                    shadow=True,
                 )
                 stripe_fill = accent_border if accent else (214, 219, 223)
                 draw.rectangle((x0 + 1, y0 + 1, x1 - 1, y0 + 8), fill=stripe_fill)
@@ -50261,12 +50282,14 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
             y += used_rows * card_h + (used_rows - 1) * gap + 10
         elif kind == "feature_card":
             card = lines if isinstance(lines, dict) else {}
+            layout = str(card.get("layout") or "").strip().lower()
             eyebrow = str(card.get("eyebrow") or "").strip()
             title_text = str(card.get("title") or "").strip()
             subtitle_text = str(card.get("subtitle") or "").strip()
             badge = str(card.get("badge") or "").strip()
             note = str(card.get("note") or "").strip()
             raw_items = card.get("items") or []
+            chips = [str(item or "").strip() for item in (card.get("chips") or []) if str(item or "").strip()]
             metric_items = []
             for item in raw_items:
                 if isinstance(item, dict):
@@ -50283,6 +50306,127 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
                     accent = False
                 if label or value:
                     metric_items.append((label, value, accent))
+            if layout == "hero":
+                try:
+                    metric_cols = int(card.get("metric_columns") or 1)
+                except Exception:
+                    metric_cols = 1
+                metric_cols = max(1, min(2, metric_cols))
+                hero_title_lines, _, hero_title_h = _pil_multiline(draw, title_text or "—", font_feature_title, width=46, line_gap=4)
+                if subtitle_text:
+                    hero_subtitle_lines, _, hero_subtitle_h = _pil_multiline(draw, subtitle_text, font_feature_subtitle, width=50, line_gap=5)
+                else:
+                    hero_subtitle_lines, hero_subtitle_h = [], 0
+                if note:
+                    hero_note_lines, _, hero_note_h = _pil_multiline(draw, note, font_feature_note, width=50, line_gap=4)
+                else:
+                    hero_note_lines, hero_note_h = [], 0
+
+                chip_rows = 1 if len(chips) <= 4 else 2
+                hero_h = 392 + max(0, chip_rows - 1) * 34 + max(0, hero_note_h - 20)
+                ensure_space(hero_h + 12)
+                x0 = margin_x
+                y0 = y
+                x1 = x0 + content_width
+                y1 = y0 + hero_h
+                _draw_card_box(draw, (x0, y0, x1, y1), outline=(225, 228, 232), fill=(253, 251, 245), width=2, radius=28, shadow=True)
+                draw.rectangle((x0, y0, x1, y0 + 10), fill=gold)
+                draw.rectangle((x0 + 20, y0 + 22, x1 - 20, y1 - 20), outline=(233, 236, 240), width=1)
+
+                left_x = x0 + 28
+                left_top = y0 + 28
+                left_w = int(content_width * 0.58)
+                panel_x = x0 + left_w + 34
+                panel_w = x1 - panel_x - 28
+
+                if badge:
+                    badge_font = font_header_small
+                    badge_box = draw.textbbox((0, 0), badge.upper(), font=badge_font)
+                    badge_w = (badge_box[2] - badge_box[0]) + 18
+                    badge_h = 28
+                    badge_x1 = x1 - 28
+                    badge_x0 = max(panel_x, badge_x1 - badge_w)
+                    _draw_card_box(
+                        draw,
+                        (badge_x0, y0 + 24, badge_x1, y0 + 24 + badge_h),
+                        outline=gold,
+                        fill=(252, 248, 235),
+                        width=2,
+                        radius=14,
+                    )
+                    draw.text((badge_x0 + (badge_w / 2), y0 + 38), badge.upper(), fill=ink, font=badge_font, anchor="mm")
+
+                if eyebrow:
+                    draw.text((left_x, left_top), eyebrow.upper(), fill=gold, font=font_feature_eyebrow)
+                    left_top += 18
+
+                draw.multiline_text((left_x, left_top), "\n".join(hero_title_lines), fill=ink, font=font_feature_title, spacing=4)
+                left_top += hero_title_h
+
+                if hero_subtitle_lines:
+                    left_top += 8
+                    draw.multiline_text((left_x, left_top), "\n".join(hero_subtitle_lines), fill=muted, font=font_feature_subtitle, spacing=5)
+                    left_top += hero_subtitle_h
+
+                chip_x = left_x
+                chip_y = left_top + 16
+                chip_limit = panel_x - 18
+                chip_row_h = 30
+                for chip in chips:
+                    chip_box = draw.textbbox((0, 0), chip, font=font_header_small)
+                    chip_w = max(92, min(220, (chip_box[2] - chip_box[0]) + 24))
+                    if chip_x + chip_w > chip_limit and chip_x > left_x:
+                        chip_x = left_x
+                        chip_y += chip_row_h + 8
+                    if chip_x + chip_w > chip_limit and chip_x == left_x:
+                        chip_w = max(92, chip_limit - left_x)
+                    _draw_card_box(
+                        draw,
+                        (chip_x, chip_y, chip_x + chip_w, chip_y + chip_row_h),
+                        outline=(200, 162, 74),
+                        fill=(252, 248, 235),
+                        width=2,
+                        radius=14,
+                    )
+                    draw.text((chip_x + chip_w / 2, chip_y + 15), chip.upper(), fill=ink, font=font_header_small, anchor="mm")
+                    chip_x += chip_w + 10
+
+                note_y = chip_y + chip_row_h + 16
+                if hero_note_lines:
+                    draw.multiline_text((left_x, note_y), "\n".join(hero_note_lines), fill=muted, font=font_feature_note, spacing=4)
+
+                panel_label_y = y0 + 30
+                draw.text((panel_x, panel_label_y), "INDICADORES CLAVE", fill=gold, font=font_feature_eyebrow)
+                draw.line((panel_x, panel_label_y + 20, x1 - 28, panel_label_y + 20), fill=(228, 231, 236), width=2)
+
+                metric_gap = 12
+                metric_h = 80
+                metric_y = panel_label_y + 34
+                metric_count = min(3, len(metric_items))
+                metric_rows = max(1, math.ceil(metric_count / metric_cols)) if metric_count else 1
+                metric_w = panel_w if metric_cols == 1 else int((panel_w - metric_gap) / 2)
+                for idx, (label, value, accent) in enumerate(metric_items[:3]):
+                    row = idx // metric_cols
+                    col = idx % metric_cols
+                    box_x0 = panel_x + col * (metric_w + metric_gap)
+                    box_y0 = metric_y + row * (metric_h + metric_gap)
+                    box_x1 = box_x0 + metric_w
+                    box_y1 = box_y0 + metric_h
+                    _draw_card_box(
+                        draw,
+                        (box_x0, box_y0, box_x1, box_y1),
+                        outline=(gold if accent else (227, 231, 235)),
+                        fill=(252, 248, 235) if accent else (255, 255, 255),
+                        width=3 if accent else 2,
+                        radius=18,
+                        shadow=True,
+                    )
+                    draw.rectangle((box_x0 + 1, box_y0 + 1, box_x1 - 1, box_y0 + 8), fill=(gold if accent else (219, 224, 228)))
+                    draw.text((box_x0 + 14, box_y0 + 18), label, fill=muted, font=font_kpi_label)
+                    draw.multiline_text((box_x0 + 14, box_y0 + 40), value, fill=ink, font=font_kpi_value, spacing=3)
+
+                y = y1 + 18
+                continue
             try:
                 cols = int(card.get("columns") or 3)
             except Exception:
@@ -50315,7 +50459,7 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
             y0 = y
             x1 = x0 + content_width
             y1 = y0 + card_h
-            _draw_card_box(draw, (x0, y0, x1, y1), outline=(225, 228, 232), fill=(253, 252, 248), width=2, radius=24)
+            _draw_card_box(draw, (x0, y0, x1, y1), outline=(225, 228, 232), fill=(253, 252, 248), width=2, radius=24, shadow=True)
             draw.rectangle((x0, y0, x1, y0 + 8), fill=gold)
 
             inner_x = x0 + 24
@@ -50368,6 +50512,7 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
                         fill=(252, 248, 235) if accent else (255, 255, 255),
                         width=3 if accent else 2,
                         radius=18,
+                        shadow=True,
                     )
                     stripe_fill = gold if accent else (219, 224, 228)
                     draw.rectangle((box_x0 + 1, box_y0 + 1, box_x1 - 1, box_y0 + 8), fill=stripe_fill)
