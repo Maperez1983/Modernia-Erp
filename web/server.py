@@ -6622,8 +6622,8 @@ def build_hipoteca_ficha_pdf(payload, section=None):
         "chips": [
             text(payload.get("banco")),
             text(payload.get("oficina")),
-            text(payload.get("encargo")),
-            text(payload.get("fecha_firma")),
+            f"Encargo {text(payload.get('encargo'))}",
+            f"Firma {date_text(payload.get('fecha_firma'))}",
         ],
         "items": [
             {"label": "Tipo hipoteca", "value": text(payload.get("tipo_hipoteca")), "accent": True},
