@@ -28142,7 +28142,7 @@ const renderClienteContabilidadPanel = () => {
           if (companyScopeId) await Promise.resolve(loadGestoriaClienteLibros("", companyScopeId));
           jumpTo(tab === "balances" ? "#gestoriaClienteLibroBalancePanel" : "#gestoriaClienteLibroDiarioPanel");
         } else if (tab === "modelos") {
-          if (companyScopeId) await Promise.resolve(loadGestoriaModelos(companyScopeId));
+          if (companyScopeId) await Promise.resolve(loadGestoriaModelos("", companyScopeId));
           jumpTo("#gestoriaModuleFiscal");
         } else if (tab === "asientos") {
           if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("operativa");
@@ -28252,7 +28252,7 @@ const renderClienteContabilidadPanel = () => {
       if (companyScopeId) loadGestoriaClienteLibros("", companyScopeId);
     });
     addRouterPane("modelos", "Modelos fiscales", "Obligaciones y modelos generados a partir de la contabilidad.", "Abrir modelos", () => {
-      if (companyScopeId) loadGestoriaModelos(companyScopeId);
+      if (companyScopeId) loadGestoriaModelos("", companyScopeId);
     });
     addRouterPane("asientos", "Asientos", "Ficha de asiento, conciliación y edición contable completa.", "Abrir asientos", () => {
       if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("libros");
@@ -71142,7 +71142,7 @@ const syncGestoriaModelosDownloadButton = () => {
       || ""
   ).trim();
   if (!rows.length && companyLegacyId) {
-    loadGestoriaModelos(companyLegacyId)
+    loadGestoriaModelos("", companyLegacyId)
       .then(() => {
         if ((state.gestoriaModelosCache?.rows || []).length) {
           syncGestoriaModelosDownloadButton();
