@@ -9226,6 +9226,15 @@
 	              </div>
             </div>
 	            <div class="crm-actions u-mb-10 u-gap-8 u-wrap">
+              <select id="hipotecaBdtListYear" class="inline-input" style="min-width:170px;">
+                <option value="">Año listado · Todos</option>
+              </select>
+              <select id="hipotecaBdtListEstado" class="inline-input" style="min-width:190px;">
+                <option value="">Estado · Todos</option>
+              </select>
+              <button type="button" id="hipotecaBdtPrintListado" class="secondary">Imprimir listado</button>
+            </div>
+	            <div class="crm-actions u-mb-10 u-gap-8 u-wrap">
               <select id="hipotecaBdtVincularSelect" style="min-width:260px; max-width:420px;">
                 <option value="">Seleccionar hipoteca…</option>
               </select>
@@ -11880,13 +11889,13 @@
             }
           })();
         </script>
-				    <script src="app-routing.js?v=11"></script>
+				    <script src="app-routing.js?v=12"></script>
 				    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-				    <script src="app.js?v=785"></script>
+				    <script src="app.js?v=786"></script>
 		    <script>
 					      (function () {
 					        if (!("serviceWorker" in navigator)) return;
-																        const TARGET_SW = "/sw.js?v=369";
+					        const TARGET_SW = "/sw.js?v=370";
 				        try {
 				          const params = new URLSearchParams(window.location.search || "");
               const keepSw = (params.get("keep_sw") || "").trim() === "1";

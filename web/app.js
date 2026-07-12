@@ -3856,6 +3856,9 @@ const hipotecaBdtSearch = document.getElementById("hipotecaBdtSearch");
 const hipotecaBdtRefresh = document.getElementById("hipotecaBdtRefresh");
 const hipotecaBdtExcelFirmadas = document.getElementById("hipotecaBdtExcelFirmadas");
 const hipotecaBdtExportYear = document.getElementById("hipotecaBdtExportYear");
+const hipotecaBdtListYear = document.getElementById("hipotecaBdtListYear");
+const hipotecaBdtListEstado = document.getElementById("hipotecaBdtListEstado");
+const hipotecaBdtPrintListado = document.getElementById("hipotecaBdtPrintListado");
 const hipotecaBdtVincularSelect = document.getElementById("hipotecaBdtVincularSelect");
 const hipotecaBdtVincularBtn = document.getElementById("hipotecaBdtVincularBtn");
 const hipotecaBdtVincularStatus = document.getElementById("hipotecaBdtVincularStatus");
@@ -41440,53 +41443,51 @@ const buildHipotecaBdtSearchHaystack = (row, columns) => {
   return { normalizedText, dniTokens, normalizedDocTokens };
 };
 
-const filterHipotecaBdtRows = (rows = [], columns = [], queryRaw = "") => {
+const filterHipotecaBdtRows = (rows = [], columns = [], queryRaw = "", filters = {}, options = {}) => {
   const q = String(queryRaw || "").trim();
   const normalizedQuery = normalizeLookupText(q);
   const docQuery = q.toUpperCase().replace(/[^0-9A-Z]/g, "");
+  const hasDocQuery = docQuery.length >= 5;
+  const yearFilter = normalizeSimple(filters?.year || "");
+  const estadoFilter = normalizeSimple(filters?.estado || "");
+  const rawLimit = options?.limit;
+  const limitValue = rawLimit === Infinity ? Infinity : Number(rawLimit);
+  const limit = limitValue === Infinity || (Number.isFinite(limitValue) && limitValue >= 0) ? limitValue : 200;
 
   const signed = rows.filter((row) => isHipotecaSignedForExport(row, columns));
-  const signedSorted = signed
-    .slice()
-    .sort((a, b) => getHipotecaFirmaTimestamp(b, columns) - getHipotecaFirmaTimestamp(a, columns));
+  const baseFiltered = rows.filter((row) => {
+    if (yearFilter && normalizeSimple(getHipotecaListadoYear(row, columns)) !== yearFilter) return false;
+    if (estadoFilter && normalizeSimple(getHipotecaListadoEstado(row, columns)) !== estadoFilter) return false;
+    return true;
+  });
 
-  if (!normalizedQuery && !docQuery) {
-    const getSortTimestamp = (row) => {
-      const firma = getHipotecaFieldValue(row, columns, ["fecha_firma", "fecha"]);
-      const encargo = getHipotecaFieldValue(row, columns, ["fecha_encargo", "fecha_encargo_cliente", "fecha_encargo_banco"]);
-      return parseDateToTimestamp(firma || encargo);
-    };
-    const sorted = rows
-      .slice()
-      .sort((a, b) => getSortTimestamp(b) - getSortTimestamp(a));
-    return {
-      mode: "all",
-      total: rows.length,
-      signedTotal: signed.length,
-      filtered: sorted.slice(0, 200),
-      matchCount: rows.length,
-    };
-  }
-
-  const filtered = rows.filter((row) => {
+  const filtered = baseFiltered.filter((row) => {
+    if (!normalizedQuery && !hasDocQuery) return true;
     const hay = buildHipotecaBdtSearchHaystack(row, columns);
     if (normalizedQuery && hay.normalizedText.includes(normalizedQuery)) return true;
-    if (docQuery && docQuery.length >= 5) {
-      if (hay.normalizedDocTokens.some((token) => token.includes(docQuery) || docQuery.includes(token))) return true;
+    if (hasDocQuery && hay.normalizedDocTokens.some((token) => token.includes(docQuery) || docQuery.includes(token))) {
+      return true;
     }
     return false;
   });
 
   const sorted = filtered
     .slice()
-    .sort((a, b) => getHipotecaFirmaTimestamp(b, columns) - getHipotecaFirmaTimestamp(a, columns));
+    .sort((a, b) => getHipotecaBdtTimelineTimestamp(b, columns) - getHipotecaBdtTimelineTimestamp(a, columns));
+
+  const activeMode = normalizedQuery || hasDocQuery ? "search" : yearFilter || estadoFilter ? "filtered" : "all";
+  const limited = Number.isFinite(limit) ? sorted.slice(0, limit) : sorted.slice();
 
   return {
-    mode: "search",
+    mode: activeMode,
     total: rows.length,
     signedTotal: signed.length,
-    filtered: sorted.slice(0, 200),
+    filtered: limited,
     matchCount: sorted.length,
+    filters: {
+      year: yearFilter,
+      estado: estadoFilter,
+    },
   };
 };
 
@@ -41540,7 +41541,7 @@ const populateHipotecaVincularSelect = (rows = [], columns = []) => {
 
 const loadHipotecaBdt = (forceRefresh = false) => {
   if (!hipotecaBdtTable || !hipotecaBdtInfo) {
-    return;
+    return Promise.resolve();
   }
   const empresa = resolveCrmFinEmpresa();
   const empresaId = resolveLegacyEmpresaId(empresa);
@@ -41549,10 +41550,10 @@ const loadHipotecaBdt = (forceRefresh = false) => {
     hipotecaBdtInfo.textContent = "";
     if (hipotecaBdtVincularStatus) hipotecaBdtVincularStatus.textContent = "";
     syncHipotecaExportYears([], []);
+    syncHipotecaListadoFilters([], []);
     populateHipotecaVincularSelect([], []);
-    return;
+    return Promise.resolve();
   }
-  const q = hipotecaBdtSearch ? hipotecaBdtSearch.value.trim() : "";
   // Para un buscador "potente" (DNI/NIF, titulares en JSON, etc.) cargamos el dataset
   // completo y filtramos en cliente. Evita depender del buscador del backend.
   const qApi = "";
@@ -41565,14 +41566,8 @@ const loadHipotecaBdt = (forceRefresh = false) => {
     state.hipotecaBdtCache.q === qApi &&
     isFreshCache
   ) {
-    const cached = state.hipotecaBdtCache.data || {};
-    const columns = cached.columns || [];
-    const rows = cached.rows || [];
-    renderHipotecaBdtList({ columns, rows, query: q });
-    syncHipotecaExportYears(rows, columns);
-    populateHipotecaVincularSelect(rows, columns);
-    if (typeof syncHipotecaBdtViewToggle === "function") syncHipotecaBdtViewToggle();
-    return;
+    renderHipotecaBdtFromCache();
+    return Promise.resolve();
   }
   const params = new URLSearchParams({
     empresa_id: empresaId,
@@ -41580,7 +41575,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
     limit: "1000",
     include_json: "1",
   });
-  api(`/api/hipoteca_bdt?${params.toString()}`)
+  return api(`/api/hipoteca_bdt?${params.toString()}`)
     .then((data) => {
       const columns = data.columns || [];
       const rows = data.rows || [];
@@ -41590,10 +41585,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
         data: { columns, rows },
         ts: Date.now(),
       };
-      renderHipotecaBdtList({ columns, rows, query: q });
-      syncHipotecaExportYears(rows, columns);
-      populateHipotecaVincularSelect(rows, columns);
-      if (typeof syncHipotecaBdtViewToggle === "function") syncHipotecaBdtViewToggle();
+      renderHipotecaBdtFromCache();
     })
     .catch((error) => {
       const message = error?.data?.error || error?.message || "No se pudo cargar la BDT.";
@@ -41601,8 +41593,10 @@ const loadHipotecaBdt = (forceRefresh = false) => {
       hipotecaBdtInfo.textContent = "";
       if (hipotecaBdtVincularStatus) hipotecaBdtVincularStatus.textContent = message;
       syncHipotecaExportYears([], []);
+      syncHipotecaListadoFilters([], []);
       populateHipotecaVincularSelect([], []);
       if (typeof syncHipotecaBdtViewToggle === "function") syncHipotecaBdtViewToggle();
+      return null;
     });
 };
 
@@ -41673,9 +41667,243 @@ const setHipotecaBdtView = (view) => {
     // ignore
   }
   if (typeof syncHipotecaBdtViewToggle === "function") syncHipotecaBdtViewToggle();
+  if (typeof renderHipotecaBdtFromCache === "function" && renderHipotecaBdtFromCache()) return;
   const cached = state.hipotecaBdtCache?.data || {};
   const q = hipotecaBdtSearch ? hipotecaBdtSearch.value.trim() : "";
   renderHipotecaBdtList({ columns: cached.columns || [], rows: cached.rows || [], query: q });
+};
+
+const HIPOTECA_BDT_STATE_ORDER = [
+  "Pendiente",
+  "Estudio",
+  "Encargo",
+  "Firmada",
+  "Rechazada",
+  "Cancelada",
+  "Indemnización",
+];
+
+const HIPOTECA_BDT_PRINT_COLUMNS = [
+  { key: "cliente", label: "Nombre y apellidos cliente" },
+  { key: "banco", label: "Banco" },
+  { key: "fecha_encargo", label: "Fecha de encargo" },
+  { key: "fecha_firma", label: "Fecha de firma" },
+  { key: "precio", label: "Valor compra inmueble" },
+  { key: "entrada", label: "Entrada" },
+  { key: "importe_hipoteca", label: "Hipoteca" },
+  { key: "comision", label: "Comisión cobrada" },
+];
+
+const extractHipotecaYearToken = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const direct = raw.match(/^(19\d{2}|20\d{2})[-/]/);
+  if (direct) return direct[1];
+  const reverse = raw.match(/[-/](19\d{2}|20\d{2})$/);
+  if (reverse) return reverse[1];
+  const anywhere = raw.match(/\b(19\d{2}|20\d{2})\b/);
+  return anywhere ? anywhere[1] : "";
+};
+
+const getHipotecaListadoYear = (row, columns) => {
+  const anio = getHipotecaFieldValue(row, columns, ["anio", "año", "year"]);
+  if (/^\d{4}$/.test(String(anio || "").trim())) return String(anio || "").trim();
+  const fechaFirma = getHipotecaFieldValue(row, columns, ["fecha_firma", "fecha"]);
+  const fechaEncargo = getHipotecaFieldValue(row, columns, [
+    "fecha_encargo",
+    "fecha_encargo_cliente",
+    "fecha_encargo_banco",
+  ]);
+  return extractHipotecaYearToken(fechaFirma) || extractHipotecaYearToken(fechaEncargo);
+};
+
+const getHipotecaListadoEstado = (row, columns) => {
+  return getHipotecaFieldValue(row, columns, ["estado"]);
+};
+
+const getHipotecaBdtTimelineTimestamp = (row, columns) => {
+  const fechaFirma = getHipotecaFieldValue(row, columns, ["fecha_firma", "fecha"]);
+  const fechaEncargo = getHipotecaFieldValue(row, columns, [
+    "fecha_encargo",
+    "fecha_encargo_cliente",
+    "fecha_encargo_banco",
+  ]);
+  const anio = getHipotecaListadoYear(row, columns);
+  return (
+    parseDateToTimestamp(fechaFirma) ||
+    parseDateToTimestamp(fechaEncargo) ||
+    (anio ? Date.UTC(Number(anio), 0, 1) : 0)
+  );
+};
+
+const getHipotecaBdtListadoFilters = () => ({
+  query: String(hipotecaBdtSearch?.value || "").trim(),
+  year: String(hipotecaBdtListYear?.value || "").trim(),
+  estado: String(hipotecaBdtListEstado?.value || "").trim(),
+});
+
+const buildHipotecaBdtFilterLabels = (filters = {}) => {
+  const labels = [];
+  const year = String(filters.year || "").trim();
+  const estado = String(filters.estado || "").trim();
+  const query = String(filters.query || "").trim();
+  if (year) labels.push(`Año ${year}`);
+  if (estado) labels.push(`Estado ${estado}`);
+  if (query) labels.push(`Búsqueda "${query}"`);
+  return labels;
+};
+
+const syncHipotecaListadoFilters = (rows = [], columns = []) => {
+  const yearSelect = hipotecaBdtListYear;
+  const estadoSelect = hipotecaBdtListEstado;
+  const items = Array.isArray(rows) ? rows : [];
+
+  if (yearSelect) {
+    const current = String(yearSelect.value || "").trim();
+    const years = Array.from(
+      new Set(items.map((row) => getHipotecaListadoYear(row, columns)).filter(Boolean))
+    ).sort((a, b) => Number(b) - Number(a));
+    yearSelect.innerHTML = "";
+    yearSelect.appendChild(createOption("", "Año listado · Todos"));
+    years.forEach((year) => {
+      yearSelect.appendChild(createOption(year, year));
+    });
+    yearSelect.disabled = items.length === 0;
+    yearSelect.value = current && years.includes(current) ? current : "";
+  }
+
+  if (estadoSelect) {
+    const current = String(estadoSelect.value || "").trim();
+    const seen = new Set();
+    const states = [];
+    items.forEach((row) => {
+      const estado = getHipotecaListadoEstado(row, columns);
+      const key = normalizeSimple(estado);
+      if (!estado || !key || seen.has(key)) return;
+      seen.add(key);
+      states.push(estado);
+    });
+    states.sort((a, b) => {
+      const rank = (value) => {
+        const idx = HIPOTECA_BDT_STATE_ORDER.findIndex((item) => normalizeSimple(item) === normalizeSimple(value));
+        return idx >= 0 ? idx : 999;
+      };
+      const diff = rank(a) - rank(b);
+      return diff || a.localeCompare(b, "es", { sensitivity: "base" });
+    });
+    estadoSelect.innerHTML = "";
+    estadoSelect.appendChild(createOption("", "Estado · Todos"));
+    states.forEach((estado) => {
+      estadoSelect.appendChild(createOption(estado, estado));
+    });
+    estadoSelect.disabled = items.length === 0;
+    const currentMatch = states.find((value) => normalizeSimple(value) === normalizeSimple(current));
+    estadoSelect.value = currentMatch || "";
+  }
+};
+
+const formatHipotecaListadoDate = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "-";
+  const iso = raw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (iso) {
+    return `${String(iso[3]).padStart(2, "0")}/${String(iso[2]).padStart(2, "0")}/${iso[1]}`;
+  }
+  const es = raw.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+  if (es) {
+    return `${String(es[1]).padStart(2, "0")}/${String(es[2]).padStart(2, "0")}/${es[3]}`;
+  }
+  const ts = parseDateToTimestamp(raw);
+  if (!ts) return raw;
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return raw;
+  return `${String(date.getUTCDate()).padStart(2, "0")}/${String(date.getUTCMonth() + 1).padStart(2, "0")}/${date.getUTCFullYear()}`;
+};
+
+const formatHipotecaListadoMoney = (value) => {
+  const num = toNumber(value);
+  if (num === null) return "-";
+  return formatEurosCompact(num);
+};
+
+const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}) => {
+  const items = Array.isArray(rows) ? rows : [];
+  const labels = buildHipotecaBdtFilterLabels(filters);
+  const summary = labels.length ? labels.join(" · ") : "Listado completo";
+  const total = items.length;
+  if (!total) {
+    return `
+      <style>
+        .hipoteca-print-meta{margin:0 0 12px;padding:12px 14px;border:1px solid #dbe3ed;border-radius:14px;background:#f8fafc;color:#0f172a;font-size:12px;font-weight:600;}
+        .hipoteca-print-empty{padding:18px 0;color:#64748b;font-size:13px;}
+      </style>
+      <div class="hipoteca-print-meta">${escapeHtml(summary)} · 0 registros</div>
+      <p class="hipoteca-print-empty">Sin datos para imprimir.</p>
+    `;
+  }
+
+  const rowsHtml = items
+    .map((row) => {
+      const values = {
+        cliente: getHipotecaDisplayName(row, columns) || "-",
+        banco: getHipotecaFieldValue(row, columns, ["banco", "entidad", "entidad_financiera"]) || "-",
+        fecha_encargo: formatHipotecaListadoDate(
+          getHipotecaFieldValue(row, columns, ["fecha_encargo", "fecha_encargo_cliente", "fecha_encargo_banco", "fecha"])
+        ),
+        fecha_firma: formatHipotecaListadoDate(getHipotecaFieldValue(row, columns, ["fecha_firma", "fecha"])),
+        precio: formatHipotecaListadoMoney(
+          getHipotecaFieldValue(row, columns, ["precio", "valor_compra_inmueble", "valor_compra", "precio_compra"])
+        ),
+        entrada: formatHipotecaListadoMoney(getHipotecaFieldValue(row, columns, ["entrada"])),
+        importe_hipoteca: formatHipotecaListadoMoney(
+          getHipotecaFieldValue(row, columns, ["importe_hipoteca", "hipoteca"])
+        ),
+        comision: formatHipotecaListadoMoney(
+          getHipotecaFieldValue(row, columns, ["comision_cobrada", "comision", "honorarios"])
+        ),
+      };
+      return `<tr>${HIPOTECA_BDT_PRINT_COLUMNS.map((column) => `<td>${escapeHtml(values[column.key] || "-")}</td>`).join("")}</tr>`;
+    })
+    .join("");
+
+  return `
+    <style>
+      .hipoteca-print-meta{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:0 0 12px;padding:12px 14px;border:1px solid #dbe3ed;border-radius:14px;background:linear-gradient(135deg,#f8fafc,#eef4ff);color:#0f172a;font-size:12px;font-weight:600;}
+      .hipoteca-print-meta strong{font-size:13px;}
+      .hipoteca-print-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;}
+      .hipoteca-print-table thead th{background:#0f172a;color:#fff;font-size:10px;line-height:1.1;letter-spacing:.08em;text-transform:uppercase;}
+      .hipoteca-print-table th:first-child{border-top-left-radius:12px;}
+      .hipoteca-print-table th:last-child{border-top-right-radius:12px;}
+      .hipoteca-print-table th, .hipoteca-print-table td{padding:8px 9px;border-bottom:1px solid #dbe3ed;vertical-align:top;word-break:break-word;}
+      .hipoteca-print-table tbody tr:nth-child(even) td{background:#f8fafc;}
+      .hipoteca-print-table tbody tr:hover td{background:#eef4ff;}
+      .hipoteca-print-table td:nth-child(3), .hipoteca-print-table td:nth-child(4){white-space:nowrap;}
+      .hipoteca-print-table td:nth-child(n+5){text-align:right;}
+    </style>
+    <div class="hipoteca-print-meta">
+      <span>${escapeHtml(summary)}</span>
+      <strong>${total} registros</strong>
+    </div>
+    <table class="hipoteca-print-table">
+      <thead>
+        <tr>${HIPOTECA_BDT_PRINT_COLUMNS.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+  `;
+};
+
+const renderHipotecaBdtFromCache = () => {
+  const cached = state.hipotecaBdtCache?.data || {};
+  const columns = Array.isArray(cached.columns) ? cached.columns : [];
+  const rows = Array.isArray(cached.rows) ? cached.rows : [];
+  if (!columns.length && !rows.length) return false;
+  syncHipotecaListadoFilters(rows, columns);
+  syncHipotecaExportYears(rows, columns);
+  populateHipotecaVincularSelect(rows, columns);
+  renderHipotecaBdtList({ columns, rows });
+  if (typeof syncHipotecaBdtViewToggle === "function") syncHipotecaBdtViewToggle();
+  return true;
 };
 
 const getHipotecaFichaFields = (columns = []) => {
@@ -44325,8 +44553,9 @@ const saveHipotecaFicha = async (event) => {
 	};
 
 const renderHipotecaBdtList = ({ columns = [], rows = [], query } = {}) => {
-  const q = typeof query === "string" ? query : hipotecaBdtSearch ? hipotecaBdtSearch.value.trim() : "";
-  const result = filterHipotecaBdtRows(rows, columns, q);
+  const filters = getHipotecaBdtListadoFilters();
+  const q = typeof query === "string" ? query : filters.query;
+  const result = filterHipotecaBdtRows(rows, columns, q, { year: filters.year, estado: filters.estado }, { limit: 200 });
   const filteredRows = result.filtered || [];
   const view = getHipotecaBdtView();
   if (view === "table") {
@@ -44335,17 +44564,23 @@ const renderHipotecaBdtList = ({ columns = [], rows = [], query } = {}) => {
     renderHipotecaBdtCards({ columns, rows: filteredRows });
   }
   if (hipotecaBdtInfo) {
+    const filterLabels = buildHipotecaBdtFilterLabels(filters);
+    const filterSuffix = filterLabels.length ? ` · ${filterLabels.join(" · ")}` : "";
     if (result.mode === "all") {
-      hipotecaBdtInfo.textContent = `Mostrando ${filteredRows.length} de ${result.total} hipotecas · firmadas ${result.signedTotal}. Usa el buscador para afinar.`;
+      hipotecaBdtInfo.textContent = `Mostrando ${filteredRows.length} de ${result.total} hipotecas${filterSuffix} · firmadas ${result.signedTotal}. Usa el buscador para afinar.`;
     } else {
       const shown = filteredRows.length;
-      hipotecaBdtInfo.textContent = `Resultados ${shown} de ${result.matchCount} · firmadas ${result.signedTotal} · dataset ${result.total}.`;
+      hipotecaBdtInfo.textContent = `Resultados ${shown} de ${result.matchCount}${filterSuffix} · firmadas ${result.signedTotal} · dataset ${result.total}.`;
     }
   }
 };
 
 const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
   if (!hipotecaBdtTable) return;
+  if (!Array.isArray(rows) || rows.length === 0) {
+    hipotecaBdtTable.innerHTML = "<p class='muted'>Sin hipotecas para estos filtros.</p>";
+    return;
+  }
   const idIndex = columns.indexOf("id");
   if (idIndex < 0) {
     hipotecaBdtTable.innerHTML = "<p class='muted'>No hay identificador para abrir fichas.</p>";
@@ -44555,11 +44790,15 @@ const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
   hipotecaBdtTable.appendChild(cardGrid);
 };
 
-	const renderHipotecaBdtTable = (data) => {
-	  if (!hipotecaBdtTable) return;
-	  const columns = data?.columns || [];
-	  const rows = data?.rows || [];
-	  const idIndex = columns.indexOf("id");
+const renderHipotecaBdtTable = (data) => {
+  if (!hipotecaBdtTable) return;
+  const columns = data?.columns || [];
+  const rows = data?.rows || [];
+  if (!Array.isArray(rows) || rows.length === 0) {
+    hipotecaBdtTable.innerHTML = "<p class='muted'>Sin hipotecas para estos filtros.</p>";
+    return;
+  }
+  const idIndex = columns.indexOf("id");
   if (idIndex < 0) {
     hipotecaBdtTable.innerHTML = "<p class='muted'>No hay identificador para abrir fichas.</p>";
     return;
@@ -89155,6 +89394,44 @@ try {
 	  });
 }
 
+if (hipotecaBdtListYear) {
+  hipotecaBdtListYear.addEventListener("change", () => {
+    if (!renderHipotecaBdtFromCache()) {
+      loadHipotecaBdt();
+    }
+  });
+}
+
+if (hipotecaBdtListEstado) {
+  hipotecaBdtListEstado.addEventListener("change", () => {
+    if (!renderHipotecaBdtFromCache()) {
+      loadHipotecaBdt();
+    }
+  });
+}
+
+if (hipotecaBdtPrintListado) {
+  hipotecaBdtPrintListado.addEventListener("click", async () => {
+    let cached = state.hipotecaBdtCache?.data || null;
+    if (!cached || !Array.isArray(cached.columns) || !Array.isArray(cached.rows)) {
+      await loadHipotecaBdt(true);
+      cached = state.hipotecaBdtCache?.data || null;
+    }
+    const columns = Array.isArray(cached?.columns) ? cached.columns : [];
+    const rows = Array.isArray(cached?.rows) ? cached.rows : [];
+    const filters = getHipotecaBdtListadoFilters();
+    const result = filterHipotecaBdtRows(
+      rows,
+      columns,
+      filters.query,
+      { year: filters.year, estado: filters.estado },
+      { limit: Infinity }
+    );
+    const html = buildHipotecaListadoPrintHtml(result.filtered || [], columns, filters);
+    openCrmPrintWindow({ title: "Listado de hipotecas", html });
+  });
+}
+
 if (hipotecaDashboardRefresh) {
   hipotecaDashboardRefresh.addEventListener("click", () => {
     loadHipotecaDashboard();
@@ -89173,11 +89450,7 @@ if (hipotecaBdtSearch) {
     clearTimeout(hipotecaBdtSearchTimer);
     hipotecaBdtSearchTimer = setTimeout(() => {
       if ((state.hipotecaAltaView || "dashboard") === "bdt") {
-        const cached = state.hipotecaBdtCache?.data || null;
-        if (cached && Array.isArray(cached.columns) && Array.isArray(cached.rows) && cached.rows.length) {
-          renderHipotecaBdtList({ columns: cached.columns || [], rows: cached.rows || [] });
-          if (typeof syncHipotecaBdtViewToggle === "function") syncHipotecaBdtViewToggle();
-        } else {
+        if (!renderHipotecaBdtFromCache()) {
           loadHipotecaBdt();
         }
       }
