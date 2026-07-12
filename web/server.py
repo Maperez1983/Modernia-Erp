@@ -7121,13 +7121,37 @@ def build_hipotecas_bdt_listado_pdf_filename(filters=None, count=None):
     return f"{filename}.pdf"
 
 
+def build_hipotecas_bdt_listado_card_items(item):
+    item = item or {}
+
+    def text(value, default="—"):
+        raw = str(value or "").strip()
+        return raw or default
+
+    def money(value):
+        return format_export_money(value)
+
+    def date_text(value):
+        return format_export_date(value) or "—"
+
+    return [
+        {"label": "Nombre y apellidos cliente", "value": text(item.get("cliente")), "accent": True},
+        {"label": "Banco", "value": text(item.get("banco"))},
+        {"label": "Fecha de encargo", "value": date_text(item.get("fecha_encargo"))},
+        {"label": "Fecha de firma", "value": date_text(item.get("fecha_firma"))},
+        {"label": "Valor compra inmueble", "value": money(item.get("precio")), "accent": True},
+        {"label": "Entrada", "value": money(item.get("entrada"))},
+        {"label": "Hipoteca", "value": money(item.get("importe_hipoteca")), "accent": True},
+        {"label": "Comisión cobrada", "value": money(item.get("honorarios")), "accent": True},
+    ]
+
+
 def build_hipotecas_bdt_listado_pdf(conn, rows, filters=None):
     rows = [row for row in (rows or []) if row is not None]
     if not rows:
         return b""
 
     items = [build_hipoteca_export_row(conn, row) for row in rows]
-    total = len(items)
     filters = filters or {}
 
     year = str(filters.get("year") or "").strip()
@@ -7140,22 +7164,26 @@ def build_hipotecas_bdt_listado_pdf(conn, rows, filters=None):
         filter_parts.append(f"Estado {estado}")
     if query:
         filter_parts.append(f'Búsqueda "{query}"')
+    ordered_items = sorted(
+        items,
+        key=lambda item: (
+            parse_iso_date(item.get("fecha_firma")) or parse_iso_date(item.get("fecha_encargo")) or datetime.min.date(),
+            str(item.get("cliente") or ""),
+        ),
+        reverse=True,
+    )
+    total = len(ordered_items)
     subtitle = " · ".join(filter_parts) if filter_parts else f"{total} operación(es)"
+    money = format_export_money
 
-    def money(value):
-        return format_export_money(value)
-
-    def date_text(value):
-        return format_export_date(value) or "—"
-
-    total_precio = sum(float(item.get("precio") or 0) for item in items)
-    total_entrada = sum(float(item.get("entrada") or 0) for item in items)
-    total_hipoteca = sum(float(item.get("importe_hipoteca") or 0) for item in items)
-    total_comision = sum(float(item.get("honorarios") or 0) for item in items)
+    total_precio = sum(float(item.get("precio") or 0) for item in ordered_items)
+    total_entrada = sum(float(item.get("entrada") or 0) for item in ordered_items)
+    total_hipoteca = sum(float(item.get("importe_hipoteca") or 0) for item in ordered_items)
+    total_comision = sum(float(item.get("honorarios") or 0) for item in ordered_items)
 
     summary = {
         "kind": "kpi_cards",
-        "columns": 4,
+        "columns": 3,
         "items": [
             {"label": "Operaciones", "value": str(total), "accent": True},
             {"label": "Compra total", "value": money(total_precio), "accent": True},
@@ -7165,36 +7193,21 @@ def build_hipotecas_bdt_listado_pdf(conn, rows, filters=None):
         ],
     }
 
-    row_lines = []
-    for idx, item in enumerate(items, start=1):
-        cliente = str(item.get("cliente") or "").strip() or f"Hipoteca {idx}"
-        banco = str(item.get("banco") or "").strip() or "-"
-        fecha_encargo = date_text(item.get("fecha_encargo"))
-        fecha_firma = date_text(item.get("fecha_firma"))
-        row_lines.append(
-            " · ".join(
-                part
-                for part in [
-                    f"{idx:02d}. {cliente}",
-                    banco,
-                    f"Encargo {fecha_encargo}",
-                    f"Firma {fecha_firma}",
-                    f"Compra {money(item.get('precio'))}",
-                    f"Entrada {money(item.get('entrada'))}",
-                    f"Hipoteca {money(item.get('importe_hipoteca'))}",
-                    f"Comisión {money(item.get('honorarios'))}",
-                ]
-                if part
+    sections = [("Resumen", summary)]
+    for idx, item in enumerate(ordered_items, start=1):
+        sections.append(
+            (
+                f"Operación {idx:02d}",
+                {
+                    "kind": "kpi_cards",
+                    "columns": 2,
+                    "items": build_hipotecas_bdt_listado_card_items(item),
+                },
             )
         )
-
-    sections = [
-        ("Resumen", summary),
-        ("Operaciones", row_lines or ["Sin datos."]),
-    ]
     footer_lines = [
         "Listado interno generado por el CRM Financiaciones.",
-        "Los importes se muestran en formato compacto para facilitar la revisión y descarga.",
+        "Cada operación se presenta con un orden fijo para facilitar la revisión comercial.",
     ]
     return build_modernia_branded_document_pdf(
         "LISTADO DE HIPOTECAS",

@@ -462,6 +462,20 @@ class HipotecasFichaPdfTests(unittest.TestCase):
             self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h2'").fetchone(),
         ]
         filters = {"year": "2025", "estado": "Firmada"}
+        card_items = server.build_hipotecas_bdt_listado_card_items(server.build_hipoteca_export_row(self.conn, rows[0]))
+        self.assertEqual(
+            [item["label"] for item in card_items],
+            [
+                "Nombre y apellidos cliente",
+                "Banco",
+                "Fecha de encargo",
+                "Fecha de firma",
+                "Valor compra inmueble",
+                "Entrada",
+                "Hipoteca",
+                "Comisión cobrada",
+            ],
+        )
         pdf_bytes = server.build_hipotecas_bdt_listado_pdf(self.conn, rows, filters=filters)
 
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
