@@ -43965,6 +43965,50 @@ const downloadHipotecaBdtFichasPdf = async (popup = null) => {
 
 const HIPOTECAS_FIRMADAS_PDF_YEAR = "2025";
 
+const downloadHipotecaBdtListadoPdf = async (popup = null) => {
+  let cached = state.hipotecaBdtCache?.data || null;
+  if (!cached || !Array.isArray(cached.columns) || !Array.isArray(cached.rows)) {
+    await loadHipotecaBdt(true);
+    cached = state.hipotecaBdtCache?.data || null;
+  }
+  const columns = Array.isArray(cached?.columns) ? cached.columns : [];
+  const rows = Array.isArray(cached?.rows) ? cached.rows : [];
+  const filters = getHipotecaBdtListadoFilters();
+  const result = filterHipotecaBdtRows(
+    rows,
+    columns,
+    filters.query,
+    { year: filters.year, estado: filters.estado },
+    { limit: Infinity }
+  );
+  const filteredRows = Array.isArray(result.filtered) ? result.filtered : [];
+  const idIndex = columns.indexOf("id");
+  if (idIndex < 0) {
+    throw new Error("No hay identificador para generar el listado.");
+  }
+  const ids = filteredRows.map((row) => String(row[idIndex] || "").trim()).filter(Boolean);
+  if (!ids.length) {
+    throw new Error("No hay hipotecas para descargar con los filtros actuales.");
+  }
+  const empresa = resolveCrmFinEmpresa();
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) {
+    throw new Error("No se pudo resolver la empresa de hipotecas.");
+  }
+  await downloadPdfFromApi(
+    "/api/hipotecas_listado_pdf",
+    {
+      empresa_id: empresaId,
+      ids,
+      filters,
+    },
+    {
+      filenameFallback: "hipotecas_listado.pdf",
+      targetWindow: popup,
+    }
+  );
+};
+
 const downloadHipotecasFirmadas2025Pdf = async (popup = null) => {
   const empresa = resolveCrmFinEmpresa();
   const empresaId = resolveLegacyEmpresaId(empresa);
@@ -89485,23 +89529,26 @@ if (hipotecaBdtListEstado) {
 
 if (hipotecaBdtPrintListado) {
   hipotecaBdtPrintListado.addEventListener("click", async () => {
-    let cached = state.hipotecaBdtCache?.data || null;
-    if (!cached || !Array.isArray(cached.columns) || !Array.isArray(cached.rows)) {
-      await loadHipotecaBdt(true);
-      cached = state.hipotecaBdtCache?.data || null;
+    let popup = null;
+    const originalText = hipotecaBdtPrintListado.textContent;
+    hipotecaBdtPrintListado.disabled = true;
+    hipotecaBdtPrintListado.textContent = "Generando...";
+    try {
+      popup = window.open("", "_blank", "noopener");
+    } catch (e) {}
+    try {
+      await downloadHipotecaBdtListadoPdf(popup);
+    } catch (error) {
+      alert(`No se pudo descargar el listado. ${String(error?.message || error || "").trim() || "Revisa los filtros e inténtalo de nuevo."}`);
+    } finally {
+      try {
+        if (popup && !popup.closed && popup.location && popup.location.href === "about:blank") {
+          popup.close();
+        }
+      } catch (e) {}
+      hipotecaBdtPrintListado.disabled = false;
+      hipotecaBdtPrintListado.textContent = originalText;
     }
-    const columns = Array.isArray(cached?.columns) ? cached.columns : [];
-    const rows = Array.isArray(cached?.rows) ? cached.rows : [];
-    const filters = getHipotecaBdtListadoFilters();
-    const result = filterHipotecaBdtRows(
-      rows,
-      columns,
-      filters.query,
-      { year: filters.year, estado: filters.estado },
-      { limit: Infinity }
-    );
-    const html = buildHipotecaListadoPrintHtml(result.filtered || [], columns, filters);
-    openCrmPrintWindow({ title: "Listado de hipotecas", html });
   });
 }
 
@@ -89526,6 +89573,31 @@ if (hipotecaBdtPrintFichas) {
       } catch (e) {}
       hipotecaBdtPrintFichas.disabled = false;
       hipotecaBdtPrintFichas.textContent = originalText;
+    }
+  });
+}
+
+if (hipotecaBdtPrintFirmadas2025) {
+  hipotecaBdtPrintFirmadas2025.addEventListener("click", async () => {
+    let popup = null;
+    const originalText = hipotecaBdtPrintFirmadas2025.textContent;
+    hipotecaBdtPrintFirmadas2025.disabled = true;
+    hipotecaBdtPrintFirmadas2025.textContent = "Generando...";
+    try {
+      popup = window.open("", "_blank", "noopener");
+    } catch (e) {}
+    try {
+      await downloadHipotecasFirmadas2025Pdf(popup);
+    } catch (error) {
+      alert(`No se pudieron generar los PDFs de 2025. ${String(error?.message || error || "").trim() || "Revisa la conexión e inténtalo de nuevo."}`);
+    } finally {
+      try {
+        if (popup && !popup.closed && popup.location && popup.location.href === "about:blank") {
+          popup.close();
+        }
+      } catch (e) {}
+      hipotecaBdtPrintFirmadas2025.disabled = false;
+      hipotecaBdtPrintFirmadas2025.textContent = originalText;
     }
   });
 }

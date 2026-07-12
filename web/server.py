@@ -7106,6 +7106,106 @@ def build_hipotecas_firmadas_pdf_filename(selected_year=None, count=None):
     return f"{filename}.pdf"
 
 
+def build_hipotecas_bdt_listado_pdf_filename(filters=None, count=None):
+    filters = filters or {}
+    parts = ["hipotecas_listado"]
+    year = slugify_text(filters.get("year") or "")
+    estado = slugify_text(filters.get("estado") or "")
+    if year:
+        parts.append(year)
+    if estado:
+        parts.append(estado)
+    if count:
+        parts.append(str(int(count)))
+    filename = "_".join(part for part in parts if part).strip("_")[:160] or "hipotecas_listado"
+    return f"{filename}.pdf"
+
+
+def build_hipotecas_bdt_listado_pdf(conn, rows, filters=None):
+    rows = [row for row in (rows or []) if row is not None]
+    if not rows:
+        return b""
+
+    items = [build_hipoteca_export_row(conn, row) for row in rows]
+    total = len(items)
+    filters = filters or {}
+
+    year = str(filters.get("year") or "").strip()
+    estado = str(filters.get("estado") or "").strip()
+    query = str(filters.get("query") or "").strip()
+    filter_parts = []
+    if year:
+        filter_parts.append(f"Año {year}")
+    if estado:
+        filter_parts.append(f"Estado {estado}")
+    if query:
+        filter_parts.append(f'Búsqueda "{query}"')
+    subtitle = " · ".join(filter_parts) if filter_parts else f"{total} operación(es)"
+
+    def money(value):
+        return format_export_money(value)
+
+    def date_text(value):
+        return format_export_date(value) or "—"
+
+    total_precio = sum(float(item.get("precio") or 0) for item in items)
+    total_entrada = sum(float(item.get("entrada") or 0) for item in items)
+    total_hipoteca = sum(float(item.get("importe_hipoteca") or 0) for item in items)
+    total_comision = sum(float(item.get("honorarios") or 0) for item in items)
+
+    summary = {
+        "kind": "kpi_cards",
+        "columns": 4,
+        "items": [
+            {"label": "Operaciones", "value": str(total), "accent": True},
+            {"label": "Compra total", "value": money(total_precio), "accent": True},
+            {"label": "Entrada total", "value": money(total_entrada)},
+            {"label": "Hipoteca total", "value": money(total_hipoteca), "accent": True},
+            {"label": "Comisión cobrada", "value": money(total_comision), "accent": True},
+        ],
+    }
+
+    row_lines = []
+    for idx, item in enumerate(items, start=1):
+        cliente = str(item.get("cliente") or "").strip() or f"Hipoteca {idx}"
+        banco = str(item.get("banco") or "").strip() or "-"
+        fecha_encargo = date_text(item.get("fecha_encargo"))
+        fecha_firma = date_text(item.get("fecha_firma"))
+        row_lines.append(
+            " · ".join(
+                part
+                for part in [
+                    f"{idx:02d}. {cliente}",
+                    banco,
+                    f"Encargo {fecha_encargo}",
+                    f"Firma {fecha_firma}",
+                    f"Compra {money(item.get('precio'))}",
+                    f"Entrada {money(item.get('entrada'))}",
+                    f"Hipoteca {money(item.get('importe_hipoteca'))}",
+                    f"Comisión {money(item.get('honorarios'))}",
+                ]
+                if part
+            )
+        )
+
+    sections = [
+        ("Resumen", summary),
+        ("Operaciones", row_lines or ["Sin datos."]),
+    ]
+    footer_lines = [
+        "Listado interno generado por el CRM Financiaciones.",
+        "Los importes se muestran en formato compacto para facilitar la revisión y descarga.",
+    ]
+    return build_modernia_branded_document_pdf(
+        "LISTADO DE HIPOTECAS",
+        subtitle,
+        sections,
+        footer_lines=footer_lines,
+        company={},
+        brand_logo_url="/assets/grupo_modernia_logo.png",
+    )
+
+
 def build_hipotecas_fichas_pdf(conn, rows, section=None, filters=None):
     rows = [row for row in (rows or []) if row is not None]
     if not rows:
@@ -56843,6 +56943,49 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "No se pudo generar el PDF"}, status=500)
                 return
             filename = build_hipotecas_fichas_pdf_filename(filters, count=len(ordered_rows))
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
+            return
+
+        if parsed.path == "/api/hipotecas_listado_pdf":
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            raw_ids = payload.get("ids") if isinstance(payload, dict) else None
+            filters = payload.get("filters") if isinstance(payload, dict) and isinstance(payload.get("filters"), dict) else {}
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            if isinstance(raw_ids, str):
+                ids = [item.strip() for item in raw_ids.split(",") if item.strip()]
+            elif isinstance(raw_ids, (list, tuple)):
+                ids = [str(item).strip() for item in raw_ids if str(item).strip()]
+            else:
+                ids = []
+            ids = list(dict.fromkeys(ids))
+            if not ids:
+                json_response(self, {"error": "ids requeridos"}, status=400)
+                return
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM hipotecas
+                WHERE empresa_id = ?
+                ORDER BY COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), updated_at, created_at) DESC
+                """,
+                (empresa_id,),
+            ).fetchall()
+            by_id = {str(row["id"] or "").strip(): row for row in rows if str(row["id"] or "").strip()}
+            ordered_rows = [by_id[record_id] for record_id in ids if record_id in by_id]
+            if not ordered_rows:
+                json_response(self, {"error": "No se encontraron hipotecas para los ids indicados"}, status=404)
+                return
+            try:
+                pdf_bytes = build_hipotecas_bdt_listado_pdf(conn, ordered_rows, filters=filters)
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo generar el PDF", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
+            if not pdf_bytes:
+                json_response(self, {"error": "No se pudo generar el PDF"}, status=500)
+                return
+            filename = build_hipotecas_bdt_listado_pdf_filename(filters, count=len(ordered_rows))
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 

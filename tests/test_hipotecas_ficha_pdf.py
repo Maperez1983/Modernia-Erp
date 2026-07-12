@@ -411,3 +411,64 @@ class HipotecasFichaPdfTests(unittest.TestCase):
         if server.PdfReader is not None:
             reader = server.PdfReader(BytesIO(pdf_bytes))
             self.assertGreaterEqual(len(reader.pages), 1)
+
+    def test_hipotecas_listado_pdf_generates_compact_list_download(self):
+        row = self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone()
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
+              oficina, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan, comision_modernia,
+              inmobiliaria_compra, asesor, estado, anio, cliente_inmueble_json, hipoteca_detalle_json, liquidacion_json,
+              created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            """,
+            (
+                "h2",
+                "e1",
+                "Luis López",
+                "c1",
+                "BBVA",
+                220000,
+                175000,
+                79.54,
+                45000,
+                2800,
+                "Modernia Norte",
+                "2025-03-10",
+                "Sí",
+                "Compra",
+                "2025-04-19",
+                550,
+                550,
+                1600,
+                "Inmo Norte",
+                "María",
+                "Firmada",
+                2025,
+                row["cliente_inmueble_json"],
+                row["hipoteca_detalle_json"],
+                row["liquidacion_json"],
+                "2026-06-19",
+                "2026-06-19",
+            ),
+        )
+        self.conn.commit()
+
+        rows = [
+            self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone(),
+            self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h2'").fetchone(),
+        ]
+        filters = {"year": "2025", "estado": "Firmada"}
+        pdf_bytes = server.build_hipotecas_bdt_listado_pdf(self.conn, rows, filters=filters)
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(
+            server.build_hipotecas_bdt_listado_pdf_filename(filters, count=len(rows)),
+            "hipotecas_listado_2025_firmada_2.pdf",
+        )
+        if server.PdfReader is not None:
+            reader = server.PdfReader(BytesIO(pdf_bytes))
+            self.assertGreaterEqual(len(reader.pages), 1)
