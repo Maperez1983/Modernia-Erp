@@ -47,6 +47,10 @@ from email.header import decode_header
 from email.utils import parseaddr
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 try:
+    import cairosvg
+except Exception:  # pragma: no cover
+    cairosvg = None
+try:
     from reportlab.pdfgen import canvas as rl_canvas
     from reportlab.lib import colors as rl_colors
 except Exception:  # pragma: no cover
@@ -5089,24 +5093,187 @@ HIPOTECA_ACCOUNTING_GESTIONES = (
     "Nómina Juan",
     "Seguro anual",
 )
-HIPOTECA_EXPORT_BRANDS = {
-    "SANTANDER": "Banco Santander",
-    "BANCO SANTANDER": "Banco Santander",
-    "BBVA": "BBVA",
-    "CAIXABANK": "CaixaBank",
-    "LA CAIXA": "CaixaBank",
-    "CAIXA": "CaixaBank",
-    "SABADELL": "Banco Sabadell",
-    "BANCO SABADELL": "Banco Sabadell",
-    "BANKINTER": "Bankinter",
-    "UNICAJA": "Unicaja Banco",
-    "UNICAJA BANCO": "Unicaja Banco",
-    "ABANCA": "ABANCA",
-    "CAJAMAR": "Cajamar",
-    "UCI": "UCI",
-    "CAJA RURAL DE GRANADA": "Caja Rural de Granada",
-    "CAJA RURAL DEL SUR": "Caja Rural del Sur",
-}
+HIPOTECA_BANK_BRANDS = (
+    {
+        "name": "Banco Santander",
+        "short": "Santander",
+        "logo": "/assets/logos/santander.svg",
+        "color": "#e30613",
+        "logo_on_dark": True,
+        "aliases": (
+            "santander",
+            "banco santander",
+            "banco santander sa",
+            "banco santander s a",
+            "banco santander s.a.",
+            "grupo santander",
+            "santander consumer",
+            "santander consumer finance",
+            "santander consumer finance sa",
+        ),
+    },
+    {
+        "name": "BBVA",
+        "short": "BBVA",
+        "logo": "/assets/logos/bbva.png",
+        "color": "#072146",
+        "logo_on_dark": False,
+        "aliases": ("bbva", "banco bilbao vizcaya argentaria", "banco bilbao vizcaya argentaria sa", "bbva sa"),
+    },
+    {
+        "name": "CaixaBank",
+        "short": "CaixaBank",
+        "logo": "/assets/logos/caixabank.svg",
+        "color": "#0079c1",
+        "logo_on_dark": False,
+        "aliases": (
+            "caixabank",
+            "caixa bank",
+            "caixabank sa",
+            "caixabank s a",
+            "la caixa",
+            "caixa",
+            "criteria caixa",
+        ),
+    },
+    {
+        "name": "Banco Sabadell",
+        "short": "Sabadell",
+        "logo": "/assets/logos/sabadell.svg",
+        "color": "#003b7a",
+        "logo_on_dark": False,
+        "aliases": (
+            "sabadell",
+            "banco sabadell",
+            "banco sabadell sa",
+            "banco sabadell s a",
+            "banco de sabadell",
+            "banco de sabadell sa",
+            "banco de sabadell s a",
+        ),
+    },
+    {
+        "name": "Bankinter",
+        "short": "Bankinter",
+        "logo": "/assets/logos/bankinter.svg",
+        "color": "#f58220",
+        "logo_on_dark": False,
+        "aliases": ("bankinter", "bankinter sa", "bankinter s a", "bankinter consumer finance", "bankinter consumer"),
+    },
+    {
+        "name": "Unicaja Banco",
+        "short": "Unicaja",
+        "logo": "/assets/logos/unicaja.png",
+        "color": "#007a53",
+        "logo_on_dark": False,
+        "aliases": ("unicaja", "unicaja banco", "unicaja banco sa", "unicaja banco s a"),
+    },
+    {
+        "name": "ABANCA",
+        "short": "ABANCA",
+        "logo": "/assets/logos/abanca.svg",
+        "color": "#001f5b",
+        "logo_on_dark": False,
+        "aliases": ("abanca", "abanca corporacion bancaria", "abanca corporacion bancaria sa"),
+    },
+    {
+        "name": "Cajamar",
+        "short": "Cajamar",
+        "logo": "/assets/logos/cajamar.svg",
+        "color": "#00843d",
+        "logo_on_dark": False,
+        "aliases": ("cajamar", "cajamar caja rural", "cajamar caja rural sociedad cooperativa de credito", "cajamar caja rural scc"),
+    },
+    {
+        "name": "UCI",
+        "short": "UCI",
+        "logo": "/assets/logos/uci.svg",
+        "color": "#5a2d82",
+        "logo_on_dark": False,
+        "aliases": ("uci", "u c i", "union de creditos inmobiliarios", "union de creditos inmobiliarios sa"),
+    },
+    {
+        "name": "Caja Rural de Granada",
+        "short": "CR Granada",
+        "logo": "/assets/logos/caja-rural-granada.png",
+        "color": "#2e7d32",
+        "logo_on_dark": True,
+        "aliases": ("caja rural de granada", "caja rural granada", "cajarural de granada", "cajarural granada", "rural granada"),
+    },
+    {
+        "name": "Caja Rural del Sur",
+        "short": "CR del Sur",
+        "logo": "/assets/logos/caja-rural-del-sur.png",
+        "color": "#0b8f3d",
+        "logo_on_dark": False,
+        "aliases": ("caja rural del sur", "caja rural sur", "cajarural del sur", "cajarural sur", "rural del sur", "rural sur"),
+    },
+    {
+        "name": "ING",
+        "short": "ING",
+        "logo": "/assets/logos/ing.svg",
+        "color": "#ff6200",
+        "logo_on_dark": False,
+        "aliases": ("ing", "ing direct", "ing bank", "ing direct nv", "ing direct n v", "ing direct nv sucursal en espana"),
+    },
+)
+
+HIPOTECA_BANK_BRAND_LOOKUP = {}
+HIPOTECA_EXPORT_BRANDS = {}
+for _bank_brand in HIPOTECA_BANK_BRANDS:
+    for _alias in (_bank_brand.get("name"), *(_bank_brand.get("aliases") or ())):
+        _alias_key = normalize_lookup_text(_alias)
+        if not _alias_key:
+            continue
+        HIPOTECA_BANK_BRAND_LOOKUP[_alias_key] = _bank_brand
+        HIPOTECA_EXPORT_BRANDS[_alias_key] = _bank_brand["name"]
+
+
+def resolve_hipoteca_bank_brand(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return {
+            "name": "",
+            "short": "",
+            "logo": "",
+            "color": "#824c45",
+            "logo_on_dark": False,
+            "original": "",
+            "display_name": "",
+        }
+    normalized = normalize_lookup_text(raw)
+    brand = HIPOTECA_BANK_BRAND_LOOKUP.get(normalized)
+    if not brand and normalized:
+        for alias_key, candidate in HIPOTECA_BANK_BRAND_LOOKUP.items():
+            if alias_key and (normalized in alias_key or alias_key in normalized):
+                brand = candidate
+                break
+    if brand:
+        return {
+            **brand,
+            "original": raw,
+            "display_name": brand["name"],
+        }
+    initials = "".join(token[:1] for token in raw.split()[:2]).upper().strip() or "??"
+    return {
+        "name": raw,
+        "short": initials,
+        "logo": "",
+        "color": "#824c45",
+        "logo_on_dark": False,
+        "original": raw,
+        "display_name": raw,
+    }
+
+
+def build_hipoteca_bank_logo_meta(value):
+    brand = resolve_hipoteca_bank_brand(value)
+    return {
+        "logo_url": str(brand.get("logo") or "").strip(),
+        "logo_initials": str(brand.get("short") or "").strip(),
+        "logo_color": str(brand.get("color") or "").strip() or "#824c45",
+        "logo_on_dark": bool(brand.get("logo_on_dark")),
+    }
 
 
 def hipoteca_estado_is_closed(value):
@@ -5335,7 +5502,8 @@ def canonicalize_hipoteca_bank_name(value):
     raw = str(value or "").strip()
     if not raw:
         return ""
-    return HIPOTECA_EXPORT_BRANDS.get(normalize_lookup_text(raw), raw)
+    brand = resolve_hipoteca_bank_brand(raw)
+    return str(brand.get("name") or raw).strip() or raw
 
 
 def format_export_money(value):
@@ -7012,9 +7180,10 @@ def build_hipoteca_ficha_pdf(payload, section=None):
             {"label": "Costes asociados", "value": coste_asociado},
         ],
     }
+    bank_logo_meta = build_hipoteca_bank_logo_meta(payload.get("banco"))
 
     sections = [
-        ("Resumen comercial", hero_card),
+        ("Resumen comercial", {**hero_card, **bank_logo_meta}),
         ("Importes clave", resumen_cards),
         ("Estructura de fondos", structure_bar),
         ("Datos operativos", operativa_cards),
@@ -7283,6 +7452,7 @@ def build_hipotecas_fichas_pdf(conn, rows, section=None, filters=None):
       estado = str(payload.get("estado") or "").strip() or "-"
       fecha_encargo = format_export_date(payload.get("fecha_encargo")) or "—"
       fecha_firma = format_export_date(payload.get("fecha_firma")) or "—"
+      bank_logo_meta = build_hipoteca_bank_logo_meta(payload.get("banco"))
       summary_chips = [
           value
           for value in [
@@ -7306,6 +7476,7 @@ def build_hipotecas_fichas_pdf(conn, rows, section=None, filters=None):
                   "subtitle": " · ".join(summary_chips),
                   "badge": estado,
                   "chips": summary_chips,
+                  **bank_logo_meta,
                   "items": [
                       {"label": "Importe hipoteca", "value": money_or_dash(payload.get("importe_hipoteca")), "accent": True},
                       {"label": "Precio compra", "value": money_or_dash(payload.get("precio")), "accent": True},
@@ -50404,6 +50575,41 @@ def _document_font(size=18, bold=False):
     return ImageFont.load_default()
 
 
+def _load_image_from_bytes(raw_bytes, max_width=520):
+    if not raw_bytes:
+        return None
+    logo = None
+    try:
+        logo = Image.open(BytesIO(raw_bytes)).convert("RGBA")
+    except Exception:
+        logo = None
+    if logo is None and cairosvg is not None:
+        try:
+            svg_kwargs = {}
+            if max_width and max_width > 0:
+                svg_kwargs["output_width"] = int(max_width)
+            png_bytes = cairosvg.svg2png(bytestring=raw_bytes, **svg_kwargs)
+            logo = Image.open(BytesIO(png_bytes)).convert("RGBA")
+        except Exception:
+            logo = None
+    if logo is None:
+        return None
+    if logo.width > max_width:
+        ratio = max_width / float(logo.width)
+        logo = logo.resize((int(logo.width * ratio), int(logo.height * ratio)), Image.LANCZOS)
+    return logo
+
+
+def _load_image_from_path(logo_path, max_width=520):
+    if not logo_path or not logo_path.exists():
+        return None
+    try:
+        raw_bytes = logo_path.read_bytes()
+    except Exception:
+        return None
+    return _load_image_from_bytes(raw_bytes, max_width=max_width)
+
+
 def _load_brand_logo(logo_url=None, max_width=520):
     raw = str(logo_url).strip() if logo_url else ""
     logo_path = None
@@ -50414,10 +50620,12 @@ def _load_brand_logo(logo_url=None, max_width=520):
             candidate = ASSETS / raw.replace("/assets/", "", 1)
             if candidate.exists():
                 logo_path = candidate
+                logo = _load_image_from_path(candidate, max_width=max_width)
         elif raw.startswith("assets/"):
             candidate = ROOT / raw
             if candidate.exists():
                 logo_path = candidate
+                logo = _load_image_from_path(candidate, max_width=max_width)
         else:
             # Permite logos subidos a S3 (solo prefijo company_logos/).
             safe_key = ""
@@ -50438,10 +50646,7 @@ def _load_brand_logo(logo_url=None, max_width=520):
             if safe_key and safe_key.startswith("company_logos/"):
                 raw_bytes, _err = s3_get_object_bytes(safe_key)
                 if raw_bytes:
-                    try:
-                        logo = Image.open(BytesIO(raw_bytes)).convert("RGBA")
-                    except Exception:
-                        logo = None
+                    logo = _load_image_from_bytes(raw_bytes, max_width=max_width)
 
     if logo is None:
         if logo_path is None:
@@ -50450,13 +50655,9 @@ def _load_brand_logo(logo_url=None, max_width=520):
                 logo_path = ASSETS / "verifika2" / "verifika2_wordmark_check_green.png"
         if not logo_path.exists():
             return None
-        try:
-            logo = Image.open(logo_path).convert("RGBA")
-        except Exception:
+        logo = _load_image_from_path(logo_path, max_width=max_width)
+        if logo is None:
             return None
-    if logo.width > max_width:
-        ratio = max_width / float(logo.width)
-        logo = logo.resize((int(logo.width * ratio), int(logo.height * ratio)), Image.LANCZOS)
     return logo
 
 
@@ -50467,14 +50668,23 @@ def _load_asset_logo(asset_rel=None, max_width=520):
     candidate = ASSETS / raw
     if not candidate.exists():
         return None
-    try:
-        logo = Image.open(candidate).convert("RGBA")
-    except Exception:
-        return None
-    if logo.width > max_width:
-        ratio = max_width / float(logo.width)
-        logo = logo.resize((int(logo.width * ratio), int(logo.height * ratio)), Image.LANCZOS)
-    return logo
+    return _load_image_from_path(candidate, max_width=max_width)
+
+
+def _parse_pdf_color(value, fallback=(255, 255, 255)):
+    raw = str(value or "").strip()
+    if not raw:
+        return fallback
+    if raw.startswith("#"):
+        hex_value = raw.lstrip("#")
+        if len(hex_value) == 3:
+            hex_value = "".join(ch * 2 for ch in hex_value)
+        if len(hex_value) == 6:
+            try:
+                return tuple(int(hex_value[idx : idx + 2], 16) for idx in (0, 2, 4))
+            except Exception:
+                return fallback
+    return fallback
 
 
 def _pil_multiline(draw, text, font, width, line_gap=8):
@@ -50814,9 +51024,19 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
                     hero_note_lines, _, hero_note_h = _pil_multiline(draw, note, font_feature_note, width=50, line_gap=4)
                 else:
                     hero_note_lines, hero_note_h = [], 0
+                logo_url = str(card.get("logo_url") or "").strip()
+                logo_initials = str(card.get("logo_initials") or "").strip()
+                logo_color = _parse_pdf_color(card.get("logo_color"), (132, 76, 69))
+                logo_on_dark = bool(card.get("logo_on_dark") or False)
+                logo_image = _load_brand_logo(logo_url, max_width=180) if logo_url else None
+                logo_tile_h = 0
+                if logo_image:
+                    logo_tile_h = max(54, min(84, logo_image.height + 18))
+                elif logo_initials:
+                    logo_tile_h = 54
 
                 chip_rows = 1 if len(chips) <= 4 else 2
-                hero_h = 392 + max(0, chip_rows - 1) * 34 + max(0, hero_note_h - 20)
+                hero_h = 392 + max(0, chip_rows - 1) * 34 + max(0, hero_note_h - 20) + (logo_tile_h + 12 if logo_tile_h else 0)
                 ensure_space(hero_h + 12)
                 x0 = margin_x
                 y0 = y
@@ -50852,6 +51072,36 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
                 if eyebrow:
                     draw.text((left_x, left_top), eyebrow.upper(), fill=gold, font=font_feature_eyebrow)
                     left_top += 18
+
+                if logo_tile_h:
+                    logo_tile_w = min(240, max(176, panel_x - left_x - 18))
+                    logo_fill = logo_color if logo_on_dark else (252, 248, 235)
+                    logo_outline = logo_color if logo_on_dark else (228, 231, 235)
+                    _draw_card_box(
+                        draw,
+                        (left_x, left_top, left_x + logo_tile_w, left_top + logo_tile_h),
+                        outline=logo_outline,
+                        fill=logo_fill,
+                        width=2,
+                        radius=18,
+                        shadow=True,
+                    )
+                    if logo_image:
+                        contained = ImageOps.contain(logo_image, (logo_tile_w - 28, logo_tile_h - 18))
+                        paste_x = left_x + 14 + max(0, int(((logo_tile_w - 28) - contained.width) / 2))
+                        paste_y = left_top + 9 + max(0, int(((logo_tile_h - 18) - contained.height) / 2))
+                        image.paste(contained, (paste_x, paste_y), contained)
+                    else:
+                        initials_font = font_feature_eyebrow if len(logo_initials) <= 3 else font_header_small
+                        text_fill = (255, 255, 255) if logo_on_dark else logo_color
+                        draw.text(
+                            (left_x + logo_tile_w / 2, left_top + logo_tile_h / 2),
+                            logo_initials or "BANK",
+                            fill=text_fill,
+                            font=initials_font,
+                            anchor="mm",
+                        )
+                    left_top += logo_tile_h + 14
 
                 draw.multiline_text((left_x, left_top), "\n".join(hero_title_lines), fill=ink, font=font_feature_title, spacing=4)
                 left_top += hero_title_h

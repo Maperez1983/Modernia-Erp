@@ -248,6 +248,43 @@ class HipotecasFichaPdfTests(unittest.TestCase):
             reader = server.PdfReader(BytesIO(full_pdf))
             self.assertGreaterEqual(len(reader.pages), 1)
 
+    def test_resolve_hipoteca_bank_brand_uses_local_assets(self):
+        brand = server.resolve_hipoteca_bank_brand("Banco Santander S.A.")
+        fallback = server.resolve_hipoteca_bank_brand("Entidad sin identificar")
+
+        self.assertEqual(brand["name"], "Banco Santander")
+        self.assertEqual(brand["logo"], "/assets/logos/santander.svg")
+        self.assertTrue(brand["logo_on_dark"])
+        self.assertEqual(fallback["logo"], "")
+        self.assertEqual(fallback["short"], "ES")
+
+    def test_build_hipoteca_ficha_pdf_passes_bank_logo_metadata(self):
+        row = self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone()
+        payload = server.build_hipoteca_ficha_payload(self.conn, row)
+        captured = {}
+
+        original = server.build_modernia_branded_document_pdf
+
+        def fake_build(title, subtitle, sections, footer_lines=None, company=None, brand_logo_url=None):
+            captured["title"] = title
+            captured["subtitle"] = subtitle
+            captured["sections"] = sections
+            captured["brand_logo_url"] = brand_logo_url
+            return b"%PDF-1.4\n%%EOF\n"
+
+        try:
+            server.build_modernia_branded_document_pdf = fake_build
+            pdf_bytes = server.build_hipoteca_ficha_pdf(payload)
+        finally:
+            server.build_modernia_branded_document_pdf = original
+
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        hero_card = captured["sections"][0][1]
+        self.assertEqual(hero_card["logo_url"], "/assets/logos/caixabank.svg")
+        self.assertEqual(hero_card["logo_initials"], "CaixaBank")
+        self.assertEqual(hero_card["logo_color"], "#0079c1")
+        self.assertFalse(hero_card["logo_on_dark"])
+
     def test_collect_hipoteca_bdt_filter_options_derives_years_and_states(self):
         rows = [
             {"anio": "", "fecha_firma": "2026-06-20", "fecha_encargo": "2026-06-12", "estado": "Firmada"},
