@@ -5414,6 +5414,55 @@ def normalize_hipoteca_estado(value):
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
+HIPOTECA_BDT_STATE_ORDER = (
+    "Pendiente",
+    "Estudio",
+    "Encargo",
+    "Firmada",
+    "Rechazada",
+    "Cancelada",
+    "Indemnización",
+)
+
+
+def extract_hipoteca_bdt_year(row):
+    raw_year = str(row_value(row, "anio", "") or row_value(row, "año", "") or row_value(row, "year", "") or "").strip()
+    if re.fullmatch(r"\d{4}", raw_year):
+        return raw_year
+    for key in ("fecha_firma", "fecha_encargo", "fecha", "created_at", "updated_at"):
+        raw = str(row_value(row, key, "") or "").strip()
+        if not raw:
+            continue
+        parsed = parse_iso_date(raw)
+        if parsed:
+            return str(parsed.year)
+        match = re.search(r"\b(19\d{2}|20\d{2})\b", raw)
+        if match:
+            return match.group(1)
+    return ""
+
+
+def collect_hipoteca_bdt_filter_options(rows):
+    years = []
+    states = []
+    seen_years = set()
+    seen_states = set()
+    for row in rows or []:
+        year = extract_hipoteca_bdt_year(row)
+        if year and year not in seen_years:
+            seen_years.add(year)
+            years.append(year)
+        estado = str(row_value(row, "estado", "") or "").strip()
+        estado_key = normalize_hipoteca_estado(estado)
+        if estado and estado_key and estado_key not in seen_states:
+            seen_states.add(estado_key)
+            states.append(estado)
+    years.sort(key=lambda value: int(value), reverse=True)
+    state_rank = {normalize_hipoteca_estado(value): idx for idx, value in enumerate(HIPOTECA_BDT_STATE_ORDER)}
+    states.sort(key=lambda value: (state_rank.get(normalize_hipoteca_estado(value), 999), value.casefold()))
+    return {"years": years, "states": states}
+
+
 def hipoteca_signed_export_year(row):
     parsed = parse_iso_date(row["fecha_firma"])
     if parsed:
@@ -7007,6 +7056,170 @@ def build_hipoteca_ficha_pdf_filename(payload, section=None):
         parts.append(section_key)
     filename = "_".join(part for part in parts if part).strip("_")[:160] or "ficha_hipoteca"
     return f"{filename}.pdf"
+
+
+def build_hipotecas_fichas_pdf_filename(filters=None, count=None):
+    filters = filters or {}
+    parts = ["fichas_hipotecas"]
+    year = slugify_text(filters.get("year") or "")
+    estado = slugify_text(filters.get("estado") or "")
+    if year:
+        parts.append(year)
+    if estado:
+        parts.append(estado)
+    if count:
+        parts.append(str(int(count)))
+    filename = "_".join(part for part in parts if part).strip("_")[:160] or "fichas_hipotecas"
+    return f"{filename}.pdf"
+
+
+def build_hipotecas_fichas_pdf(conn, rows, section=None, filters=None):
+    rows = [row for row in (rows or []) if row is not None]
+    if not rows:
+        return b""
+
+    if PdfReader is not None and PdfWriter is not None:
+        writer = PdfWriter()
+        page_count = 0
+        for row in rows:
+            payload = build_hipoteca_ficha_payload(conn, row)
+            pdf_bytes = build_hipoteca_ficha_pdf(payload, section=section)
+            if not pdf_bytes:
+                continue
+            reader = PdfReader(BytesIO(pdf_bytes))
+            for page in reader.pages:
+                writer.add_page(page)
+                page_count += 1
+        if not page_count:
+            return b""
+        buffer = BytesIO()
+        writer.write(buffer)
+        return buffer.getvalue()
+
+    def money_or_dash(value):
+        raw = str(value or "").strip()
+        if not raw and value not in (0, 0.0):
+            return "—"
+        return format_export_money(value)
+
+    def percent_or_dash(value):
+        raw = str(value or "").strip()
+        if not raw and value not in (0, 0.0):
+            return "—"
+        amount = parse_money_value(value)
+        if amount is None:
+            return "—"
+        if 0 <= amount <= 1:
+            amount *= 100
+        return f"{amount:.2f} %"
+
+    payloads = [build_hipoteca_ficha_payload(conn, row) for row in rows]
+    total = len(payloads)
+    filter_parts = []
+    if isinstance(filters, dict):
+        year = str(filters.get("year") or "").strip()
+        estado = str(filters.get("estado") or "").strip()
+        query = str(filters.get("query") or "").strip()
+        if year:
+            filter_parts.append(f"Año {year}")
+        if estado:
+            filter_parts.append(f"Estado {estado}")
+        if query:
+            filter_parts.append(f'Búsqueda "{query}"')
+    subtitle = " · ".join(filter_parts) if filter_parts else f"{total} operación(es)"
+
+    sections = []
+    for idx, payload in enumerate(payloads, start=1):
+      cliente = str(payload.get("cliente") or "").strip() or f"Hipoteca {idx}"
+      banco = str(payload.get("banco") or "").strip() or "-"
+      oficina = str(payload.get("oficina") or payload.get("inmobiliaria") or "").strip() or "-"
+      asesor = str(payload.get("asesor") or "").strip() or "-"
+      estado = str(payload.get("estado") or "").strip() or "-"
+      fecha_encargo = format_export_date(payload.get("fecha_encargo")) or "—"
+      fecha_firma = format_export_date(payload.get("fecha_firma")) or "—"
+      summary_chips = [
+          value
+          for value in [
+              banco,
+              oficina,
+              asesor,
+              f"Encargo {fecha_encargo}" if fecha_encargo != "—" else "",
+              f"Firma {fecha_firma}" if fecha_firma != "—" else "",
+          ]
+          if value and value != "—"
+      ]
+
+      sections.append(
+          (
+              f"Ficha {idx}/{total}",
+              {
+                  "kind": "feature_card",
+                  "layout": "hero",
+                  "eyebrow": "Presentación comercial",
+                  "title": cliente,
+                  "subtitle": " · ".join(summary_chips),
+                  "badge": estado,
+                  "chips": summary_chips,
+                  "items": [
+                      {"label": "Importe hipoteca", "value": money_or_dash(payload.get("importe_hipoteca")), "accent": True},
+                      {"label": "Precio compra", "value": money_or_dash(payload.get("precio")), "accent": True},
+                      {"label": "% financiación", "value": percent_or_dash(payload.get("porcentaje")), "accent": True},
+                  ],
+                  "note": "Ficha comercial resumida para impresión masiva de operaciones.",
+              },
+          )
+      )
+
+      sections.append(
+          (
+              f"Datos operativos {idx}",
+              {
+                  "kind": "kpi_cards",
+                  "columns": 3,
+                  "items": [
+                      {"label": "Cliente", "value": cliente, "accent": True},
+                      {"label": "Banco", "value": banco},
+                      {"label": "Oficina", "value": oficina},
+                      {"label": "Asesor", "value": asesor},
+                      {"label": "Estado", "value": estado, "accent": True},
+                      {"label": "Fecha encargo", "value": fecha_encargo},
+                      {"label": "Fecha firma", "value": fecha_firma},
+                      {"label": "Tipo hipoteca", "value": str(payload.get("tipo_hipoteca") or "").strip() or "—"},
+                  ],
+              },
+          )
+      )
+
+      sections.append(
+          (
+              f"Importes {idx}",
+              {
+                  "kind": "kpi_cards",
+                  "columns": 3,
+                  "items": [
+                      {"label": "Entrada", "value": money_or_dash(payload.get("entrada")), "accent": True},
+                      {"label": "Comisión", "value": money_or_dash(payload.get("honorarios") or payload.get("comision")), "accent": True},
+                      {"label": "Cesión", "value": money_or_dash(payload.get("cesion"))},
+                      {"label": "Comisión Juan", "value": money_or_dash(payload.get("comision_juan"))},
+                      {"label": "Comisión Modernia", "value": money_or_dash(payload.get("comision_modernia"))},
+                      {"label": "Importe hipoteca", "value": money_or_dash(payload.get("importe_hipoteca")), "accent": True},
+                  ],
+              },
+          )
+      )
+
+    footer_lines = [
+        "Documento comercial interno generado por el CRM Financiaciones.",
+        "Cada ficha resume la operación en formato de presentación para impresión masiva.",
+    ]
+    return build_modernia_branded_document_pdf(
+        "FICHAS DE HIPOTECAS",
+        subtitle,
+        sections,
+        footer_lines=footer_lines,
+        company={},
+        brand_logo_url="/assets/grupo_modernia_logo.png",
+    )
 
 
 def derive_hipoteca_inmobiliaria_cost(row):
@@ -56556,6 +56769,50 @@ class Handler(BaseHTTPRequestHandler):
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
+        if parsed.path == "/api/hipotecas_fichas_pdf":
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            section = str(payload.get("section") or "").strip()
+            raw_ids = payload.get("ids") if isinstance(payload, dict) else None
+            filters = payload.get("filters") if isinstance(payload, dict) and isinstance(payload.get("filters"), dict) else {}
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            if isinstance(raw_ids, str):
+                ids = [item.strip() for item in raw_ids.split(",") if item.strip()]
+            elif isinstance(raw_ids, (list, tuple)):
+                ids = [str(item).strip() for item in raw_ids if str(item).strip()]
+            else:
+                ids = []
+            ids = list(dict.fromkeys(ids))
+            if not ids:
+                json_response(self, {"error": "ids requeridos"}, status=400)
+                return
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM hipotecas
+                WHERE empresa_id = ?
+                ORDER BY COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), updated_at, created_at) DESC
+                """,
+                (empresa_id,),
+            ).fetchall()
+            by_id = {str(row["id"] or "").strip(): row for row in rows if str(row["id"] or "").strip()}
+            ordered_rows = [by_id[record_id] for record_id in ids if record_id in by_id]
+            if not ordered_rows:
+                json_response(self, {"error": "No se encontraron hipotecas para los ids indicados"}, status=404)
+                return
+            try:
+                pdf_bytes = build_hipotecas_fichas_pdf(conn, ordered_rows, section=section or None, filters=filters)
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo generar el PDF", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
+            if not pdf_bytes:
+                json_response(self, {"error": "No se pudo generar el PDF"}, status=500)
+                return
+            filename = build_hipotecas_fichas_pdf_filename(filters, count=len(ordered_rows))
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
+            return
+
         if parsed.path == "/api/irpf_alquiler_simulate":
             ejercicio = int(payload.get("ejercicio") or 0)
             if ejercicio <= 0:
@@ -88214,6 +88471,15 @@ class Handler(BaseHTTPRequestHandler):
 
             select_cols = ", ".join([quote_ident(col) for col in columns])
             where_clause = " AND ".join(where)
+            meta_rows = conn.execute(
+                f"""
+                SELECT anio, fecha_firma, fecha_encargo, estado
+                FROM hipotecas
+                WHERE {where_clause}
+                """,
+                values,
+            ).fetchall()
+            filters = collect_hipoteca_bdt_filter_options(meta_rows)
             rows = conn.execute(
                 f"""
                 SELECT {select_cols}
@@ -88224,7 +88490,7 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 values,
             ).fetchall()
-            json_response(self, {"columns": columns, "rows": [row_to_cells(r, columns) for r in rows]})
+            json_response(self, {"columns": columns, "rows": [row_to_cells(r, columns) for r in rows], "filters": filters})
             return
 
         if path == "/api/hipotecas_audit_descuadres":

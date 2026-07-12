@@ -247,3 +247,71 @@ class HipotecasFichaPdfTests(unittest.TestCase):
         if server.PdfReader is not None:
             reader = server.PdfReader(BytesIO(full_pdf))
             self.assertGreaterEqual(len(reader.pages), 1)
+
+    def test_collect_hipoteca_bdt_filter_options_derives_years_and_states(self):
+        rows = [
+            {"anio": "", "fecha_firma": "2026-06-20", "fecha_encargo": "2026-06-12", "estado": "Firmada"},
+            {"anio": "2025", "fecha_firma": "", "fecha_encargo": "2025-03-03", "estado": "Pendiente"},
+            {"anio": None, "fecha_firma": "2026-01-15", "fecha_encargo": "", "estado": "firmada"},
+        ]
+
+        filters = server.collect_hipoteca_bdt_filter_options(rows)
+
+        self.assertEqual(filters["years"], ["2026", "2025"])
+        self.assertEqual(filters["states"], ["Pendiente", "Firmada"])
+
+    def test_build_hipotecas_fichas_pdf_merges_multiple_reports(self):
+        row = self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone()
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
+              oficina, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan, comision_modernia,
+              inmobiliaria_compra, asesor, estado, anio, cliente_inmueble_json, hipoteca_detalle_json, liquidacion_json,
+              created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            """,
+            (
+                "h2",
+                "e1",
+                "Luis López",
+                "c1",
+                "BBVA",
+                220000,
+                175000,
+                79.54,
+                45000,
+                2800,
+                "Modernia Norte",
+                "2026-06-10",
+                "Sí",
+                "Compra",
+                "2026-06-19",
+                550,
+                550,
+                1600,
+                "Inmo Norte",
+                "María",
+                "Firmada",
+                2026,
+                row["cliente_inmueble_json"],
+                row["hipoteca_detalle_json"],
+                row["liquidacion_json"],
+                "2026-06-19",
+                "2026-06-19",
+            ),
+        )
+        self.conn.commit()
+
+        rows = [
+            self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone(),
+            self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h2'").fetchone(),
+        ]
+        batch_pdf = server.build_hipotecas_fichas_pdf(self.conn, rows)
+
+        self.assertTrue(batch_pdf.startswith(b"%PDF"))
+        if server.PdfReader is not None:
+            reader = server.PdfReader(BytesIO(batch_pdf))
+            self.assertGreaterEqual(len(reader.pages), 2)
