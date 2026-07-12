@@ -6989,6 +6989,26 @@ def build_hipoteca_ficha_pdf(payload, section=None):
     )
 
 
+def build_hipoteca_ficha_pdf_filename(payload, section=None):
+    payload = payload or {}
+    parts = ["ficha_hipoteca"]
+    for value in (
+        slugify_text(payload.get("cliente") or ""),
+        slugify_text(payload.get("banco") or ""),
+        slugify_text(payload.get("id") or ""),
+    ):
+        if value:
+            parts.append(value)
+            break
+    else:
+        parts.append("documento")
+    section_key = slugify_text(section or "")
+    if section_key and section_key not in {"all", "todo", "todas"}:
+        parts.append(section_key)
+    filename = "_".join(part for part in parts if part).strip("_")[:160] or "ficha_hipoteca"
+    return f"{filename}.pdf"
+
+
 def derive_hipoteca_inmobiliaria_cost(row):
     total = parse_money_value((row.get("comision") if isinstance(row, dict) else row["comision"]) or 0)
     juan = parse_money_value((row.get("comision_juan") if isinstance(row, dict) else row["comision_juan"]) or 0)
@@ -53315,8 +53335,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not pdf_bytes:
                     json_response(self, {"error": "no se pudo generar el PDF"}, status=500)
                     return
-                # Sin filename -> Content-Disposition no se fuerza a descarga; el navegador decide (inline).
-                binary_response(self, pdf_bytes, content_type="application/pdf", filename=None)
+                # Con filename forzamos descarga y damos un nombre legible al PDF.
+                binary_response(
+                    self,
+                    pdf_bytes,
+                    content_type="application/pdf",
+                    filename=build_hipoteca_ficha_pdf_filename(payload, section=section),
+                )
                 return
             finally:
                 try:

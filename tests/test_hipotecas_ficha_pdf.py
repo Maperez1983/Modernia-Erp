@@ -231,10 +231,15 @@ class HipotecasFichaPdfTests(unittest.TestCase):
 
         full_pdf = server.build_hipoteca_ficha_pdf(payload)
         comprador_pdf = server.build_hipoteca_ficha_pdf(payload, section="comprador")
+        full_filename = server.build_hipoteca_ficha_pdf_filename(payload)
+        comprador_filename = server.build_hipoteca_ficha_pdf_filename(payload, section="comprador")
 
         self.assertTrue(full_pdf.startswith(b"%PDF"))
         self.assertTrue(comprador_pdf.startswith(b"%PDF"))
         self.assertGreater(len(full_pdf), len(comprador_pdf))
+        self.assertTrue(full_filename.startswith("ficha_hipoteca_"))
+        self.assertTrue(full_filename.endswith(".pdf"))
+        self.assertIn("comprador", comprador_filename)
         self.assertIn("liquidacion_print", payload)
         self.assertIn("liq", payload["liquidacion_print"])
         self.assertGreater(payload["liquidacion_print"]["liq"]["comprador"]["suma_total_necesaria"], 0)

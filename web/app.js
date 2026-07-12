@@ -42504,6 +42504,7 @@ const ensureHipotecaFichaPanel = () => {
           </div>
         </div>
         <div class="form-actions">
+          <button type="button" id="hipotecaFichaPdfCompleta" class="secondary">PDF completo</button>
           <button type="button" id="hipotecaFichaPdfComprador" class="secondary">PDF comprador</button>
           <button type="button" id="hipotecaFichaPdfVendedor" class="secondary">PDF vendedor</button>
           <button type="button" id="hipotecaFichaPdfCheques" class="secondary">PDF cheques</button>
@@ -42601,13 +42602,14 @@ const ensureHipotecaFichaPanel = () => {
     panel.querySelector(id)?.addEventListener("click", () => {
       if (panel.dataset.pdfReviewBlocked === "1") {
         const reason = String(panel.dataset.pdfReviewBlockedReason || "").trim() || "Revisión Excel con incidencias.";
-        const ok = window.confirm(`${reason}\n\n¿Generar el PDF igualmente?`);
+        const ok = window.confirm(`${reason}\n\n¿Descargar el PDF igualmente?`);
         if (!ok) return;
       }
       const recordId = String(panel.dataset.recordId || "").trim();
       if (recordId) openHipotecaFichaPdf(recordId, section);
     });
   };
+  bindPdf("#hipotecaFichaPdfCompleta", "");
   bindPdf("#hipotecaFichaPdfComprador", "comprador");
   bindPdf("#hipotecaFichaPdfVendedor", "vendedor");
   bindPdf("#hipotecaFichaPdfCheques", "cheques");
@@ -43653,16 +43655,31 @@ const openHipotecaFichaPrint = (recordId, section = "") => {
   }
 };
 
-const openHipotecaFichaPdf = (recordId, section = "") => {
+const openHipotecaFichaPdf = async (recordId, section = "") => {
   const id = String(recordId || "").trim();
   if (!id) return;
   const params = new URLSearchParams({ id });
   const normalized = String(section || "").trim();
   if (normalized) params.set("section", normalized);
   const url = `/api/hipoteca_ficha_pdf?${params.toString()}`;
-  const w = window.open(url, "_blank", "noopener");
-  if (!w) {
-    alert("No se pudo abrir el PDF. Revisa si el navegador está bloqueando pop-ups para este sitio.");
+  try {
+    const res = await fetch(url, { credentials: "same-origin" });
+    if (!res.ok) {
+      const text = await res.text();
+      let detail = text || `HTTP ${res.status}`;
+      try {
+        const parsed = text ? JSON.parse(text) : null;
+        if (parsed && parsed.error) detail = parsed.detail ? `${parsed.error} · ${parsed.detail}` : parsed.error;
+      } catch (e) {}
+      throw new Error(detail);
+    }
+    const disposition = String(res.headers.get("Content-Disposition") || "");
+    const match = disposition.match(/filename="([^"]+)"/i);
+    const filename = match && match[1] ? match[1] : `ficha_hipoteca_${id}${normalized ? `_${normalized}` : ""}.pdf`;
+    const blob = await res.blob();
+    downloadBlobFile(filename, blob);
+  } catch (error) {
+    alert(`No se pudo descargar el PDF. ${String(error?.message || error || "").trim() || "Revisa la conexión e inténtalo de nuevo."}`);
   }
 };
 
@@ -44496,9 +44513,9 @@ const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
 	    const pdfBtn = document.createElement("button");
 	    pdfBtn.type = "button";
 	    pdfBtn.className = "secondary";
-	    pdfBtn.textContent = "PDF";
+    pdfBtn.textContent = "PDF completo";
     pdfBtn.disabled = !canGeneratePdf;
-    pdfBtn.title = canGeneratePdf ? "" : "Disponible solo para firmadas con fecha de firma.";
+    pdfBtn.title = canGeneratePdf ? "Descargar la ficha completa en PDF." : "Disponible solo para firmadas con fecha de firma.";
     pdfBtn.addEventListener("click", () => openHipotecaFichaPdf(recordId));
 
     const deleteBtn = document.createElement("button");
@@ -44587,9 +44604,9 @@ const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
     const pdfBtn = document.createElement("button");
     pdfBtn.type = "button";
     pdfBtn.className = "secondary";
-    pdfBtn.textContent = "PDF";
+    pdfBtn.textContent = "PDF completo";
     pdfBtn.disabled = !canGeneratePdf;
-    pdfBtn.title = canGeneratePdf ? "" : "Disponible solo para firmadas con fecha de firma.";
+    pdfBtn.title = canGeneratePdf ? "Descargar la ficha completa en PDF." : "Disponible solo para firmadas con fecha de firma.";
     pdfBtn.addEventListener("click", () => {
       openHipotecaFichaPdf(recordId);
     });
