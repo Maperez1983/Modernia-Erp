@@ -5508,6 +5508,28 @@ def collect_hipotecas_firmadas_export_rows(conn, empresa_id, selected_year=None)
     return items
 
 
+def collect_hipotecas_firmadas_rows(conn, empresa_id, selected_year=None):
+    year_filter = str(selected_year or "").strip()
+    raw_rows = conn.execute(
+        """
+        SELECT *
+        FROM hipotecas
+        WHERE empresa_id = ?
+        ORDER BY COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), created_at) DESC, created_at DESC
+        """,
+        (empresa_id,),
+    ).fetchall()
+    items = []
+    for raw in raw_rows:
+        if not is_hipoteca_signed_for_export(raw):
+            continue
+        declarativo_year = hipoteca_signed_export_year(raw)
+        if year_filter and declarativo_year != year_filter:
+            continue
+        items.append(raw)
+    return items
+
+
 def build_hipotecas_firmadas_excel_workbook(items, selected_year=None):
     wb = Workbook()
     summary = wb.active
@@ -7070,6 +7092,17 @@ def build_hipotecas_fichas_pdf_filename(filters=None, count=None):
     if count:
         parts.append(str(int(count)))
     filename = "_".join(part for part in parts if part).strip("_")[:160] or "fichas_hipotecas"
+    return f"{filename}.pdf"
+
+
+def build_hipotecas_firmadas_pdf_filename(selected_year=None, count=None):
+    parts = ["hipotecas_firmadas"]
+    year = slugify_text(str(selected_year or "").strip())
+    if year:
+        parts.append(year)
+    if count:
+        parts.append(str(int(count)))
+    filename = "_".join(part for part in parts if part).strip("_")[:160] or "hipotecas_firmadas"
     return f"{filename}.pdf"
 
 
@@ -88812,6 +88845,32 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
             self.end_headers()
             self.wfile.write(content)
+            return
+
+        if path == "/api/hipotecas_firmadas_pdf":
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            selected_year = str(payload.get("year") or "2025").strip() or "2025"
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            rows = collect_hipotecas_firmadas_rows(conn, empresa_id, selected_year)
+            if not rows:
+                json_response(self, {"error": f"No hay hipotecas firmadas para el año {selected_year}"}, status=404)
+                return
+            try:
+                pdf_bytes = build_hipotecas_fichas_pdf(
+                    conn,
+                    rows,
+                    filters={"year": selected_year, "estado": "Firmada"},
+                )
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo generar el PDF", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
+            if not pdf_bytes:
+                json_response(self, {"error": "No se pudo generar el PDF"}, status=500)
+                return
+            filename = build_hipotecas_firmadas_pdf_filename(selected_year, count=len(rows))
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
         if path == "/api/fincas_seguros_dashboard":

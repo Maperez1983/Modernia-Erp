@@ -3860,6 +3860,7 @@ const hipotecaBdtListYear = document.getElementById("hipotecaBdtListYear");
 const hipotecaBdtListEstado = document.getElementById("hipotecaBdtListEstado");
 const hipotecaBdtPrintListado = document.getElementById("hipotecaBdtPrintListado");
 const hipotecaBdtPrintFichas = document.getElementById("hipotecaBdtPrintFichas");
+const hipotecaBdtPrintFirmadas2025 = document.getElementById("hipotecaBdtPrintFirmadas2025");
 const hipotecaBdtVincularSelect = document.getElementById("hipotecaBdtVincularSelect");
 const hipotecaBdtVincularBtn = document.getElementById("hipotecaBdtVincularBtn");
 const hipotecaBdtVincularStatus = document.getElementById("hipotecaBdtVincularStatus");
@@ -43957,6 +43958,27 @@ const downloadHipotecaBdtFichasPdf = async (popup = null) => {
     },
     {
       filenameFallback: "fichas_hipotecas.pdf",
+      targetWindow: popup,
+    }
+  );
+};
+
+const HIPOTECAS_FIRMADAS_PDF_YEAR = "2025";
+
+const downloadHipotecasFirmadas2025Pdf = async (popup = null) => {
+  const empresa = resolveCrmFinEmpresa();
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) {
+    throw new Error("No se pudo resolver la empresa de hipotecas.");
+  }
+  await downloadPdfFromApi(
+    "/api/hipotecas_firmadas_pdf",
+    {
+      empresa_id: empresaId,
+      year: HIPOTECAS_FIRMADAS_PDF_YEAR,
+    },
+    {
+      filenameFallback: `hipotecas_firmadas_${HIPOTECAS_FIRMADAS_PDF_YEAR}.pdf`,
       targetWindow: popup,
     }
   );
