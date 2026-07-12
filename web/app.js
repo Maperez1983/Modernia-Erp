@@ -10496,42 +10496,6 @@ const ensureWorkspaceCompanyContabilidadCache = (companyId = "") => {
   return cache;
 };
 
-const buildWorkspaceCompanyContabilidadShellHtml = () => `
-    <div class="section-head">
-      <div>
-        <h3>Contabilidad de la empresa</h3>
-        <p class="muted">Dashboard, libro diario, mayor, balances, modelos fiscales y asientos de la empresa activa.</p>
-      </div>
-    </div>
-    <div class="muted" data-company-conta-breadcrumb style="margin-bottom:8px; font-size:12px; letter-spacing:0.04em;">
-      Workspace &gt; Empresa &gt; Ficha empresa &gt; Contabilidad
-    </div>
-    <div class="footer" data-company-conta-status style="margin:8px 0 12px;"></div>
-    <div class="tabs crm-lightning-subbar" data-company-conta-tabs>
-      <button class="tab active" type="button" data-company-conta-tab="dashboard">Dashboard</button>
-      <button class="tab" type="button" data-company-conta-tab="diario">Libro diario</button>
-      <button class="tab" type="button" data-company-conta-tab="mayor">Libro mayor</button>
-      <button class="tab" type="button" data-company-conta-tab="balances">Balances</button>
-      <button class="tab" type="button" data-company-conta-tab="modelos">Modelos</button>
-      <button class="tab" type="button" data-company-conta-tab="asientos">Asientos</button>
-    </div>
-    <div class="stack" style="gap:16px; margin-top:12px;">
-      <div data-company-conta-pane="dashboard" data-company-conta-scope="main"></div>
-      <div data-company-conta-pane="diario" data-company-conta-scope="main" class="hidden"></div>
-      <div data-company-conta-pane="mayor" data-company-conta-scope="main" class="hidden"></div>
-      <div data-company-conta-pane="balances" data-company-conta-scope="main" class="hidden">
-        <div class="tabs crm-lightning-subbar" data-company-conta-balance-tabs style="margin-bottom:12px;">
-          <button class="tab active" type="button" data-company-conta-balance-tab="balance-situacion">Balance de situación</button>
-          <button class="tab" type="button" data-company-conta-balance-tab="pyg">P&amp;G</button>
-        </div>
-        <div data-company-conta-balance-pane="balance-situacion" data-company-conta-scope="balance"></div>
-        <div data-company-conta-balance-pane="pyg" data-company-conta-scope="balance" class="hidden"></div>
-      </div>
-      <div data-company-conta-pane="modelos" data-company-conta-scope="main" class="hidden"></div>
-      <div data-company-conta-pane="asientos" data-company-conta-scope="main" class="hidden"></div>
-    </div>
-  `;
-
 const resetWorkspaceCompanyContabilidadCache = (companyId = "") => {
   state.workspaceCompanyContabilidadCache = {
     companyId: String(companyId || "").trim(),
@@ -10542,34 +10506,6 @@ const resetWorkspaceCompanyContabilidadCache = (companyId = "") => {
   state.workspaceCompanyContabilidadBalanceTab = "balance-situacion";
   state.workspaceCompanyContabilidadSelectedAsientoId = "";
   return state.workspaceCompanyContabilidadCache;
-};
-
-const bindWorkspaceCompanyContabilidadButtons = (shell) => {
-  if (!shell) return;
-  shell.querySelectorAll("[data-company-conta-tab]").forEach((btn) => {
-    if (btn.dataset.companyContaClickBound === "1") return;
-    btn.dataset.companyContaClickBound = "1";
-    btn.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      const tab = normalizeWorkspaceCompanyContaTab(btn.dataset.companyContaTab || "dashboard");
-      console.warn("[conta tab click]", tab);
-      void setWorkspaceCompanyContabilidadTab(tab, { scroll: false });
-    });
-  });
-  shell.querySelectorAll("[data-company-conta-balance-tab]").forEach((btn) => {
-    if (btn.dataset.companyContaBalanceClickBound === "1") return;
-    btn.dataset.companyContaBalanceClickBound = "1";
-    btn.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation();
-      const tab = normalizeWorkspaceCompanyContabilidadBalanceTab(btn.dataset.companyContaBalanceTab || "balance-situacion");
-      console.warn("[conta tab click]", tab);
-      void setWorkspaceCompanyContabilidadBalanceTab(tab);
-    });
-  });
 };
 
 const formatWorkspaceCompanyContaMoney = (value) => {
@@ -10729,8 +10665,8 @@ const syncWorkspaceCompanyContabilidadBalanceTabs = () => {
     btn.classList.toggle("active", active);
     btn.setAttribute("aria-pressed", active ? "true" : "false");
   });
-  shell.querySelectorAll('[data-company-conta-balance-pane][data-company-conta-scope="balance"]').forEach((pane) => {
-    const key = normalizeWorkspaceCompanyContabilidadBalanceTab(pane.dataset.companyContaBalancePane || "");
+  shell.querySelectorAll('[data-company-conta-pane][data-company-conta-scope="balance"]').forEach((pane) => {
+    const key = normalizeWorkspaceCompanyContabilidadBalanceTab(pane.dataset.companyContaPane || "");
     const show = key === tab;
     pane.classList.toggle("hidden", !show);
     pane.hidden = !show;
@@ -10983,18 +10919,17 @@ const renderCompanyContaBalances = () => {
       </div>
       <div class="grid crm-kpis" data-company-conta-balance-metrics></div>
       <div class="card-soft" style="margin-top:16px;">
-        <div data-company-conta-balance-pane="balance-situacion" data-company-conta-scope="balance"></div>
-        <div data-company-conta-balance-pane="pyg" data-company-conta-scope="balance" class="hidden"></div>
+        <div data-company-conta-pane="balance-situacion" data-company-conta-scope="balance"></div>
+        <div data-company-conta-pane="pyg" data-company-conta-scope="balance" class="hidden"></div>
       </div>
     </div>
   `;
-  bindWorkspaceCompanyContabilidadButtons(shell);
   renderWorkspaceCompanyContabilidadMetricCards(pane.querySelector("[data-company-conta-balance-metrics]"), [
     { label: "Balance situación", value: books ? numberFormatter.format(balanceRows.length) : "Cargando", note: "Cuentas" },
     { label: "P&G", value: books ? numberFormatter.format(pygRows.length) : "Cargando", note: "Resultados" },
   ]);
   renderWorkspaceCompanyContabilidadTable(
-    pane.querySelector('[data-company-conta-balance-pane="balance-situacion"]'),
+    pane.querySelector('[data-company-conta-pane="balance-situacion"]'),
     ["Cuenta", "Debe", "Haber", "Saldo"],
     balanceRows.map((row) => [
       row.cuenta || "-",
@@ -11005,7 +10940,7 @@ const renderCompanyContaBalances = () => {
     books ? balanceSituacionEmptyText : "Cargando balance de situación..."
   );
   renderWorkspaceCompanyContabilidadTable(
-    pane.querySelector('[data-company-conta-balance-pane="pyg"]'),
+    pane.querySelector('[data-company-conta-pane="pyg"]'),
     ["Cuenta", "Debe", "Haber", "Saldo"],
     pygRows.map((row) => [
       row.cuenta || "-",
@@ -11255,27 +11190,65 @@ let _companyContaMovedNodes = [];
 const ensureWorkspaceCompanyContabilidadShell = () => {
   if (!workspaceCompanyFichaBody) return null;
   let shell = workspaceCompanyFichaBody.querySelector('[data-company-conta-shell="1"]');
+  if (shell) return shell;
   const panel = workspaceCompanyFichaBody.querySelector('[data-company-ficha-panel="contabilidad"]');
   if (!panel) return null;
-  const requiredMainTabs = ["dashboard", "diario", "mayor", "balances", "modelos", "asientos"];
-  const requiredMainPanes = ["dashboard", "diario", "mayor", "balances", "modelos", "asientos"];
-  const needsRebuild = !shell
-    || requiredMainTabs.some((tab) => !shell.querySelector(`[data-company-conta-tab="${tab}"]`))
-    || requiredMainPanes.some((paneKey) => !shell.querySelector(`[data-company-conta-pane="${paneKey}"]`))
-    || !shell.querySelector('[data-company-conta-balance-pane="balance-situacion"]')
-    || !shell.querySelector('[data-company-conta-balance-pane="pyg"]');
-  if (!shell) {
-    shell = document.createElement("div");
-    shell.dataset.companyContaShell = "1";
-    panel.appendChild(shell);
-  }
-  if (needsRebuild) {
-    shell.dataset.companyContaShell = "1";
-    shell.innerHTML = buildWorkspaceCompanyContabilidadShellHtml();
-  }
-  bindWorkspaceCompanyContabilidadButtons(shell);
-  if (!shell.parentNode) {
-    panel.appendChild(shell);
+  shell = document.createElement("div");
+  shell.dataset.companyContaShell = "1";
+  shell.innerHTML = `
+    <div class="section-head">
+      <div>
+        <h3>Contabilidad de la empresa</h3>
+        <p class="muted">Dashboard, libro diario, mayor, balances, modelos fiscales y asientos de la empresa activa.</p>
+      </div>
+    </div>
+    <div class="footer" data-company-conta-status style="margin:8px 0 12px;"></div>
+    <div class="tabs crm-lightning-subbar" data-company-conta-tabs>
+      <button class="tab active" type="button" data-company-conta-tab="dashboard">Dashboard</button>
+      <button class="tab" type="button" data-company-conta-tab="diario">Libro diario</button>
+      <button class="tab" type="button" data-company-conta-tab="mayor">Libro mayor</button>
+      <button class="tab" type="button" data-company-conta-tab="balances">Balances</button>
+      <button class="tab" type="button" data-company-conta-tab="modelos">Modelos</button>
+      <button class="tab" type="button" data-company-conta-tab="asientos">Asientos</button>
+    </div>
+    <div class="stack" style="gap:16px; margin-top:12px;">
+      <div data-company-conta-pane="dashboard" data-company-conta-scope="main"></div>
+      <div data-company-conta-pane="diario" data-company-conta-scope="main" class="hidden"></div>
+      <div data-company-conta-pane="mayor" data-company-conta-scope="main" class="hidden"></div>
+      <div data-company-conta-pane="balances" data-company-conta-scope="main" class="hidden">
+        <div class="tabs crm-lightning-subbar" data-company-conta-balance-tabs style="margin-bottom:12px;">
+          <button class="tab active" type="button" data-company-conta-balance-tab="balance-situacion">Balance de situación</button>
+          <button class="tab" type="button" data-company-conta-balance-tab="pyg">P&amp;G</button>
+        </div>
+        <div data-company-conta-pane="balance-situacion" data-company-conta-scope="balance"></div>
+        <div data-company-conta-pane="pyg" data-company-conta-scope="balance" class="hidden"></div>
+      </div>
+      <div data-company-conta-pane="modelos" data-company-conta-scope="main" class="hidden"></div>
+      <div data-company-conta-pane="asientos" data-company-conta-scope="main" class="hidden"></div>
+    </div>
+  `;
+  panel.appendChild(shell);
+  if (shell.dataset.companyContaBound !== "1") {
+    shell.dataset.companyContaBound = "1";
+    shell.addEventListener("click", (ev) => {
+      const mainBtn = ev?.target?.closest ? ev.target.closest("[data-company-conta-tab]") : null;
+      if (mainBtn && shell.contains(mainBtn)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        ev.stopImmediatePropagation();
+        const nextTab = normalizeWorkspaceCompanyContaTab(mainBtn.dataset.companyContaTab || "dashboard");
+        void setWorkspaceCompanyContabilidadTab(nextTab, { scroll: false });
+        return;
+      }
+      const balanceBtn = ev?.target?.closest ? ev.target.closest("[data-company-conta-balance-tab]") : null;
+      if (balanceBtn && shell.contains(balanceBtn)) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        ev.stopImmediatePropagation();
+        const nextBalanceTab = normalizeWorkspaceCompanyContabilidadBalanceTab(balanceBtn.dataset.companyContaBalanceTab || "balance-situacion");
+        void setWorkspaceCompanyContabilidadBalanceTab(nextBalanceTab);
+      }
+    });
   }
   return shell;
 };
@@ -42632,7 +42605,7 @@ const ensureHipotecaFichaPanel = () => {
         if (!ok) return;
       }
       const recordId = String(panel.dataset.recordId || "").trim();
-      if (recordId) openHipotecaFichaPrint(recordId, section);
+      if (recordId) openHipotecaFichaPdf(recordId, section);
     });
   };
   bindPdf("#hipotecaFichaPdfComprador", "comprador");
@@ -43680,6 +43653,19 @@ const openHipotecaFichaPrint = (recordId, section = "") => {
   }
 };
 
+const openHipotecaFichaPdf = (recordId, section = "") => {
+  const id = String(recordId || "").trim();
+  if (!id) return;
+  const params = new URLSearchParams({ id });
+  const normalized = String(section || "").trim();
+  if (normalized) params.set("section", normalized);
+  const url = `/api/hipoteca_ficha_pdf?${params.toString()}`;
+  const w = window.open(url, "_blank", "noopener");
+  if (!w) {
+    alert("No se pudo abrir el PDF. Revisa si el navegador está bloqueando pop-ups para este sitio.");
+  }
+};
+
 const downloadHipotecasFirmadasExcel = () => {
   const empresa = resolveCrmFinEmpresa();
   const empresaId = resolveLegacyEmpresaId(empresa);
@@ -44513,7 +44499,7 @@ const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
 	    pdfBtn.textContent = "PDF";
     pdfBtn.disabled = !canGeneratePdf;
     pdfBtn.title = canGeneratePdf ? "" : "Disponible solo para firmadas con fecha de firma.";
-    pdfBtn.addEventListener("click", () => openHipotecaFichaPrint(recordId));
+    pdfBtn.addEventListener("click", () => openHipotecaFichaPdf(recordId));
 
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
@@ -44605,7 +44591,7 @@ const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
     pdfBtn.disabled = !canGeneratePdf;
     pdfBtn.title = canGeneratePdf ? "" : "Disponible solo para firmadas con fecha de firma.";
     pdfBtn.addEventListener("click", () => {
-      openHipotecaFichaPrint(recordId);
+      openHipotecaFichaPdf(recordId);
     });
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";

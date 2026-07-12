@@ -3840,6 +3840,89 @@ def find_existing_seguro_id(conn, empresa_id, poliza_numero, compania, exclude_i
     return ""
 
 
+def find_reusable_hipoteca_open_record(
+    conn,
+    empresa_id,
+    *,
+    cliente=None,
+    cliente_id=None,
+    fecha_encargo=None,
+    precio=None,
+    importe_hipoteca=None,
+    banco=None,
+    oficina=None,
+    exclude_id=None,
+):
+    cols = table_columns(conn, "hipotecas") or set()
+    if not empresa_id or "empresa_id" not in cols:
+        return None
+    where = ["empresa_id = ?"]
+    values = [empresa_id]
+    if "estado" in cols:
+        where.append("LOWER(TRIM(COALESCE(estado, ''))) IN (?, ?, ?)")
+        values.extend(["estudio", "encargo", "pendiente"])
+    fecha_encargo_text = str(fecha_encargo or "").strip()
+    if fecha_encargo_text and "fecha_encargo" in cols:
+        where.append("NULLIF(TRIM(COALESCE(fecha_encargo, '')), '') = NULLIF(TRIM(?), '')")
+        values.append(fecha_encargo_text)
+    precio_val = parse_optional_float(precio)
+    if precio_val is not None and "precio" in cols:
+        where.append("precio = ?")
+        values.append(precio_val)
+    importe_val = parse_optional_float(importe_hipoteca)
+    if importe_val is not None and "importe_hipoteca" in cols:
+        where.append("importe_hipoteca = ?")
+        values.append(importe_val)
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM hipotecas
+        WHERE {" AND ".join(where)}
+        ORDER BY COALESCE(NULLIF(updated_at, ''), NULLIF(created_at, '')) DESC
+        """,
+        values,
+    ).fetchall()
+    cliente_id_norm = str(cliente_id or "").strip()
+    cliente_norm = normalize_lookup_text(cliente)
+    banco_norm = normalize_lookup_text(banco)
+    oficina_norm = normalize_lookup_text(oficina)
+    for row in rows or []:
+        row_id = str(row_value(row, "id") or "").strip()
+        if exclude_id and row_id == str(exclude_id or "").strip():
+            continue
+        row_cliente_id = str(row_value(row, "cliente_id") or "").strip() if "cliente_id" in cols else ""
+        row_cliente_norm = normalize_lookup_text(row_value(row, "cliente") or "") if "cliente" in cols else ""
+        if cliente_id_norm:
+            if row_cliente_id:
+                if row_cliente_id != cliente_id_norm:
+                    continue
+            elif cliente_norm:
+                if row_cliente_norm != cliente_norm:
+                    continue
+            else:
+                continue
+        elif cliente_norm:
+            if row_cliente_norm != cliente_norm:
+                continue
+        else:
+            continue
+        if banco_norm and "banco" in cols:
+            row_banco_norm = normalize_lookup_text(row_value(row, "banco") or "")
+            if row_banco_norm and row_banco_norm != banco_norm:
+                continue
+        if oficina_norm:
+            row_oficina_raw = ""
+            if "oficina" in cols:
+                row_oficina_raw = str(row_value(row, "oficina") or "").strip()
+            if not row_oficina_raw and "inmobiliaria_compra" in cols:
+                row_oficina_raw = str(row_value(row, "inmobiliaria_compra") or "").strip()
+            row_oficina_norm = normalize_lookup_text(row_oficina_raw)
+            if row_oficina_norm and row_oficina_norm != oficina_norm:
+                continue
+        return row
+    return None
+
+
 def normalize_lookup_text(value):
     if not value:
         return ""
@@ -4943,6 +5026,9 @@ MALAGA_BONUS_OFFICES = {
     "MODERNIA NORTE",
     "MODERNIA OESTE",
     "MODERNIA CENTRO",
+    "VERIFIKA2 NORTE",
+    "VERIFIKA2 OESTE",
+    "VERIFIKA2 CENTRO",
     "MALAGA NORTE",
     "MALAGA OESTE",
     "MALAGA CENTRO",
@@ -5836,16 +5922,12 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
     tipo = html.escape(payload["tipo_hipoteca"] or "-")
     asesor = html.escape(payload["asesor"] or "-")
     inmobiliaria = html.escape(payload["inmobiliaria"] or "-")
-    direccion = html.escape(payload["cliente_direccion"] or "-")
-    nif = html.escape(payload["cliente_nif"] or "-")
-    telefono = html.escape(payload["cliente_telefono"] or "-")
-    email_val = html.escape(payload["cliente_email"] or "-")
+    estado = html.escape(payload["estado"] or "-")
     fecha_encargo = html.escape(format_export_date(payload["fecha_encargo"]) or "-")
     fecha_firma = html.escape(format_export_date(payload["fecha_firma"]) or "-")
     importe = html.escape(format_export_money(payload["importe_hipoteca"]))
     precio = html.escape(format_export_money(payload["precio"]))
     entrada = html.escape(format_export_money(payload["entrada"]))
-    honorarios = html.escape(format_export_money(payload["honorarios"]))
     liq_payload = payload.get("liquidacion_print") if isinstance(payload.get("liquidacion_print"), dict) else {}
     liq = liq_payload.get("liq") if isinstance(liq_payload.get("liq"), dict) else {}
     flags = liq_payload.get("flags") if isinstance(liq_payload.get("flags"), dict) else {}
@@ -5906,6 +5988,19 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
             text = text.rstrip("0").rstrip(",")
         return html.escape(text)
 
+    cliente_inmueble = _safe_json_object(payload.get("cliente_inmueble_json") or "{}")
+
+    def fallback_text(primary, nested_path=None, default="-"):
+        raw = str(primary or "").strip()
+        if raw:
+            return raw
+        if nested_path:
+            nested_value = _get_nested(cliente_inmueble or {}, nested_path, default)
+            nested_text = str(nested_value or "").strip()
+            if nested_text:
+                return nested_text
+        return default
+
     comprador = liq.get("comprador") if isinstance(liq.get("comprador"), dict) else {}
     gastos_cv = comprador.get("gastos_compraventa") if isinstance(comprador.get("gastos_compraventa"), dict) else {}
     hip = comprador.get("hipoteca") if isinstance(comprador.get("hipoteca"), dict) else {}
@@ -5921,6 +6016,35 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
     cuadre_cheq2 = cuadre.get("cheque2") if isinstance(cuadre.get("cheque2"), dict) else {}
     cuadre_gastos = cuadre.get("gastos_escrituras") if isinstance(cuadre.get("gastos_escrituras"), dict) else {}
     notaria = liq.get("notaria") if isinstance(liq.get("notaria"), dict) else {}
+
+    porcentaje_val = parse_optional_float(payload.get("porcentaje"))
+    porcentaje_text = "-"
+    if porcentaje_val is not None:
+        try:
+            porcentaje_text = html.escape(f"{float(porcentaje_val):.2f}".rstrip("0").rstrip(".").replace(".", ",") + " %")
+        except Exception:
+            porcentaje_text = "-"
+
+    cliente_nif_text = html.escape(fallback_text(payload["cliente_nif"], "comprador.c1.nif"))
+    cliente_direccion_text = html.escape(fallback_text(payload["cliente_direccion"], "inmueble.direccion"))
+    cliente_telefono_text = html.escape(fallback_text(payload["cliente_telefono"], "comprador.c1.telefono"))
+    cliente_email_text = html.escape(fallback_text(payload["cliente_email"], "comprador.c1.email"))
+    cuota_estimada = html.escape(format_export_money(parse_money_value(prestamo.get("cuota_inicial") or 0)))
+    total_necesario = html.escape(
+        format_export_money(parse_money_value(hip.get("total_necesario") or comprador.get("suma_total_necesaria") or 0))
+    )
+    hero_chips = "".join(
+        chip
+        for chip in [
+            f'<span class="hero-chip">{banco}</span>' if banco != "-" else "",
+            f'<span class="hero-chip">{html.escape(str(payload.get("oficina") or "-"))}</span>'
+            if str(payload.get("oficina") or "").strip()
+            else "",
+            f'<span class="hero-chip">Encargo {html.escape(str(payload.get("encargo") or "-"))}</span>',
+            f'<span class="hero-chip">Firma {fecha_firma}</span>' if fecha_firma != "-" else "",
+        ]
+        if chip
+    )
 
     liq_section = ""
     if liq:
@@ -6117,15 +6241,16 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <title>Ficha hipoteca · {cliente}</title>
+  <title>Ficha comercial de hipoteca · {cliente}</title>
   <style>
     :root {{
-      --ink: #122033;
-      --muted: #5c6b80;
-      --brand: #103f91;
-      --brand-2: #1aa0c9;
-      --paper: #f4f7fb;
-      --line: #d7e2ee;
+      --ink: #15191f;
+      --muted: #6e747b;
+      --gold: #c8a24a;
+      --gold-strong: #a9852d;
+      --paper: #f6f3eb;
+      --line: rgba(22, 27, 43, 0.10);
+      --shadow: 0 18px 40px rgba(22, 27, 43, 0.10);
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -6133,68 +6258,120 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
       font-family: "Avenir Next", "Segoe UI", sans-serif;
       color: var(--ink);
       background:
-        radial-gradient(circle at top right, rgba(26,160,201,.18), transparent 28%),
-        linear-gradient(160deg, #eef3f9 0%, #ffffff 44%, #eef4fb 100%);
+        radial-gradient(circle at top right, rgba(200,162,74,.14), transparent 28%),
+        linear-gradient(160deg, #f3efe7 0%, #ffffff 46%, #f4f0e6 100%);
       padding: 28px;
+      print-color-adjust: exact;
+      -webkit-print-color-adjust: exact;
     }}
     .sheet {{
-      max-width: 980px;
+      max-width: 1040px;
       margin: 0 auto;
-      background: rgba(255,255,255,.96);
-      border: 1px solid rgba(16,63,145,.08);
-      border-radius: 28px;
+      background: rgba(255,255,255,.97);
+      border: 1px solid rgba(22, 27, 43, 0.08);
+      border-radius: 32px;
       overflow: hidden;
-      box-shadow: 0 20px 55px rgba(13,35,66,.12);
+      box-shadow: var(--shadow);
     }}
     .hero {{
       display: grid;
       grid-template-columns: 170px 1fr auto;
       gap: 22px;
       align-items: center;
-      padding: 28px 30px;
-      background: linear-gradient(135deg, rgba(16,63,145,.97), rgba(26,160,201,.92));
-      color: #fff;
+      padding: 28px 30px 24px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,246,240,0.96));
+      color: var(--ink);
+      border-bottom: 1px solid var(--line);
+      position: relative;
+    }}
+    .hero::before {{
+      content: "";
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 8px;
+      background: linear-gradient(90deg, var(--gold) 0%, #d5b15c 48%, #8b8f7e 100%);
     }}
     .hero img {{
       width: 150px;
       max-height: 90px;
       object-fit: contain;
     }}
+    .hero-copy {{
+      display: grid;
+      gap: 10px;
+    }}
+    .hero-kicker {{
+      color: var(--gold-strong);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      font-weight: 800;
+    }}
     .hero h1 {{
       margin: 0;
-      font-size: 30px;
-      line-height: 1.05;
-      letter-spacing: -.03em;
+      font-size: 32px;
+      line-height: 1;
+      letter-spacing: -.04em;
     }}
     .hero p {{
       margin: 8px 0 0;
-      color: rgba(255,255,255,.85);
+      color: var(--muted);
       font-size: 14px;
     }}
     .hero-tag {{
       padding: 10px 14px;
       border-radius: 999px;
-      background: rgba(255,255,255,.16);
+      background: rgba(200,162,74,.14);
+      border: 1px solid rgba(200,162,74,.30);
+      color: var(--ink);
       font-weight: 700;
       font-size: 13px;
       text-transform: uppercase;
       letter-spacing: .08em;
     }}
+    .hero-chips {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 4px;
+    }}
+    .hero-chip {{
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 5px 12px;
+      border-radius: 999px;
+      background: rgba(252, 248, 235, 0.98);
+      border: 1px solid rgba(200, 162, 74, 0.34);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .02em;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.7);
+    }}
     .content {{
       padding: 28px 30px 34px;
       display: grid;
-      gap: 24px;
+      gap: 22px;
     }}
     .metrics {{
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 14px;
     }}
     .metric {{
-      background: var(--paper);
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      padding: 16px 18px;
+      background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,244,236,.96));
+      border: 1px solid rgba(22, 27, 43, 0.08);
+      border-top: 4px solid rgba(22, 27, 43, 0.08);
+      border-radius: 20px;
+      padding: 16px 18px 15px;
+      box-shadow: 0 12px 26px rgba(22, 27, 43, 0.06);
+      min-height: 84px;
+    }}
+    .metric.metric-accent {{
+      border-color: rgba(200, 162, 74, 0.36);
+      border-top-color: var(--gold);
+      background: linear-gradient(180deg, rgba(252, 248, 235, .98), rgba(246, 240, 224, .96));
     }}
     .metric span {{
       display: block;
@@ -6205,8 +6382,9 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
       margin-bottom: 10px;
     }}
     .metric strong {{
-      font-size: 22px;
+      font-size: 24px;
       line-height: 1.05;
+      letter-spacing: -.03em;
     }}
     .sections {{
       display: grid;
@@ -6214,17 +6392,31 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
       gap: 20px;
     }}
     .panel {{
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: 22px;
-      padding: 20px 22px;
+      background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(249,246,240,.95));
+      border: 1px solid rgba(22, 27, 43, 0.08);
+      border-top: 4px solid rgba(200,162,74,.78);
+      border-radius: 24px;
+      padding: 20px 22px 22px;
+      box-shadow: 0 14px 30px rgba(22, 27, 43, 0.07);
     }}
     .panel h2 {{
-      margin: 0 0 16px;
+      margin: 0 0 14px;
       font-size: 16px;
       text-transform: uppercase;
       letter-spacing: .08em;
-      color: var(--brand);
+      color: var(--ink);
+      position: relative;
+      padding-bottom: 10px;
+    }}
+    .panel h2::after {{
+      content: "";
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 120px;
+      height: 3px;
+      border-radius: 999px;
+      background: var(--gold);
     }}
     .page-break {{
       break-before: page;
@@ -6256,26 +6448,30 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
     dl {{
       margin: 0;
       display: grid;
-      grid-template-columns: 180px 1fr;
-      gap: 10px 16px;
+      grid-template-columns: minmax(160px, 210px) 1fr;
+      gap: 10px 18px;
       align-items: start;
     }}
     dt {{
       color: var(--muted);
       font-weight: 600;
+      line-height: 1.35;
     }}
     dd {{
       margin: 0;
       font-weight: 700;
+      line-height: 1.35;
     }}
     .footer-note {{
       color: var(--muted);
       font-size: 12px;
       text-align: right;
+      padding-top: 2px;
     }}
     @media print {{
       body {{ background: #fff; padding: 0; }}
       .sheet {{ box-shadow: none; border-radius: 0; border: none; max-width: none; }}
+      .hero::before {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
     }}
   </style>
   {print_script}
@@ -6285,25 +6481,29 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
   <div class="sheet">
     <div class="hero">
       <img src="/assets/grupo_modernia_logo.png" alt="Grupo Modernia" />
-      <div>
-        <h1>Ficha de Operación Hipotecaria</h1>
+      <div class="hero-copy">
+        <div class="hero-kicker">Presentación comercial</div>
+        <h1>Ficha comercial de hipoteca</h1>
         <p>{cliente} · {banco}</p>
+        <div class="hero-chips">{hero_chips}</div>
       </div>
-      <div class="hero-tag">Financiaciones Modernia</div>
+      <div class="hero-tag">{estado}</div>
     </div>
     <div class="content">
       <div class="metrics">
-        <div class="metric"><span>Importe hipoteca</span><strong>{importe}</strong></div>
-        <div class="metric"><span>Precio compra</span><strong>{precio}</strong></div>
-        <div class="metric"><span>Entrada</span><strong>{entrada}</strong></div>
-        <div class="metric"><span>Honorarios</span><strong>{honorarios}</strong></div>
+        <div class="metric metric-accent"><span>Importe hipoteca</span><strong>{importe}</strong></div>
+      <div class="metric metric-accent"><span>% financiación</span><strong>{porcentaje_text}</strong></div>
+      <div class="metric metric-accent"><span>Cuota estimada</span><strong>{cuota_estimada}</strong></div>
+      <div class="metric"><span>Precio compra</span><strong>{precio}</strong></div>
+      <div class="metric"><span>Entrada</span><strong>{entrada}</strong></div>
+      <div class="metric"><span>Total necesario</span><strong>{total_necesario}</strong></div>
       </div>
       <div class="sections">
         <div class="panel">
           <h2>Datos de la operación</h2>
           <dl>
             <dt>Cliente</dt><dd>{cliente}</dd>
-            <dt>DNI</dt><dd>{nif}</dd>
+            <dt>DNI</dt><dd>{cliente_nif_text}</dd>
             <dt>Fecha encargo</dt><dd>{fecha_encargo}</dd>
             <dt>Fecha firma</dt><dd>{fecha_firma}</dd>
             <dt>Tipo hipoteca</dt><dd>{tipo}</dd>
@@ -6315,9 +6515,9 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
         <div class="panel">
           <h2>Datos del cliente</h2>
           <dl>
-            <dt>Dirección</dt><dd>{direccion}</dd>
-            <dt>Teléfono</dt><dd>{telefono}</dd>
-            <dt>Email</dt><dd>{email_val}</dd>
+            <dt>Dirección</dt><dd>{cliente_direccion_text}</dd>
+            <dt>Teléfono</dt><dd>{cliente_telefono_text}</dd>
+            <dt>Email</dt><dd>{cliente_email_text}</dd>
             <dt>Oficina</dt><dd>{html.escape(payload["oficina"] or "-")}</dd>
             <dt>Estado</dt><dd>{html.escape(payload["estado"] or "-")}</dd>
           </dl>
@@ -6329,6 +6529,464 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
   </div>
 </body>
 </html>"""
+
+
+def _hipoteca_ficha_row_text(row, key, default=""):
+    if row is None:
+        return default
+    try:
+        if isinstance(row, dict):
+            value = row.get(key)
+        elif hasattr(row, "keys") and key in row.keys():
+            value = row[key]
+        else:
+            return default
+    except Exception:
+        return default
+    text = str(value or "").strip()
+    return text or default
+
+
+def _hipoteca_ficha_bool_text(value):
+    raw = str(value or "").strip()
+    if not raw:
+        return "—"
+    normalized = normalize_lookup_text(raw)
+    if normalized in {"SI", "S", "TRUE", "1", "YES", "Y"}:
+        return "Sí"
+    if normalized in {"NO", "FALSE", "0", "N"}:
+        return "No"
+    return raw
+
+
+def _hipoteca_ficha_money(value, default="—"):
+    if value in (None, ""):
+        return default
+    try:
+        amount = parse_money_value(value)
+    except Exception:
+        amount = None
+    if amount is None:
+        text = str(value or "").strip()
+        return text or default
+    return format_eur(amount)
+
+
+def _hipoteca_ficha_num(value, decimals=2, default="—"):
+    if value in (None, ""):
+        return default
+    parsed = parse_optional_float(value)
+    if parsed is None:
+        text = str(value or "").strip()
+        return text or default
+    try:
+        amount = float(parsed)
+    except Exception:
+        text = str(value or "").strip()
+        return text or default
+    raw = f"{amount:,.{int(decimals)}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    if int(decimals) > 0:
+        raw = raw.rstrip("0").rstrip(",")
+    return raw
+
+
+def _hipoteca_ficha_json_lines(raw_value):
+    text = str(raw_value or "").strip()
+    if not text:
+        return ["{}"]
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        return text.splitlines() or [text]
+    try:
+        return json.dumps(parsed, ensure_ascii=False, indent=2, sort_keys=True).splitlines()
+    except Exception:
+        return text.splitlines() or [text]
+
+
+def _hipoteca_ficha_intervinientes_text(cliente_inmueble):
+    intervinientes = _get_nested(cliente_inmueble or {}, "intervinientes", [])
+    if not isinstance(intervinientes, list):
+        return "—"
+    parts = []
+    for item in intervinientes:
+        if not isinstance(item, dict):
+            continue
+        rol = str(item.get("rol") or item.get("tipo") or "Interviniente").strip()
+        nombre = str(item.get("nombre") or item.get("name") or "").strip()
+        nif = str(item.get("nif") or item.get("dni") or "").strip()
+        chunk = " · ".join([part for part in [rol, nombre, nif] if part])
+        if chunk:
+            parts.append(chunk)
+    return " | ".join(parts) if parts else "—"
+
+
+def build_hipoteca_ficha_payload(conn, row):
+    payload = build_hipoteca_export_row(conn, row)
+    payload["empresa_id"] = _hipoteca_ficha_row_text(row, "empresa_id")
+    payload["created_at"] = _hipoteca_ficha_row_text(row, "created_at")
+    payload["updated_at"] = _hipoteca_ficha_row_text(row, "updated_at")
+    payload["cliente_inmueble_json"] = _hipoteca_ficha_row_text(row, "cliente_inmueble_json")
+    payload["hipoteca_detalle_json"] = _hipoteca_ficha_row_text(row, "hipoteca_detalle_json")
+    payload["liquidacion_json"] = _hipoteca_ficha_row_text(row, "liquidacion_json")
+    liquidacion_raw = _safe_json_object(payload.get("liquidacion_json") or "{}")
+    payload["liquidacion_print"] = compute_hipoteca_liquidacion_print_data(payload, liquidacion_raw)
+    return payload
+
+
+def build_hipoteca_ficha_pdf(payload, section=None):
+    payload = payload or {}
+    liq_payload = payload.get("liquidacion_print")
+    if not isinstance(liq_payload, dict) or not liq_payload:
+        liq_payload = compute_hipoteca_liquidacion_print_data(payload, _safe_json_object(payload.get("liquidacion_json") or "{}"))
+    liq = liq_payload.get("liq") if isinstance(liq_payload.get("liq"), dict) else {}
+    flags = liq_payload.get("flags") if isinstance(liq_payload.get("flags"), dict) else {}
+
+    cliente_inmueble = _safe_json_object(payload.get("cliente_inmueble_json") or "{}")
+    hipoteca_detalle = _safe_json_object(payload.get("hipoteca_detalle_json") or "{}")
+
+    comprador = liq.get("comprador") if isinstance(liq.get("comprador"), dict) else {}
+    gastos_cv = comprador.get("gastos_compraventa") if isinstance(comprador.get("gastos_compraventa"), dict) else {}
+    hip = comprador.get("hipoteca") if isinstance(comprador.get("hipoteca"), dict) else {}
+    entregas = comprador.get("entregas") if isinstance(comprador.get("entregas"), dict) else {}
+    vendedor = liq.get("vendedor") if isinstance(liq.get("vendedor"), dict) else {}
+    vendedor_ded = vendedor.get("deducciones") if isinstance(vendedor.get("deducciones"), dict) else {}
+    vendedor_vendedores = vendedor.get("vendedores") if isinstance(vendedor.get("vendedores"), dict) else {}
+    vend_v1 = vendedor_vendedores.get("v1") if isinstance(vendedor_vendedores.get("v1"), dict) else {}
+    vend_v2 = vendedor_vendedores.get("v2") if isinstance(vendedor_vendedores.get("v2"), dict) else {}
+    cuadre = liq.get("cuadre") if isinstance(liq.get("cuadre"), dict) else {}
+    cuadre_cheq1 = cuadre.get("cheque1") if isinstance(cuadre.get("cheque1"), dict) else {}
+    cuadre_cheq2 = cuadre.get("cheque2") if isinstance(cuadre.get("cheque2"), dict) else {}
+    cuadre_gastos = cuadre.get("gastos_escrituras") if isinstance(cuadre.get("gastos_escrituras"), dict) else {}
+    notaria = liq.get("notaria") if isinstance(liq.get("notaria"), dict) else {}
+    prestamo = liq.get("prestamo") if isinstance(liq.get("prestamo"), dict) else {}
+
+    def text(value, default="—"):
+        raw = str(value or "").strip()
+        return raw if raw else default
+
+    def money(value, default="—"):
+        return _hipoteca_ficha_money(value, default=default)
+
+    def num(value, decimals=2, default="—"):
+        return _hipoteca_ficha_num(value, decimals=decimals, default=default)
+
+    def pct(value, decimals=2, default="—"):
+        raw = _hipoteca_ficha_num(value, decimals=decimals, default=default)
+        if raw == default:
+            return default
+        return f"{raw} %"
+
+    def date_text(value):
+        parsed = parse_iso_date(value)
+        if parsed:
+            return parsed.strftime("%d/%m/%Y")
+        return text(value)
+
+    def nested(obj, path, default="—"):
+        raw = _get_nested(obj or {}, path, default)
+        if raw in (None, ""):
+            return default
+        if isinstance(raw, (dict, list)):
+            return default
+        return str(raw).strip() or default
+
+    def amount_value(raw):
+        try:
+            return float(parse_money_value(raw or 0) or 0.0)
+        except Exception:
+            return 0.0
+
+    coste_asociado = round(
+        sum(
+            [
+                amount_value(payload.get("honorarios")),
+                amount_value(payload.get("cesion")),
+                amount_value(payload.get("comision_juan")),
+                amount_value(payload.get("comision_modernia")),
+                amount_value(nested(hip, "notaria_impuestos_gestoria")),
+                amount_value(nested(hip, "comision_apertura")),
+                amount_value(nested(hip, "cuota_socio")),
+                amount_value(nested(hip, "comision_cheques")),
+                amount_value(nested(hip, "seguro_proteccion_pago")),
+                amount_value(nested(hip, "seguro_hogar")),
+                amount_value(nested(hip, "seguro_vida")),
+            ]
+        ),
+        2,
+    )
+
+    hero_card = {
+        "kind": "feature_card",
+        "layout": "hero",
+        "eyebrow": "Presentación comercial",
+        "title": text(payload.get("cliente")),
+        "subtitle": " · ".join(
+            [
+                part
+                for part in [
+                    text(payload.get("banco")),
+                    text(payload.get("oficina")),
+                    text(payload.get("asesor")),
+                ]
+                if part and part != "—"
+            ]
+        ),
+        "badge": text(payload.get("estado")),
+        "chips": [
+            text(payload.get("banco")),
+            text(payload.get("oficina")),
+            f"Encargo {text(payload.get('encargo'))}",
+            f"Firma {date_text(payload.get('fecha_firma'))}",
+        ],
+        "items": [
+            {"label": "Tipo hipoteca", "value": text(payload.get("tipo_hipoteca")), "accent": True},
+            {"label": "Importe hipoteca", "value": money(payload.get("importe_hipoteca")), "accent": True},
+            {"label": "% financiación", "value": pct(payload.get("porcentaje")), "accent": True},
+        ],
+        "note": "Ficha interna para presentar la operación de forma clara, rápida y comercial.",
+    }
+
+    resumen_cards = {
+        "kind": "kpi_cards",
+        "columns": 3,
+        "items": [
+            {"label": "Importe hipoteca", "value": money(payload.get("importe_hipoteca")), "accent": True},
+            {"label": "% financiación", "value": pct(payload.get("porcentaje")), "accent": True},
+            {"label": "Cuota estimada", "value": money(nested(prestamo, "cuota_inicial")), "accent": True},
+            {"label": "Precio compra", "value": money(payload.get("precio"))},
+            {"label": "Entrada", "value": money(payload.get("entrada"))},
+            {"label": "Total necesario", "value": money(nested(hip, "total_necesario"))},
+        ],
+    }
+
+    operativa_cards = {
+        "kind": "kpi_cards",
+        "columns": 3,
+        "items": [
+            {"label": "Cliente", "value": text(payload.get("cliente")), "accent": True},
+            {"label": "Banco", "value": text(payload.get("banco"))},
+            {"label": "Oficina", "value": text(payload.get("oficina"))},
+            {"label": "Asesor", "value": text(payload.get("asesor"))},
+            {"label": "Estado", "value": text(payload.get("estado")), "accent": True},
+            {"label": "Fecha firma", "value": date_text(payload.get("fecha_firma"))},
+        ],
+    }
+
+    trazabilidad_lines = [
+        ("ID operación", text(payload.get("id"))),
+        ("Empresa ID", text(payload.get("empresa_id"))),
+        ("Cliente ID", text(payload.get("cliente_id"))),
+        ("Creado", text(payload.get("created_at"))),
+        ("Actualizado", text(payload.get("updated_at"))),
+    ]
+
+    importes_lines = [
+        ("Precio compra", money(payload.get("precio"))),
+        ("Importe hipoteca", money(payload.get("importe_hipoteca"))),
+        ("% financiación", pct(payload.get("porcentaje"))),
+        ("Entrada", money(payload.get("entrada"))),
+        ("Comisión cliente", money(payload.get("honorarios"))),
+        ("Cesión banco", money(payload.get("cesion"))),
+        ("Comisión Juan", money(payload.get("comision_juan"))),
+        ("Comisión Modernia", money(payload.get("comision_modernia"))),
+    ]
+
+    cliente_lines = [
+        ("Inmueble · Dirección", nested(cliente_inmueble, "inmueble.direccion")),
+        ("Inmueble · Localidad", nested(cliente_inmueble, "inmueble.localidad")),
+        ("Inmueble · Provincia", nested(cliente_inmueble, "inmueble.provincia")),
+        ("Intervinientes", _hipoteca_ficha_intervinientes_text(cliente_inmueble)),
+        ("C1 · Nombre", nested(cliente_inmueble, "comprador.c1.nombre")),
+        ("C1 · NIF/NIE", nested(cliente_inmueble, "comprador.c1.nif")),
+        ("C1 · Email", nested(cliente_inmueble, "comprador.c1.email")),
+        ("C1 · Teléfono", nested(cliente_inmueble, "comprador.c1.telefono")),
+        ("C1 · Domicilio", nested(cliente_inmueble, "comprador.c1.domicilio")),
+        ("C2 · Nombre", nested(cliente_inmueble, "comprador.c2.nombre")),
+        ("C2 · NIF/NIE", nested(cliente_inmueble, "comprador.c2.nif")),
+        ("C2 · Email", nested(cliente_inmueble, "comprador.c2.email")),
+        ("C2 · Teléfono", nested(cliente_inmueble, "comprador.c2.telefono")),
+        ("C2 · Domicilio", nested(cliente_inmueble, "comprador.c2.domicilio")),
+        ("C2 · Mismo domicilio", _hipoteca_ficha_bool_text(nested(cliente_inmueble, "comprador.c2.mismo_domicilio"))),
+        ("Prestatario 1 · Fuente", nested(cliente_inmueble, "prestataria.p1.source")),
+        ("Prestatario 1 · Nombre", nested(cliente_inmueble, "prestataria.p1.nombre")),
+        ("Prestatario 1 · NIF/NIE", nested(cliente_inmueble, "prestataria.p1.nif")),
+        ("Prestatario 2 · Fuente", nested(cliente_inmueble, "prestataria.p2.source")),
+        ("Prestatario 2 · Nombre", nested(cliente_inmueble, "prestataria.p2.nombre")),
+        ("Prestatario 2 · NIF/NIE", nested(cliente_inmueble, "prestataria.p2.nif")),
+    ]
+
+    hipoteca_lines = [
+        ("Condiciones · Interés", num(nested(hipoteca_detalle, "condiciones.interes"), 4)),
+        ("Condiciones · Cuota", money(nested(hipoteca_detalle, "condiciones.cuota"))),
+        ("Preferencias · Plazo amortización (años)", num(nested(hipoteca_detalle, "preferencias.plazo_anos"), 0)),
+        ("Preferencias · Tipo interés", nested(hipoteca_detalle, "preferencias.tipo_interes")),
+        ("Preferencias · Garantía vivienda habitual", _hipoteca_ficha_bool_text(nested(hipoteca_detalle, "preferencias.garantia_vivienda_habitual"))),
+        ("Preferencias · Comisión apertura máx.", money(nested(hipoteca_detalle, "preferencias.comision_apertura_max"))),
+        ("Preferencias · Otras", nested(hipoteca_detalle, "preferencias.otras")),
+        ("Precontractual · Registro", nested(hipoteca_detalle, "precontractual.registro")),
+        ("Precontractual · Seguro RC", nested(hipoteca_detalle, "precontractual.seguro_rc")),
+        ("Comentarios", nested(hipoteca_detalle, "comentarios")),
+    ]
+
+    comprador_lines = [
+        ("Cliente", text(nested(comprador, "cliente", payload.get("cliente")))),
+        ("Vivienda", nested(comprador, "vivienda")),
+        ("Localidad", nested(comprador, "localidad")),
+        ("Provincia", nested(comprador, "provincia")),
+        ("Precio compra vivienda", money(nested(comprador, "precio_compra"))),
+        ("Escriturado", money(nested(comprador, "escriturado"))),
+        ("Notaría (compraventa)", money(nested(gastos_cv, "notaria"))),
+        ("Registro propiedad", money(nested(gastos_cv, "registro"))),
+        ("Impuesto transmisiones", money(nested(gastos_cv, "itp"))),
+        ("Gestoría", money(nested(gastos_cv, "gestoria"))),
+        ("Total gastos compraventa", money(nested(gastos_cv, "total"))),
+        ("Notaría, impuestos y gestoría (hipoteca)", money(nested(hip, "notaria_impuestos_gestoria"))),
+        ("Comisión apertura", money(nested(hip, "comision_apertura"))),
+        ("Cuota socio caja", money(nested(hip, "cuota_socio"))),
+        ("Comisión cheques/OMF", money(nested(hip, "comision_cheques"))),
+        ("Seguro protección de pago", money(nested(hip, "seguro_proteccion_pago"))),
+        ("Seguro hogar", money(nested(hip, "seguro_hogar"))),
+        ("Seguro vida", money(nested(hip, "seguro_vida"))),
+        ("Total gastos bloque", money(nested(hip, "total_bloque"))),
+        ("Total necesario", money(nested(hip, "total_necesario"))),
+        ("Gestión inmobiliaria", money(nested(comprador, "gestion_inmobiliaria"))),
+        ("Gestión financiación", money(nested(comprador, "gestion_financiacion"))),
+        ("Suma total necesaria", money(nested(comprador, "suma_total_necesaria"))),
+        ("Señal", money(nested(entregas, "senal"))),
+        ("Transf. a Modernia", money(nested(entregas, "transf_modernia"))),
+        ("A ingresar en banco", money(nested(entregas, "ingresar_banco"))),
+        ("Préstamo concedido", money(nested(entregas, "prestamo_concedido"))),
+        ("Suma total entregada", money(nested(comprador, "suma_total_entregada"))),
+        ("Sobran en cuenta", money(nested(comprador, "sobran_en_cuenta"))),
+        ("Protección financiada", _hipoteca_ficha_bool_text(flags.get("proteccion_financiado"))),
+        ("Hogar financiado", _hipoteca_ficha_bool_text(flags.get("hogar_financiado"))),
+        ("Vida financiada", _hipoteca_ficha_bool_text(flags.get("vida_financiado"))),
+    ]
+
+    vendedor_lines = [
+        ("Cliente", text(nested(vendedor, "cliente", payload.get("cliente")))),
+        ("Dirección", nested(vendedor, "direccion")),
+        ("Localidad", nested(vendedor, "localidad")),
+        ("Precio vivienda", money(nested(vendedor, "precio_vivienda"))),
+        ("Deducciones (texto)", nested(vendedor, "deducciones_nota")),
+        ("Señal", money(nested(vendedor_ded, "senal"))),
+        ("Cancelación económica préstamo", money(nested(vendedor_ded, "cancelacion_economica"))),
+        ("Cancelación registral préstamo", money(nested(vendedor_ded, "cancelacion_registral"))),
+        ("Deuda IBI", money(nested(vendedor_ded, "deuda_ibi"))),
+        ("Plusvalía municipal", money(nested(vendedor_ded, "plusvalia"))),
+        ("Retención 3% no residente", money(nested(vendedor_ded, "retencion_no_residente"))),
+        ("Gestión no residente", money(nested(vendedor_ded, "gestion_no_residente"))),
+        ("Subtotal pte. percibir", money(nested(vendedor, "subtotal_pte_percibir"))),
+        ("Total a percibir", money(nested(vendedor, "total_a_percibir"))),
+        ("Vendedor 1", " · ".join([part for part in [text(nested(vend_v1, "nombre")), text(nested(vend_v1, "nif"))] if part and part != "—"]) or "—"),
+        ("Vendedor 2", " · ".join([part for part in [text(nested(vend_v2, "nombre")), text(nested(vend_v2, "nif"))] if part and part != "—"]) or "—"),
+        ("Registro", nested(vendedor, "registro")),
+        ("Finca", nested(vendedor, "finca")),
+        ("Notas", nested(vendedor, "notas")),
+    ]
+
+    cheques_lines = [
+        ("Préstamo concedido", money(nested(cuadre, "prestamo_concedido"))),
+        ("Ingreso en cuenta", money(nested(cuadre, "ingreso_en_cuenta"))),
+        ("Seguros", money(nested(cuadre, "seguros"))),
+        ("Cheque 1 · Beneficiario", nested(cuadre_cheq1, "beneficiario")),
+        ("Cheque 1 · Importe", money(nested(cuadre_cheq1, "importe"))),
+        ("Cheque 2 · Beneficiario", nested(cuadre_cheq2, "beneficiario")),
+        ("Cheque 2 · Importe", money(nested(cuadre_cheq2, "importe"))),
+        ("Cancelación económica préstamo", money(nested(cuadre, "cancelacion_economica"))),
+        ("Retención cancelación registral", money(nested(cuadre, "retencion_cancelacion_registral"))),
+        ("Retención deuda IBI", money(nested(cuadre, "retencion_ibi"))),
+        ("Retención 3% no residente", money(nested(cuadre, "retencion_no_residente"))),
+        ("Gestión no residente", money(nested(cuadre, "gestion_no_residente"))),
+        ("Gastos escrituras · Compraventa", money(nested(cuadre_gastos, "compraventa"))),
+        ("Gastos escrituras · Hipoteca", money(nested(cuadre_gastos, "hipoteca"))),
+        ("Gastos escrituras · Com. apertura", money(nested(cuadre_gastos, "com_apertura"))),
+        ("Comisión cheques/OMF", money(nested(cuadre, "comision_cheques"))),
+        ("Cuota socio caja", money(nested(cuadre, "cuota_socio"))),
+        ("Total salidas", money(nested(cuadre, "total_salidas"))),
+        ("Total medios de pago", money(nested(cuadre, "total_medios_pago"))),
+        ("Diferencia vs escriturado", money(nested(cuadre, "diferencia_medios_pago"))),
+        ("Sobran en cuenta (auto)", money(nested(cuadre, "sobran_en_cuenta"))),
+        ("Cuadre sobrante OK", _hipoteca_ficha_bool_text(flags.get("cuadre_sobrante_ok"))),
+        ("Δ sobrante", _hipoteca_ficha_num(flags.get("cuadre_sobrante_delta"), 2)),
+    ]
+
+    notaria_lines = [
+        ("Notaría", nested(notaria, "nombre")),
+        ("Contacto", nested(notaria, "contacto")),
+        ("Atención", nested(notaria, "atencion")),
+        ("Entidad hipoteca", nested(notaria, "entidad")),
+        ("Op. referencia", nested(notaria, "op_referencia")),
+        ("Fecha y hora firma", nested(notaria, "fecha_hora_firma")),
+        ("Forma de pago", nested(notaria, "forma_pago")),
+        ("Observaciones", nested(notaria, "observaciones")),
+        ("Tipo salida", nested(prestamo, "tipo_salida")),
+        ("Revisión", _hipoteca_ficha_num(nested(prestamo, "revision"), 4)),
+        ("Interés", _hipoteca_ficha_num(nested(prestamo, "interes"), 6)),
+        ("Plazo (años)", _hipoteca_ficha_num(nested(prestamo, "plazo_anos"), 0)),
+        ("Nº cuotas", _hipoteca_ficha_num(nested(prestamo, "numero_cuotas"), 0)),
+        ("Cuota inicial", money(nested(prestamo, "cuota_inicial"))),
+        ("Apertura", _hipoteca_ficha_num(nested(prestamo, "apertura"), 4)),
+        ("Ca. parcial", _hipoteca_ficha_num(nested(prestamo, "cancelacion_parcial"), 4)),
+        ("Cancelación", _hipoteca_ficha_num(nested(prestamo, "cancelacion"), 4)),
+    ]
+
+    structure_bar = {
+        "kind": "split_bar",
+        "label": "Estructura de fondos",
+        "items": [
+            {"label": "Hipoteca", "value": amount_value(payload.get("importe_hipoteca"))},
+            {"label": "Entrada", "value": amount_value(payload.get("entrada"))},
+            {"label": "Costes asociados", "value": coste_asociado},
+        ],
+    }
+
+    sections = [
+        ("Resumen comercial", hero_card),
+        ("Importes clave", resumen_cards),
+        ("Estructura de fondos", structure_bar),
+        ("Datos operativos", operativa_cards),
+        ("Cliente e inmueble", cliente_lines),
+        ("Hipoteca y condiciones", hipoteca_lines),
+        ("Liquidación comprador", comprador_lines),
+        ("Liquidación vendedor", vendedor_lines),
+        ("Cuadre de cheques", cheques_lines),
+        ("Notaría y préstamo", notaria_lines),
+        ("Trazabilidad", trazabilidad_lines),
+        ("JSON · cliente e inmueble", _hipoteca_ficha_json_lines(payload.get("cliente_inmueble_json") or "{}")),
+        ("JSON · hipoteca detalle", _hipoteca_ficha_json_lines(payload.get("hipoteca_detalle_json") or "{}")),
+        ("JSON · liquidación", _hipoteca_ficha_json_lines(payload.get("liquidacion_json") or "{}")),
+    ]
+
+    section_key = normalize_lookup_text(section or "")
+    if section_key in {"COMPRADOR", "VENDEDOR", "CHEQUES", "NOTARIA"}:
+        keep_map = {
+            "COMPRADOR": {"Resumen comercial", "Importes clave", "Estructura de fondos", "Datos operativos", "Liquidación comprador"},
+            "VENDEDOR": {"Resumen comercial", "Importes clave", "Estructura de fondos", "Datos operativos", "Liquidación vendedor"},
+            "CHEQUES": {"Resumen comercial", "Importes clave", "Estructura de fondos", "Datos operativos", "Cuadre de cheques"},
+            "NOTARIA": {"Resumen comercial", "Importes clave", "Estructura de fondos", "Datos operativos", "Notaría y préstamo"},
+        }
+        sections = [item for item in sections if item[0] in keep_map[section_key]]
+
+    subtitle_parts = [text(payload.get("cliente")), text(payload.get("banco")), text(payload.get("estado"))]
+    fecha_firma_text = date_text(payload.get("fecha_firma"))
+    if fecha_firma_text and fecha_firma_text != "—":
+        subtitle_parts.append(f"Firma {fecha_firma_text}")
+    subtitle = " · ".join([part for part in subtitle_parts if part and part != "—"])
+    subtitle = subtitle or text(payload.get("id"))
+    footer = [
+        "Documento comercial interno generado por el CRM Financiaciones.",
+        "Revisar la liquidación y los datos técnicos antes de usarlo fuera del expediente.",
+    ]
+    return build_modernia_branded_document_pdf(
+        "FICHA COMERCIAL DE HIPOTECA",
+        subtitle,
+        sections,
+        footer_lines=footer,
+        company={},
+        brand_logo_url="/assets/grupo_modernia_logo.png",
+    )
 
 
 def derive_hipoteca_inmobiliaria_cost(row):
@@ -26925,23 +27583,6 @@ def ensure_fin_followup_action(
 def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
     if not row:
         return None
-    existing = conn.execute(
-        """
-        SELECT id
-        FROM hipotecas
-        WHERE empresa_id = ?
-          AND cliente_id = ?
-          AND fecha_encargo = ?
-        LIMIT 1
-        """,
-        (empresa_id, row["cliente1_id"], row["fecha"]),
-    ).fetchone()
-    if existing:
-        conn.execute(
-            "UPDATE asesoramientos_financiacion SET estado = ?, updated_at = datetime(?) WHERE id = ?",
-            ("Convertido", now, row["id"]),
-        )
-        return existing["id"]
     precio_inmueble = None
     inmueble_id = ""
     try:
@@ -26980,6 +27621,7 @@ def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
     except Exception:
         ocr_text = ""
     ocr_clean = re.sub(r"\s+", " ", (ocr_text or "").replace("\u00a0", " ")).strip()
+    ocr_fields = {}
 
     def _pick_float(patterns):
         for pat in patterns:
@@ -27033,7 +27675,17 @@ def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
             now,
             {"telefono": ocr_fields.get("cliente1_telefono"), "email": ocr_fields.get("cliente1_email")},
         )
-    cliente_nombre = row["cliente1_nombre"] or ""
+    if cliente1_id and not str(row["cliente1_id"] or "").strip():
+        try:
+            conn.execute(
+                "UPDATE asesoramientos_financiacion SET cliente1_id = ?, updated_at = datetime(?) WHERE id = ?",
+                (cliente1_id, now, row["id"]),
+            )
+        except Exception:
+            pass
+    cliente_nombre = str(row["cliente1_nombre"] or "").strip()
+    if not cliente_nombre and ocr_fields:
+        cliente_nombre = str(ocr_fields.get("cliente1_nombre") or "").strip()
     if row["cliente2_nombre"]:
         cliente_nombre = f"{cliente_nombre} / {row['cliente2_nombre']}".strip(" /")
     fecha = row["fecha"] or ""
@@ -27041,6 +27693,21 @@ def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
         anio = int(fecha.split("/")[-1]) if "/" in fecha else int(fecha.split("-")[0])
     except Exception:
         anio = None
+    existing = find_reusable_hipoteca_open_record(
+        conn,
+        empresa_id,
+        cliente=cliente_nombre,
+        cliente_id=cliente1_id,
+        fecha_encargo=fecha,
+        precio=precio_inmueble if precio_inmueble not in (None, "", 0, 0.0) else ocr_precio,
+        importe_hipoteca=ocr_importe,
+    )
+    if existing:
+        conn.execute(
+            "UPDATE asesoramientos_financiacion SET estado = ?, updated_at = datetime(?) WHERE id = ?",
+            ("Convertido", now, row["id"]),
+        )
+        return existing["id"]
     hipoteca_id = os.urandom(16).hex()
     conn.execute(
         """
@@ -32874,6 +33541,81 @@ def compute_gestoria_renta_campaigns_total(conn, empresa_id, ejercicio=""):
         latest_year = max(year_counts.keys())
         return {"ejercicio": latest_year, "count": int(year_counts.get(latest_year, 0))}
     return {"ejercicio": ejercicio_val, "count": int(total)}
+
+
+def compute_gestoria_dashboard_segmentacion_trabajos(conn, empresa_ids):
+    empresa_ids = empresa_ids if isinstance(empresa_ids, (list, tuple, set)) else [empresa_ids]
+    empresa_ids = [str(eid or "").strip() for eid in empresa_ids]
+    empresa_ids = [eid for eid in empresa_ids if eid]
+    if not empresa_ids:
+        return {
+            "herencias_total": 0,
+            "trafico_total": 0,
+            "expedientes_total": 0,
+            "tasaciones_total": 0,
+            "rentas_total": 0,
+            "abiertos_total": 0,
+        }
+
+    placeholders_emp = ",".join(["?"] * len(empresa_ids))
+    seg = conn.execute(
+        f"""
+            SELECT
+              SUM(
+                CASE
+                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'herencias' THEN 1
+                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%herenc%' THEN 1
+                  ELSE 0
+                END
+              ) AS herencias_total,
+              SUM(
+                CASE
+                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'trafico' THEN 1
+                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
+                    LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%trafic%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%transfer%'
+                  ) THEN 1
+                  ELSE 0
+                END
+              ) AS trafico_total,
+              SUM(
+                CASE
+                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'expedientes' THEN 1
+                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND (
+                    LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%expedient%' OR LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%administrat%'
+                  ) THEN 1
+                  ELSE 0
+                END
+              ) AS expedientes_total,
+              SUM(
+                CASE
+                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'tasaciones' THEN 1
+                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%tasaci%' THEN 1
+                  ELSE 0
+                END
+              ) AS tasaciones_total,
+              SUM(
+                CASE
+                  WHEN LOWER(COALESCE(NULLIF(gt.tipo_categoria,''), '')) = 'rentas' THEN 1
+                  WHEN COALESCE(NULLIF(gt.tipo_categoria,''), '') = '' AND LOWER(COALESCE(gt.tipo_trabajo,'')) LIKE '%renta%' THEN 1
+                  ELSE 0
+                END
+              ) AS rentas_total,
+              SUM(CASE WHEN (LOWER(COALESCE(gt.estado,'')) IN ('completado','finalizado','hecho','cerrado')) THEN 0 ELSE 1 END) AS abiertos_total
+            FROM gestoria_trabajos gt
+            WHERE gt.empresa_id IN ({placeholders_emp})
+        """,
+        tuple(empresa_ids),
+    ).fetchone()
+    return {
+        "herencias_total": int(row_value(seg, "herencias_total", 0) or 0),
+        "trafico_total": int(row_value(seg, "trafico_total", 0) or 0),
+        "expedientes_total": int(row_value(seg, "expedientes_total", 0) or 0),
+        "tasaciones_total": int(row_value(seg, "tasaciones_total", 0) or 0),
+        "rentas_total": int(row_value(seg, "rentas_total", 0) or 0),
+        "abiertos_total": int(row_value(seg, "abiertos_total", 0) or 0),
+    }
+
+
 def serialize_renta_detalles_payload(raw_value, existing_value=""):
     current = parse_renta_detalles_payload(existing_value)
     if isinstance(raw_value, dict):
@@ -49495,6 +50237,10 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
     font_body_bold = _document_font(17, bold=True)
     font_kpi_value = _document_font(26, bold=True)
     font_kpi_label = _document_font(14, bold=False)
+    font_feature_eyebrow = _document_font(13, bold=True)
+    font_feature_title = _document_font(28, bold=True)
+    font_feature_subtitle = _document_font(16, bold=False)
+    font_feature_note = _document_font(14, bold=False)
     font_footer = _document_font(15, bold=False)
     font_header_small = _document_font(14, bold=False)
 
@@ -49513,6 +50259,29 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
         company_meta_parts.append(f"Tlf: {company_tel}")
 
     pages = []
+
+    def _draw_card_box(
+        draw_obj,
+        box,
+        *,
+        outline=None,
+        fill=None,
+        width=2,
+        radius=18,
+        shadow=False,
+        shadow_offset=4,
+        shadow_fill=(234, 236, 239),
+    ):
+        if shadow:
+            sx0, sy0, sx1, sy1 = box[0] + shadow_offset, box[1] + shadow_offset, box[2] + shadow_offset, box[3] + shadow_offset
+            try:
+                draw_obj.rounded_rectangle((sx0, sy0, sx1, sy1), radius=radius, outline=None, fill=shadow_fill, width=1)
+            except Exception:
+                draw_obj.rectangle((sx0, sy0, sx1, sy1), outline=None, fill=shadow_fill, width=1)
+        try:
+            draw_obj.rounded_rectangle(box, radius=radius, outline=outline, fill=fill, width=width)
+        except Exception:
+            draw_obj.rectangle(box, outline=outline, fill=fill, width=width)
 
     def new_page():
         image = Image.new("RGB", (page_width, page_height), bg)
@@ -49559,6 +50328,8 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
         heading_box = draw.textbbox((margin_x, y), heading, font=font_section)
         ensure_space((heading_box[3] - heading_box[1]) + 20)
         draw.text((margin_x, y), heading, fill=ink, font=font_section)
+        underline_w = max(120, min(content_width, int((heading_box[2] - heading_box[0]) + 40)))
+        draw.line((margin_x, heading_box[3] + 4, margin_x + underline_w, heading_box[3] + 4), fill=gold, width=3)
         y = heading_box[3] + 12
         kind = str(lines.get("kind") or "").strip().lower() if isinstance(lines, dict) else ""
 
@@ -49571,18 +50342,12 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
             cols = max(2, min(4, cols))
             gap = 18
             card_w = int((content_width - gap * (cols - 1)) / cols)
-            card_h = 98
-            radius = 18
+            card_h = 102
+            radius = 20
             border = (225, 228, 232)
             fill = (250, 250, 250)
             accent_border = gold
             accent_fill = (252, 248, 235)
-
-            def _rounded(box, *, outline=None, fill=None, width=2, r=18):
-                try:
-                    draw.rounded_rectangle(box, radius=r, outline=outline, fill=fill, width=width)
-                except Exception:
-                    draw.rectangle(box, outline=outline, fill=fill, width=width)
 
             row = 0
             col = 0
@@ -49606,16 +50371,20 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
                 x1 = x0 + card_w
                 y1 = y0 + card_h
                 ensure_space((row + 1) * (card_h + gap) + 10)
-                _rounded(
+                _draw_card_box(
+                    draw,
                     (x0, y0, x1, y1),
                     outline=accent_border if accent else border,
                     fill=accent_fill if accent else fill,
                     width=3 if accent else 2,
-                    r=radius,
+                    radius=radius,
+                    shadow=True,
                 )
+                stripe_fill = accent_border if accent else (214, 219, 223)
+                draw.rectangle((x0 + 1, y0 + 1, x1 - 1, y0 + 8), fill=stripe_fill)
                 pad_x = 18
-                draw.text((x0 + pad_x, y0 + 16), label, fill=muted, font=font_kpi_label)
-                draw.text((x0 + pad_x, y0 + 44), value, fill=ink, font=font_kpi_value)
+                draw.text((x0 + pad_x, y0 + 20), label, fill=muted, font=font_kpi_label)
+                draw.multiline_text((x0 + pad_x, y0 + 48), value, fill=ink, font=font_kpi_value, spacing=3)
 
                 col += 1
                 if col >= cols:
@@ -49625,6 +50394,252 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
             if used_rows <= 0:
                 used_rows = 1
             y += used_rows * card_h + (used_rows - 1) * gap + 10
+        elif kind == "feature_card":
+            card = lines if isinstance(lines, dict) else {}
+            layout = str(card.get("layout") or "").strip().lower()
+            eyebrow = str(card.get("eyebrow") or "").strip()
+            title_text = str(card.get("title") or "").strip()
+            subtitle_text = str(card.get("subtitle") or "").strip()
+            badge = str(card.get("badge") or "").strip()
+            note = str(card.get("note") or "").strip()
+            raw_items = card.get("items") or []
+            chips = [str(item or "").strip() for item in (card.get("chips") or []) if str(item or "").strip()]
+            metric_items = []
+            for item in raw_items:
+                if isinstance(item, dict):
+                    label = str(item.get("label") or "").strip()
+                    value = str(item.get("value") or "").strip()
+                    accent = bool(item.get("accent") or False)
+                elif isinstance(item, (list, tuple)) and len(item) >= 2:
+                    label = str(item[0] or "").strip()
+                    value = str(item[1] or "").strip()
+                    accent = False
+                else:
+                    label = ""
+                    value = str(item or "").strip()
+                    accent = False
+                if label or value:
+                    metric_items.append((label, value, accent))
+            if layout == "hero":
+                try:
+                    metric_cols = int(card.get("metric_columns") or 1)
+                except Exception:
+                    metric_cols = 1
+                metric_cols = max(1, min(2, metric_cols))
+                hero_title_lines, _, hero_title_h = _pil_multiline(draw, title_text or "—", font_feature_title, width=46, line_gap=4)
+                if subtitle_text:
+                    hero_subtitle_lines, _, hero_subtitle_h = _pil_multiline(draw, subtitle_text, font_feature_subtitle, width=50, line_gap=5)
+                else:
+                    hero_subtitle_lines, hero_subtitle_h = [], 0
+                if note:
+                    hero_note_lines, _, hero_note_h = _pil_multiline(draw, note, font_feature_note, width=50, line_gap=4)
+                else:
+                    hero_note_lines, hero_note_h = [], 0
+
+                chip_rows = 1 if len(chips) <= 4 else 2
+                hero_h = 392 + max(0, chip_rows - 1) * 34 + max(0, hero_note_h - 20)
+                ensure_space(hero_h + 12)
+                x0 = margin_x
+                y0 = y
+                x1 = x0 + content_width
+                y1 = y0 + hero_h
+                _draw_card_box(draw, (x0, y0, x1, y1), outline=(225, 228, 232), fill=(253, 251, 245), width=2, radius=28, shadow=True)
+                draw.rectangle((x0, y0, x1, y0 + 10), fill=gold)
+                draw.rectangle((x0 + 20, y0 + 22, x1 - 20, y1 - 20), outline=(233, 236, 240), width=1)
+
+                left_x = x0 + 28
+                left_top = y0 + 28
+                left_w = int(content_width * 0.58)
+                panel_x = x0 + left_w + 34
+                panel_w = x1 - panel_x - 28
+
+                if badge:
+                    badge_font = font_header_small
+                    badge_box = draw.textbbox((0, 0), badge.upper(), font=badge_font)
+                    badge_w = (badge_box[2] - badge_box[0]) + 18
+                    badge_h = 28
+                    badge_x1 = x1 - 28
+                    badge_x0 = max(panel_x, badge_x1 - badge_w)
+                    _draw_card_box(
+                        draw,
+                        (badge_x0, y0 + 24, badge_x1, y0 + 24 + badge_h),
+                        outline=gold,
+                        fill=(252, 248, 235),
+                        width=2,
+                        radius=14,
+                    )
+                    draw.text((badge_x0 + (badge_w / 2), y0 + 38), badge.upper(), fill=ink, font=badge_font, anchor="mm")
+
+                if eyebrow:
+                    draw.text((left_x, left_top), eyebrow.upper(), fill=gold, font=font_feature_eyebrow)
+                    left_top += 18
+
+                draw.multiline_text((left_x, left_top), "\n".join(hero_title_lines), fill=ink, font=font_feature_title, spacing=4)
+                left_top += hero_title_h
+
+                if hero_subtitle_lines:
+                    left_top += 8
+                    draw.multiline_text((left_x, left_top), "\n".join(hero_subtitle_lines), fill=muted, font=font_feature_subtitle, spacing=5)
+                    left_top += hero_subtitle_h
+
+                chip_x = left_x
+                chip_y = left_top + 16
+                chip_limit = panel_x - 18
+                chip_row_h = 30
+                for chip in chips:
+                    chip_box = draw.textbbox((0, 0), chip, font=font_header_small)
+                    chip_w = max(92, min(220, (chip_box[2] - chip_box[0]) + 24))
+                    if chip_x + chip_w > chip_limit and chip_x > left_x:
+                        chip_x = left_x
+                        chip_y += chip_row_h + 8
+                    if chip_x + chip_w > chip_limit and chip_x == left_x:
+                        chip_w = max(92, chip_limit - left_x)
+                    _draw_card_box(
+                        draw,
+                        (chip_x, chip_y, chip_x + chip_w, chip_y + chip_row_h),
+                        outline=(200, 162, 74),
+                        fill=(252, 248, 235),
+                        width=2,
+                        radius=14,
+                    )
+                    draw.text((chip_x + chip_w / 2, chip_y + 15), chip.upper(), fill=ink, font=font_header_small, anchor="mm")
+                    chip_x += chip_w + 10
+
+                note_y = chip_y + chip_row_h + 16
+                if hero_note_lines:
+                    draw.multiline_text((left_x, note_y), "\n".join(hero_note_lines), fill=muted, font=font_feature_note, spacing=4)
+
+                panel_label_y = y0 + 30
+                draw.text((panel_x, panel_label_y), "INDICADORES CLAVE", fill=gold, font=font_feature_eyebrow)
+                draw.line((panel_x, panel_label_y + 20, x1 - 28, panel_label_y + 20), fill=(228, 231, 236), width=2)
+
+                metric_gap = 12
+                metric_h = 80
+                metric_y = panel_label_y + 34
+                metric_count = min(3, len(metric_items))
+                metric_rows = max(1, math.ceil(metric_count / metric_cols)) if metric_count else 1
+                metric_w = panel_w if metric_cols == 1 else int((panel_w - metric_gap) / 2)
+                for idx, (label, value, accent) in enumerate(metric_items[:3]):
+                    row = idx // metric_cols
+                    col = idx % metric_cols
+                    box_x0 = panel_x + col * (metric_w + metric_gap)
+                    box_y0 = metric_y + row * (metric_h + metric_gap)
+                    box_x1 = box_x0 + metric_w
+                    box_y1 = box_y0 + metric_h
+                    _draw_card_box(
+                        draw,
+                        (box_x0, box_y0, box_x1, box_y1),
+                        outline=(gold if accent else (227, 231, 235)),
+                        fill=(252, 248, 235) if accent else (255, 255, 255),
+                        width=3 if accent else 2,
+                        radius=18,
+                        shadow=True,
+                    )
+                    draw.rectangle((box_x0 + 1, box_y0 + 1, box_x1 - 1, box_y0 + 8), fill=(gold if accent else (219, 224, 228)))
+                    draw.text((box_x0 + 14, box_y0 + 18), label, fill=muted, font=font_kpi_label)
+                    draw.multiline_text((box_x0 + 14, box_y0 + 40), value, fill=ink, font=font_kpi_value, spacing=3)
+
+                y = y1 + 18
+                continue
+            try:
+                cols = int(card.get("columns") or 3)
+            except Exception:
+                cols = 3
+            cols = max(2, min(4, cols))
+            metric_gap = 14
+            metric_h = 78
+            metric_w = int((content_width - metric_gap * (cols - 1)) / cols)
+            metric_rows = max(1, math.ceil(len(metric_items) / cols)) if metric_items else 0
+            title_lines, _, title_h = _pil_multiline(draw, title_text or "—", font_feature_title, width=72, line_gap=4)
+            if subtitle_text:
+                subtitle_lines, _, subtitle_h = _pil_multiline(draw, subtitle_text, font_feature_subtitle, width=84, line_gap=5)
+            else:
+                subtitle_lines, subtitle_h = [], 0
+            if note:
+                note_lines, _, note_h = _pil_multiline(draw, note, font_feature_note, width=90, line_gap=4)
+            else:
+                note_lines, note_h = [], 0
+
+            eyebrow_h = 18 if eyebrow else 0
+            card_h = 24 + eyebrow_h + title_h + (6 if subtitle_lines else 0) + subtitle_h + 16
+            if metric_items:
+                card_h += metric_rows * metric_h + max(0, metric_rows - 1) * metric_gap + 16
+            if note_lines:
+                card_h += 10 + note_h
+            card_h += 18
+
+            ensure_space(card_h + 12)
+            x0 = margin_x
+            y0 = y
+            x1 = x0 + content_width
+            y1 = y0 + card_h
+            _draw_card_box(draw, (x0, y0, x1, y1), outline=(225, 228, 232), fill=(253, 252, 248), width=2, radius=24, shadow=True)
+            draw.rectangle((x0, y0, x1, y0 + 8), fill=gold)
+
+            inner_x = x0 + 24
+            cur_y = y0 + 20
+
+            if badge:
+                badge_font = font_header_small
+                badge_box = draw.textbbox((0, 0), badge.upper(), font=badge_font)
+                badge_w = (badge_box[2] - badge_box[0]) + 18
+                badge_h = 26
+                badge_x1 = x1 - 24
+                badge_x0 = max(inner_x, badge_x1 - badge_w)
+                _draw_card_box(
+                    draw,
+                    (badge_x0, cur_y - 2, badge_x1, cur_y + badge_h - 2),
+                    outline=gold,
+                    fill=(252, 248, 235),
+                    width=2,
+                    radius=13,
+                )
+                draw.text((badge_x0 + (badge_w / 2), cur_y + 10), badge.upper(), fill=ink, font=badge_font, anchor="mm")
+
+            if eyebrow:
+                draw.text((inner_x, cur_y), eyebrow.upper(), fill=gold, font=font_feature_eyebrow)
+                cur_y += eyebrow_h
+
+            draw.multiline_text((inner_x, cur_y), "\n".join(title_lines), fill=ink, font=font_feature_title, spacing=4)
+            cur_y += title_h
+
+            if subtitle_lines:
+                cur_y += 6
+                draw.multiline_text((inner_x, cur_y), "\n".join(subtitle_lines), fill=muted, font=font_feature_subtitle, spacing=5)
+                cur_y += subtitle_h
+
+            if metric_items:
+                cur_y += 16
+                draw.line((inner_x, cur_y, x1 - 24, cur_y), fill=(228, 231, 236), width=2)
+                cur_y += 16
+                for idx, (label, value, accent) in enumerate(metric_items):
+                    row = idx // cols
+                    col = idx % cols
+                    box_x0 = inner_x + col * (metric_w + metric_gap)
+                    box_y0 = cur_y + row * (metric_h + metric_gap)
+                    box_x1 = box_x0 + metric_w
+                    box_y1 = box_y0 + metric_h
+                    _draw_card_box(
+                        draw,
+                        (box_x0, box_y0, box_x1, box_y1),
+                        outline=(gold if accent else (227, 231, 235)),
+                        fill=(252, 248, 235) if accent else (255, 255, 255),
+                        width=3 if accent else 2,
+                        radius=18,
+                        shadow=True,
+                    )
+                    stripe_fill = gold if accent else (219, 224, 228)
+                    draw.rectangle((box_x0 + 1, box_y0 + 1, box_x1 - 1, box_y0 + 8), fill=stripe_fill)
+                    draw.text((box_x0 + 14, box_y0 + 18), label, fill=muted, font=font_kpi_label)
+                    draw.multiline_text((box_x0 + 14, box_y0 + 42), value, fill=ink, font=font_kpi_value, spacing=3)
+
+                cur_y += metric_rows * metric_h + max(0, metric_rows - 1) * metric_gap
+
+            if note_lines:
+                cur_y += 14
+                draw.multiline_text((inner_x, cur_y), "\n".join(note_lines), fill=muted, font=font_feature_note, spacing=4)
+
+            y = y1 + 18
         elif kind == "split_bar":
             # Horizontal split bar (e.g. Exenta vs Sujeta)
             label = str(lines.get("label") or "").strip()
@@ -75267,30 +76282,21 @@ class Handler(BaseHTTPRequestHandler):
             entrada = parse_optional_float(payload.get("entrada"))
             comision = parse_optional_float(payload.get("comision"))
             anio = parse_optional_int(payload.get("anio"))
-            estado_busqueda = ("estudio", "encargo", "pendiente")
             existing = None
-            if (not force_new) and cliente:
-                where = "empresa_id = ? AND LOWER(TRIM(estado)) IN (?, ?, ?) AND LOWER(TRIM(cliente)) = LOWER(TRIM(?))"
-                values = [empresa["id"], *estado_busqueda, cliente]
-                if fecha_encargo:
-                    where += " AND fecha_encargo = ?"
-                    values.append(fecha_encargo)
-                if precio is not None:
-                    where += " AND precio = ?"
-                    values.append(precio)
-                if importe_hipoteca is not None:
-                    where += " AND importe_hipoteca = ?"
-                    values.append(importe_hipoteca)
-                existing = conn.execute(
-                    f"SELECT id FROM hipotecas WHERE {where} LIMIT 1",
-                    values,
-                ).fetchone()
-            existing_row = None
-            if existing:
-                existing_row = conn.execute(
-                    "SELECT * FROM hipotecas WHERE id = ?",
-                    (existing["id"],),
-                ).fetchone()
+            oficina_candidate = str(payload.get("oficina") or "").strip() or str(payload.get("inmobiliaria_compra") or "").strip()
+            if (not force_new) and (cliente or cliente_id):
+                existing = find_reusable_hipoteca_open_record(
+                    conn,
+                    empresa["id"],
+                    cliente=cliente,
+                    cliente_id=cliente_id,
+                    fecha_encargo=fecha_encargo,
+                    precio=precio,
+                    importe_hipoteca=importe_hipoteca,
+                    banco=payload.get("banco") or "",
+                    oficina=oficina_candidate,
+                )
+            existing_row = existing
 
             effective_comision = (
                 comision if comision is not None else (existing_row["comision"] if existing_row else 0)
@@ -86460,7 +87466,7 @@ class Handler(BaseHTTPRequestHandler):
             firmadas_mes = conn.execute(
                 """
                 SELECT COUNT(*) AS total
-                FROM hipotecas
+                FROM hipotecas h
                 WHERE """
                 + scope_clause
                 + """
@@ -86490,7 +87496,7 @@ class Handler(BaseHTTPRequestHandler):
                     END
                   ) AS porcentaje_medio,
                   AVG(COALESCE(comision, 0)) AS comision_media
-                FROM hipotecas
+                FROM hipotecas h
                 WHERE """
                 + scope_clause
                 + """
@@ -87308,6 +88314,33 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"counts": counts, "items": items})
             return
 
+        if path == "/api/hipoteca_ficha_pdf":
+            record_id = (params.get("id", [""])[0] or "").strip()
+            section = (params.get("section", [""])[0] or "").strip()
+            if not record_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            row = conn.execute(
+                """
+                SELECT *
+                FROM hipotecas
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (record_id,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "Hipoteca no encontrada"}, status=404)
+                return
+            try:
+                payload = build_hipoteca_ficha_payload(conn, row)
+                pdf_bytes = build_hipoteca_ficha_pdf(payload, section=section)
+            except Exception as exc:
+                json_response(self, {"error": str(exc) or "No se pudo generar el PDF"}, status=500)
+                return
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=None)
+            return
+
         if path == "/api/hipoteca_ficha_print":
             record_id = (params.get("id", [""])[0] or "").strip()
             section = (params.get("section", [""])[0] or "").strip()
@@ -87327,14 +88360,7 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Hipoteca no encontrada"}, status=404)
                 return
-            liquidacion_raw = {}
-            try:
-                if "liquidacion_json" in row.keys():
-                    liquidacion_raw = _safe_json_object(row["liquidacion_json"] or "{}")
-            except Exception:
-                liquidacion_raw = {}
-            export_row = build_hipoteca_export_row(conn, row)
-            export_row["liquidacion_print"] = compute_hipoteca_liquidacion_print_data(export_row, liquidacion_raw)
+            export_row = build_hipoteca_ficha_payload(conn, row)
             content = render_hipoteca_print_html(
                 export_row,
                 auto_print=auto_print,
