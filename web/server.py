@@ -5922,16 +5922,12 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
     tipo = html.escape(payload["tipo_hipoteca"] or "-")
     asesor = html.escape(payload["asesor"] or "-")
     inmobiliaria = html.escape(payload["inmobiliaria"] or "-")
-    direccion = html.escape(payload["cliente_direccion"] or "-")
-    nif = html.escape(payload["cliente_nif"] or "-")
-    telefono = html.escape(payload["cliente_telefono"] or "-")
-    email_val = html.escape(payload["cliente_email"] or "-")
+    estado = html.escape(payload["estado"] or "-")
     fecha_encargo = html.escape(format_export_date(payload["fecha_encargo"]) or "-")
     fecha_firma = html.escape(format_export_date(payload["fecha_firma"]) or "-")
     importe = html.escape(format_export_money(payload["importe_hipoteca"]))
     precio = html.escape(format_export_money(payload["precio"]))
     entrada = html.escape(format_export_money(payload["entrada"]))
-    honorarios = html.escape(format_export_money(payload["honorarios"]))
     liq_payload = payload.get("liquidacion_print") if isinstance(payload.get("liquidacion_print"), dict) else {}
     liq = liq_payload.get("liq") if isinstance(liq_payload.get("liq"), dict) else {}
     flags = liq_payload.get("flags") if isinstance(liq_payload.get("flags"), dict) else {}
@@ -5992,6 +5988,19 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
             text = text.rstrip("0").rstrip(",")
         return html.escape(text)
 
+    cliente_inmueble = _safe_json_object(payload.get("cliente_inmueble_json") or "{}")
+
+    def fallback_text(primary, nested_path=None, default="-"):
+        raw = str(primary or "").strip()
+        if raw:
+            return raw
+        if nested_path:
+            nested_value = _get_nested(cliente_inmueble or {}, nested_path, default)
+            nested_text = str(nested_value or "").strip()
+            if nested_text:
+                return nested_text
+        return default
+
     comprador = liq.get("comprador") if isinstance(liq.get("comprador"), dict) else {}
     gastos_cv = comprador.get("gastos_compraventa") if isinstance(comprador.get("gastos_compraventa"), dict) else {}
     hip = comprador.get("hipoteca") if isinstance(comprador.get("hipoteca"), dict) else {}
@@ -6007,6 +6016,35 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
     cuadre_cheq2 = cuadre.get("cheque2") if isinstance(cuadre.get("cheque2"), dict) else {}
     cuadre_gastos = cuadre.get("gastos_escrituras") if isinstance(cuadre.get("gastos_escrituras"), dict) else {}
     notaria = liq.get("notaria") if isinstance(liq.get("notaria"), dict) else {}
+
+    porcentaje_val = parse_optional_float(payload.get("porcentaje"))
+    porcentaje_text = "-"
+    if porcentaje_val is not None:
+        try:
+            porcentaje_text = html.escape(f"{float(porcentaje_val):.2f}".rstrip("0").rstrip(".").replace(".", ",") + " %")
+        except Exception:
+            porcentaje_text = "-"
+
+    cliente_nif_text = html.escape(fallback_text(payload["cliente_nif"], "comprador.c1.nif"))
+    cliente_direccion_text = html.escape(fallback_text(payload["cliente_direccion"], "inmueble.direccion"))
+    cliente_telefono_text = html.escape(fallback_text(payload["cliente_telefono"], "comprador.c1.telefono"))
+    cliente_email_text = html.escape(fallback_text(payload["cliente_email"], "comprador.c1.email"))
+    cuota_estimada = html.escape(format_export_money(parse_money_value(prestamo.get("cuota_inicial") or 0)))
+    total_necesario = html.escape(
+        format_export_money(parse_money_value(hip.get("total_necesario") or comprador.get("suma_total_necesaria") or 0))
+    )
+    hero_chips = "".join(
+        chip
+        for chip in [
+            f'<span class="hero-chip">{banco}</span>' if banco != "-" else "",
+            f'<span class="hero-chip">{html.escape(str(payload.get("oficina") or "-"))}</span>'
+            if str(payload.get("oficina") or "").strip()
+            else "",
+            f'<span class="hero-chip">Encargo {html.escape(str(payload.get("encargo") or "-"))}</span>',
+            f'<span class="hero-chip">Firma {fecha_firma}</span>' if fecha_firma != "-" else "",
+        ]
+        if chip
+    )
 
     liq_section = ""
     if liq:
@@ -6203,15 +6241,16 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <title>Ficha hipoteca · {cliente}</title>
+  <title>Ficha comercial de hipoteca · {cliente}</title>
   <style>
     :root {{
-      --ink: #122033;
-      --muted: #5c6b80;
-      --brand: #103f91;
-      --brand-2: #1aa0c9;
-      --paper: #f4f7fb;
-      --line: #d7e2ee;
+      --ink: #15191f;
+      --muted: #6e747b;
+      --gold: #c8a24a;
+      --gold-strong: #a9852d;
+      --paper: #f6f3eb;
+      --line: rgba(22, 27, 43, 0.10);
+      --shadow: 0 18px 40px rgba(22, 27, 43, 0.10);
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -6219,68 +6258,120 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
       font-family: "Avenir Next", "Segoe UI", sans-serif;
       color: var(--ink);
       background:
-        radial-gradient(circle at top right, rgba(26,160,201,.18), transparent 28%),
-        linear-gradient(160deg, #eef3f9 0%, #ffffff 44%, #eef4fb 100%);
+        radial-gradient(circle at top right, rgba(200,162,74,.14), transparent 28%),
+        linear-gradient(160deg, #f3efe7 0%, #ffffff 46%, #f4f0e6 100%);
       padding: 28px;
+      print-color-adjust: exact;
+      -webkit-print-color-adjust: exact;
     }}
     .sheet {{
-      max-width: 980px;
+      max-width: 1040px;
       margin: 0 auto;
-      background: rgba(255,255,255,.96);
-      border: 1px solid rgba(16,63,145,.08);
-      border-radius: 28px;
+      background: rgba(255,255,255,.97);
+      border: 1px solid rgba(22, 27, 43, 0.08);
+      border-radius: 32px;
       overflow: hidden;
-      box-shadow: 0 20px 55px rgba(13,35,66,.12);
+      box-shadow: var(--shadow);
     }}
     .hero {{
       display: grid;
       grid-template-columns: 170px 1fr auto;
       gap: 22px;
       align-items: center;
-      padding: 28px 30px;
-      background: linear-gradient(135deg, rgba(16,63,145,.97), rgba(26,160,201,.92));
-      color: #fff;
+      padding: 28px 30px 24px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,246,240,0.96));
+      color: var(--ink);
+      border-bottom: 1px solid var(--line);
+      position: relative;
+    }}
+    .hero::before {{
+      content: "";
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 8px;
+      background: linear-gradient(90deg, var(--gold) 0%, #d5b15c 48%, #8b8f7e 100%);
     }}
     .hero img {{
       width: 150px;
       max-height: 90px;
       object-fit: contain;
     }}
+    .hero-copy {{
+      display: grid;
+      gap: 10px;
+    }}
+    .hero-kicker {{
+      color: var(--gold-strong);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
+      font-weight: 800;
+    }}
     .hero h1 {{
       margin: 0;
-      font-size: 30px;
-      line-height: 1.05;
-      letter-spacing: -.03em;
+      font-size: 32px;
+      line-height: 1;
+      letter-spacing: -.04em;
     }}
     .hero p {{
       margin: 8px 0 0;
-      color: rgba(255,255,255,.85);
+      color: var(--muted);
       font-size: 14px;
     }}
     .hero-tag {{
       padding: 10px 14px;
       border-radius: 999px;
-      background: rgba(255,255,255,.16);
+      background: rgba(200,162,74,.14);
+      border: 1px solid rgba(200,162,74,.30);
+      color: var(--ink);
       font-weight: 700;
       font-size: 13px;
       text-transform: uppercase;
       letter-spacing: .08em;
     }}
+    .hero-chips {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 4px;
+    }}
+    .hero-chip {{
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 5px 12px;
+      border-radius: 999px;
+      background: rgba(252, 248, 235, 0.98);
+      border: 1px solid rgba(200, 162, 74, 0.34);
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .02em;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.7);
+    }}
     .content {{
       padding: 28px 30px 34px;
       display: grid;
-      gap: 24px;
+      gap: 22px;
     }}
     .metrics {{
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(3, minmax(0, 1fr));
       gap: 14px;
     }}
     .metric {{
-      background: var(--paper);
-      border: 1px solid var(--line);
-      border-radius: 18px;
-      padding: 16px 18px;
+      background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(248,244,236,.96));
+      border: 1px solid rgba(22, 27, 43, 0.08);
+      border-top: 4px solid rgba(22, 27, 43, 0.08);
+      border-radius: 20px;
+      padding: 16px 18px 15px;
+      box-shadow: 0 12px 26px rgba(22, 27, 43, 0.06);
+      min-height: 84px;
+    }}
+    .metric.metric-accent {{
+      border-color: rgba(200, 162, 74, 0.36);
+      border-top-color: var(--gold);
+      background: linear-gradient(180deg, rgba(252, 248, 235, .98), rgba(246, 240, 224, .96));
     }}
     .metric span {{
       display: block;
@@ -6291,8 +6382,9 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
       margin-bottom: 10px;
     }}
     .metric strong {{
-      font-size: 22px;
+      font-size: 24px;
       line-height: 1.05;
+      letter-spacing: -.03em;
     }}
     .sections {{
       display: grid;
@@ -6300,17 +6392,31 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
       gap: 20px;
     }}
     .panel {{
-      background: #fff;
-      border: 1px solid var(--line);
-      border-radius: 22px;
-      padding: 20px 22px;
+      background: linear-gradient(180deg, rgba(255,255,255,.98), rgba(249,246,240,.95));
+      border: 1px solid rgba(22, 27, 43, 0.08);
+      border-top: 4px solid rgba(200,162,74,.78);
+      border-radius: 24px;
+      padding: 20px 22px 22px;
+      box-shadow: 0 14px 30px rgba(22, 27, 43, 0.07);
     }}
     .panel h2 {{
-      margin: 0 0 16px;
+      margin: 0 0 14px;
       font-size: 16px;
       text-transform: uppercase;
       letter-spacing: .08em;
-      color: var(--brand);
+      color: var(--ink);
+      position: relative;
+      padding-bottom: 10px;
+    }}
+    .panel h2::after {{
+      content: "";
+      position: absolute;
+      left: 0;
+      bottom: 0;
+      width: 120px;
+      height: 3px;
+      border-radius: 999px;
+      background: var(--gold);
     }}
     .page-break {{
       break-before: page;
@@ -6342,26 +6448,30 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
     dl {{
       margin: 0;
       display: grid;
-      grid-template-columns: 180px 1fr;
-      gap: 10px 16px;
+      grid-template-columns: minmax(160px, 210px) 1fr;
+      gap: 10px 18px;
       align-items: start;
     }}
     dt {{
       color: var(--muted);
       font-weight: 600;
+      line-height: 1.35;
     }}
     dd {{
       margin: 0;
       font-weight: 700;
+      line-height: 1.35;
     }}
     .footer-note {{
       color: var(--muted);
       font-size: 12px;
       text-align: right;
+      padding-top: 2px;
     }}
     @media print {{
       body {{ background: #fff; padding: 0; }}
       .sheet {{ box-shadow: none; border-radius: 0; border: none; max-width: none; }}
+      .hero::before {{ -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
     }}
   </style>
   {print_script}
@@ -6371,25 +6481,29 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
   <div class="sheet">
     <div class="hero">
       <img src="/assets/grupo_modernia_logo.png" alt="Grupo Modernia" />
-      <div>
-        <h1>Ficha de Operación Hipotecaria</h1>
+      <div class="hero-copy">
+        <div class="hero-kicker">Presentación comercial</div>
+        <h1>Ficha comercial de hipoteca</h1>
         <p>{cliente} · {banco}</p>
+        <div class="hero-chips">{hero_chips}</div>
       </div>
-      <div class="hero-tag">Financiaciones Modernia</div>
+      <div class="hero-tag">{estado}</div>
     </div>
     <div class="content">
       <div class="metrics">
-        <div class="metric"><span>Importe hipoteca</span><strong>{importe}</strong></div>
-        <div class="metric"><span>Precio compra</span><strong>{precio}</strong></div>
-        <div class="metric"><span>Entrada</span><strong>{entrada}</strong></div>
-        <div class="metric"><span>Honorarios</span><strong>{honorarios}</strong></div>
+        <div class="metric metric-accent"><span>Importe hipoteca</span><strong>{importe}</strong></div>
+      <div class="metric metric-accent"><span>% financiación</span><strong>{porcentaje_text}</strong></div>
+      <div class="metric metric-accent"><span>Cuota estimada</span><strong>{cuota_estimada}</strong></div>
+      <div class="metric"><span>Precio compra</span><strong>{precio}</strong></div>
+      <div class="metric"><span>Entrada</span><strong>{entrada}</strong></div>
+      <div class="metric"><span>Total necesario</span><strong>{total_necesario}</strong></div>
       </div>
       <div class="sections">
         <div class="panel">
           <h2>Datos de la operación</h2>
           <dl>
             <dt>Cliente</dt><dd>{cliente}</dd>
-            <dt>DNI</dt><dd>{nif}</dd>
+            <dt>DNI</dt><dd>{cliente_nif_text}</dd>
             <dt>Fecha encargo</dt><dd>{fecha_encargo}</dd>
             <dt>Fecha firma</dt><dd>{fecha_firma}</dd>
             <dt>Tipo hipoteca</dt><dd>{tipo}</dd>
@@ -6401,9 +6515,9 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
         <div class="panel">
           <h2>Datos del cliente</h2>
           <dl>
-            <dt>Dirección</dt><dd>{direccion}</dd>
-            <dt>Teléfono</dt><dd>{telefono}</dd>
-            <dt>Email</dt><dd>{email_val}</dd>
+            <dt>Dirección</dt><dd>{cliente_direccion_text}</dd>
+            <dt>Teléfono</dt><dd>{cliente_telefono_text}</dd>
+            <dt>Email</dt><dd>{cliente_email_text}</dd>
             <dt>Oficina</dt><dd>{html.escape(payload["oficina"] or "-")}</dd>
             <dt>Estado</dt><dd>{html.escape(payload["estado"] or "-")}</dd>
           </dl>
