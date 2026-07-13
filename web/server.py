@@ -7444,10 +7444,13 @@ def build_hipotecas_bdt_listado_pdf_filename(filters=None, count=None):
     parts = ["hipotecas_listado"]
     year = slugify_text(filters.get("year") or "")
     estado = slugify_text(filters.get("estado") or "")
+    order = normalize_hipoteca_pdf_sort_order(filters.get("order") or filters.get("sort_order") or "desc")
     if year:
         parts.append(year)
     if estado:
         parts.append(estado)
+    if order:
+        parts.append(order)
     if count:
         parts.append(str(int(count)))
     filename = "_".join(part for part in parts if part).strip("_")[:160] or "hipotecas_listado"
