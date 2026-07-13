@@ -11343,6 +11343,12 @@ const setWorkspaceCompanyContabilidadTab = async (tabKey = "dashboard", opts = {
     await Promise.all(tasks);
   } catch (e) {}
   if (loadSeq !== _companyContaLoadSeq) return;
+  if (tab === "diarios" || tab === "balances") {
+    if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("libros");
+    if (typeof setGestoriaClienteLibroTab === "function") setGestoriaClienteLibroTab(tab === "balances" ? "balance" : "diario");
+  } else if (tab === "asientos") {
+    if (typeof setGestoriaClienteContaTab === "function") setGestoriaClienteContaTab("operativa");
+  }
 
   renderWorkspaceCompanyContabilidadShellPanes();
   syncWorkspaceCompanyContabilidadTabs();
@@ -28339,13 +28345,15 @@ const renderClienteContabilidadPanel = () => {
       container.appendChild(wrapper);
     };
     const openCompanyTab = (tabKey, afterLoad = null) => {
-      void activateTab(tabKey);
+      const activation = activateTab(tabKey);
       if (typeof afterLoad === "function") {
-        window.setTimeout(() => {
-          try {
-            afterLoad();
-          } catch (e) {}
-        }, 0);
+        Promise.resolve(activation)
+          .then(() => {
+            try {
+              afterLoad();
+            } catch (e) {}
+          })
+          .catch(() => {});
       }
     };
     renderMetricCards(dashboardSummaryEl, [], "Cargando resumen contable...");
@@ -28359,7 +28367,7 @@ const renderClienteContabilidadPanel = () => {
       { label: "Importación", note: "Revisar lotes y OCR.", actionLabel: "Abrir", primary: true, onClick: () => openCompanyTab("importacion") },
       { label: "Validación", note: "Ver incidencias de conciliación.", actionLabel: "Abrir", onClick: () => openCompanyTab("validacion") },
       { label: "Banco", note: "Cuentas y movimientos conciliables.", actionLabel: "Abrir", onClick: () => openCompanyTab("banco") },
-      { label: "Diarios", note: "Libro diario y balance.", actionLabel: "Abrir", onClick: () => openCompanyTab("diarios") },
+      { label: "Diarios", note: "Libro diario y balance.", actionLabel: "Abrir", onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("diario")) },
     ]);
     renderActionRows(importacionActionsEl, [
       { label: "Abrir importador", note: "Lotes, documentos y OCR.", actionLabel: "Importador", primary: true, onClick: () => openCompanyTab("importacion") },
@@ -28372,7 +28380,7 @@ const renderClienteContabilidadPanel = () => {
       { label: "Ir a asientos", note: "Ver la propuesta contable.", actionLabel: "Asientos", onClick: () => openCompanyTab("asientos") },
     ]);
     renderActionRows(diariosActionsEl, [
-      { label: "Abrir diario", note: "Apuntes y asientos agrupados.", actionLabel: "Diario", primary: true, onClick: () => openCompanyTab("diarios") },
+      { label: "Abrir diario", note: "Apuntes y asientos agrupados.", actionLabel: "Diario", primary: true, onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("diario")) },
       { label: "Abrir mayor", note: "Analítica por cuentas.", actionLabel: "Mayor", onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("mayor")) },
       { label: "Ver facturas", note: "Cruce de facturas y asiento.", actionLabel: "Facturas", onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("facturas")) },
       { label: "Ver IVA", note: "Desglose fiscal asociado.", actionLabel: "IVA", onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("iva")) },
@@ -28385,7 +28393,7 @@ const renderClienteContabilidadPanel = () => {
     renderActionRows(balancesActionsEl, [
       { label: "Abrir balance", note: "Sumas y saldos.", actionLabel: "Balance", primary: true, onClick: () => openCompanyTab("balances") },
       { label: "Ver PyG", note: "Resultado del ejercicio.", actionLabel: "PyG", onClick: () => openCompanyTab("balances", () => setGestoriaClienteLibroTab("pyg")) },
-      { label: "Volver al diario", note: "Cruce con apuntes.", actionLabel: "Diario", onClick: () => openCompanyTab("diarios") },
+      { label: "Volver al diario", note: "Cruce con apuntes.", actionLabel: "Diario", onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("diario")) },
     ]);
     renderActionRows(asientosActionsEl, [
       { label: "Abrir asientos", note: "Ficha y edición contable.", actionLabel: "Asientos", primary: true, onClick: () => openCompanyTab("asientos") },
@@ -28547,7 +28555,7 @@ const renderClienteContabilidadPanel = () => {
         { label: "Ir a asientos", note: "Ver la propuesta contable.", actionLabel: "Asientos", onClick: () => openCompanyTab("asientos") },
       ]);
       renderActionRows(diariosActionsEl, [
-        { label: "Abrir diario", note: "Apuntes y asientos agrupados.", actionLabel: "Diario", primary: true, onClick: () => openCompanyTab("diarios") },
+        { label: "Abrir diario", note: "Apuntes y asientos agrupados.", actionLabel: "Diario", primary: true, onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("diario")) },
         { label: "Abrir mayor", note: "Analítica por cuentas.", actionLabel: "Mayor", onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("mayor")) },
         { label: "Ver facturas", note: "Cruce de facturas y asiento.", actionLabel: "Facturas", onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("facturas")) },
         { label: "Ver IVA", note: "Desglose fiscal asociado.", actionLabel: "IVA", onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("iva")) },
@@ -28555,7 +28563,7 @@ const renderClienteContabilidadPanel = () => {
       renderActionRows(balancesActionsEl, [
         { label: "Abrir balance", note: "Sumas y saldos.", actionLabel: "Balance", primary: true, onClick: () => openCompanyTab("balances") },
         { label: "Ver PyG", note: "Resultado del ejercicio.", actionLabel: "PyG", onClick: () => openCompanyTab("balances", () => setGestoriaClienteLibroTab("pyg")) },
-        { label: "Volver al diario", note: "Cruce con apuntes.", actionLabel: "Diario", onClick: () => openCompanyTab("diarios") },
+        { label: "Volver al diario", note: "Cruce con apuntes.", actionLabel: "Diario", onClick: () => openCompanyTab("diarios", () => setGestoriaClienteLibroTab("diario")) },
       ]);
       renderActionRows(asientosActionsEl, [
         { label: "Abrir asientos", note: "Ficha y edición contable.", actionLabel: "Asientos", primary: true, onClick: () => openCompanyTab("asientos") },
