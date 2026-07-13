@@ -1,0 +1,653 @@
+{
+  "schema": "modernia.fiscal_venta_presets.v1",
+  "updated_at": "2026-04-20",
+  "sources_global": [
+    {
+      "label": "AEAT · IRPF 2024 · Reglas generales cálculo ganancias/pérdidas (arts. 34–36 LIRPF)",
+      "url": "https://www3.agenciatributaria.gob.es/Sede/ayuda/manuales-videos-folletos/manuales-practicos/irpf-2024/c11-ganancias-perdidas-patrimoniales/determinacion-importe-ganancias-perdidas-patrimon-generales/derivadas-transmisiones-onerosas-lucrativas/reglas-generales-calculo.html"
+    },
+    {
+      "label": "AEAT · IRPF 2025 · Gravamen estatal base liquidable del ahorro (art. 66 LIRPF)",
+      "url": "https://sede.agenciatributaria.gob.es/Sede/ayuda/manuales-videos-folletos/manuales-practicos/irpf-2025/c15-calculo-impuesto-determinacion-cuotas-integras/gravamen-base-liquidable-ahorro/gravamen-estatal.html"
+    },
+    {
+      "label": "AEAT · IRPF 2025 · Gravamen autonómico base liquidable del ahorro (art. 76 LIRPF)",
+      "url": "https://sede.agenciatributaria.gob.es/Sede/ayuda/manuales-videos-folletos/manuales-practicos/irpf-2025/c15-calculo-impuesto-determinacion-cuotas-integras/gravamen-base-liquidable-ahorro/gravamen-autonomico.html"
+    },
+    {
+      "label": "BOE · Ley 7/2024 (modifica escala ahorro autonómica, art. 76 LIRPF; 15% tramo >300k)",
+      "url": "https://www.boe.es/eli/es/l/2024/12/20/7"
+    },
+    {
+      "label": "AEAT · IRNR · Retención adquirente de inmueble (3% · modelo 211)",
+      "url": "https://www3.agenciatributaria.gob.es/Sede/no-residentes/irnr-sin-establecimiento-permanente/retenciones-irnr-sin-establecimiento-permanente/retencion-adquirente-inmueble.html"
+    },
+    {
+      "label": "BOE · RDL 26/2021 (IIVTNU: coeficientes máximos art. 107.4 TRLRHL)",
+      "url": "https://www.boe.es/buscar/act.php?id=BOE-A-2021-18276"
+    },
+    {
+      "label": "BOE · RDL 8/2023 art. 24 (IIVTNU: coeficientes máximos desde 01/01/2024)",
+      "url": "https://www.boe.es/buscar/act.php?id=BOE-A-2023-26452"
+    }
+  ],
+  "presets": [
+    {
+      "id": "venta_irpf_basica_2026_malaga",
+      "title": "Venta (IRPF) · Básica · Málaga · Devengo 2026",
+      "description": "Ganancia simple con datos mínimos. Sirve para validar fórmula (valor transmisión - adquisición) y que 2026 use escala 2025 como asumida.",
+      "dgt_refs": ["V0858-13", "V0954-25"],
+      "wizard": { "operacion": "venta", "ccaa": "AN", "referencia": "Málaga · Piso urbano (supuesto básico)" },
+      "irpf": {
+        "ejercicio": "2026",
+        "regimen_fiscal": "irpf",
+        "ccaa": "AN",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "2019-02-15",
+        "fecha_transmision": "2026-04-21",
+        "valor_adquisicion": "150000",
+        "gastos_adquisicion": "6000",
+        "inversiones_mejoras": "0",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "220000",
+        "gastos_transmision": "7000",
+        "plusvalia_municipal": "0",
+        "vivienda_habitual": false,
+        "exencion_mayor_65": false
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "",
+        "fecha_adquisicion": "2019-02-15",
+        "fecha_transmision": "2026-04-21",
+        "valor_suelo": "60000",
+        "participacion_pct": "100",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      }
+    },
+    {
+      "id": "venta_irpf_tramo_30pct_2025",
+      "title": "Venta (IRPF) · Tramo >300k (30%) · Ejercicio 2025",
+      "description": "Fuerza base ahorro 400.000€ para validar el último tramo (30% total) y la cuota (101.880€).",
+      "dgt_refs": ["V0858-13"],
+      "wizard": { "operacion": "venta", "ccaa": "MD", "referencia": "Madrid · Ganancia grande (tramo 30%)" },
+      "irpf": {
+        "ejercicio": "2025",
+        "regimen_fiscal": "irpf",
+        "ccaa": "MD",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "2020-01-01",
+        "fecha_transmision": "2025-06-30",
+        "valor_adquisicion": "100000",
+        "gastos_adquisicion": "0",
+        "inversiones_mejoras": "0",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "500000",
+        "gastos_transmision": "0",
+        "plusvalia_municipal": "0",
+        "vivienda_habitual": false,
+        "exencion_mayor_65": false
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "Preset usa Málaga solo para que el simulador IIVTNU tenga municipio resoluble por CP.",
+        "fecha_adquisicion": "2020-01-01",
+        "fecha_transmision": "2025-06-30",
+        "valor_suelo": "90000",
+        "participacion_pct": "100",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      },
+      "expect": {
+        "irpf": {
+          "base_ahorro_sujeta": 400000.0,
+          "cuota_ahorro_estimada": 101880.0
+        }
+      }
+    },
+    {
+      "id": "venta_irnr_retencion_3pct",
+      "title": "Venta (IRNR) · No residente · Retención 3% · Ejercicio 2026",
+      "description": "Valida tipo IRNR (19%) + retención típica 3% sobre el precio de transmisión (modelo 211).",
+      "wizard": { "operacion": "venta", "ccaa": "VC", "referencia": "Valencia · No residente (IRNR + retención)" },
+      "irpf": {
+        "ejercicio": "2026",
+        "regimen_fiscal": "irnr",
+        "ccaa": "VC",
+        "retencion_pct": "3",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "2018-03-10",
+        "fecha_transmision": "2026-04-21",
+        "valor_adquisicion": "180000",
+        "gastos_adquisicion": "0",
+        "inversiones_mejoras": "0",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "280000",
+        "gastos_transmision": "0",
+        "plusvalia_municipal": "0",
+        "vivienda_habitual": false,
+        "exencion_mayor_65": false
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "",
+        "fecha_adquisicion": "2018-03-10",
+        "fecha_transmision": "2026-04-21",
+        "valor_suelo": "70000",
+        "participacion_pct": "100",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      },
+      "expect": {
+        "irpf": {
+          "ganancia_patrimonial": 100000.0,
+          "base_ahorro_sujeta": 100000.0,
+          "cuota_ahorro_estimada": 19000.0,
+          "retencion_importe": 8400.0,
+          "cuota_neta": 10600.0
+        }
+      }
+    },
+    {
+      "id": "venta_irpf_exencion_mayor65_viv_habitual",
+      "title": "Venta (IRPF) · Exención >65 · Vivienda habitual",
+      "description": "Marca vivienda habitual + exención >65 para que la ganancia quede exenta al 100%.",
+      "dgt_refs": ["V0525-22"],
+      "wizard": { "operacion": "venta", "ccaa": "GA", "referencia": "Galicia · >65 vivienda habitual (exento)" },
+      "irpf": {
+        "ejercicio": "2025",
+        "regimen_fiscal": "irpf",
+        "ccaa": "GA",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "2005-01-01",
+        "fecha_transmision": "2025-05-20",
+        "valor_adquisicion": "90000",
+        "gastos_adquisicion": "0",
+        "inversiones_mejoras": "0",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "190000",
+        "gastos_transmision": "0",
+        "plusvalia_municipal": "0",
+        "vivienda_habitual": true,
+        "exencion_mayor_65": true
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "",
+        "fecha_adquisicion": "2005-01-01",
+        "fecha_transmision": "2025-05-20",
+        "valor_suelo": "55000",
+        "participacion_pct": "100",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      },
+      "expect": {
+        "irpf": {
+          "exento": 100000.0,
+          "base_ahorro_sujeta": 0.0,
+          "cuota_ahorro_estimada": 0.0
+        }
+      }
+    },
+    {
+      "id": "venta_irpf_reinversion_parcial",
+      "title": "Venta (IRPF) · Reinversión parcial · Vivienda habitual",
+      "description": "Reinversión proporcional: exento = ganancia × reinversión / importe obtenido (neto préstamo).",
+      "dgt_refs": ["V0030-21"],
+      "wizard": { "operacion": "venta", "ccaa": "CT", "referencia": "Cataluña · Reinversión parcial (proporcional)" },
+      "irpf": {
+        "ejercicio": "2025",
+        "regimen_fiscal": "irpf",
+        "ccaa": "CT",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "2016-02-01",
+        "fecha_transmision": "2025-07-01",
+        "valor_adquisicion": "160000",
+        "gastos_adquisicion": "0",
+        "inversiones_mejoras": "0",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "240000",
+        "gastos_transmision": "0",
+        "plusvalia_municipal": "0",
+        "vivienda_habitual": true,
+        "exencion_mayor_65": false,
+        "importe_reinvertido": "60000",
+        "prestamo_pendiente": "90000"
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "",
+        "fecha_adquisicion": "2016-02-01",
+        "fecha_transmision": "2025-07-01",
+        "valor_suelo": "65000",
+        "participacion_pct": "100",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      }
+    },
+    {
+      "id": "venta_irpf_copropiedad_50pct",
+      "title": "Venta (IRPF) · Copropiedad 50% · Ajuste participación",
+      "description": "Valida que adquisición/transmisión y retención (si IRNR) se prorratean por participación.",
+      "dgt_refs": ["V0030-21"],
+      "wizard": { "operacion": "venta", "ccaa": "PV", "pv_territorio": "BI", "referencia": "Bizkaia · Copropiedad 50% (IRPF)" },
+      "irpf": {
+        "ejercicio": "2025",
+        "regimen_fiscal": "irpf",
+        "ccaa": "PV",
+        "participacion_pct": "50",
+        "fecha_adquisicion": "2020-04-01",
+        "fecha_transmision": "2025-04-01",
+        "valor_adquisicion": "200000",
+        "gastos_adquisicion": "0",
+        "inversiones_mejoras": "0",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "260000",
+        "gastos_transmision": "0",
+        "plusvalia_municipal": "0",
+        "vivienda_habitual": false,
+        "exencion_mayor_65": false
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "",
+        "fecha_adquisicion": "2020-04-01",
+        "fecha_transmision": "2025-04-01",
+        "valor_suelo": "80000",
+        "participacion_pct": "50",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      }
+    },
+    {
+      "id": "venta_irpf_con_amortizacion",
+      "title": "Venta (IRPF) · Inmueble alquilado (amortización deducida)",
+      "description": "La amortización deducida reduce el valor de adquisición y aumenta la ganancia.",
+      "dgt_refs": ["V2421-23"],
+      "wizard": { "operacion": "venta", "ccaa": "NC", "referencia": "Navarra · Alquilado (amortización) · IRPF" },
+      "irpf": {
+        "ejercicio": "2025",
+        "regimen_fiscal": "irpf",
+        "ccaa": "NC",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "2015-01-01",
+        "fecha_transmision": "2025-01-15",
+        "valor_adquisicion": "120000",
+        "gastos_adquisicion": "0",
+        "inversiones_mejoras": "0",
+        "amortizacion_deducida": "18000",
+        "valor_transmision": "150000",
+        "gastos_transmision": "0",
+        "plusvalia_municipal": "0",
+        "vivienda_habitual": false,
+        "exencion_mayor_65": false
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "",
+        "fecha_adquisicion": "2015-01-01",
+        "fecha_transmision": "2025-01-15",
+        "valor_suelo": "50000",
+        "participacion_pct": "100",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      }
+    },
+    {
+      "id": "iivtnu_usufructo_vitalicio",
+      "title": "IIVTNU · Usufructo vitalicio (factor automático)",
+      "description": "Valida el factor del derecho (usufructo vitalicio) según edad.",
+      "dgt_refs": ["V0597-23", "V0105-23"],
+      "wizard": { "operacion": "venta", "ccaa": "AN", "referencia": "Málaga · Usufructo vitalicio (IIVTNU) · Venta" },
+      "irpf": {
+        "ejercicio": "2025",
+        "regimen_fiscal": "irpf",
+        "ccaa": "AN",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "2021-04-20",
+        "fecha_transmision": "2025-04-20",
+        "valor_adquisicion": "200000",
+        "gastos_adquisicion": "0",
+        "inversiones_mejoras": "0",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "220000",
+        "gastos_transmision": "0",
+        "plusvalia_municipal": "0",
+        "vivienda_habitual": false,
+        "exencion_mayor_65": false
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "Derecho usufructo vitalicio; el simulador calcula factor derecho automáticamente.",
+        "fecha_adquisicion": "2021-04-20",
+        "fecha_transmision": "2025-04-20",
+        "valor_suelo": "60000",
+        "participacion_pct": "100",
+        "derecho_tipo": "usufructo_vitalicio",
+        "usufructuario_edad": "70",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      }
+    },
+    {
+      "id": "venta_irpf_mejoras_y_gastos",
+      "title": "Venta (IRPF) · Con mejoras + gastos adquisición/transmisión",
+      "description": "Valida que mejoras y gastos suman/restan correctamente en los valores de adquisición/transmisión.",
+      "dgt_refs": ["V0858-13", "V0954-25"],
+      "wizard": { "operacion": "venta", "ccaa": "CM", "referencia": "Castilla-La Mancha · Mejoras + gastos" },
+      "irpf": {
+        "ejercicio": "2025",
+        "regimen_fiscal": "irpf",
+        "ccaa": "CM",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "2017-09-01",
+        "fecha_transmision": "2025-09-01",
+        "valor_adquisicion": "140000",
+        "gastos_adquisicion": "8000",
+        "inversiones_mejoras": "12000",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "210000",
+        "gastos_transmision": "9000",
+        "plusvalia_municipal": "2500",
+        "vivienda_habitual": false,
+        "exencion_mayor_65": false
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "",
+        "fecha_adquisicion": "2017-09-01",
+        "fecha_transmision": "2025-09-01",
+        "valor_suelo": "50000",
+        "participacion_pct": "100",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      }
+    },
+    {
+      "id": "venta_irpf_perdida_base0",
+      "title": "Venta (IRPF) · Pérdida patrimonial (base ahorro 0 en simulador)",
+      "description": "Caso de pérdida: el simulador fija base ahorro sujeta a 0 (modelo simplificado: no compensa con otras ganancias).",
+      "wizard": { "operacion": "venta", "ccaa": "CN", "referencia": "Canarias · Pérdida patrimonial" },
+      "irpf": {
+        "ejercicio": "2025",
+        "regimen_fiscal": "irpf",
+        "ccaa": "CN",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "2019-01-01",
+        "fecha_transmision": "2025-01-31",
+        "valor_adquisicion": "220000",
+        "gastos_adquisicion": "0",
+        "inversiones_mejoras": "0",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "200000",
+        "gastos_transmision": "5000",
+        "plusvalia_municipal": "0",
+        "vivienda_habitual": false,
+        "exencion_mayor_65": false
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "",
+        "fecha_adquisicion": "2019-01-01",
+        "fecha_transmision": "2025-01-31",
+        "valor_suelo": "45000",
+        "participacion_pct": "100",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      },
+      "expect": {
+        "irpf": {
+          "base_ahorro_sujeta": 0.0,
+          "cuota_ahorro_estimada": 0.0
+        }
+      }
+    },
+    {
+      "id": "iivtnu_no_sujeto_forzado",
+      "title": "IIVTNU · No sujeción (forzado por situación especial)",
+      "description": "Valida que si se marca no sujeto, la cuota recomendada se fuerza a 0.",
+      "dgt_refs": ["V2035-16", "V0239-16", "V1702-16"],
+      "wizard": { "operacion": "venta", "ccaa": "CE", "referencia": "Ceuta · IIVTNU no sujeto (forzado)" },
+      "irpf": {
+        "ejercicio": "2025",
+        "regimen_fiscal": "irpf",
+        "ccaa": "CE",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "2020-01-01",
+        "fecha_transmision": "2025-01-02",
+        "valor_adquisicion": "100000",
+        "gastos_adquisicion": "0",
+        "inversiones_mejoras": "0",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "120000",
+        "gastos_transmision": "0",
+        "plusvalia_municipal": "0",
+        "vivienda_habitual": false,
+        "exencion_mayor_65": false
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "no_sujeto",
+        "situacion_motivo": "Supuesto de no sujeción (marcado manualmente).",
+        "fecha_adquisicion": "2020-01-01",
+        "fecha_transmision": "2025-01-02",
+        "valor_suelo": "40000",
+        "participacion_pct": "100",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      },
+      "expect": {
+        "iivtnu": {
+          "cuota_recomendada": 0.0,
+          "metodo_recomendado": "no_sujecion"
+        }
+      }
+    },
+    {
+      "id": "iivtnu_metodo_real_mas_bajo",
+      "title": "IIVTNU · Método real recomendado (cuota menor)",
+      "description": "Incluye valores adquisición/transmisión + ratio suelo para activar método real y que sea menor que el objetivo.",
+      "wizard": { "operacion": "venta", "ccaa": "ML", "referencia": "Melilla · IIVTNU método real recomendado" },
+      "irpf": {
+        "ejercicio": "2025",
+        "regimen_fiscal": "irpf",
+        "ccaa": "ML",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "2024-01-01",
+        "fecha_transmision": "2025-01-02",
+        "valor_adquisicion": "200000",
+        "gastos_adquisicion": "0",
+        "inversiones_mejoras": "0",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "201000",
+        "gastos_transmision": "0",
+        "plusvalia_municipal": "0",
+        "vivienda_habitual": false,
+        "exencion_mayor_65": false
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "",
+        "fecha_adquisicion": "2024-01-01",
+        "fecha_transmision": "2025-01-02",
+        "valor_suelo": "60000",
+        "valor_catastral_total": "120000",
+        "valor_adquisicion": "200000",
+        "valor_transmision": "201000",
+        "gastos_adquisicion": "0",
+        "gastos_transmision": "0",
+        "participacion_pct": "100",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      },
+      "expect": {
+        "iivtnu": {
+          "metodo_recomendado": "real"
+        }
+      }
+    },
+    {
+      "id": "venta_irnr_2015_cambio_tipo_11jul",
+      "title": "Venta (IRNR) · 2015 cambio tipo (20% → 19,5% desde 12/07/2015)",
+      "description": "Valida el corte del tipo IRNR en 2015 (antes/después 12/07/2015).",
+      "wizard": { "operacion": "venta", "ccaa": "AN", "referencia": "IRNR 2015 (corte 12/07/2015)" },
+      "irpf": {
+        "ejercicio": "2015",
+        "regimen_fiscal": "irnr",
+        "ccaa": "AN",
+        "retencion_pct": "3",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "2010-01-01",
+        "fecha_transmision": "2015-07-11",
+        "valor_adquisicion": "100000",
+        "gastos_adquisicion": "0",
+        "inversiones_mejoras": "0",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "150000",
+        "gastos_transmision": "0",
+        "plusvalia_municipal": "0",
+        "vivienda_habitual": false,
+        "exencion_mayor_65": false
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "",
+        "fecha_adquisicion": "2010-01-01",
+        "fecha_transmision": "2015-07-11",
+        "valor_suelo": "30000",
+        "participacion_pct": "100",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      },
+      "expect": {
+        "irpf": {
+          "cuota_ahorro_estimada": 10000.0
+        }
+      }
+    },
+    {
+      "id": "venta_irpf_inmueble_heredado_valor_adquisicion",
+      "title": "Venta (IRPF) · Inmueble heredado (valor adquisición heredado)",
+      "description": "Ejemplo orientativo: venta posterior de inmueble heredado. El valor de adquisición suele venir del ISD + gastos asociados (aquí se reflejan como gastos adquisición).",
+      "dgt_refs": ["V1463-25"],
+      "wizard": { "operacion": "venta", "ccaa": "AN", "referencia": "Venta de inmueble heredado (ejemplo)" },
+      "irpf": {
+        "ejercicio": "2026",
+        "regimen_fiscal": "irpf",
+        "ccaa": "AN",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "2018-03-12",
+        "fecha_transmision": "2026-04-21",
+        "valor_adquisicion": "180000",
+        "gastos_adquisicion": "12000",
+        "inversiones_mejoras": "0",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "240000",
+        "gastos_transmision": "8000",
+        "plusvalia_municipal": "0",
+        "vivienda_habitual": false,
+        "exencion_mayor_65": false
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "Ejemplo: adquisición por herencia (no simula ISD).",
+        "fecha_adquisicion": "2018-03-12",
+        "fecha_transmision": "2026-04-21",
+        "valor_suelo": "65000",
+        "participacion_pct": "100",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      }
+    },
+    {
+      "id": "venta_irpf_abatimiento_dt9_mejoras",
+      "title": "Venta (IRPF) · Abatimiento (DT 9ª) con mejoras",
+      "description": "Venta con adquisición previa a 31/12/1994 y mejora posterior (se separa el componente de mejora para no aplicar abatimiento a la ganancia de la mejora).",
+      "dgt_refs": ["V0603-17", "V0499-17"],
+      "wizard": { "operacion": "venta", "ccaa": "AN", "referencia": "Chalet con mejoras (DT 9ª) (ejemplo)" },
+      "irpf": {
+        "ejercicio": "2025",
+        "regimen_fiscal": "irpf",
+        "ccaa": "AN",
+        "participacion_pct": "100",
+        "fecha_adquisicion": "1992-10-10",
+        "fecha_transmision": "2025-02-03",
+        "valor_adquisicion": "100000",
+        "gastos_adquisicion": "8000",
+        "inversiones_mejoras": "75000",
+        "fecha_mejoras": "2012-07-01",
+        "valor_transmision_mejoras": "150000",
+        "amortizacion_deducida": "0",
+        "valor_transmision": "500000",
+        "gastos_transmision": "0",
+        "plusvalia_municipal": "15000",
+        "vivienda_habitual": false,
+        "exencion_mayor_65": false,
+        "abatimiento_mode": "auto",
+        "abatimiento_tipo": "inmueble",
+        "abatimiento_vt1_acumulado_2015": "0"
+      },
+      "iivtnu": {
+        "codigo_postal": "29001",
+        "tipo_transmision": "onerosa",
+        "situacion_especial": "",
+        "situacion_motivo": "",
+        "fecha_adquisicion": "1992-10-10",
+        "fecha_transmision": "2025-02-03",
+        "valor_suelo": "60000",
+        "participacion_pct": "100",
+        "derecho_tipo": "pleno_dominio",
+        "tipo_gravamen_pct_manual": "30",
+        "bonificacion_pct": "0"
+      },
+      "expect": {
+        "irpf": {
+          "ganancia_patrimonial": 302000.0,
+          "ganancia_patrimonial_computable": 270917.14,
+          "base_ahorro_sujeta": 270917.14
+        }
+      }
+    }
+  ]
+}

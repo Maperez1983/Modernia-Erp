@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-label="Verificado por Verifika²">
+  <defs>
+    <radialGradient id="goldBg" cx="30%" cy="30%" r="70%">
+      <stop offset="0" stop-color="#FFF3C4" />
+      <stop offset="0.42" stop-color="#F9D17B" />
+      <stop offset="1" stop-color="#B9892B" />
+    </radialGradient>
+    <linearGradient id="goldStroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFE6A6" />
+      <stop offset="0.6" stop-color="#F2C14E" />
+      <stop offset="1" stop-color="#996A1B" />
+    </linearGradient>
+  </defs>
+  <circle cx="160" cy="160" r="146" fill="url(#goldBg)" />
+  <circle cx="160" cy="160" r="146" fill="none" stroke="url(#goldStroke)" stroke-width="10" />
+  <circle cx="160" cy="160" r="126" fill="none" stroke="rgba(11,29,51,0.16)" stroke-width="2" />
+  <!-- Check “V” fiel al logo original (trazado desde PNG) -->
+  <g transform="translate(160 152) scale(0.72) translate(-75 -89)">
+    <g transform="translate(0,162) scale(0.1,-0.1)" fill="#0B1D33" stroke="none">
+      <path d="M1309 1357 c-290 -98 -503 -324 -714 -759 l-51 -106 -64 151 c-123 295 -135 316 -176 333 -21 9 -79 18 -129 21 -127 8 -131 1 -77 -115 23 -48 65 -143 95 -212 30 -69 71 -160 91 -202 19 -42 55 -123 80 -180 76 -176 86 -196 102 -202 26 -10 152 -7 177 5 18 8 43 53 102 187 109 248 274 574 352 700 90 145 142 211 245 316 49 49 88 91 88 93 0 8 -32 0 -121 -30z" />
+    </g>
+  </g>
+  <text x="160" y="86" text-anchor="middle" font-family="Space Grotesk, Source Sans 3, sans-serif" font-size="18" font-weight="700" fill="#0B1D33" letter-spacing="1.8">
+    VERIFICADO
+  </text>
+  <text x="160" y="246" text-anchor="middle" font-family="Space Grotesk, Source Sans 3, sans-serif" font-size="28" font-weight="700" fill="#0B1D33">
+    verifika<tspan font-size="18" baseline-shift="super">2</tspan>
+  </text>
+</svg>

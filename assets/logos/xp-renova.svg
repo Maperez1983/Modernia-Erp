@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="240" viewBox="0 0 1600 240" role="img" aria-label="XP Renova">
+  <defs>
+    <linearGradient id="xp-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5f827f"/>
+      <stop offset="55%" stop-color="#8b9777"/>
+      <stop offset="100%" stop-color="#2f7586"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="240" rx="28" fill="#f8f7f5"/>
+  <g transform="translate(0 -2)">
+    <path d="M0 0H170L255 85L170 170H0L85 85Z" fill="url(#xp-gradient)" opacity="0.96"/>
+    <path d="M97 0H230L320 88L230 176H97L188 88Z" fill="#f8f7f5"/>
+    <path d="M181 0H340C405 0 458 53 458 118C458 183 405 236 340 236H270V168H334C363 168 386 145 386 116C386 87 363 64 334 64H247Z" fill="url(#xp-gradient)"/>
+    <path d="M243 0H352L204 236H95Z" fill="url(#xp-gradient)" opacity="0.94"/>
+    <path d="M67 236H0L148 0H215Z" fill="url(#xp-gradient)" opacity="0.94"/>
+  </g>
+  <g fill="#000">
+    <text x="562" y="146" font-family="Avenir Next, Montserrat, Arial, sans-serif" font-size="132" font-weight="700" letter-spacing="10">RENOVA</text>
+  </g>
+  <rect x="1078" y="99" width="101" height="8" rx="4" fill="#f8f7f5"/>
+</svg>
