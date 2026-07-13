@@ -1,0 +1,12 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = [
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    "**/generated/**",
+    "**/*.generated.py",
+    "**/*_generated.py",
+    "**/*_pb2.py",
+]
