@@ -1,0 +1,9 @@
+-r requirements.txt
+
+ruff
+mypy
+pytest
+pytest-cov
+factory-boy
+pre-commit
+types-requests
