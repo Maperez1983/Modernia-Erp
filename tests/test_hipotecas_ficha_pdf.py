@@ -541,7 +541,11 @@ class HipotecasFichaPdfTests(unittest.TestCase):
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
         self.assertEqual(
             server.build_hipotecas_bdt_listado_pdf_filename(filters, count=len(rows)),
-            "hipotecas_listado_2025_firmada_2.pdf",
+            "hipotecas_listado_2025_firmada_desc_2.pdf",
+        )
+        self.assertEqual(
+            server.build_hipotecas_bdt_listado_pdf_filename({**filters, "order": "asc"}, count=len(rows)),
+            "hipotecas_listado_2025_firmada_asc_2.pdf",
         )
         if server.PdfReader is not None:
             reader = server.PdfReader(BytesIO(pdf_bytes))
