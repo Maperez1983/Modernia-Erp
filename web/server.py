@@ -39,7 +39,7 @@ try:
     from zoneinfo import ZoneInfo
 except Exception:  # pragma: no cover
     ZoneInfo = None
-from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import unicodedata
 from email.message import EmailMessage
@@ -73,7 +73,7 @@ try:
     from .auth_security import verify_password as runtime_verify_password
     from .schema_support import apply_schema_file, ensure_column, table_columns
     from .db_backend import is_postgres_enabled as db_is_postgres_enabled
-    from .db_backend import open_db_conn, open_postgres_conn, ensure_postgres_sqlite_compat, get_postgres_pool_stats
+    from .db_backend import open_db_conn, open_postgres_conn, get_postgres_pool_stats
     from .db_backend import set_conn_tracker as db_set_conn_tracker, reset_conn_tracker as db_reset_conn_tracker
     from .seguros_state import can_transition_seguro_estado as runtime_can_transition_seguro_estado
     from .seguros_state import normalize_seguro_estado_value as runtime_normalize_seguro_estado_value
@@ -84,7 +84,7 @@ except ImportError:
     from auth_security import verify_password as runtime_verify_password
     from schema_support import apply_schema_file, ensure_column, table_columns
     from db_backend import is_postgres_enabled as db_is_postgres_enabled
-    from db_backend import open_db_conn, open_postgres_conn, ensure_postgres_sqlite_compat, get_postgres_pool_stats
+    from db_backend import open_db_conn, open_postgres_conn, get_postgres_pool_stats
     from db_backend import set_conn_tracker as db_set_conn_tracker, reset_conn_tracker as db_reset_conn_tracker
     from seguros_state import can_transition_seguro_estado as runtime_can_transition_seguro_estado
     from seguros_state import normalize_seguro_estado_value as runtime_normalize_seguro_estado_value

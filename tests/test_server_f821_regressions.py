@@ -1,6 +1,6 @@
 import sqlite3
 import unittest
-from datetime import datetime, timezone
+from datetime import timezone
 
 from web.server import (
     _parse_iso_dt_utc,
@@ -207,4 +207,3 @@ class ServerF821RegressionTests(unittest.TestCase):
         self.assertEqual(templates["servicio"], "fincas")
         keys = [item["key"] for item in templates["templates"]]
         self.assertEqual(keys, ["fincas_calculado", "fincas_completo"])
-
