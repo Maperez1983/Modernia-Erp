@@ -499,7 +499,7 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
     page,
     '[data-company-conta-tab="diario"]',
     '[data-company-conta-pane="diario"]',
-    ['Libro diario', '430000', '700000']
+    ['Libro diario', 'Cuadra', '430000', '700000']
   );
   snapshots.mayor = await waitVisibleTab(
     page,
@@ -573,6 +573,7 @@ class EmpresaContabilidadE2ETests(unittest.TestCase):
         self.assertIn("Modelos fiscales", snapshots["modelos"])
         self.assertIn("Asientos", snapshots["asientos"])
         self.assertIn("Sección activa", result["status"])
+        self.assertIn("Cuadra", snapshots["diario"])
 
         unique_snapshots = {
             snapshots["dashboard"],

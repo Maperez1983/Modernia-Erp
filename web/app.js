@@ -10612,6 +10612,168 @@ const groupWorkspaceCompanyContabilidadDiaryRows = (rows = []) => {
     .sort((a, b) => String(b.fecha || "").localeCompare(String(a.fecha || "")) || String(b.referencia || "").localeCompare(String(a.referencia || "")));
 };
 
+const groupWorkspaceCompanyContabilidadDiaryEntries = (rows = []) => {
+  const grouped = new Map();
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    const key = String(row?.asiento_id || "").trim() || `${String(row?.fecha || "").trim()}-${String(row?.referencia || "").trim()}`;
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        asiento_id: String(row?.asiento_id || "").trim(),
+        fecha: String(row?.fecha || "").trim(),
+        referencia: String(row?.referencia || "").trim(),
+        concepto: String(row?.concepto || "").trim(),
+        factura_numero: String(row?.factura_numero || "").trim(),
+        factura_fecha: String(row?.factura_fecha || "").trim(),
+        factura_total: row?.factura_total,
+        tipo_factura: String(row?.tipo_factura || "").trim(),
+        lines: [],
+      });
+    }
+    const item = grouped.get(key);
+    if (!item.fecha && row?.fecha) item.fecha = String(row.fecha || "").trim();
+    if (!item.referencia && row?.referencia) item.referencia = String(row.referencia || "").trim();
+    if (!item.concepto && row?.concepto) item.concepto = String(row.concepto || "").trim();
+    item.lines.push(row);
+  });
+  return Array.from(grouped.values())
+    .map((item) => {
+      const debe = item.lines.reduce((sum, line) => sum + parseMoneyValue(line?.debe), 0);
+      const haber = item.lines.reduce((sum, line) => sum + parseMoneyValue(line?.haber), 0);
+      const cuentas = item.lines.map((line) => String(line?.cuenta || "").trim()).filter(Boolean);
+      return {
+        ...item,
+        debe,
+        haber,
+        diff: Math.abs(debe - haber),
+        lineas: item.lines.length,
+        cuentas: cuentas.slice(0, 4).join(", "),
+      };
+    })
+    .sort(
+      (a, b) =>
+        String(a.fecha || "").localeCompare(String(b.fecha || "")) ||
+        String(a.referencia || "").localeCompare(String(b.referencia || "")) ||
+        String(a.asiento_id || "").localeCompare(String(b.asiento_id || ""))
+    );
+};
+
+const renderWorkspaceCompanyContabilidadDiaryPrintHtml = ({ companyName = "", companyId = "", entries = [] } = {}) => {
+  const items = Array.isArray(entries) ? entries : [];
+  const totalApuntes = items.reduce((sum, entry) => sum + Number(entry?.lineas || 0), 0);
+  const totalDebe = items.reduce((sum, entry) => sum + parseMoneyValue(entry?.debe), 0);
+  const totalHaber = items.reduce((sum, entry) => sum + parseMoneyValue(entry?.haber), 0);
+  const totalDiff = Math.abs(totalDebe - totalHaber);
+  const printCard = (label, value, note = "") => `
+    <div style="padding:12px 14px;border:1px solid #dbe2ea;border-radius:12px;background:#f8fafc;">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#64748b;">${escapeHtml(label)}</div>
+      <div style="font-size:18px;font-weight:700;margin-top:4px;">${escapeHtml(String(value ?? ""))}</div>
+      ${note ? `<div style="font-size:12px;color:#64748b;margin-top:3px;">${escapeHtml(note)}</div>` : ""}
+    </div>
+  `;
+  const entryBlocks = items
+    .map((entry) => {
+      const lines = Array.isArray(entry.lines) ? entry.lines : [];
+      const balanced = Math.abs(Number(entry.debe || 0) - Number(entry.haber || 0)) < 0.01;
+      const rows = lines.length
+        ? lines
+            .map(
+              (line, idx) => `
+                <tr>
+                  <td style="width:42px;text-align:center;">${idx + 1}</td>
+                  <td>${escapeHtml(String(line.cuenta || "-"))}</td>
+                  <td>${escapeHtml(String(line.descripcion || "-"))}</td>
+                  <td>${escapeHtml(String(line.tercero || "-"))}</td>
+                  <td>${escapeHtml(String(line.tercero_nif || "-"))}</td>
+                  <td style="text-align:right;">${escapeHtml(formatWorkspaceCompanyContaMoney(line.debe))}</td>
+                  <td style="text-align:right;">${escapeHtml(formatWorkspaceCompanyContaMoney(line.haber))}</td>
+                  <td>${escapeHtml(String(line.impuesto_tipo || "-"))}</td>
+                  <td style="text-align:right;">${escapeHtml(Number.isFinite(Number(line.impuesto_pct)) ? `${Number(line.impuesto_pct).toFixed(2)} %` : "-")}</td>
+                  <td>${escapeHtml(String(line.factura_numero || "-"))}</td>
+                  <td>${escapeHtml(String(line.factura_fecha || "-"))}</td>
+                </tr>
+              `
+            )
+            .join("")
+        : `<tr><td colspan="11">Sin líneas.</td></tr>`;
+      return `
+        <div style="margin:0 0 16px 0;border:1px solid #dbe2ea;border-radius:14px;overflow:hidden;page-break-inside:avoid;break-inside:avoid;">
+          <div style="padding:12px 14px;background:#f8fafc;border-bottom:1px solid #dbe2ea;">
+            <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
+              <div>
+                <div style="font-size:14px;font-weight:700;color:#0f172a;">${escapeHtml(String(entry.fecha || "-"))} · Asiento ${escapeHtml(String(entry.asiento_id || "-"))}</div>
+                <div style="margin-top:3px;font-size:12px;line-height:1.45;color:#475569;">
+                  ${escapeHtml(String(entry.referencia || "Sin referencia"))}
+                  ${entry.concepto ? ` · ${escapeHtml(String(entry.concepto || ""))}` : ""}
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(4,minmax(92px,1fr));gap:8px;min-width:min(100%, 420px);">
+                ${printCard("Líneas", numberFormatter.format(Number(entry.lineas || 0)), "Apuntes del asiento")}
+                ${printCard("Debe", formatWorkspaceCompanyContaMoney(entry.debe), "Total asiento")}
+                ${printCard("Haber", formatWorkspaceCompanyContaMoney(entry.haber), "Total asiento")}
+                ${printCard("Estado", balanced ? "Cuadra" : "Descuadre", `Dif.: ${formatWorkspaceCompanyContaMoney(entry.diff || 0)}`)}
+              </div>
+            </div>
+          </div>
+          <div style="overflow:auto;">
+            <table style="margin:0;border:none;font-size:12px;">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Cuenta</th>
+                  <th>Descripción</th>
+                  <th>Tercero</th>
+                  <th>NIF tercero</th>
+                  <th style="text-align:right;">Debe</th>
+                  <th style="text-align:right;">Haber</th>
+                  <th>Impuesto</th>
+                  <th style="text-align:right;">% Impuesto</th>
+                  <th>Factura</th>
+                  <th>Fecha factura</th>
+                </tr>
+              </thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+          <div style="padding:10px 14px;background:#fcfdff;border-top:1px solid #dbe2ea;display:flex;justify-content:space-between;gap:12px;font-size:12px;color:#475569;">
+            <span>${escapeHtml(entry.factura_numero ? `Factura ${entry.factura_numero}` : "Sin factura vinculada")}${entry.factura_fecha ? ` · ${escapeHtml(String(entry.factura_fecha || ""))}` : ""}${entry.tipo_factura ? ` · ${escapeHtml(String(entry.tipo_factura || ""))}` : ""}</span>
+            <span>${balanced ? "Cuadra" : `Descuadre: ${formatWorkspaceCompanyContaMoney(entry.diff || 0)}`}</span>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+  return `
+    <div style="font-family:Arial,Helvetica,sans-serif;padding:22px;color:#111827;">
+      <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:18px;">
+        <div>
+          <div style="font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:#64748b;">Libro diario</div>
+          <h1 style="margin:4px 0 8px 0;font-size:22px;line-height:1.1;">${escapeHtml(companyName || "Empresa")}</h1>
+          <div style="font-size:12px;line-height:1.6;color:#475569;">
+            <div>Empresa: ${escapeHtml(companyName || "Empresa")}</div>
+            ${companyId ? `<div>ID legado: ${escapeHtml(companyId)}</div>` : ""}
+            <div>Asientos ordenados cronológicamente con detalle de líneas y control de cuadratura.</div>
+          </div>
+        </div>
+        <div style="text-align:right;color:#64748b;font-size:12px;line-height:1.5;">
+          <div>Emitido: ${escapeHtml(new Date().toLocaleString("es-ES"))}</div>
+          <div>Formato: diario formal</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 18px 0;">
+        ${printCard("Asientos", numberFormatter.format(items.length), "Bloques cronológicos")}
+        ${printCard("Apuntes", numberFormatter.format(totalApuntes), "Líneas registradas")}
+        ${printCard("Debe", formatWorkspaceCompanyContaMoney(totalDebe), "Acumulado general")}
+        ${printCard("Haber", formatWorkspaceCompanyContaMoney(totalHaber), "Acumulado general")}
+      </div>
+      ${items.length ? entryBlocks : `<p style="margin:0;color:#64748b;">Sin apuntes en libro diario para esta empresa.</p>`}
+      <div style="margin-top:18px;padding-top:12px;border-top:1px solid #dbe2ea;font-size:12px;color:#64748b;display:flex;justify-content:space-between;gap:12px;">
+        <span>Cuadre total: ${formatWorkspaceCompanyContaMoney(totalDiff)}</span>
+        <span>${items.length ? "Libro diario disponible para impresión" : "Libro diario vacío"}</span>
+      </div>
+    </div>
+  `;
+};
+
 const getWorkspaceCompanyContabilidadBooks = () => {
   const companyId = getWorkspaceCompanyContabilidadCompanyId();
   const cache = ensureWorkspaceCompanyContabilidadCache(companyId);
@@ -10817,9 +10979,11 @@ const renderCompanyContaDiario = () => {
   const pane = shell.querySelector('[data-company-conta-pane="diario"]');
   if (!pane) return;
   const books = getWorkspaceCompanyContabilidadBooks();
-  const diaryRows = books ? groupWorkspaceCompanyContabilidadDiaryRows(books.diarioRaw || []) : [];
+  const company = getWorkspaceCompanyById(state.currentWorkspaceCompanyWsId || state.currentWorkspaceCompanyId || companyId || "");
+  const diaryRaw = books && Array.isArray(books.diarioRaw) ? books.diarioRaw : [];
+  const diaryEntries = books ? groupWorkspaceCompanyContabilidadDiaryEntries(diaryRaw) : [];
   const diaryEmptyText = "Sin apuntes en libro diario para esta empresa";
-  const diarySubtitle = diaryRows.length ? "Asientos agrupados por movimiento para la empresa activa." : diaryEmptyText;
+  const diarySubtitle = diaryRaw.length ? "Asientos ordenados cronológicamente con detalle de líneas." : diaryEmptyText;
   pane.innerHTML = `
     <div class="form-card">
       <div class="section-head">
@@ -10827,34 +10991,118 @@ const renderCompanyContaDiario = () => {
           <h3>Libro diario</h3>
           <p class="muted">${escapeHtml(diarySubtitle)}</p>
         </div>
+        <div class="form-actions" style="margin:0;">
+          <button type="button" class="secondary ghost" data-company-conta-diario-print ${!books ? "disabled" : ""}>Imprimir diario</button>
+        </div>
       </div>
       <div class="grid crm-kpis" data-company-conta-diario-metrics></div>
       <div class="card-soft" style="margin-top:16px;">
         <div data-company-conta-diario-table></div>
       </div>
+      <div class="muted" style="margin-top:10px;">Empresa: ${escapeHtml(String(company?.nombre || company?.razon_social || state.currentWorkspaceCompanyName || "Empresa"))}${state.currentWorkspaceCompanyId ? ` · ID legado: ${escapeHtml(String(state.currentWorkspaceCompanyId || ""))}` : ""}</div>
     </div>
   `;
   renderWorkspaceCompanyContabilidadMetricCards(pane.querySelector("[data-company-conta-diario-metrics]"), [
-    { label: "Asientos", value: books ? numberFormatter.format(diaryRows.length) : "Cargando", note: "Agrupados" },
-    { label: "Líneas", value: books ? numberFormatter.format((books.diarioRaw || []).length) : "Cargando", note: "Detalle de líneas" },
-    { label: "Facturas", value: books ? numberFormatter.format((books.facturasRaw || []).length) : "Cargando", note: "Conciliadas" },
+    { label: "Apuntes", value: books ? numberFormatter.format(diaryRaw.length) : "Cargando", note: "Líneas" },
+    { label: "Asientos", value: books ? numberFormatter.format(diaryEntries.length) : "Cargando", note: "Cronológicos" },
+    { label: "Debe", value: books ? formatWorkspaceCompanyContaMoney(diaryEntries.reduce((sum, entry) => sum + parseMoneyValue(entry.debe), 0)) : "Cargando", note: "Acumulado" },
+    { label: "Haber", value: books ? formatWorkspaceCompanyContaMoney(diaryEntries.reduce((sum, entry) => sum + parseMoneyValue(entry.haber), 0)) : "Cargando", note: "Acumulado" },
+    { label: "Dif.", value: books ? formatWorkspaceCompanyContaMoney(Math.abs(diaryEntries.reduce((sum, entry) => sum + parseMoneyValue(entry.debe), 0) - diaryEntries.reduce((sum, entry) => sum + parseMoneyValue(entry.haber), 0))) : "Cargando", note: "Control" },
   ]);
-  renderWorkspaceCompanyContabilidadTable(
-    pane.querySelector("[data-company-conta-diario-table]"),
-    ["Fecha", "Asiento", "Referencia", "Concepto", "Cuentas", "Líneas", "Debe", "Haber", "Factura"],
-    diaryRows.map((row) => [
-      row.fecha || "-",
-      row.asiento_id || "-",
-      row.referencia || "-",
-      row.concepto || "-",
-      row.cuentas || "-",
-      numberFormatter.format(Number(row.lineas || 0)),
-      formatWorkspaceCompanyContaMoney(row.debe),
-      formatWorkspaceCompanyContaMoney(row.haber),
-      row.factura_numero || "-",
-    ]),
-    books ? diaryEmptyText : "Cargando libro diario..."
-  );
+  const diaryTable = pane.querySelector("[data-company-conta-diario-table]");
+  if (!diaryTable) return;
+  if (!books || !diaryEntries.length) {
+    diaryTable.innerHTML = `<p class="muted">${escapeHtml(books ? diaryEmptyText : "Cargando libro diario...")}</p>`;
+  } else {
+    diaryTable.innerHTML = `
+      <div class="stack" style="gap:12px;">
+        ${diaryEntries
+          .map((entry) => {
+            const lineRows = entry.lines
+              .map(
+                (line, idx) => `
+                  <tr>
+                    <td>${escapeHtml(String(line.cuenta || "-"))}</td>
+                    <td>${escapeHtml(String(line.descripcion || "-"))}</td>
+                    <td>${escapeHtml(String(line.tercero || "-"))}</td>
+                    <td>${escapeHtml(String(line.tercero_nif || "-"))}</td>
+                    <td>${escapeHtml(formatWorkspaceCompanyContaMoney(line.debe))}</td>
+                    <td>${escapeHtml(formatWorkspaceCompanyContaMoney(line.haber))}</td>
+                    <td>${escapeHtml(String(line.impuesto_tipo || "-"))}</td>
+                    <td>${escapeHtml(Number.isFinite(Number(line.impuesto_pct)) ? `${Number(line.impuesto_pct).toFixed(2)} %` : "-")}</td>
+                    <td>${escapeHtml(String(line.factura_numero || "-"))}</td>
+                    <td>${escapeHtml(String(line.factura_fecha || "-"))}</td>
+                  </tr>
+                `
+              )
+              .join("");
+            const balanced = Math.abs(Number(entry.debe || 0) - Number(entry.haber || 0)) < 0.01;
+            return `
+              <details class="card-soft" open>
+                <summary style="cursor:pointer; list-style:none;">
+                  <div class="section-head" style="margin:0;">
+                    <div>
+                      <strong>${escapeHtml(String(entry.fecha || "-"))} · Asiento ${escapeHtml(String(entry.asiento_id || "-"))}</strong>
+                      <div class="muted">
+                        ${escapeHtml(String(entry.referencia || "Sin referencia"))}
+                        ${entry.concepto ? ` · ${escapeHtml(String(entry.concepto || ""))}` : ""}
+                      </div>
+                    </div>
+                    <div class="workspace-mini-kpis">
+                      <div class="workspace-mini-kpi"><span>Líneas</span><strong>${escapeHtml(numberFormatter.format(Number(entry.lineas || 0)))}</strong></div>
+                      <div class="workspace-mini-kpi"><span>Debe</span><strong>${escapeHtml(formatWorkspaceCompanyContaMoney(entry.debe))}</strong></div>
+                      <div class="workspace-mini-kpi"><span>Haber</span><strong>${escapeHtml(formatWorkspaceCompanyContaMoney(entry.haber))}</strong></div>
+                      <div class="workspace-mini-kpi"><span>Dif.</span><strong>${escapeHtml(formatWorkspaceCompanyContaMoney(entry.diff || 0))}</strong></div>
+                      <div class="workspace-mini-kpi"><span>Estado</span><strong>${balanced ? "Cuadra" : "Descuadre"}</strong></div>
+                    </div>
+                  </div>
+                </summary>
+                <div style="overflow:auto; margin-top:12px;">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Cuenta</th>
+                        <th>Descripción</th>
+                        <th>Tercero</th>
+                        <th>NIF tercero</th>
+                        <th>Debe</th>
+                        <th>Haber</th>
+                        <th>Impuesto</th>
+                        <th>% Impuesto</th>
+                        <th>Factura</th>
+                        <th>Fecha factura</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${lineRows || `<tr><td colspan="10">Sin líneas.</td></tr>`}
+                    </tbody>
+                  </table>
+                </div>
+                <div class="muted" style="margin-top:8px;">
+                  ${entry.factura_numero ? `Factura ${escapeHtml(String(entry.factura_numero || ""))}` : "Sin factura vinculada"}
+                  ${entry.factura_fecha ? ` · ${escapeHtml(String(entry.factura_fecha || ""))}` : ""}
+                  ${entry.tipo_factura ? ` · ${escapeHtml(String(entry.tipo_factura || ""))}` : ""}
+                </div>
+              </details>
+            `;
+          })
+          .join("")}
+      </div>
+    `;
+  }
+  const printBtn = pane.querySelector("[data-company-conta-diario-print]");
+  if (printBtn && books) {
+    printBtn.onclick = () => {
+      openCrmPrintWindow({
+        title: `Libro diario - ${String(company?.nombre || company?.razon_social || state.currentWorkspaceCompanyName || "Empresa")}`,
+        html: renderWorkspaceCompanyContabilidadDiaryPrintHtml({
+          companyName: String(company?.nombre || company?.razon_social || state.currentWorkspaceCompanyName || "Empresa"),
+          companyId: String(state.currentWorkspaceCompanyId || "").trim(),
+          entries: diaryEntries,
+        }),
+      });
+    };
+  }
 };
 
 const renderCompanyContaMayor = () => {
