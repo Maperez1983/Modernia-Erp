@@ -1712,6 +1712,11 @@ def validate_usuario_services_for_workspace(conn, workspace_id, servicio_raw):
     invalid = set()
     for item in parse_services_param(servicio_raw):
         module_key = resolve_workspace_module_key_for_user_service(item)
+        if not module_key:
+            action_key = normalize_action_key(item)
+            if action_key in {"administracion", "direccion", "control", "admin"}:
+                invalid.add(action_key)
+            continue
         if module_key and module_key not in enabled:
             invalid.add(module_key)
     return sorted(invalid)
@@ -42986,10 +42991,6 @@ def workspace_session_is_privileged(session):
     # `normalize_lookup_text` devuelve tokens en MAYÚSCULAS (sin acentos).
     if rol in {"ADMINISTRADOR", "ADMIN", "DIRECCION", "CONTROL", "ADMINISTRACION"}:
         return True
-    # Compat: algunos flujos legacy guardaban "Dirección/Administración" en `servicio` en vez de `rol`.
-    servicios = _normalize_service_tokens(session.get("servicio") or "")
-    if servicios.intersection({"DIRECCION", "CONTROL", "ADMINISTRACION", "ADMIN"}):
-        return True
     return False
 
 def _parse_csv_tokens(value):
@@ -43047,8 +43048,8 @@ def is_superadmin_actor(conn, session):
 
 def workspace_actor_is_privileged(conn, session):
     """
-    Determina permisos usando la sesión y, si hace falta, refrescando contra la DB.
-    Evita falsos 403 si el usuario fue promovido a admin y su sesión aún no refleja rol/servicio.
+    Determina permisos usando la sesión y el mecanismo seguro existente.
+    No eleva privilegios a partir de `rol` o `servicio` leídos de la DB.
     """
     # Modo estricto: solo superadmin allowlisted puede hacer acciones globales.
     if APP_SUPERADMIN_ENFORCE:
@@ -43065,7 +43066,7 @@ def workspace_actor_is_privileged(conn, session):
         return False
     try:
         row = conn.execute(
-            "SELECT rol, servicio, activo FROM usuarios WHERE id = ? LIMIT 1",
+            "SELECT activo FROM usuarios WHERE id = ? LIMIT 1",
             (user_id,),
         ).fetchone()
     except Exception:
@@ -43078,7 +43079,7 @@ def workspace_actor_is_privileged(conn, session):
             return False
     except Exception:
         pass
-    return workspace_session_is_privileged({"rol": row["rol"] or "", "servicio": row["servicio"] or ""})
+    return False
 
 
 def workspace_actor_can_manage_workspace(conn, session, workspace_id):
@@ -54558,21 +54559,21 @@ class Handler(BaseHTTPRequestHandler):
                     cookies=[self._build_session_cookie("", max_age=0)],
                 )
                 return
-            # Best-effort: si la DB ya está lista, refrescamos nombre/rol/servicio para evitar sesiones desfasadas
-            # (p.ej. cuando un admin cambia "Servicios visibles" en RRHH).
+            # Best-effort: si la DB ya está lista, refrescamos solo datos de presentación
+            # (nombre/apellidos/usuario/email) para evitar sesiones desfasadas.
             if Handler._db_ready:
                 try:
                     conn = get_db(self.db_path)
                     self._track_conn(conn)
                     user = conn.execute(
                         """
-                        SELECT id, nombre, apellido, usuario, email, servicio, rol
+                        SELECT id, nombre, apellido, usuario, email, activo
                         FROM usuarios
-                        WHERE id = ? AND activo = 1
+                        WHERE id = ?
                         """,
                         (session.get("user_id"),),
                     ).fetchone()
-                    if user:
+                    if user and int(user["activo"] or 0) == 1:
                         refreshed_session = dict(session)
                         refreshed_session.update(
                             {
@@ -54580,8 +54581,6 @@ class Handler(BaseHTTPRequestHandler):
                                 "apellido": user["apellido"] or "",
                                 "usuario": user["usuario"] or "",
                                 "email": user["email"] or "",
-                                "servicio": user["servicio"] or "",
-                                "rol": user["rol"] or "",
                             }
                         )
                         with AUTH_SESSIONS_LOCK:
@@ -54593,16 +54592,14 @@ class Handler(BaseHTTPRequestHandler):
                                 auth_conn.execute(
                                     """
                                     UPDATE auth_sessions
-                                    SET usuario = ?, nombre = ?, apellido = ?, rol = ?, email = ?, servicio = ?
+                                    SET usuario = ?, nombre = ?, apellido = ?, email = ?
                                     WHERE token = ?
                                     """,
                                     [
                                         refreshed_session.get("usuario") or "",
                                         refreshed_session.get("nombre") or "",
                                         refreshed_session.get("apellido") or "",
-                                        refreshed_session.get("rol") or "",
                                         refreshed_session.get("email") or "",
-                                        refreshed_session.get("servicio") or "",
                                         token,
                                     ],
                                 )
