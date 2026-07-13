@@ -41997,7 +41997,7 @@ def fetch_workspace_time_entries(conn, workspace_id, empresa_id=None, limit=40, 
     empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
     if not empresa_ids:
         return {"rows": []}
-    where = [f"t.workspace_id = ?", f"t.empresa_id IN ({','.join('?' for _ in empresa_ids)})"]
+    where = ["t.workspace_id = ?", f"t.empresa_id IN ({','.join('?' for _ in empresa_ids)})"]
     params = [workspace_id, *empresa_ids]
     month_text = str(month or "").strip()
     if month_text:
@@ -44236,7 +44236,7 @@ def upsert_workspace_rrhh_turnos(conn, workspace_id, persona_id, days, now=None)
 
 def fetch_workspace_rrhh_ausencias(conn, workspace_id, *, empresa_id=None, persona_id=None, month=None, limit=120):
     empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
-    where = [f"a.workspace_id = ?"]
+    where = ["a.workspace_id = ?"]
     params = [workspace_id]
     # Permite registros sin empresa_id (ficha incompleta / legacy) sin ocultarlos del panel.
     if empresa_ids:
@@ -44272,7 +44272,7 @@ def fetch_workspace_rrhh_ausencias(conn, workspace_id, *, empresa_id=None, perso
 
 def fetch_workspace_rrhh_gastos(conn, workspace_id, *, empresa_id=None, persona_id=None, month=None, limit=120):
     empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
-    where = [f"g.workspace_id = ?"]
+    where = ["g.workspace_id = ?"]
     params = [workspace_id]
     # Permite registros sin empresa_id (ficha incompleta / legacy) sin ocultarlos del panel.
     if empresa_ids:
@@ -44307,7 +44307,7 @@ def fetch_workspace_rrhh_gastos(conn, workspace_id, *, empresa_id=None, persona_
 
 
 def fetch_workspace_rrhh_documentos(conn, workspace_id, *, empresa_id=None, persona_id=None, limit=200):
-    where = [f"d.workspace_id = ?"]
+    where = ["d.workspace_id = ?"]
     params = [workspace_id]
     pid = str(persona_id or "").strip()
     if pid:
