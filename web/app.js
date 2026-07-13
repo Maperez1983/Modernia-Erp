@@ -28044,7 +28044,8 @@ const renderClienteContabilidadPanel = () => {
 
   const cliente = state.currentClienteData || {};
   const tipoPersona = normalizeSimple(cliente.tipo_persona || "");
-  const companyScopeId = String(state.currentWorkspaceCompanyId || cliente.id || "").trim();
+  const companyScope = getWorkspaceCompanyById(state.currentWorkspaceCompanyWsId || state.currentWorkspaceCompanyId || "");
+  const companyScopeId = String(resolveLegacyEmpresaId(companyScope) || state.currentWorkspaceCompanyId || cliente.id || "").trim();
   const hasCompanyWorkspace = Boolean(String(state.currentWorkspaceCompanyId || "").trim());
   const isEmpresaExplorer = String(state.currentPage || "").trim() === "empresa";
   const isEmpresaContable =
@@ -28064,7 +28065,7 @@ const renderClienteContabilidadPanel = () => {
       ? mainTabFromUrl
       : (contaTabs.includes(savedMainTab) ? savedMainTab : "dashboard");
     state.clienteContaMainTab = mainTab;
-    const companyId = String(state.currentWorkspaceCompanyId || companyScopeId || "").trim();
+    const companyId = String(resolveLegacyEmpresaId(companyScope) || state.currentWorkspaceCompanyId || companyScopeId || "").trim();
     let contaStatusEl = null;
     const setMainTab = (tabKey) => {
       state.clienteContaMainTab = tabKey;
@@ -71170,9 +71171,11 @@ const syncGestoriaModelosDownloadButton = () => {
   const btn = document.getElementById("gestoriaModelosDownloadBtn");
   const status = document.getElementById("gestoriaModelosDownloadStatus");
   const rows = Array.isArray(state.gestoriaModelosCache?.rows) ? state.gestoriaModelosCache.rows : [];
+  const companyScope = getWorkspaceCompanyById(state.currentWorkspaceCompanyWsId || state.currentWorkspaceCompanyId || "");
   const companyLegacyId = String(
-    state.currentWorkspaceCompanyId
+    resolveLegacyEmpresaId(companyScope)
       || resolveLegacyEmpresaId(resolveCrmGestoriaEmpresa())
+      || state.currentWorkspaceCompanyId
       || ""
   ).trim();
   if (!rows.length && companyLegacyId) {
