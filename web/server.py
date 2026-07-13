@@ -45,7 +45,7 @@ import unicodedata
 from email.message import EmailMessage
 from email.header import decode_header
 from email.utils import parseaddr
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
+from PIL import Image, ImageColor, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
 try:
     import cairosvg
 except Exception:  # pragma: no cover
@@ -5251,6 +5251,7 @@ def resolve_hipoteca_bank_brand(value):
     if brand:
         return {
             **brand,
+            "logo_on_dark": bool(brand.get("logo_on_dark") or brand.get("logoOnDark")),
             "original": raw,
             "display_name": brand["name"],
         }
@@ -5272,8 +5273,90 @@ def build_hipoteca_bank_logo_meta(value):
         "logo_url": str(brand.get("logo") or "").strip(),
         "logo_initials": str(brand.get("short") or "").strip(),
         "logo_color": str(brand.get("color") or "").strip() or "#824c45",
-        "logo_on_dark": bool(brand.get("logo_on_dark")),
+        "logo_on_dark": bool(brand.get("logo_on_dark") or brand.get("logoOnDark")),
+        "logo_label": str(brand.get("display_name") or brand.get("name") or "").strip(),
     }
+
+
+def _logo_badge_info_from_path(raw_logo_url):
+    raw = str(raw_logo_url or "").strip()
+    if not raw:
+        return None
+    raw_lower = raw.lower()
+    for brand in HIPOTECA_BANK_BRANDS:
+        logo_path = str(brand.get("logo") or "").strip()
+        if logo_path and logo_path.lower() == raw_lower:
+            return {
+                "label": str(brand.get("name") or "").strip() or str(brand.get("short") or "").strip() or "Banco",
+                "short": str(brand.get("short") or "").strip() or "".join(token[:1] for token in str(brand.get("name") or "").split()[:2]).upper(),
+                "color": str(brand.get("color") or "").strip() or "#824c45",
+                "logo_on_dark": bool(brand.get("logoOnDark")),
+            }
+    parsed = urllib.parse.urlparse(raw)
+    stem = Path(parsed.path or raw).stem.strip()
+    if not stem:
+        return None
+    stem = re.sub(r"[_-]+", " ", stem)
+    stem = re.sub(r"\s+", " ", stem).strip()
+    if not stem:
+        return None
+    lower = stem.lower()
+    if lower == "grupo modernia logo":
+        label = "Grupo Modernia"
+        color = "#c8a24a"
+    elif lower.startswith("verifika2"):
+        label = "Verifika²"
+        color = "#2f5c45"
+    else:
+        label = stem.title()
+        color = "#824c45"
+    short = "".join(token[:1] for token in label.split()[:2]).upper().strip() or label[:2].upper()
+    return {
+        "label": label,
+        "short": short,
+        "color": color,
+        "logo_on_dark": False,
+    }
+
+
+def _build_logo_badge_image(label, color="#824c45", short=None, logo_on_dark=False, max_width=520):
+    label = str(label or "").strip() or "Banco"
+    short = str(short or "").strip() or "".join(token[:1] for token in label.split()[:2]).upper().strip() or label[:2].upper()
+    try:
+        accent = ImageColor.getrgb(str(color or "#824c45").strip())
+    except Exception:
+        accent = (132, 76, 69)
+    fill = accent if logo_on_dark else (255, 255, 255)
+    border = accent
+    text_fill = (255, 255, 255) if logo_on_dark else accent
+    secondary_fill = accent if logo_on_dark else (250, 250, 250)
+    badge_height = 96 if len(label) <= 16 else 110 if len(label) <= 28 else 124
+    badge_width = min(max_width, max(240, 150 + len(label) * 9))
+    image = Image.new("RGBA", (badge_width, badge_height), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(image)
+    try:
+        draw.rounded_rectangle((1, 1, badge_width - 2, badge_height - 2), radius=22, fill=fill, outline=border, width=3)
+    except Exception:
+        draw.rectangle((1, 1, badge_width - 2, badge_height - 2), fill=fill, outline=border, width=3)
+    box_size = min(72, badge_height - 24)
+    box_y = int((badge_height - box_size) / 2)
+    draw.rounded_rectangle((14, box_y, 14 + box_size, box_y + box_size), radius=18, fill=secondary_fill, outline=border, width=2)
+    short_font = _document_font(28 if len(short) <= 3 else 22, bold=True)
+    short_fill = (255, 255, 255) if logo_on_dark else accent
+    draw.text((14 + box_size / 2, box_y + box_size / 2), short, fill=short_fill, font=short_font, anchor="mm")
+    label_x = 14 + box_size + 16
+    label_width = max(90, badge_width - label_x - 18)
+    label_font = _document_font(18 if len(label) <= 18 else 16 if len(label) <= 28 else 14, bold=True)
+    label_lines = _pdf_wrap_lines_px(draw, label, label_font, label_width)
+    try:
+        sample_box = draw.textbbox((0, 0), "Ag", font=label_font)
+        line_height = (sample_box[3] - sample_box[1]) + 3
+    except Exception:
+        line_height = 22
+    block_height = max(line_height * len(label_lines), line_height)
+    label_y = max(12, int((badge_height - block_height) / 2))
+    draw.multiline_text((label_x, label_y), "\n".join(label_lines), fill=text_fill, font=label_font, spacing=3)
+    return image
 
 
 def normalize_hipoteca_pdf_sort_order(value):
@@ -5728,6 +5811,76 @@ def collect_hipotecas_firmadas_rows(conn, empresa_id, selected_year=None):
             continue
         items.append(raw)
     return items
+
+
+def hipoteca_export_year(row):
+    return extract_hipoteca_bdt_year(row)
+
+
+def collect_hipotecas_export_rows(
+    conn,
+    empresa_id,
+    selected_year=None,
+    selected_estado=None,
+    selected_order="desc",
+    signed_only=False,
+    record_ids=None,
+):
+    empresa_id = str(empresa_id or "").strip()
+    if not empresa_id:
+        return []
+    raw_rows = conn.execute(
+        """
+        SELECT *
+        FROM hipotecas
+        WHERE empresa_id = ?
+        ORDER BY COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), updated_at, created_at) DESC
+        """,
+        (empresa_id,),
+    ).fetchall()
+    record_id_set = {
+        str(item or "").strip()
+        for item in (record_ids or [])
+        if str(item or "").strip()
+    }
+    year_filter = str(selected_year or "").strip()
+    estado_filter = normalize_hipoteca_estado(selected_estado)
+    items = []
+    for raw in raw_rows:
+        row_id = str(row_value(raw, "id") or "").strip()
+        if record_id_set and row_id not in record_id_set:
+            continue
+        if signed_only and not is_hipoteca_signed_for_export(raw):
+            continue
+        if year_filter and hipoteca_export_year(raw) != year_filter:
+            continue
+        if estado_filter and normalize_hipoteca_estado(row_value(raw, "estado")) != estado_filter:
+            continue
+        items.append(raw)
+    return sort_hipoteca_export_rows(items, order=selected_order)
+
+
+def build_hipotecas_export_pdf_filename(mode="listado", selected_year=None, selected_estado=None, count=None):
+    mode_key = normalize_lookup_text(mode)
+    if mode_key in {"FICHAS", "FICHA"}:
+        return build_hipotecas_fichas_pdf_filename({"year": selected_year, "estado": selected_estado}, count=count)
+    if mode_key in {"FIRMADAS", "FIRMADA"}:
+        return build_hipotecas_firmadas_pdf_filename(selected_year, count=count)
+    return build_hipotecas_bdt_listado_pdf_filename({"year": selected_year, "estado": selected_estado}, count=count)
+
+
+def build_hipotecas_export_pdf(conn, rows, mode="listado", selected_year=None, selected_estado=None, selected_order="desc"):
+    mode_key = normalize_lookup_text(mode)
+    filters = {
+        "year": str(selected_year or "").strip(),
+        "estado": str(selected_estado or "").strip(),
+        "order": str(selected_order or "desc").strip() or "desc",
+    }
+    if mode_key in {"FICHAS", "FICHA", "FIRMADAS", "FIRMADA"}:
+        if mode_key in {"FIRMADAS", "FIRMADA"} and not filters["estado"]:
+            filters["estado"] = "Firmada"
+        return build_hipotecas_fichas_pdf(conn, rows, filters=filters)
+    return build_hipotecas_bdt_listado_pdf(conn, rows, filters=filters)
 
 
 def build_hipotecas_firmadas_excel_workbook(items, selected_year=None):
@@ -7491,6 +7644,12 @@ def build_hipotecas_bdt_listado_pdf(conn, rows, filters=None):
     estado = str(filters.get("estado") or "").strip()
     query = str(filters.get("query") or "").strip()
     order = normalize_hipoteca_pdf_sort_order(filters.get("order") or filters.get("sort_order") or "desc")
+    ordered_items = sorted(
+        items,
+        key=hipoteca_export_sort_key,
+        reverse=order != "asc",
+    )
+    total = len(ordered_items)
     filter_parts = []
     if year:
         filter_parts.append(f"Año {year}")
@@ -7501,12 +7660,6 @@ def build_hipotecas_bdt_listado_pdf(conn, rows, filters=None):
     filter_parts.append("Orden ascendente" if order == "asc" else "Orden descendente")
     if not (year or estado or query):
         filter_parts.insert(0, f"{total} operación(es)")
-    ordered_items = sorted(
-        items,
-        key=hipoteca_export_sort_key,
-        reverse=order != "asc",
-    )
-    total = len(ordered_items)
     subtitle = " · ".join(filter_parts) if filter_parts else f"{total} operación(es)"
     money = format_export_money
 
@@ -7527,11 +7680,56 @@ def build_hipotecas_bdt_listado_pdf(conn, rows, filters=None):
         ],
     }
 
-    sections = [("Resumen", summary)]
+    sections = [("Resumen", summary), ("__PAGE_BREAK__", [])]
     for idx, item in enumerate(ordered_items, start=1):
+        bank_logo_meta = build_hipoteca_bank_logo_meta(item.get("banco"))
         sections.append(
             (
                 f"Operación {idx:02d}",
+                {
+                    "kind": "feature_card",
+                    "layout": "hero",
+                    "eyebrow": f"Operación {idx}/{total}",
+                    "title": str(item.get("cliente") or "").strip() or f"Hipoteca {idx}",
+                    "subtitle": " · ".join(
+                        [
+                            part
+                            for part in [
+                                str(item.get("banco") or "").strip(),
+                                str(item.get("oficina") or item.get("inmobiliaria") or "").strip(),
+                                str(item.get("asesor") or "").strip(),
+                            ]
+                            if part
+                        ]
+                    ),
+                    "badge": str(item.get("estado") or "").strip(),
+                    "chips": [
+                        part
+                        for part in [
+                            str(item.get("banco") or "").strip(),
+                            format_export_date(item.get("fecha_encargo")) or "",
+                            format_export_date(item.get("fecha_firma")) or "",
+                        ]
+                        if part
+                    ],
+                    **bank_logo_meta,
+                    "items": [
+                        {"label": "Nombre y apellidos cliente", "value": str(item.get("cliente") or "").strip() or "—", "accent": True},
+                        {"label": "Banco", "value": str(item.get("banco") or "").strip() or "—"},
+                        {"label": "Fecha de encargo", "value": format_export_date(item.get("fecha_encargo"))},
+                        {"label": "Fecha de firma", "value": format_export_date(item.get("fecha_firma"))},
+                        {"label": "Valor compra inmueble", "value": format_export_money(item.get("precio")), "accent": True},
+                        {"label": "Entrada", "value": format_export_money(item.get("entrada"))},
+                        {"label": "Hipoteca", "value": format_export_money(item.get("importe_hipoteca")), "accent": True},
+                        {"label": "Comisión cobrada", "value": format_export_money(item.get("honorarios") or item.get("comision")), "accent": True},
+                    ],
+                    "note": "Ficha comercial resumida del listado.",
+                },
+            )
+        )
+        sections.append(
+            (
+                f"Datos operativos {idx}",
                 {
                     "kind": "kpi_cards",
                     "columns": 2,
@@ -7539,6 +7737,8 @@ def build_hipotecas_bdt_listado_pdf(conn, rows, filters=None):
                 },
             )
         )
+        if idx < total:
+            sections.append(("__PAGE_BREAK__", []))
     footer_lines = [
         "Listado interno generado por el CRM Financiaciones.",
         "Cada operación se presenta con un orden fijo para facilitar la revisión comercial.",
@@ -7695,6 +7895,8 @@ def build_hipotecas_fichas_pdf(conn, rows, section=None, filters=None):
               },
           )
       )
+      if idx < total:
+          sections.append(("__PAGE_BREAK__", []))
 
     footer_lines = [
         "Documento comercial interno generado por el CRM Financiaciones.",
@@ -50825,8 +51027,22 @@ def _load_brand_logo(logo_url=None, max_width=520):
             if not logo_path.exists():
                 logo_path = ASSETS / "verifika2" / "verifika2_wordmark_check_green.png"
         if not logo_path.exists():
-            return None
-        logo = _load_image_from_path(logo_path, max_width=max_width)
+            logo = None
+        else:
+            logo = _load_image_from_path(logo_path, max_width=max_width)
+        if logo is None:
+            badge_info = _logo_badge_info_from_path(raw)
+            if badge_info:
+                try:
+                    logo = _build_logo_badge_image(
+                        badge_info.get("label") or "Logo",
+                        color=badge_info.get("color") or "#824c45",
+                        short=badge_info.get("short") or "",
+                        logo_on_dark=bool(badge_info.get("logo_on_dark")),
+                        max_width=max_width,
+                    )
+                except Exception:
+                    logo = None
         if logo is None:
             return None
     return logo
@@ -50907,6 +51123,12 @@ def build_branded_document_pdf(title, subtitle, sections, footer_lines=None, bra
         image, draw, y = new_page()
 
     for heading, lines in sections:
+        if str(heading or "").strip().upper() in {"__PAGE_BREAK__", "__PAGEBREAK__"} or (
+            isinstance(lines, dict) and str(lines.get("kind") or "").strip().lower() == "page_break"
+        ):
+            pages.append(image)
+            image, draw, y = new_page()
+            continue
         heading_box = draw.textbbox((margin_x, y), heading, font=font_section)
         ensure_space((heading_box[3] - heading_box[1]) + 20)
         draw.text((margin_x, y), heading, fill=(60, 67, 72), font=font_section)
@@ -51085,6 +51307,12 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
         image, draw, y = new_page()
 
     for heading, lines in sections:
+        if str(heading or "").strip().upper() in {"__PAGE_BREAK__", "__PAGEBREAK__"} or (
+            isinstance(lines, dict) and str(lines.get("kind") or "").strip().lower() == "page_break"
+        ):
+            pages.append(image)
+            image, draw, y = new_page()
+            continue
         heading_box = draw.textbbox((margin_x, y), heading, font=font_section)
         ensure_space((heading_box[3] - heading_box[1]) + 20)
         draw.text((margin_x, y), heading, fill=ink, font=font_section)
@@ -51716,6 +51944,10 @@ def build_branded_text_document_pdf(title, subtitle, body_lines, footer_lines=No
         image, draw, y = new_page()
 
     for line in body_lines:
+        if str(line or "").strip().upper() in {"__PAGE_BREAK__", "__PAGEBREAK__"}:
+            pages.append(image)
+            image, draw, y = new_page()
+            continue
         raw = str(line or "")
         if not raw.strip():
             ensure_space(24)
@@ -57420,6 +57652,54 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "No se pudo generar el PDF"}, status=500)
                 return
             filename = build_hipotecas_bdt_listado_pdf_filename(filters, count=len(ordered_rows))
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
+            return
+
+        if parsed.path == "/api/hipotecas_export_pdf":
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            filters = payload.get("filters") if isinstance(payload, dict) and isinstance(payload.get("filters"), dict) else {}
+            mode = str(payload.get("mode") or filters.get("mode") or "listado").strip().lower() or "listado"
+            selected_year = str(payload.get("year") or filters.get("year") or "").strip()
+            selected_estado = str(payload.get("estado") or filters.get("estado") or "").strip()
+            selected_order = str(payload.get("order") or filters.get("order") or "desc").strip() or "desc"
+            raw_ids = payload.get("ids") if isinstance(payload, dict) else None
+            if isinstance(raw_ids, str):
+                record_ids = [item.strip() for item in raw_ids.split(",") if item.strip()]
+            elif isinstance(raw_ids, (list, tuple)):
+                record_ids = [str(item).strip() for item in raw_ids if str(item).strip()]
+            else:
+                record_ids = []
+            rows = collect_hipotecas_export_rows(
+                conn,
+                empresa_id,
+                selected_year=selected_year,
+                selected_estado=selected_estado,
+                selected_order=selected_order,
+                signed_only=mode in {"firmadas", "firmada"},
+                record_ids=record_ids or None,
+            )
+            if not rows:
+                json_response(self, {"error": "No se encontraron hipotecas para exportar"}, status=404)
+                return
+            try:
+                pdf_bytes = build_hipotecas_export_pdf(
+                    conn,
+                    rows,
+                    mode=mode,
+                    selected_year=selected_year,
+                    selected_estado=selected_estado,
+                    selected_order=selected_order,
+                )
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo generar el PDF", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
+            if not pdf_bytes:
+                json_response(self, {"error": "No se pudo generar el PDF"}, status=500)
+                return
+            filename = build_hipotecas_export_pdf_filename(mode, selected_year=selected_year, selected_estado=selected_estado, count=len(rows))
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 

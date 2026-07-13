@@ -3859,9 +3859,10 @@ const hipotecaBdtExportYear = document.getElementById("hipotecaBdtExportYear");
 const hipotecaBdtListYear = document.getElementById("hipotecaBdtListYear");
 const hipotecaBdtListEstado = document.getElementById("hipotecaBdtListEstado");
 const hipotecaBdtListOrder = document.getElementById("hipotecaBdtListOrder");
+const hipotecaBdtFirmadasYear = document.getElementById("hipotecaBdtFirmadasYear");
 const hipotecaBdtPrintListado = document.getElementById("hipotecaBdtPrintListado");
 const hipotecaBdtPrintFichas = document.getElementById("hipotecaBdtPrintFichas");
-const hipotecaBdtPrintFirmadas2025 = document.getElementById("hipotecaBdtPrintFirmadas2025");
+const hipotecaBdtPrintFirmadas = document.getElementById("hipotecaBdtPrintFirmadas");
 const hipotecaBdtVincularSelect = document.getElementById("hipotecaBdtVincularSelect");
 const hipotecaBdtVincularBtn = document.getElementById("hipotecaBdtVincularBtn");
 const hipotecaBdtVincularStatus = document.getElementById("hipotecaBdtVincularStatus");
@@ -41518,9 +41519,9 @@ const filterHipotecaBdtRows = (rows = [], columns = [], queryRaw = "", filters =
   };
 };
 
-const syncHipotecaExportYears = (rows = [], columns = []) => {
-  if (!hipotecaBdtExportYear) return;
-  const current = String(hipotecaBdtExportYear.value || "").trim();
+const syncHipotecaYearSelect = (selectEl, rows = [], columns = [], placeholder = "Todos") => {
+  if (!selectEl) return;
+  const current = String(selectEl.value || "").trim();
   const years = Array.from(
     new Set(
       rows
@@ -41529,14 +41530,23 @@ const syncHipotecaExportYears = (rows = [], columns = []) => {
         .filter(Boolean)
     )
   ).sort((a, b) => Number(b) - Number(a));
-  hipotecaBdtExportYear.innerHTML = "";
-  hipotecaBdtExportYear.appendChild(createOption("", "Declarativo · Todos"));
+  selectEl.innerHTML = "";
+  selectEl.appendChild(createOption("", placeholder));
   years.forEach((year) => {
-    hipotecaBdtExportYear.appendChild(createOption(year, `Declarativo ${year}`));
+    selectEl.appendChild(createOption(year, year));
   });
+  selectEl.disabled = years.length === 0;
   if (current && years.includes(current)) {
-    hipotecaBdtExportYear.value = current;
+    selectEl.value = current;
   }
+};
+
+const syncHipotecaExportYears = (rows = [], columns = []) => {
+  syncHipotecaYearSelect(hipotecaBdtExportYear, rows, columns, "Declarativo · Todos");
+};
+
+const syncHipotecaFirmadasYears = (rows = [], columns = []) => {
+  syncHipotecaYearSelect(hipotecaBdtFirmadasYear, rows, columns, "Firmadas · Todos");
 };
 
 const populateHipotecaVincularSelect = (rows = [], columns = []) => {
@@ -41577,6 +41587,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
     hipotecaBdtInfo.textContent = "";
     if (hipotecaBdtVincularStatus) hipotecaBdtVincularStatus.textContent = "";
     syncHipotecaExportYears([], []);
+    syncHipotecaFirmadasYears([], []);
     syncHipotecaListadoFilters([], [], {});
     populateHipotecaVincularSelect([], []);
     return Promise.resolve();
@@ -41620,6 +41631,7 @@ const loadHipotecaBdt = (forceRefresh = false) => {
       hipotecaBdtInfo.textContent = "";
       if (hipotecaBdtVincularStatus) hipotecaBdtVincularStatus.textContent = message;
       syncHipotecaExportYears([], []);
+      syncHipotecaFirmadasYears([], []);
       syncHipotecaListadoFilters([], [], {});
       populateHipotecaVincularSelect([], []);
       if (typeof syncHipotecaBdtViewToggle === "function") syncHipotecaBdtViewToggle();
@@ -41942,6 +41954,7 @@ const renderHipotecaBdtFromCache = () => {
   if (!columns.length && !rows.length) return false;
   syncHipotecaListadoFilters(rows, columns, cached.filters || {});
   syncHipotecaExportYears(rows, columns);
+  syncHipotecaFirmadasYears(rows, columns);
   populateHipotecaVincularSelect(rows, columns);
   renderHipotecaBdtList({ columns, rows });
   if (typeof syncHipotecaBdtViewToggle === "function") syncHipotecaBdtViewToggle();
@@ -43953,7 +43966,7 @@ const openHipotecaFichaPdf = async (recordId, section = "") => {
   }
 };
 
-const downloadHipotecaBdtFichasPdf = async (popup = null) => {
+const downloadHipotecaBdtPdf = async (mode = "listado", popup = null) => {
   let cached = state.hipotecaBdtCache?.data || null;
   if (!cached || !Array.isArray(cached.columns) || !Array.isArray(cached.rows)) {
     await loadHipotecaBdt(true);
@@ -43962,21 +43975,33 @@ const downloadHipotecaBdtFichasPdf = async (popup = null) => {
   const columns = Array.isArray(cached?.columns) ? cached.columns : [];
   const rows = Array.isArray(cached?.rows) ? cached.rows : [];
   const filters = getHipotecaBdtListadoFilters();
+  const modeKey = String(mode || "listado").trim().toLowerCase() || "listado";
+  const selectedYear = modeKey === "firmadas" ? String(hipotecaBdtFirmadasYear?.value || "").trim() : String(filters.year || "").trim();
+  const selectedEstado = modeKey === "firmadas" ? "" : String(filters.estado || "").trim();
   const result = filterHipotecaBdtRows(
     rows,
     columns,
     filters.query,
-    { year: filters.year, estado: filters.estado },
+    { year: selectedYear, estado: selectedEstado, order: filters.order },
     { limit: Infinity }
   );
-  const filteredRows = Array.isArray(result.filtered) ? result.filtered : [];
+  let filteredRows = Array.isArray(result.filtered) ? result.filtered : [];
+  if (modeKey === "firmadas") {
+    filteredRows = filteredRows.filter((row) => isHipotecaSignedForExport(row, columns));
+  }
   const idIndex = columns.indexOf("id");
   if (idIndex < 0) {
-    throw new Error("No hay identificador para generar las fichas.");
+    throw new Error("No hay identificador para generar el PDF.");
   }
   const ids = filteredRows.map((row) => String(row[idIndex] || "").trim()).filter(Boolean);
   if (!ids.length) {
-    throw new Error("No hay hipotecas para imprimir con los filtros actuales.");
+    throw new Error(
+      modeKey === "firmadas"
+        ? "No hay hipotecas firmadas para exportar con los filtros actuales."
+        : modeKey === "fichas"
+          ? "No hay hipotecas para imprimir con los filtros actuales."
+          : "No hay hipotecas para descargar con los filtros actuales."
+    );
   }
   const empresa = resolveCrmFinEmpresa();
   const empresaId = resolveLegacyEmpresaId(empresa);
@@ -43984,79 +44009,28 @@ const downloadHipotecaBdtFichasPdf = async (popup = null) => {
     throw new Error("No se pudo resolver la empresa de hipotecas.");
   }
   await downloadPdfFromApi(
-    "/api/hipotecas_fichas_pdf",
+    "/api/hipotecas_export_pdf",
     {
       empresa_id: empresaId,
+      mode: modeKey,
       ids,
-      filters,
+      year: selectedYear,
+      estado: selectedEstado,
+      order: filters.order,
+      filters: {
+        query: filters.query,
+        year: selectedYear,
+        estado: selectedEstado,
+        order: filters.order,
+      },
     },
     {
-      filenameFallback: "fichas_hipotecas.pdf",
-      targetWindow: popup,
-    }
-  );
-};
-
-const HIPOTECAS_FIRMADAS_PDF_YEAR = "2025";
-
-const downloadHipotecaBdtListadoPdf = async (popup = null) => {
-  let cached = state.hipotecaBdtCache?.data || null;
-  if (!cached || !Array.isArray(cached.columns) || !Array.isArray(cached.rows)) {
-    await loadHipotecaBdt(true);
-    cached = state.hipotecaBdtCache?.data || null;
-  }
-  const columns = Array.isArray(cached?.columns) ? cached.columns : [];
-  const rows = Array.isArray(cached?.rows) ? cached.rows : [];
-  const filters = getHipotecaBdtListadoFilters();
-  const result = filterHipotecaBdtRows(
-    rows,
-    columns,
-    filters.query,
-    { year: filters.year, estado: filters.estado },
-    { limit: Infinity }
-  );
-  const filteredRows = Array.isArray(result.filtered) ? result.filtered : [];
-  const idIndex = columns.indexOf("id");
-  if (idIndex < 0) {
-    throw new Error("No hay identificador para generar el listado.");
-  }
-  const ids = filteredRows.map((row) => String(row[idIndex] || "").trim()).filter(Boolean);
-  if (!ids.length) {
-    throw new Error("No hay hipotecas para descargar con los filtros actuales.");
-  }
-  const empresa = resolveCrmFinEmpresa();
-  const empresaId = resolveLegacyEmpresaId(empresa);
-  if (!empresaId) {
-    throw new Error("No se pudo resolver la empresa de hipotecas.");
-  }
-  await downloadPdfFromApi(
-    "/api/hipotecas_listado_pdf",
-    {
-      empresa_id: empresaId,
-      ids,
-      filters,
-    },
-    {
-      filenameFallback: "hipotecas_listado.pdf",
-      targetWindow: popup,
-    }
-  );
-};
-
-const downloadHipotecasFirmadas2025Pdf = async (popup = null) => {
-  const empresa = resolveCrmFinEmpresa();
-  const empresaId = resolveLegacyEmpresaId(empresa);
-  if (!empresaId) {
-    throw new Error("No se pudo resolver la empresa de hipotecas.");
-  }
-  await downloadPdfFromApi(
-    "/api/hipotecas_firmadas_pdf",
-    {
-      empresa_id: empresaId,
-      year: HIPOTECAS_FIRMADAS_PDF_YEAR,
-    },
-    {
-      filenameFallback: `hipotecas_firmadas_${HIPOTECAS_FIRMADAS_PDF_YEAR}.pdf`,
+      filenameFallback:
+        modeKey === "firmadas"
+          ? "hipotecas_firmadas.pdf"
+          : modeKey === "fichas"
+            ? "fichas_hipotecas.pdf"
+            : "hipotecas_listado.pdf",
       targetWindow: popup,
     }
   );
@@ -89579,7 +89553,7 @@ if (hipotecaBdtPrintListado) {
       popup = window.open("", "_blank", "noopener");
     } catch (e) {}
     try {
-      await downloadHipotecaBdtListadoPdf(popup);
+      await downloadHipotecaBdtPdf("listado", popup);
     } catch (error) {
       alert(`No se pudo descargar el listado. ${String(error?.message || error || "").trim() || "Revisa los filtros e inténtalo de nuevo."}`);
     } finally {
@@ -89604,7 +89578,7 @@ if (hipotecaBdtPrintFichas) {
       popup = window.open("", "_blank", "noopener");
     } catch (e) {}
     try {
-      await downloadHipotecaBdtFichasPdf(popup);
+      await downloadHipotecaBdtPdf("fichas", popup);
     } catch (error) {
       alert(`No se pudieron generar las fichas PDF. ${String(error?.message || error || "").trim() || "Revisa los filtros e inténtalo de nuevo."}`);
     } finally {
@@ -89619,27 +89593,27 @@ if (hipotecaBdtPrintFichas) {
   });
 }
 
-if (hipotecaBdtPrintFirmadas2025) {
-  hipotecaBdtPrintFirmadas2025.addEventListener("click", async () => {
+if (hipotecaBdtPrintFirmadas) {
+  hipotecaBdtPrintFirmadas.addEventListener("click", async () => {
     let popup = null;
-    const originalText = hipotecaBdtPrintFirmadas2025.textContent;
-    hipotecaBdtPrintFirmadas2025.disabled = true;
-    hipotecaBdtPrintFirmadas2025.textContent = "Generando...";
+    const originalText = hipotecaBdtPrintFirmadas.textContent;
+    hipotecaBdtPrintFirmadas.disabled = true;
+    hipotecaBdtPrintFirmadas.textContent = "Generando...";
     try {
       popup = window.open("", "_blank", "noopener");
     } catch (e) {}
     try {
-      await downloadHipotecasFirmadas2025Pdf(popup);
+      await downloadHipotecaBdtPdf("firmadas", popup);
     } catch (error) {
-      alert(`No se pudieron generar los PDFs de 2025. ${String(error?.message || error || "").trim() || "Revisa la conexión e inténtalo de nuevo."}`);
+      alert(`No se pudieron generar los PDFs firmados. ${String(error?.message || error || "").trim() || "Revisa la conexión e inténtalo de nuevo."}`);
     } finally {
       try {
         if (popup && !popup.closed && popup.location && popup.location.href === "about:blank") {
           popup.close();
         }
       } catch (e) {}
-      hipotecaBdtPrintFirmadas2025.disabled = false;
-      hipotecaBdtPrintFirmadas2025.textContent = originalText;
+      hipotecaBdtPrintFirmadas.disabled = false;
+      hipotecaBdtPrintFirmadas.textContent = originalText;
     }
   });
 }

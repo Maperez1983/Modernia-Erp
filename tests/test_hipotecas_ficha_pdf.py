@@ -308,6 +308,119 @@ class HipotecasFichaPdfTests(unittest.TestCase):
         self.assertEqual(filters["years"], ["2026", "2025"])
         self.assertEqual(filters["states"], ["Pendiente", "Firmada"])
 
+    def test_collect_hipotecas_export_rows_and_badge_fallback(self):
+        row = self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone()
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
+              oficina, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan, comision_modernia,
+              inmobiliaria_compra, asesor, estado, anio, cliente_inmueble_json, hipoteca_detalle_json, liquidacion_json,
+              created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            """,
+            (
+                "h2",
+                "e1",
+                "Luis López",
+                "c1",
+                "BBVA",
+                220000,
+                175000,
+                79.54,
+                45000,
+                2800,
+                "Modernia Norte",
+                "2025-03-10",
+                "Sí",
+                "Compra",
+                "2025-04-19",
+                550,
+                550,
+                1600,
+                "Inmo Norte",
+                "María",
+                "Firmada",
+                2025,
+                row["cliente_inmueble_json"],
+                row["hipoteca_detalle_json"],
+                row["liquidacion_json"],
+                "2026-06-19",
+                "2026-06-19",
+            ),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
+              oficina, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan, comision_modernia,
+              inmobiliaria_compra, asesor, estado, anio, cliente_inmueble_json, hipoteca_detalle_json, liquidacion_json,
+              created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            """,
+            (
+                "h3",
+                "e1",
+                "No Firmada",
+                "c1",
+                "Sabadell",
+                210000,
+                165000,
+                78.57,
+                45000,
+                2600,
+                "Modernia Este",
+                "2026-01-15",
+                "Sí",
+                "Compra",
+                "2026-02-18",
+                500,
+                500,
+                1500,
+                "Inmo Este",
+                "María",
+                "Firmada",
+                2026,
+                row["cliente_inmueble_json"],
+                row["hipoteca_detalle_json"],
+                row["liquidacion_json"],
+                "2026-06-19",
+                "2026-06-19",
+            ),
+        )
+        self.conn.commit()
+
+        rows_2025 = server.collect_hipotecas_export_rows(
+            self.conn,
+            "e1",
+            selected_year="2025",
+            selected_estado="Firmada",
+            selected_order="asc",
+            signed_only=True,
+        )
+        self.assertEqual([row["id"] for row in rows_2025], ["h2"])
+        self.assertTrue(server.resolve_hipoteca_bank_brand("Banco Santander S.A.")["logo_on_dark"])
+        self.assertIsNotNone(server._load_brand_logo("/assets/logos/santander.svg", max_width=180))
+        self.assertIsNotNone(server._load_brand_logo("/assets/grupo_modernia_logo.png", max_width=180))
+
+        pdf_bytes = server.build_hipotecas_export_pdf(
+            self.conn,
+            rows_2025,
+            mode="firmadas",
+            selected_year="2025",
+            selected_estado="Firmada",
+            selected_order="asc",
+        )
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertEqual(
+            server.build_hipotecas_export_pdf_filename("firmadas", selected_year="2025", count=len(rows_2025)),
+            "hipotecas_firmadas_2025_1.pdf",
+        )
+
     def test_build_hipotecas_fichas_pdf_merges_multiple_reports(self):
         row = self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone()
         self.conn.execute(
