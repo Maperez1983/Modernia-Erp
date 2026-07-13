@@ -7260,17 +7260,6 @@ def build_hipoteca_ficha_pdf(payload, section=None):
         ("Actualizado", text(payload.get("updated_at"))),
     ]
 
-    importes_lines = [
-        ("Precio compra", money(payload.get("precio"))),
-        ("Importe hipoteca", money(payload.get("importe_hipoteca"))),
-        ("% financiación", pct(payload.get("porcentaje"))),
-        ("Entrada", money(payload.get("entrada"))),
-        ("Comisión cliente", money(payload.get("honorarios"))),
-        ("Cesión banco", money(payload.get("cesion"))),
-        ("Comisión Juan", money(payload.get("comision_juan"))),
-        ("Comisión Modernia", money(payload.get("comision_modernia"))),
-    ]
-
     cliente_lines = [
         ("Inmueble · Dirección", nested(cliente_inmueble, "inmueble.direccion")),
         ("Inmueble · Localidad", nested(cliente_inmueble, "inmueble.localidad")),
@@ -17642,7 +17631,7 @@ def _parse_renta_pdf_fields(text: str) -> dict:
         if not digits:
             return None
         try:
-            code_num = int(digits)
+            int(digits)
         except Exception:
             return None
         code_pat = _code_pat(code_text)
@@ -20784,7 +20773,6 @@ def ocr_poliza_key_regions(path, use_external=False):
 
 def ocr_pdf_first_page(pdf_path):
     is_pdf = str(pdf_path).lower().endswith(".pdf")
-    tmpdir = None
     tmp_generated = ""
     img_path = pdf_path
     if is_pdf:
@@ -28401,7 +28389,6 @@ def _extract_highlights(item):
     text = str(item.get("library_text") or "").strip()
     if not text:
         return []
-    hay = normalize_lookup_text(text).lower()
     keywords_raw = str(item.get("matched_keywords") or "").strip()
     keywords = [normalize_lookup_text(k).lower() for k in keywords_raw.split(",") if k.strip()]
     sentences = _split_sentences(text, max_sentences=10)
@@ -41932,14 +41919,12 @@ def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled
     # los miembros del workspace, no el listado global del sistema.
     #
     # Nota: en algunos entornos legacy puede fallar el conteo de workspaces (por migraciones parciales).
-    # Para evitar mezclar usuarios entre workspaces, priorizamos la tabla `workspace_miembros` siempre
-    # que existan membresías para este workspace. Solo hacemos fallback al listado global si es un
-    # entorno de 1 workspace y no hay miembros configurados.
+    # Para evitar mezclar usuarios entre workspaces, priorizamos la tabla `workspace_miembros`
+    # siempre que existan membresías para este workspace.
     join_sql = ""
     member_where = ""
     member_params = []
     members_count = 0
-    workspace_count = 0
     try:
         ensure_workspace_core_tables(conn)
         row = conn.execute(
@@ -41949,12 +41934,6 @@ def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled
         members_count = int(row_value(row, "total", 0) or row_value(row, 0) or 0)
     except Exception:
         members_count = 0
-    try:
-        row = conn.execute("SELECT COUNT(*) AS total FROM workspaces").fetchone()
-        workspace_count = int(row_value(row, "total", 0) or row_value(row, 0) or 0)
-    except Exception:
-        # Si no podemos determinarlo, asumimos multi-tenant para evitar fugas.
-        workspace_count = 0
     if members_count > 0:
         join_sql = "JOIN workspace_miembros mem ON mem.usuario_id = u.id"
         member_where = " AND mem.workspace_id = ?"
@@ -43397,9 +43376,6 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
                 ]
                 if part
             ).strip()
-            time_enabled = int(row_value(user_row, "registro_horario_activo", 0) or 0) == 1
-            services = _normalize_service_tokens(row_value(user_row, "servicio") or "")
-            has_service = bool(services)
             # Evidencias de pertenencia:
             has_persona = False
             try:
@@ -43448,8 +43424,6 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
                         has_persona = True
                 except Exception:
                     _rollback_best_effort(conn)
-
-            # Si hay un único workspace, mantenemos comportamiento legacy (casi seguro en despliegues single-tenant).
             single_workspace = False
             try:
                 ws_count_row = conn.execute("SELECT COUNT(*) AS total FROM workspaces").fetchone()
@@ -43458,27 +43432,6 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
             except Exception:
                 _rollback_best_effort(conn)
                 single_workspace = False
-
-            # Además, permitimos auto-vincular en el workspace "default" si el usuario tiene servicios o fichaje activo.
-            is_default = False
-            try:
-                ws_row = conn.execute("SELECT nombre, slug FROM workspaces WHERE id = ? LIMIT 1", (ws_id,)).fetchone()
-            except Exception:
-                _rollback_best_effort(conn)
-                ws_row = None
-            try:
-                ws_slug = normalize_workspace_slug(row_value(ws_row, "slug") or row_value(ws_row, "nombre") or "")
-                default_slug = normalize_workspace_slug(DEFAULT_WORKSPACE_NAME)
-                is_default = ws_slug in {
-                    default_slug,
-                    "verifika2",
-                    "modernia",
-                    "grupomodernia",
-                    "grupo-modernia",
-                    "grupo_modernia",
-                }
-            except Exception:
-                is_default = False
 
             # IMPORTANTE: en modo multi-tenant no auto-vinculamos usuarios "por defecto" solo por tener servicios
             # o fichaje activo. Eso provoca contaminación de miembros entre workspaces (usuarios acaban apareciendo
@@ -48669,7 +48622,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             return 2
 
         max_title_w = max(200, int(right_limit - title_x))
-        title_lines = _draw_cover_text(
+        _draw_cover_text(
             cover_draw,
             title_x,
             top_margin + 12,
@@ -48698,13 +48651,6 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             fecha_txt = format_spanish_long_date_capitalized(fecha_txt)
         except Exception:
             pass
-        n_viv = int(calc.get("num_vecinos") or 0)
-        n_loc = int(calc.get("num_locales") or 0)
-        n_tra = int(calc.get("num_trasteros") or 0)
-        n_ap = int(calc.get("num_aparcamientos") or 0)
-        subtotal = float(budget.get("subtotal") or calc.get("cuota_sugerida") or 0.0)
-        impuestos = float(budget.get("impuestos") or 0.0)
-        total = float(budget.get("total") or 0.0) if float(budget.get("total") or 0.0) else max(0.0, subtotal + impuestos)
         # Carta de presentación (tono comercial y clara, encima de la foto del equipo).
         intro_lines = [
             "Gracias por solicitar nuestra propuesta. En Modernia llevamos más de 40 años administrando comunidades con un enfoque cercano y muy práctico.",
@@ -51209,7 +51155,6 @@ def build_branded_document_pdf(title, subtitle, sections, footer_lines=None, bra
     footer_lines = footer_lines or []
     page_width, page_height = 1240, 1754
     margin_x, top_margin, bottom_margin = 90, 70, 90
-    content_width = page_width - (margin_x * 2)
     logo = _load_brand_logo(brand_logo_url, max_width=560)
     font_title = _document_font(34, bold=True)
     font_subtitle = _document_font(18, bold=False)
@@ -52996,14 +52941,10 @@ def build_inmueble_negotiation_offer_pdf(company, inmueble, buyer, action):
 
             c1_name = u(buyer.get("nombre"))
             c1_nif = u(buyer.get("nif"))
-            c1_tel = u(buyer.get("telefono"))
-            c1_email = u(buyer.get("email"))
-
             propietario_nombre = u(action.get("propietario_nombre") or inmueble.get("propietario_nombre"))
             propietario_nif = u(action.get("propietario_nif") or inmueble.get("propietario_nif"))
 
             ref_catastral = u(inmueble.get("referencia_catastral") or inmueble.get("ref_catastral"))
-            datos_registrales = u(action.get("datos_registrales") or inmueble.get("datos_registrales") or "")
 
             amount_value = parse_money_value(action.get("importe_propuesta") or inmueble.get("precio_objetivo") or 0) or 0.0
             amount = u(format_eur_short(amount_value))
@@ -53241,8 +53182,6 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
         bg = rl_colors.white
 
     margin = 44
-    top = h - margin
-
     # Header band
     c.setFillColor(primary)
     c.rect(0, h - 120, w, 120, stroke=0, fill=1)
@@ -54859,7 +54798,7 @@ class Handler(BaseHTTPRequestHandler):
                 if parsed.path not in {"/api/ocr_job"}:
                     self._ensure_db_ready()
                 self.handle_api(parsed)
-            except DbUnavailableError as exc:
+            except DbUnavailableError:
                 try:
                     Handler._trigger_db_bootstrap_async(self.db_path)
                 except Exception:
@@ -80286,14 +80225,12 @@ class Handler(BaseHTTPRequestHandler):
             bucket, _region = s3_config()
             # Evita redirigir/firmar objetos inexistentes (acaban mostrando XML NoSuchKey en el navegador).
             resolved_key = ""
-            last_exc = None
             for candidate in _iter_s3_legacy_key_candidates(key):
                 try:
                     client.head_object(Bucket=bucket, Key=candidate)
                     resolved_key = candidate
                     break
                 except Exception as exc:
-                    last_exc = exc
                     code = ""
                     try:
                         code = str((getattr(exc, "response", {}) or {}).get("Error", {}).get("Code", "") or "")
@@ -90131,7 +90068,6 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     year = conn.execute("SELECT strftime('%Y','now','localtime') AS y").fetchone()["y"]
 
-            estado_expr = "LOWER(TRIM(estado))"
             compania_expr = "LOWER(TRIM(compania))"
             seguros_columns = {str(c or "").strip().lower() for c in (table_columns(conn, "seguros") or set()) if str(c or "").strip()}
             responsable_candidates = [
@@ -90160,16 +90096,6 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 responsable_expr = "NULL"
             # Use the real policy timeline first; fallback to import/create timestamps.
-            slash_match = (
-                "TRIM(COALESCE(fecha_efecto, '')) ~ '^[0-3][0-9]/[0-1][0-9]/[1-2][0-9]{3}$'"
-                if is_pg
-                else "TRIM(COALESCE(fecha_efecto, '')) GLOB '[0-3][0-9]/[0-1][0-9]/[1-2][0-9][0-9][0-9]'"
-            )
-            dash_match = (
-                "TRIM(COALESCE(fecha_efecto, '')) ~ '^[0-3][0-9]-[0-1][0-9]-[1-2][0-9]{3}$'"
-                if is_pg
-                else "TRIM(COALESCE(fecha_efecto, '')) GLOB '[0-3][0-9]-[0-1][0-9]-[1-2][0-9][0-9][0-9]'"
-            )
             max_year = datetime.now().year + 1
             max_year_2 = int(max_year % 100)
             if is_pg:
@@ -92230,7 +92156,6 @@ class Handler(BaseHTTPRequestHandler):
 
             resp_expr_ops = "COALESCE(NULLIF(responsable_gestion, ''), NULLIF(agente, ''), 'Sin responsable')"
             resp_expr_caps = "COALESCE(NULLIF(responsable, ''), NULLIF(asesor, ''), 'Sin responsable')"
-            resp_expr_mov = "COALESCE(NULLIF(asesor, ''), 'Sin responsable')"
 
             ventas_total_row = _q_one(
                 f"""
