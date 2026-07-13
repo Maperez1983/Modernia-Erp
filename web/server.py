@@ -69,20 +69,22 @@ except Exception:  # pragma: no cover
 try:
     from .auth_security import hash_password as runtime_hash_password
     from .auth_security import needs_password_rehash
+    from .auth_security import PBKDF2_SHA256
     from .auth_security import verify_password as runtime_verify_password
     from .schema_support import apply_schema_file, ensure_column, table_columns
     from .db_backend import is_postgres_enabled as db_is_postgres_enabled
-    from .db_backend import open_postgres_conn, ensure_postgres_sqlite_compat, get_postgres_pool_stats
+    from .db_backend import open_db_conn, open_postgres_conn, ensure_postgres_sqlite_compat, get_postgres_pool_stats
     from .db_backend import set_conn_tracker as db_set_conn_tracker, reset_conn_tracker as db_reset_conn_tracker
     from .seguros_state import can_transition_seguro_estado as runtime_can_transition_seguro_estado
     from .seguros_state import normalize_seguro_estado_value as runtime_normalize_seguro_estado_value
 except ImportError:
     from auth_security import hash_password as runtime_hash_password
     from auth_security import needs_password_rehash
+    from auth_security import PBKDF2_SHA256
     from auth_security import verify_password as runtime_verify_password
     from schema_support import apply_schema_file, ensure_column, table_columns
     from db_backend import is_postgres_enabled as db_is_postgres_enabled
-    from db_backend import open_postgres_conn, ensure_postgres_sqlite_compat, get_postgres_pool_stats
+    from db_backend import open_db_conn, open_postgres_conn, ensure_postgres_sqlite_compat, get_postgres_pool_stats
     from db_backend import set_conn_tracker as db_set_conn_tracker, reset_conn_tracker as db_reset_conn_tracker
     from seguros_state import can_transition_seguro_estado as runtime_can_transition_seguro_estado
     from seguros_state import normalize_seguro_estado_value as runtime_normalize_seguro_estado_value
@@ -402,6 +404,29 @@ def _normalize_doc_key_for_ui(value: object) -> str:
     if not text or _looks_like_placeholder_doc_key(text):
         return ""
     return _normalize_s3_key(text) if text.startswith("s3://") else text
+
+
+def _doc_link_from_gestoria_doc_row(doc_row):
+    if not doc_row:
+        return "", ""
+    try:
+        row = dict(doc_row) if not isinstance(doc_row, dict) else doc_row
+    except Exception:
+        return "", ""
+    doc_key = _normalize_doc_key_for_ui(row.get("doc_key") or "")
+    if not doc_key:
+        doc_key = _normalize_doc_key_for_ui(row.get("repo_key") or "")
+    doc_url = str(row.get("doc_url") or "").strip()
+    if not _is_public_doc_url(doc_url):
+        doc_url = ""
+    return doc_key, doc_url
+
+
+def _gestoria_doc_visible_for_user(conn, session, empresa_id):
+    if workspace_actor_is_privileged(conn, session):
+        return True
+    ok, _ = enforce_empresa_membership(conn, session, empresa_id)
+    return bool(ok)
 
 
 def _s3_grant_key(session, key, *, ttl_seconds=None, conn=None):
@@ -1736,7 +1761,6 @@ def cliente_has_servicio(conn, cliente_id, servicios):
         [cliente_id, *servicios],
     ).fetchone()
     return bool(row)
-    return digits
 
 
 def cliente_has_servicio_in_workspace(conn, cliente_id, servicios, workspace_id=None):
@@ -3944,6 +3968,15 @@ def normalize_lookup_text(value):
     return text
 
 
+def normalize_simple(value):
+    if not value:
+        return ""
+    text = str(value)
+    text = unicodedata.normalize("NFD", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    return text.lower().strip()
+
+
 def service_sql_match_clause(alias, services):
     """Build a tolerant SQL service filter for free-text `clientes_empresas.servicio` labels."""
     normalized = [normalize_service_key(s) for s in (services or []) if str(s or "").strip()]
@@ -4869,6 +4902,23 @@ def parse_datetime_value(value):
     if parsed_date:
         return datetime.combine(parsed_date, datetime.min.time(), tzinfo=timezone.utc)
     return None
+
+
+def parse_date_to_timestamp(value):
+    if isinstance(value, (int, float)):
+        try:
+            return float(value)
+        except Exception:
+            return None
+    dt = parse_datetime_value(value)
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    try:
+        return float(dt.timestamp())
+    except Exception:
+        return None
 
 
 def _parse_iso_dt_utc(value):
@@ -8495,6 +8545,129 @@ def fin_sync_missing_action(conn, empresa_id, asesoramiento_id, cliente_id, clie
             """,
             (now, asesoramiento_id),
         )
+
+
+def ensure_action_for_related(
+    conn,
+    *,
+    empresa_id,
+    servicio,
+    related_tipo,
+    related_id,
+    tipo,
+    fecha=None,
+    cliente_id=None,
+    cliente_nombre=None,
+    notas=None,
+    responsable=None,
+    now=None,
+    estado="Pendiente",
+):
+    empresa_id = str(empresa_id or "").strip()
+    servicio = str(servicio or "").strip()
+    related_tipo = str(related_tipo or "").strip()
+    related_id = str(related_id or "").strip()
+    tipo = str(tipo or "").strip()
+    if not conn or not empresa_id or not servicio or not related_tipo or not related_id or not tipo:
+        return None
+    now_ts = str(now or app_now().isoformat())
+    fecha_value = str(fecha or "").strip() or None
+    cliente_id_value = str(cliente_id or "").strip() or None
+    cliente_nombre_value = str(cliente_nombre or "").strip() or None
+    notas_value = str(notas or "").strip() or None
+    responsable_value = str(responsable or "").strip() or None
+    existing = conn.execute(
+        """
+        SELECT id
+        FROM acciones
+        WHERE empresa_id = ?
+          AND LOWER(COALESCE(servicio, '')) = LOWER(?)
+          AND LOWER(COALESCE(related_tipo, '')) = LOWER(?)
+          AND COALESCE(related_id, '') = ?
+          AND COALESCE(tipo, '') = ?
+        LIMIT 1
+        """,
+        (empresa_id, servicio, related_tipo, related_id, tipo),
+    ).fetchone()
+    if existing:
+        conn.execute(
+            """
+            UPDATE acciones
+            SET fecha = COALESCE(?, fecha),
+                cliente_id = COALESCE(?, cliente_id),
+                cliente_nombre = COALESCE(?, cliente_nombre),
+                asunto = COALESCE(?, asunto),
+                tipo = COALESCE(?, tipo),
+                responsable = COALESCE(?, responsable),
+                estado = ?,
+                notas = COALESCE(?, notas),
+                updated_at = datetime(?)
+            WHERE id = ?
+            """,
+            (
+                fecha_value,
+                cliente_id_value,
+                cliente_nombre_value,
+                tipo,
+                tipo,
+                responsable_value,
+                estado or "Pendiente",
+                notas_value,
+                now_ts,
+                existing["id"],
+            ),
+        )
+        return str(existing["id"])
+    action_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO acciones (
+          id, empresa_id, servicio, cliente_id, cliente_nombre, fecha, asunto, tipo,
+          responsable, estado, notas, related_id, related_tipo, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+        )
+        """,
+        (
+            action_id,
+            empresa_id,
+            servicio,
+            cliente_id_value,
+            cliente_nombre_value,
+            fecha_value,
+            tipo,
+            tipo,
+            responsable_value,
+            estado or "Pendiente",
+            notas_value,
+            related_id,
+            related_tipo,
+            now_ts,
+            now_ts,
+        ),
+    )
+    return action_id
+
+
+def close_actions_for_related(conn, *, empresa_id, servicio, related_tipo, related_id, now=None, estado="Hecho"):
+    empresa_id = str(empresa_id or "").strip()
+    servicio = str(servicio or "").strip()
+    related_tipo = str(related_tipo or "").strip()
+    related_id = str(related_id or "").strip()
+    if not conn or not empresa_id or not servicio or not related_tipo or not related_id:
+        return
+    now_ts = str(now or app_now().isoformat())
+    conn.execute(
+        """
+        UPDATE acciones
+        SET estado = ?, updated_at = datetime(?)
+        WHERE empresa_id = ?
+          AND LOWER(COALESCE(servicio, '')) = LOWER(?)
+          AND LOWER(COALESCE(related_tipo, '')) = LOWER(?)
+          AND COALESCE(related_id, '') = ?
+        """,
+        (estado or "Hecho", now_ts, empresa_id, servicio, related_tipo, related_id),
+    )
 
 
 def seguros_sync_activation_action(conn, seguro_row, now):
@@ -12127,6 +12300,20 @@ def build_irpf_ganancia_compare_report_pdf(payload: dict) -> bytes:
             return float(parse_money_value(value or 0) or 0.0)
         except Exception:
             return 0.0
+
+    def _push_money(lines: list, label: str, raw: object, *, keep_zero: bool = False) -> None:
+        val = _money_num(raw)
+        if val is None:
+            return
+        if (not keep_zero) and abs(val) < 1e-9:
+            return
+        lines.append((label, format_eur(val)))
+
+    def _push_text(lines: list, label: str, raw: object) -> None:
+        text = str(raw or "").strip()
+        if not text:
+            return
+        lines.append((label, text))
 
     empresa = str(payload.get("empresa_nombre") or "").strip() or "Grupo Modernia"
     ref = str(payload.get("referencia") or payload.get("inmueble_ref") or payload.get("expediente") or "").strip()
@@ -33028,125 +33215,6 @@ def delete_workspace_rrhh_productividad_manual(conn, workspace_id, persona_id, e
     )
     return {"ok": True}
 
-    placeholders = ",".join(["?"] * len(selected_cliente_ids))
-    selected_set = set(str(cid or "").strip() for cid in selected_cliente_ids)
-    doc_ids = [doc_id for doc_id in renta_doc_id_owner.keys() if doc_id]
-    ref_ids = [ref_id for ref_id in renta_ref_owner.keys() if ref_id]
-    # En SQLite, "0" funciona como falso en expresiones booleanas, pero en Postgres OR exige boolean.
-    # Usamos una condición siempre falsa portable.
-    doc_id_clause = "1=0"
-    doc_id_values = []
-    if doc_ids:
-        doc_id_clause = f"id IN ({','.join(['?'] * len(doc_ids))})"
-        doc_id_values = doc_ids
-    ref_id_clause = "1=0"
-    ref_id_values = []
-    if ref_ids:
-        ref_id_clause = f"LOWER(COALESCE(referencia_id,'')) IN ({','.join(['?'] * len(ref_ids))})"
-        ref_id_values = [str(r or "").strip().lower() for r in ref_ids]
-    renta_filter = """
-      (
-        LOWER(COALESCE(referencia_tipo, '')) = 'renta'
-        OR LOWER(COALESCE(tipo, '')) = 'renta'
-        OR LOWER(COALESCE(tipo, '')) = 'declaracion de renta'
-        OR LOWER(COALESCE(nombre, '')) LIKE 'renta %'
-        OR LOWER(COALESCE(tipo, '')) LIKE 'modelo 100%'
-      )
-    """
-    docs = conn.execute(
-        f"""
-        SELECT id, cliente_id, nombre, tipo, fecha, estado, notas, doc_key, doc_url, referencia_tipo, referencia_id, updated_at
-        FROM gestoria_docs
-        WHERE (
-          {doc_id_clause}
-          OR (
-            cliente_id IN ({placeholders})
-            AND {renta_filter}
-          )
-          OR (
-            {ref_id_clause}
-            AND {renta_filter}
-          )
-        )
-        ORDER BY cliente_id ASC,
-                 COALESCE(NULLIF(TRIM(COALESCE(CAST(fecha AS TEXT), '')), ''), '0001-01-01') DESC,
-                 updated_at DESC
-        """,
-        tuple(doc_id_values + selected_cliente_ids + ref_id_values),
-    ).fetchall()
-    docs_by_cliente = {}
-    for doc in docs:
-        doc_dict = dict(doc)
-        cid = str(doc_dict.get("cliente_id") or "").strip()
-        if cid not in selected_set:
-            cid = ""
-        if not cid:
-            ref_id = str(doc_dict.get("referencia_id") or "").strip().lower()
-            doc_id = str(doc_dict.get("id") or "").strip()
-            cid = renta_ref_owner.get(ref_id) or renta_doc_id_owner.get(doc_id) or ""
-        if not cid:
-            continue
-        doc_dict["cliente_id"] = cid
-        docs_by_cliente.setdefault(cid, []).append(doc_dict)
-    for item in items:
-        cliente_id = item["cliente_id"]
-        docs_list = docs_by_cliente.get(cliente_id, []) or []
-        if ejercicio_val and docs_list:
-            allowed_doc_ids = renta_doc_ids_by_cliente.get(cliente_id, set()) or set()
-            allowed_ref_ids = renta_ref_ids_by_cliente.get(cliente_id, set()) or set()
-            filtered_docs = []
-            year_token = ejercicio_val.lower()
-            for doc in docs_list:
-                try:
-                    doc_id = str(doc.get("id") or "").strip()
-                    ref_id = str(doc.get("referencia_id") or "").strip().lower()
-                    nombre = str(doc.get("nombre") or "").strip().lower()
-                    fecha = str(doc.get("fecha") or "").strip()
-                    if doc_id and doc_id in allowed_doc_ids:
-                        filtered_docs.append(doc)
-                        continue
-                    if ref_id and ref_id in allowed_ref_ids:
-                        filtered_docs.append(doc)
-                        continue
-                    if year_token and (year_token in nombre):
-                        filtered_docs.append(doc)
-                        continue
-                    if year_token and fecha.startswith(ejercicio_val):
-                        filtered_docs.append(doc)
-                        continue
-                except Exception:
-                    continue
-            docs_list = filtered_docs
-        item["docs"] = docs_list
-        if docs_list:
-            item["doc_count"] = len(docs_list)
-            item["preview_doc"] = docs_list[0]
-            continue
-        latest = item.get("renta_latest") or {}
-        doc_key = str(latest.get("doc_key") or "").strip()
-        doc_url = str(latest.get("doc_url") or "").strip()
-        if doc_key or doc_url:
-            ejercicio = str(latest.get("ejercicio") or "").strip()
-            entry_id = str(latest.get("id") or "").strip()
-            item["doc_count"] = 1
-            item["preview_doc"] = {
-                "id": "",
-                "cliente_id": item["cliente_id"],
-                "nombre": str(latest.get("doc_nombre") or f"Renta {ejercicio}.pdf").strip(),
-                "tipo": "Modelo 100",
-                "fecha": str(latest.get("presentacion_fecha") or "").strip(),
-                "estado": str(latest.get("estado_presentacion") or latest.get("doc_status") or "").strip(),
-                "notas": "",
-                "doc_key": doc_key,
-                "doc_url": doc_url,
-                "referencia_tipo": "renta",
-                "referencia_id": renta_ref_id_for_entry(ejercicio, entry_id),
-            }
-        else:
-            item["doc_count"] = 0
-            item["preview_doc"] = {}
-    return items
-
 
 def gestoria_renta_doc_sql_condition(alias="d"):
     prefix = f"{alias}." if alias else ""
@@ -39505,6 +39573,19 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS workspace_presupuesto_shares (
+          token TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          presupuesto_id TEXT NOT NULL,
+          expires_at TEXT,
+          last_access_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS workspace_contratos (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
@@ -44471,7 +44552,7 @@ def run_workspace_time_missing_sweep(conn, workspace_id, now=None):
     # Importante: Render suele ejecutar en UTC. Para alertas (faltan entrada/salida) usamos hora local.
     if now:
         now_ts = now
-        now_dt = parse_iso_datetime(now_ts) or app_now()
+        now_dt = _parse_iso_dt_utc(now_ts) or app_now()
     else:
         now_dt = app_now()
         now_ts = now_dt.isoformat()
@@ -45415,6 +45496,15 @@ def fetch_workspace_fincas_incidencias(conn, workspace_id, limit=40):
     return {"rows": [dict(row) for row in rows]}
 
 
+def fetch_workspace_fincas_incidencias_for_comunidad(conn, workspace_id, comunidad_id=None, limit=40):
+    comunidad_id = str(comunidad_id or "").strip()
+    payload = fetch_workspace_fincas_incidencias(conn, workspace_id, limit=limit)
+    rows = payload.get("rows") or []
+    if not comunidad_id:
+        return payload
+    return {"rows": [row for row in rows if str(row.get("comunidad_id") or "").strip() == comunidad_id]}
+
+
 def fetch_workspace_fincas_proveedores(conn, workspace_id, limit=40):
     rows = conn.execute(
         """
@@ -45444,6 +45534,15 @@ def fetch_workspace_fincas_proveedores(conn, workspace_id, limit=40):
         (workspace_id, max(1, min(int(limit or 40), 100))),
     ).fetchall()
     return {"rows": [dict(row) for row in rows]}
+
+
+def fetch_workspace_fincas_proveedores_for_comunidad(conn, workspace_id, comunidad_id=None, limit=40):
+    comunidad_id = str(comunidad_id or "").strip()
+    payload = fetch_workspace_fincas_proveedores(conn, workspace_id, limit=limit)
+    rows = payload.get("rows") or []
+    if not comunidad_id:
+        return payload
+    return {"rows": [row for row in rows if str(row.get("comunidad_id") or "").strip() == comunidad_id]}
 
 
 def fetch_workspace_fincas_juntas(conn, workspace_id, limit=40):
@@ -47130,6 +47229,25 @@ def fetch_workspace_budget_pdf_payload(conn, budget_id, workspace_id=None):
         },
         "lineas": [dict(row) for row in lineas],
     }
+
+
+def fetch_workspace_presupuesto_share(conn, token):
+    token = str(token or "").strip()
+    if not token:
+        return None
+    try:
+        row = conn.execute(
+            """
+            SELECT token, workspace_id, presupuesto_id, expires_at, last_access_at, created_at, updated_at
+            FROM workspace_presupuesto_shares
+            WHERE token = ?
+            LIMIT 1
+            """,
+            (token,),
+        ).fetchone()
+    except Exception:
+        return None
+    return dict(row) if row else None
 
 
 def fetch_workspace_budget_encargo_payload(conn, budget_id, workspace_id=None):
@@ -52146,6 +52264,109 @@ def get_workspace_contract_templates():
     }
 
 
+def get_workspace_budget_templates():
+    return {
+        "gestoria": [
+            {
+                "key": "gestoria_libre",
+                "label": "Libre",
+                "help": "Presupuesto totalmente editable. Úsalo para gestoría a medida o encargos no estandarizados.",
+                "title": "",
+                "lineas": [],
+            },
+            {
+                "key": "gestoria_renta",
+                "label": "Renta anual",
+                "help": "Base simple para campañas de renta. Puedes tocar importe, conceptos y observaciones libremente.",
+                "title": "Servicio de renta anual",
+                "lineas": [
+                    {"categoria": "Fiscal", "concepto": "Confección y presentación de declaración de renta", "cantidad": 1, "unidad": "servicio", "precio_unitario": 0, "descuento_pct": 0},
+                ],
+            },
+            {
+                "key": "gestoria_fiscal",
+                "label": "Asesoría fiscal",
+                "help": "Plantilla para servicios recurrentes de asesoría o gestión tributaria.",
+                "title": "Servicio de asesoría fiscal",
+                "lineas": [
+                    {"categoria": "Asesoría", "concepto": "Asesoramiento fiscal y soporte operativo", "cantidad": 1, "unidad": "servicio", "precio_unitario": 0, "descuento_pct": 0},
+                ],
+            },
+        ],
+        "reformas": [
+            {
+                "key": "reformas_libre",
+                "label": "Libre por partidas",
+                "help": "Presupuesto por partidas completamente editable. Añade una línea por concepto de obra.",
+                "title": "",
+                "lineas": [],
+            },
+            {
+                "key": "reformas_integral",
+                "label": "Reforma integral",
+                "help": "Plantilla base para una reforma integral de vivienda.",
+                "title": "Presupuesto de reforma integral",
+                "lineas": [
+                    {"categoria": "Demolición", "concepto": "Demoliciones y retirada de escombros", "cantidad": 1, "unidad": "partida", "precio_unitario": 0, "descuento_pct": 0},
+                    {"categoria": "Albañilería", "concepto": "Trabajos de albañilería y replanteo", "cantidad": 1, "unidad": "partida", "precio_unitario": 0, "descuento_pct": 0},
+                    {"categoria": "Instalaciones", "concepto": "Electricidad y fontanería", "cantidad": 1, "unidad": "partida", "precio_unitario": 0, "descuento_pct": 0},
+                    {"categoria": "Acabados", "concepto": "Pintura, carpintería y remates", "cantidad": 1, "unidad": "partida", "precio_unitario": 0, "descuento_pct": 0},
+                ],
+            },
+            {
+                "key": "reformas_bano",
+                "label": "Reforma de baño",
+                "help": "Plantilla rápida para cambios de baño con partidas estándar.",
+                "title": "Presupuesto de reforma de baño",
+                "lineas": [
+                    {"categoria": "Demolición", "concepto": "Demolición y retirada de sanitarios/revestimientos", "cantidad": 1, "unidad": "partida", "precio_unitario": 0, "descuento_pct": 0},
+                    {"categoria": "Fontanería", "concepto": "Adaptación de instalaciones y desagües", "cantidad": 1, "unidad": "partida", "precio_unitario": 0, "descuento_pct": 0},
+                    {"categoria": "Acabados", "concepto": "Alicatado, sanitarios y remates", "cantidad": 1, "unidad": "partida", "precio_unitario": 0, "descuento_pct": 0},
+                ],
+            },
+        ],
+        "fincas": [
+            {
+                "key": "fincas_calculado",
+                "label": "Calculado automático",
+                "help": "Calcula base mensual con 5 € por vivienda y 1 € por local, trastero o aparcamiento, mínimo 60 €. Luego puedes editar el resultado.",
+                "title": "Administración de comunidad",
+                "lineas": [],
+            },
+            {
+                "key": "fincas_completo",
+                "label": "Administración + extras",
+                "help": "Parte de la cuota automática y te deja añadir partidas extra para juntas, incidencias o gestiones especiales.",
+                "title": "Administración de comunidad + servicios complementarios",
+                "lineas": [
+                    {"categoria": "Gestión", "concepto": "Gestión de incidencias y coordinación de proveedores", "cantidad": 1, "unidad": "servicio", "precio_unitario": 0, "descuento_pct": 0},
+                ],
+            },
+        ],
+    }
+
+
+def get_workspace_budget_templates_for_service(service):
+    service_key = normalize_service_key(service or "")
+    catalog = get_workspace_budget_templates()
+    return catalog.get(service_key) or catalog["gestoria"]
+
+
+def fetch_workspace_presupuesto_templates(conn, workspace_id, servicio=None, include_inactive=False, limit=200):
+    templates = get_workspace_budget_templates_for_service(servicio)
+    try:
+        limit_int = int(limit or 0)
+    except Exception:
+        limit_int = 0
+    limit_int = max(1, min(limit_int or len(templates), 200))
+    return {
+        "workspace_id": str(workspace_id or "").strip(),
+        "servicio": normalize_service_key(servicio or "") or "gestoria",
+        "include_inactive": bool(include_inactive),
+        "templates": [dict(item) for item in templates[:limit_int]],
+    }
+
+
 def _load_legal_payload_for_area(area_key):
     area_key = normalize_service_key(area_key or "")
     if not area_key:
@@ -52866,6 +53087,18 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
         propuesta = None
     documento_tipo = str(action.get("documento_tipo") or "Propuesta").strip() or "Propuesta"
     fecha = str(action.get("fecha") or datetime.now(timezone.utc).date().isoformat()).strip() or datetime.now(timezone.utc).date().isoformat()
+
+    def fmt_ddmmyyyy(value, fallback=""):
+        raw = str(value or "").strip()
+        if not raw:
+            return str(fallback or "").strip()
+        if re.match(r"^\d{2}/\d{2}/\d{4}$", raw):
+            return raw
+        parsed = parse_iso_date(raw)
+        if parsed:
+            return parsed.strftime("%d/%m/%Y")
+        return raw
+
     try:
         fecha_display = fmt_ddmmyyyy(fecha)
     except Exception:
@@ -54314,6 +54547,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/share/presupuesto":
             params = urllib.parse.parse_qs(parsed.query)
             token = str(params.get("token", [""])[0] or "").strip()
+            section = str(params.get("section", [""])[0] or "").strip()
             if not token:
                 json_response(self, {"error": "token requerido"}, status=400)
                 return
@@ -69068,7 +69302,7 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (f"%{record_id}%",),
             )
-            conn.execute(
+            doc_rows = conn.execute(
                 """
                 SELECT id FROM gestoria_docs
                 WHERE referencia_tipo = 'seguros'
@@ -84711,7 +84945,7 @@ class Handler(BaseHTTPRequestHandler):
                     factura_id = str(asiento_row["factura_id"] or "").strip()
             confianza = parse_confidence_value(payload.get("confianza") or (movimiento_row and (movimiento_row["conciliacion_confianza"] or movimiento_row["matched_score"])) or 100)
             now_iso = datetime.utcnow().isoformat()
-            regla_id = str(payload.get("regla_id") or (movimiento_row and movement_row["regla_aplicada"]) or "").strip() or None
+            regla_id = str(payload.get("regla_id") or (movimiento_row and movimiento_row["regla_aplicada"]) or "").strip() or None
             if movimiento_row:
                 conn.execute(
                     """
@@ -89346,7 +89580,7 @@ class Handler(BaseHTTPRequestHandler):
                 return '"' + str(value or "").replace('"', '""') + '"'
 
             where = ["empresa_id = ?"]
-            values: List[object] = [empresa_id]
+            values: list[object] = [empresa_id]
             if record_id:
                 where.append("id = ?")
                 values.append(record_id)
@@ -90865,8 +91099,6 @@ class Handler(BaseHTTPRequestHandler):
                 queue.append(dict(row))
                 if len(queue) >= limit_int:
                     break
-
-            import hashlib
 
             backend = getattr(conn, "__crm_backend__", "") or ""
             now = app_now().isoformat()
