@@ -547,6 +547,7 @@ class HipotecasFichaPdfTests(unittest.TestCase):
             server.build_hipotecas_bdt_listado_pdf_filename({**filters, "order": "asc"}, count=len(rows)),
             "hipotecas_listado_2025_firmada_asc_2.pdf",
         )
+        self.assertTrue(server.build_hipoteca_bank_logo_meta("BBVA")["logo_url"])
         if server.PdfReader is not None:
             reader = server.PdfReader(BytesIO(pdf_bytes))
-            self.assertGreaterEqual(len(reader.pages), 1)
+            self.assertEqual(len(reader.pages), 3)
