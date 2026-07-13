@@ -55873,6 +55873,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/empresa_update",
             "/api/empresa_create",
             "/api/empresa_delete",
+            # Hipoteca PDF exports are scoped by empresa_id and do not need empresa_nombre.
+            "/api/hipotecas_fichas_pdf",
+            "/api/hipotecas_listado_pdf",
+            "/api/hipotecas_firmadas_pdf",
         ):
             if not empresa_nombre:
                 json_response(self, {"error": "empresa_nombre requerido"}, status=400)

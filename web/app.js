@@ -43988,6 +43988,7 @@ const downloadHipotecaBdtFichasPdf = async (popup = null) => {
     "/api/hipotecas_fichas_pdf",
     {
       empresa_id: empresaId,
+      empresa_nombre: empresa?.nombre || resolveCrmFinEmpresaNombre(),
       ids,
       filters,
     },
@@ -44034,6 +44035,7 @@ const downloadHipotecaBdtListadoPdf = async (popup = null) => {
     "/api/hipotecas_listado_pdf",
     {
       empresa_id: empresaId,
+      empresa_nombre: empresa?.nombre || resolveCrmFinEmpresaNombre(),
       ids,
       filters,
     },
@@ -44054,6 +44056,7 @@ const downloadHipotecasFirmadas2025Pdf = async (popup = null) => {
     "/api/hipotecas_firmadas_pdf",
     {
       empresa_id: empresaId,
+      empresa_nombre: empresa?.nombre || resolveCrmFinEmpresaNombre(),
       year: HIPOTECAS_FIRMADAS_PDF_YEAR,
     },
     {
