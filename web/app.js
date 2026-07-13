@@ -3858,6 +3858,7 @@ const hipotecaBdtExcelFirmadas = document.getElementById("hipotecaBdtExcelFirmad
 const hipotecaBdtExportYear = document.getElementById("hipotecaBdtExportYear");
 const hipotecaBdtListYear = document.getElementById("hipotecaBdtListYear");
 const hipotecaBdtListEstado = document.getElementById("hipotecaBdtListEstado");
+const hipotecaBdtListOrder = document.getElementById("hipotecaBdtListOrder");
 const hipotecaBdtPrintListado = document.getElementById("hipotecaBdtPrintListado");
 const hipotecaBdtPrintFichas = document.getElementById("hipotecaBdtPrintFichas");
 const hipotecaBdtPrintFirmadas2025 = document.getElementById("hipotecaBdtPrintFirmadas2025");
@@ -30695,6 +30696,7 @@ const handleRoute = () => {
     openClienteDetail,
     openSeguroById,
     openCompany,
+    openWorkspaceCompanyFicha,
     goHome,
     ui: UI,
   };
@@ -30733,6 +30735,24 @@ const handleRoute = () => {
       openAdmin();
       UI?.refreshContext(state);
       return;
+    }
+    const slug = params.get("empresa");
+    if (slug && !params.has("crm") && (params.has("holding") || params.has("workspace") || params.has("conta")) && typeof openWorkspaceCompanyFicha === "function") {
+      const empresa = getWorkspaceCompanyBySlug(slug);
+      openWorkspaceCompanyFicha(
+        String(empresa?.id || empresa?.legacy_empresa_id || empresa?.nombre || slug).trim(),
+        params.get("conta") || "dashboard"
+      );
+      UI?.refreshContext(state);
+      return;
+    }
+    if (slug) {
+      const empresa = getWorkspaceCompanyBySlug(slug);
+      if (empresa && typeof openCompany === "function") {
+        openCompany(String(empresa.nombre || empresa.razon_social || slug).trim());
+        UI?.refreshContext(state);
+        return;
+      }
     }
     // Importante: si viene `holding=1&mode=tenant&workspace=...&crm=...` queremos entrar al CRM directamente
     // (no quedarnos en la pantalla de selección de vistas del holding).
@@ -30858,18 +30878,6 @@ const handleRoute = () => {
         UI?.refreshContext(state);
       }, 250);
       return;
-    }
-    const slug = params.get("empresa");
-    if (slug) {
-      const empresa = getWorkspaceCompanyBySlug(slug);
-      if (typeof openWorkspaceCompanyFicha === "function") {
-        openWorkspaceCompanyFicha(
-          String(empresa?.id || empresa?.legacy_empresa_id || empresa?.nombre || slug).trim(),
-          params.get("conta") || "dashboard"
-        );
-        UI?.refreshContext(state);
-        return;
-      }
     }
   } catch (e) {}
   goHome();
@@ -41452,6 +41460,8 @@ const filterHipotecaBdtRows = (rows = [], columns = [], queryRaw = "", filters =
   const hasDocQuery = docQuery.length >= 5;
   const yearFilter = normalizeSimple(filters?.year || "");
   const estadoFilter = normalizeSimple(filters?.estado || "");
+  const orderFilter = normalizeSimple(filters?.order || "");
+  const sortAscending = orderFilter === "ASC" || orderFilter === "ASCENDENTE" || orderFilter === "CRECIENTE";
   const rawLimit = options?.limit;
   const limitValue = rawLimit === Infinity ? Infinity : Number(rawLimit);
   const limit = limitValue === Infinity || (Number.isFinite(limitValue) && limitValue >= 0) ? limitValue : 200;
@@ -41475,7 +41485,21 @@ const filterHipotecaBdtRows = (rows = [], columns = [], queryRaw = "", filters =
 
   const sorted = filtered
     .slice()
-    .sort((a, b) => getHipotecaBdtTimelineTimestamp(b, columns) - getHipotecaBdtTimelineTimestamp(a, columns));
+    .sort((a, b) => {
+      const tsA = getHipotecaBdtTimelineTimestamp(a, columns);
+      const tsB = getHipotecaBdtTimelineTimestamp(b, columns);
+      if (tsA !== tsB) {
+        return sortAscending ? tsA - tsB : tsB - tsA;
+      }
+      const nameA = normalizeLookupText(getHipotecaDisplayName(a, columns) || "");
+      const nameB = normalizeLookupText(getHipotecaDisplayName(b, columns) || "");
+      if (nameA !== nameB) {
+        return sortAscending ? nameA.localeCompare(nameB, "es", { sensitivity: "base" }) : nameB.localeCompare(nameA, "es", { sensitivity: "base" });
+      }
+      const idA = normalizeLookupText(getHipotecaFieldValue(a, columns, ["id"]) || "");
+      const idB = normalizeLookupText(getHipotecaFieldValue(b, columns, ["id"]) || "");
+      return sortAscending ? idA.localeCompare(idB, "es", { sensitivity: "base" }) : idB.localeCompare(idA, "es", { sensitivity: "base" });
+    });
 
   const activeMode = normalizedQuery || hasDocQuery ? "search" : yearFilter || estadoFilter ? "filtered" : "all";
   const limited = Number.isFinite(limit) ? sorted.slice(0, limit) : sorted.slice();
@@ -41489,6 +41513,7 @@ const filterHipotecaBdtRows = (rows = [], columns = [], queryRaw = "", filters =
     filters: {
       year: yearFilter,
       estado: estadoFilter,
+      order: sortAscending ? "asc" : "desc",
     },
   };
 };
@@ -41742,6 +41767,7 @@ const getHipotecaBdtListadoFilters = () => ({
   query: String(hipotecaBdtSearch?.value || "").trim(),
   year: String(hipotecaBdtListYear?.value || "").trim(),
   estado: String(hipotecaBdtListEstado?.value || "").trim(),
+  order: String(hipotecaBdtListOrder?.value || "desc").trim() || "desc",
 });
 
 const buildHipotecaBdtFilterLabels = (filters = {}) => {
@@ -41749,8 +41775,10 @@ const buildHipotecaBdtFilterLabels = (filters = {}) => {
   const year = String(filters.year || "").trim();
   const estado = String(filters.estado || "").trim();
   const query = String(filters.query || "").trim();
+  const order = normalizeSimple(filters.order || "");
   if (year) labels.push(`Año ${year}`);
   if (estado) labels.push(`Estado ${estado}`);
+  labels.push(order === "ASC" || order === "ASCENDENTE" || order === "CRECIENTE" ? "Orden ascendente" : "Orden descendente");
   if (query) labels.push(`Búsqueda "${query}"`);
   return labels;
 };
@@ -41758,6 +41786,7 @@ const buildHipotecaBdtFilterLabels = (filters = {}) => {
 const syncHipotecaListadoFilters = (rows = [], columns = [], filters = {}) => {
   const yearSelect = hipotecaBdtListYear;
   const estadoSelect = hipotecaBdtListEstado;
+  const orderSelect = hipotecaBdtListOrder;
   const items = Array.isArray(rows) ? rows : [];
   const yearSeed = Array.isArray(filters?.years) ? filters.years : [];
   const stateSeed = Array.isArray(filters?.states) ? filters.states : [];
@@ -41807,6 +41836,11 @@ const syncHipotecaListadoFilters = (rows = [], columns = [], filters = {}) => {
     estadoSelect.disabled = states.length === 0;
     const currentMatch = states.find((value) => normalizeSimple(value) === normalizeSimple(current));
     estadoSelect.value = currentMatch || "";
+  }
+
+  if (orderSelect) {
+    const currentOrder = String(orderSelect.value || "").trim().toLowerCase();
+    orderSelect.value = currentOrder === "asc" ? "asc" : "desc";
   }
 };
 
@@ -89527,6 +89561,13 @@ if (hipotecaBdtListEstado) {
   });
 }
 
+if (hipotecaBdtListOrder) {
+  hipotecaBdtListOrder.addEventListener("change", () => {
+    if (!renderHipotecaBdtFromCache()) {
+      loadHipotecaBdt();
+    }
+  });
+}
 if (hipotecaBdtPrintListado) {
   hipotecaBdtPrintListado.addEventListener("click", async () => {
     let popup = null;

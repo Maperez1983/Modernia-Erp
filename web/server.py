@@ -5276,6 +5276,38 @@ def build_hipoteca_bank_logo_meta(value):
     }
 
 
+def normalize_hipoteca_pdf_sort_order(value):
+    raw = normalize_lookup_text(value)
+    if raw in {"ASC", "ASCENDENTE", "ASCENDING", "CRECIENTE", "UP"}:
+        return "asc"
+    return "desc"
+
+
+def hipoteca_export_sort_key(item):
+    item = item or {}
+    fecha = parse_iso_date(row_value(item, "fecha_firma")) or parse_iso_date(row_value(item, "fecha_encargo"))
+    if fecha is None:
+        anio = str(row_value(item, "anio") or "").strip()
+        if re.fullmatch(r"\d{4}", anio):
+            try:
+                fecha = date(int(anio), 1, 1)
+            except Exception:
+                fecha = None
+    if fecha is None:
+        fecha = datetime.min.date()
+    cliente = normalize_lookup_text(row_value(item, "cliente") or "")
+    banco = normalize_lookup_text(row_value(item, "banco") or "")
+    return (fecha, cliente, banco)
+
+
+def sort_hipoteca_export_rows(items, order="desc"):
+    rows = [row for row in (items or []) if row is not None]
+    if not rows:
+        return []
+    reverse = normalize_hipoteca_pdf_sort_order(order) != "asc"
+    return sorted(rows, key=hipoteca_export_sort_key, reverse=reverse)
+
+
 def hipoteca_estado_is_closed(value):
     return normalize_lookup_text(value) in HIPOTECA_SIGNED_STATES
 
@@ -7229,6 +7261,138 @@ def build_hipoteca_ficha_pdf(payload, section=None):
     )
 
 
+def build_hipoteca_ficha_compact_pdf(payload):
+    payload = payload or {}
+
+    def text(value, default="—"):
+        raw = str(value or "").strip()
+        return raw if raw else default
+
+    def money(value, default="—"):
+        raw = str(value or "").strip()
+        if not raw and value not in (0, 0.0):
+            return default
+        return format_export_money(value)
+
+    def pct(value, decimals=2, default="—"):
+        raw = parse_optional_float(value)
+        if raw is None:
+            text_value = str(value or "").strip()
+            return text_value or default
+        try:
+            amount = float(raw)
+        except Exception:
+            text_value = str(value or "").strip()
+            return text_value or default
+        if 0 <= amount <= 1:
+            amount *= 100
+        value_text = f"{amount:,.{int(decimals)}f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        if int(decimals) > 0:
+            value_text = value_text.rstrip("0").rstrip(",")
+        return f"{value_text} %"
+
+    def date_text(value):
+        parsed = parse_iso_date(value)
+        if parsed:
+            return parsed.strftime("%d/%m/%Y")
+        return text(value)
+
+    def total_associated():
+        return round(
+            sum(
+                [
+                    float(parse_money_value(payload.get("honorarios") or 0) or 0.0),
+                    float(parse_money_value(payload.get("cesion") or 0) or 0.0),
+                    float(parse_money_value(payload.get("comision_juan") or 0) or 0.0),
+                    float(parse_money_value(payload.get("comision_modernia") or 0) or 0.0),
+                ]
+            ),
+            2,
+        )
+
+    bank_logo_meta = build_hipoteca_bank_logo_meta(payload.get("banco"))
+    cliente = text(payload.get("cliente"))
+    banco = text(payload.get("banco"))
+    oficina = text(payload.get("oficina") or payload.get("inmobiliaria"))
+    asesor = text(payload.get("asesor"))
+    estado = text(payload.get("estado"))
+    tipo_hipoteca = text(payload.get("tipo_hipoteca"))
+    fecha_encargo = date_text(payload.get("fecha_encargo"))
+    fecha_firma = date_text(payload.get("fecha_firma"))
+
+    subtitle_parts = [part for part in [banco, oficina, asesor] if part and part != "—"]
+    subtitle = " · ".join(subtitle_parts) or text(payload.get("id"))
+    hero_card = {
+        "kind": "feature_card",
+        "layout": "hero",
+        "eyebrow": "Ficha comercial resumida",
+        "title": cliente,
+        "subtitle": subtitle,
+        "badge": estado,
+        "chips": [
+            value
+            for value in [
+                banco if banco != "—" else "",
+                oficina if oficina != "—" else "",
+                f"Encargo {fecha_encargo}" if fecha_encargo != "—" else "",
+                f"Firma {fecha_firma}" if fecha_firma != "—" else "",
+            ]
+            if value
+        ],
+        "items": [
+            {"label": "Importe hipoteca", "value": money(payload.get("importe_hipoteca")), "accent": True},
+            {"label": "Precio compra", "value": money(payload.get("precio")), "accent": True},
+            {"label": "% financiación", "value": pct(payload.get("porcentaje")), "accent": True},
+        ],
+        "note": "Ficha resumida de una sola hoja.",
+    }
+
+    operativa_cards = {
+        "kind": "kpi_cards",
+        "columns": 4,
+        "items": [
+            {"label": "Cliente", "value": cliente, "accent": True},
+            {"label": "Banco", "value": banco},
+            {"label": "Oficina", "value": oficina},
+            {"label": "Asesor", "value": asesor},
+            {"label": "Estado", "value": estado, "accent": True},
+            {"label": "Tipo hipoteca", "value": tipo_hipoteca},
+            {"label": "Fecha encargo", "value": fecha_encargo},
+            {"label": "Fecha firma", "value": fecha_firma},
+        ],
+    }
+
+    importes_cards = {
+        "kind": "kpi_cards",
+        "columns": 4,
+        "items": [
+            {"label": "Entrada", "value": money(payload.get("entrada")), "accent": True},
+            {"label": "Comisión cliente", "value": money(payload.get("honorarios")), "accent": True},
+            {"label": "Cesión banco", "value": money(payload.get("cesion"))},
+            {"label": "Comisión Juan", "value": money(payload.get("comision_juan"))},
+            {"label": "Comisión Modernia", "value": money(payload.get("comision_modernia"))},
+            {"label": "Total asociado", "value": money(total_associated()), "accent": True},
+        ],
+    }
+
+    footer_lines = [
+        "Ficha resumida de una sola hoja para impresión rápida.",
+        "La ficha completa sigue disponible en la descarga individual.",
+    ]
+    return build_modernia_branded_document_pdf(
+        "FICHA COMERCIAL RESUMIDA",
+        subtitle,
+        [
+            ("Resumen comercial", {**hero_card, **bank_logo_meta}),
+            ("Datos operativos", operativa_cards),
+            ("Importes clave", importes_cards),
+        ],
+        footer_lines=footer_lines,
+        company={},
+        brand_logo_url="/assets/grupo_modernia_logo.png",
+    )
+
+
 def build_hipoteca_ficha_pdf_filename(payload, section=None):
     payload = payload or {}
     parts = ["ficha_hipoteca"]
@@ -7321,11 +7485,14 @@ def build_hipotecas_bdt_listado_pdf(conn, rows, filters=None):
         return b""
 
     items = [build_hipoteca_export_row(conn, row) for row in rows]
-    filters = filters or {}
+    filters = filters if isinstance(filters, dict) else {}
 
     year = str(filters.get("year") or "").strip()
     estado = str(filters.get("estado") or "").strip()
     query = str(filters.get("query") or "").strip()
+    order = normalize_hipoteca_pdf_sort_order(filters.get("order") or filters.get("sort_order") or "desc")
+    ordered_items = sort_hipoteca_export_rows(items, order=order)
+    total = len(ordered_items)
     filter_parts = []
     if year:
         filter_parts.append(f"Año {year}")
@@ -7333,15 +7500,9 @@ def build_hipotecas_bdt_listado_pdf(conn, rows, filters=None):
         filter_parts.append(f"Estado {estado}")
     if query:
         filter_parts.append(f'Búsqueda "{query}"')
-    ordered_items = sorted(
-        items,
-        key=lambda item: (
-            parse_iso_date(item.get("fecha_firma")) or parse_iso_date(item.get("fecha_encargo")) or datetime.min.date(),
-            str(item.get("cliente") or ""),
-        ),
-        reverse=True,
-    )
-    total = len(ordered_items)
+    filter_parts.append("Orden ascendente" if order == "asc" else "Orden descendente")
+    if not (year or estado or query):
+        filter_parts.insert(0, f"{total} operación(es)")
     subtitle = " · ".join(filter_parts) if filter_parts else f"{total} operación(es)"
     money = format_export_money
 
@@ -7393,12 +7554,15 @@ def build_hipotecas_fichas_pdf(conn, rows, section=None, filters=None):
     if not rows:
         return b""
 
+    filters = filters if isinstance(filters, dict) else {}
+    order = normalize_hipoteca_pdf_sort_order(filters.get("order") or filters.get("sort_order") or "desc")
+
     if PdfReader is not None and PdfWriter is not None:
         writer = PdfWriter()
         page_count = 0
-        for row in rows:
+        for row in sort_hipoteca_export_rows(rows, order=order):
             payload = build_hipoteca_ficha_payload(conn, row)
-            pdf_bytes = build_hipoteca_ficha_pdf(payload, section=section)
+            pdf_bytes = build_hipoteca_ficha_compact_pdf(payload)
             if not pdf_bytes:
                 continue
             reader = PdfReader(BytesIO(pdf_bytes))
@@ -7428,7 +7592,7 @@ def build_hipotecas_fichas_pdf(conn, rows, section=None, filters=None):
             amount *= 100
         return f"{amount:.2f} %"
 
-    payloads = [build_hipoteca_ficha_payload(conn, row) for row in rows]
+    payloads = [build_hipoteca_ficha_payload(conn, row) for row in sort_hipoteca_export_rows(rows, order=order)]
     total = len(payloads)
     filter_parts = []
     if isinstance(filters, dict):
@@ -7441,6 +7605,9 @@ def build_hipotecas_fichas_pdf(conn, rows, section=None, filters=None):
             filter_parts.append(f"Estado {estado}")
         if query:
             filter_parts.append(f'Búsqueda "{query}"')
+        filter_parts.append("Orden ascendente" if order == "asc" else "Orden descendente")
+        if not (year or estado or query):
+            filter_parts.insert(0, f"{total} operación(es)")
     subtitle = " · ".join(filter_parts) if filter_parts else f"{total} operación(es)"
 
     sections = []

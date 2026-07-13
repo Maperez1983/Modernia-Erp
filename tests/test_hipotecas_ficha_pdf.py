@@ -248,6 +248,17 @@ class HipotecasFichaPdfTests(unittest.TestCase):
             reader = server.PdfReader(BytesIO(full_pdf))
             self.assertGreaterEqual(len(reader.pages), 1)
 
+    def test_build_hipoteca_ficha_compact_pdf_uses_one_page(self):
+        row = self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone()
+        payload = server.build_hipoteca_ficha_payload(self.conn, row)
+
+        compact_pdf = server.build_hipoteca_ficha_compact_pdf(payload)
+
+        self.assertTrue(compact_pdf.startswith(b"%PDF"))
+        if server.PdfReader is not None:
+            reader = server.PdfReader(BytesIO(compact_pdf))
+            self.assertEqual(len(reader.pages), 1)
+
     def test_resolve_hipoteca_bank_brand_uses_local_assets(self):
         brand = server.resolve_hipoteca_bank_brand("Banco Santander S.A.")
         fallback = server.resolve_hipoteca_bank_brand("Entidad sin identificar")
@@ -351,7 +362,19 @@ class HipotecasFichaPdfTests(unittest.TestCase):
         self.assertTrue(batch_pdf.startswith(b"%PDF"))
         if server.PdfReader is not None:
             reader = server.PdfReader(BytesIO(batch_pdf))
-            self.assertGreaterEqual(len(reader.pages), 2)
+            self.assertEqual(len(reader.pages), 2)
+
+    def test_sort_hipoteca_export_rows_respects_order(self):
+        rows = [
+            {"cliente": "B", "fecha_firma": "2025-06-10", "fecha_encargo": "2025-06-01", "banco": "BBVA"},
+            {"cliente": "A", "fecha_firma": "2025-01-15", "fecha_encargo": "2025-01-10", "banco": "CaixaBank"},
+        ]
+
+        asc = server.sort_hipoteca_export_rows(rows, order="asc")
+        desc = server.sort_hipoteca_export_rows(rows, order="desc")
+
+        self.assertEqual([row["cliente"] for row in asc], ["A", "B"])
+        self.assertEqual([row["cliente"] for row in desc], ["B", "A"])
 
     def test_hipotecas_firmadas_pdf_filters_2025_and_signed_rows(self):
         row = self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone()
