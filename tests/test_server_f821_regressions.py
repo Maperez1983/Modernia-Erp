@@ -1,10 +1,13 @@
+import os
 import sqlite3
 import unittest
 from datetime import timezone
+from unittest import mock
 
 from web.server import (
     _parse_iso_dt_utc,
     close_actions_for_related,
+    configure_sentry,
     ensure_action_for_related,
     fetch_workspace_fincas_incidencias_for_comunidad,
     fetch_workspace_fincas_proveedores_for_comunidad,
@@ -98,6 +101,10 @@ class ServerF821RegressionTests(unittest.TestCase):
         self.assertIsNotNone(parsed)
         self.assertEqual(parsed.tzinfo, timezone.utc)
         self.assertEqual(parsed.isoformat(), "2026-07-13T12:34:56+00:00")
+
+    def test_configure_sentry_without_dsn_is_noop(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertFalse(configure_sentry())
 
     def test_ensure_and_close_actions_for_related(self):
         action_id = ensure_action_for_related(

@@ -93167,6 +93167,33 @@ class Handler(BaseHTTPRequestHandler):
         json_response(self, {"error": "Endpoint no valido"}, status=404)
 
 
+def configure_sentry():
+    """
+    Enable Sentry only when explicitly configured.
+
+    Keep this lazy so importing the server module remains side-effect free.
+    """
+    sentry_dsn = str(os.environ.get("SENTRY_DSN") or "").strip()
+    if not sentry_dsn:
+        return False
+    try:
+        import sentry_sdk
+    except Exception:
+        return False
+    environment = str(os.environ.get("SENTRY_ENVIRONMENT") or "production").strip() or "production"
+    try:
+        sentry_sdk.init(
+            dsn=sentry_dsn,
+            environment=environment,
+            send_default_pii=False,
+            include_local_variables=False,
+            max_request_body_size="never",
+        )
+    except Exception:
+        return False
+    return True
+
+
 def main():
     parser = argparse.ArgumentParser(description="Verifika² · CRM local server.")
     parser.add_argument("--db", default=str(DB_CONFIGURED), help="SQLite path.")
@@ -93192,6 +93219,7 @@ def main():
         except Exception:
             args.port = 8000
 
+    configure_sentry()
     Handler.db_path = args.db
     Handler.ocr_db_path = args.ocr_db
     ocr_workers = max(1, min(8, int(args.ocr_workers or 1)))
