@@ -7444,13 +7444,10 @@ def build_hipotecas_bdt_listado_pdf_filename(filters=None, count=None):
     parts = ["hipotecas_listado"]
     year = slugify_text(filters.get("year") or "")
     estado = slugify_text(filters.get("estado") or "")
-    order = normalize_hipoteca_pdf_sort_order(filters.get("order") or filters.get("sort_order") or "desc")
     if year:
         parts.append(year)
     if estado:
         parts.append(estado)
-    if order:
-        parts.append(order)
     if count:
         parts.append(str(int(count)))
     filename = "_".join(part for part in parts if part).strip("_")[:160] or "hipotecas_listado"
@@ -7494,8 +7491,6 @@ def build_hipotecas_bdt_listado_pdf(conn, rows, filters=None):
     estado = str(filters.get("estado") or "").strip()
     query = str(filters.get("query") or "").strip()
     order = normalize_hipoteca_pdf_sort_order(filters.get("order") or filters.get("sort_order") or "desc")
-    ordered_items = sort_hipoteca_export_rows(items, order=order)
-    total = len(ordered_items)
     filter_parts = []
     if year:
         filter_parts.append(f"Año {year}")
@@ -7506,6 +7501,12 @@ def build_hipotecas_bdt_listado_pdf(conn, rows, filters=None):
     filter_parts.append("Orden ascendente" if order == "asc" else "Orden descendente")
     if not (year or estado or query):
         filter_parts.insert(0, f"{total} operación(es)")
+    ordered_items = sorted(
+        items,
+        key=hipoteca_export_sort_key,
+        reverse=order != "asc",
+    )
+    total = len(ordered_items)
     subtitle = " · ".join(filter_parts) if filter_parts else f"{total} operación(es)"
     money = format_export_money
 
@@ -7528,54 +7529,12 @@ def build_hipotecas_bdt_listado_pdf(conn, rows, filters=None):
 
     sections = [("Resumen", summary)]
     for idx, item in enumerate(ordered_items, start=1):
-        bank_logo_meta = build_hipoteca_bank_logo_meta(item.get("banco"))
-        cliente = str(item.get("cliente") or "").strip() or f"Hipoteca {idx}"
-        banco = str(item.get("banco") or "").strip() or "-"
-        oficina = str(item.get("oficina") or "").strip() or "-"
-        asesor = str(item.get("asesor") or "").strip() or "-"
-        estado = str(item.get("estado") or "").strip() or "-"
-        fecha_encargo = format_export_date(item.get("fecha_encargo")) or "—"
-        fecha_firma = format_export_date(item.get("fecha_firma")) or "—"
-        summary_chips = [
-            value
-            for value in [
-                banco,
-                oficina,
-                asesor,
-                f"Encargo {fecha_encargo}" if fecha_encargo != "—" else "",
-                f"Firma {fecha_firma}" if fecha_firma != "—" else "",
-                estado,
-            ]
-            if value and value != "—"
-        ]
         sections.append(
             (
                 f"Operación {idx:02d}",
                 {
-                    "kind": "feature_card",
-                    "layout": "hero",
-                    "page_break_before": True,
-                    "eyebrow": "Operación comercial",
-                    "title": cliente,
-                    "subtitle": " · ".join(summary_chips),
-                    "badge": estado,
-                    "chips": summary_chips,
-                    **bank_logo_meta,
-                    "items": [
-                        {"label": "Valor compra inmueble", "value": money(item.get("precio")), "accent": True},
-                        {"label": "Entrada", "value": money(item.get("entrada")), "accent": True},
-                        {"label": "Hipoteca", "value": money(item.get("importe_hipoteca")), "accent": True},
-                    ],
-                    "note": "Presentación comercial resumida para impresión masiva de operaciones.",
-                },
-            )
-        )
-        sections.append(
-            (
-                f"Datos operativos {idx:02d}",
-                {
                     "kind": "kpi_cards",
-                    "columns": 3,
+                    "columns": 2,
                     "items": build_hipotecas_bdt_listado_card_items(item),
                 },
             )
@@ -51060,7 +51019,6 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
         company_meta_parts.append(f"Tlf: {company_tel}")
 
     pages = []
-    current_page_has_content = False
 
     def _draw_card_box(
         draw_obj,
@@ -51086,7 +51044,6 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
             draw_obj.rectangle(box, outline=outline, fill=fill, width=width)
 
     def new_page():
-        nonlocal current_page_has_content
         image = Image.new("RGB", (page_width, page_height), bg)
         draw = ImageDraw.Draw(image)
         y = top_margin
@@ -51114,7 +51071,6 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
             subtitle_lines, _sub_line_height, sub_height = _pil_multiline(draw, subtitle, font_subtitle, width=96, line_gap=6)
             draw.multiline_text((margin_x, y), "\n".join(subtitle_lines), fill=muted, font=font_subtitle, spacing=6)
             y += sub_height + 18
-        current_page_has_content = False
 
         return image, draw, y
 
@@ -51129,10 +51085,6 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
         image, draw, y = new_page()
 
     for heading, lines in sections:
-        page_break_before = bool(lines.get("page_break_before")) if isinstance(lines, dict) else False
-        if page_break_before and current_page_has_content:
-            pages.append(image)
-            image, draw, y = new_page()
         heading_box = draw.textbbox((margin_x, y), heading, font=font_section)
         ensure_space((heading_box[3] - heading_box[1]) + 20)
         draw.text((margin_x, y), heading, fill=ink, font=font_section)
@@ -51708,14 +51660,12 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
                 draw.multiline_text((margin_x, y), "\n".join(wrapped), fill=ink, font=font_body, spacing=6)
                 y += total_height + 6
         y += 14
-        current_page_has_content = True
 
     for line in footer_lines:
         wrapped, _line_height, total_height = _pil_multiline(draw, line, font_footer, width=100, line_gap=5)
         ensure_space(total_height + 4)
         draw.multiline_text((margin_x, y), "\n".join(wrapped), fill=muted, font=font_footer, spacing=5)
         y += total_height + 4
-        current_page_has_content = True
 
     pages.append(image)
     buffer = BytesIO()
@@ -54873,9 +54823,6 @@ class Handler(BaseHTTPRequestHandler):
             "/api/hipotecas/firmar",
             "/api/hipotecas_update",
             "/api/hipotecas_delete",
-            "/api/hipotecas_fichas_pdf",
-            "/api/hipotecas_listado_pdf",
-            "/api/hipotecas_firmadas_pdf",
             "/api/gestoria",
                 "/api/gestoria_trabajos",
                 "/api/gestoria_trabajos_update",
@@ -55924,10 +55871,6 @@ class Handler(BaseHTTPRequestHandler):
             "/api/empresa_update",
             "/api/empresa_create",
             "/api/empresa_delete",
-            # Hipoteca PDF exports are scoped by empresa_id and do not need empresa_nombre.
-            "/api/hipotecas_fichas_pdf",
-            "/api/hipotecas_listado_pdf",
-            "/api/hipotecas_firmadas_pdf",
         ):
             if not empresa_nombre:
                 json_response(self, {"error": "empresa_nombre requerido"}, status=400)
