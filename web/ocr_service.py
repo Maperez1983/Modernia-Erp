@@ -228,3 +228,95 @@ def normalize_field_label(value):
     value = re.sub(r"[^a-z0-9 ]+", " ", value)
     value = re.sub(r"\s+", " ", value).strip()
     return value
+
+
+def docai_available():
+    processor_id = os.environ.get("DOCUMENTAI_PROCESSOR_ID") or os.environ.get("DOC_AI_PROCESSOR_ID")
+    return bool(processor_id)
+
+
+def map_docai_fields(doc_fields):
+    doc_fields = doc_fields or {}
+
+    def doc_pick(label, idx=1):
+        key = f"{label} {idx}"
+        return doc_fields.get(key, "") or doc_fields.get(label, "")
+
+    fields = {}
+    fields["cliente1_nombre"] = doc_pick("nombre y apellidos", 1) or doc_pick("nombre", 1)
+    fields["cliente2_nombre"] = doc_pick("nombre y apellidos", 2) or doc_pick("nombre", 2)
+    fields["cliente1_dni"] = doc_pick("dni", 1) or doc_pick("nif", 1)
+    fields["cliente2_dni"] = doc_pick("dni", 2) or doc_pick("nif", 2)
+    fields["cliente1_telefono"] = doc_pick("telefono", 1) or doc_pick("movil", 1)
+    fields["cliente2_telefono"] = doc_pick("telefono", 2) or doc_pick("movil", 2)
+    fields["cliente1_email"] = doc_pick("correo electronico", 1) or doc_pick("email", 1)
+    fields["cliente2_email"] = doc_pick("correo electronico", 2) or doc_pick("email", 2)
+    fields["cliente1_fecha_nacimiento"] = doc_pick("fecha nacimiento", 1)
+    fields["cliente2_fecha_nacimiento"] = doc_pick("fecha nacimiento", 2)
+    fields["cliente1_estado_civil"] = doc_pick("estado civil", 1)
+    fields["cliente2_estado_civil"] = doc_pick("estado civil", 2)
+    fields["cliente1_hijos"] = doc_pick("hijos", 1)
+    fields["cliente2_hijos"] = doc_pick("hijos", 2)
+    fields["cliente1_profesion"] = doc_pick("profesion", 1)
+    fields["cliente2_profesion"] = doc_pick("profesion", 2)
+    fields["cliente1_tipo_contrato"] = doc_pick("tipo contrato", 1)
+    fields["cliente2_tipo_contrato"] = doc_pick("tipo contrato", 2)
+    fields["cliente1_ingresos"] = doc_pick("ingresos nomina", 1) or doc_pick("ingresos", 1) or doc_pick("nomina", 1)
+    fields["cliente2_ingresos"] = doc_pick("ingresos nomina", 2) or doc_pick("ingresos", 2) or doc_pick("nomina", 2)
+    fields["cliente1_patrimonio"] = doc_pick("patrimonio alquiler", 1)
+    fields["cliente2_patrimonio"] = doc_pick("patrimonio alquiler", 2)
+    fields["cliente1_prestamos"] = doc_pick("prestamos", 1)
+    fields["cliente2_prestamos"] = doc_pick("prestamos", 2)
+    return fields
+
+
+def map_docai_poliza_fields(doc_fields):
+    doc_fields = doc_fields or {}
+
+    def doc_pick(labels):
+        for label in labels:
+            key = normalize_field_label(label)
+            if doc_fields.get(key):
+                return doc_fields.get(key)
+        return ""
+
+    fields = {}
+    fields["tomador"] = doc_pick([
+        "tomador",
+        "asegurado",
+        "asegurado principal",
+        "titular",
+        "contratante",
+        "nombre",
+        "nombre y apellidos",
+    ])
+    fields["dni"] = doc_pick(["dni", "nif", "cif", "documento", "doc identificacion"])
+    fields["telefono"] = doc_pick(["telefono", "móvil", "movil"])
+    fields["email"] = doc_pick(["correo electronico", "email"])
+    fields["direccion"] = doc_pick(["direccion", "domicilio"])
+    fields["compania"] = doc_pick(["compania", "compañia", "aseguradora", "entidad aseguradora"])
+    fields["ramo"] = doc_pick(["ramo", "modalidad", "producto"])
+    fields["poliza_numero"] = doc_pick([
+        "poliza",
+        "numero poliza",
+        "nº poliza",
+        "número poliza",
+        "certificado",
+        "contrato",
+    ])
+    fields["fecha_efecto"] = doc_pick([
+        "fecha efecto",
+        "efecto",
+        "inicio vigencia",
+        "fecha inicio",
+        "vigencia desde",
+    ])
+    fields["fecha_vencimiento"] = doc_pick([
+        "fecha vencimiento",
+        "vencimiento",
+        "fin vigencia",
+        "vigencia hasta",
+    ])
+    fields["prima_neta"] = doc_pick(["prima neta", "neta"])
+    fields["prima_total"] = doc_pick(["prima total", "prima anual", "total recibo", "total"])
+    return fields

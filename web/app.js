@@ -1,10 +1,19 @@
 // Render puede tener cold starts que superan 15s en la primera petición.
 // Subimos el timeout para evitar falsos "Servidor no disponible" al arrancar.
 try { window.__APP_JS_LOADED = true; } catch (e) {}
-const API_TIMEOUT_MS = 90000;
-
-// Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v372";
+const APP_SHARED = window.CRMAppShared && typeof window.CRMAppShared === "object" ? window.CRMAppShared : {};
+const HAS_APP_SHARED = Boolean(window.CRMAppShared && typeof window.CRMAppShared === "object");
+if (!HAS_APP_SHARED) {
+  try {
+    console.warn("CRMAppShared no disponible; usando fallbacks locales de arranque.");
+  } catch (e) {}
+}
+const useSharedOrFallback = (name, fallback) => {
+  const sharedValue = APP_SHARED && APP_SHARED[name];
+  return typeof sharedValue === "function" ? sharedValue.bind(APP_SHARED) : fallback;
+};
+const API_TIMEOUT_MS = APP_SHARED.API_TIMEOUT_MS || 90000;
+const APP_SW_VERSION = APP_SHARED.APP_SW_VERSION || "v372";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -14,11 +23,7 @@ const isDebugEnabled = () => false;
 const debugLog = () => {};
 try { localStorage.removeItem("crm.debug"); } catch (e) {}
 
-// Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
-const DEFAULT_TENANT_WORKSPACE_SLUG = "verifika2";
-const LEGACY_TENANT_WORKSPACE_SLUGS = new Set(["modernia", "grupomodernia", "grupo-modernia"]);
-const DEFAULT_TENANT_WORKSPACE_NAME = "Verifika²";
-const normalizeSlugLike = (value) =>
+const fallbackNormalizeSlugLike = (value) =>
   String(value || "")
     .trim()
     .toLowerCase()
@@ -27,22 +32,17 @@ const normalizeSlugLike = (value) =>
     .replace(/\-+/g, "-")
     .replace(/^\-+|\-+$/g, "");
 
-const normalizeTenantWorkspaceSlug = (value, fallback = DEFAULT_TENANT_WORKSPACE_SLUG) => {
+const fallbackNormalizeTenantWorkspaceSlug = (value, fallback = DEFAULT_TENANT_WORKSPACE_SLUG) => {
   const raw = String(value || "").trim();
   if (!raw) return fallback;
-  const normalized = normalizeSlugLike(raw);
-  // Compat legacy: durante mucho tiempo "modernia/grupomodernia" apuntaban al workspace por defecto.
-  // Pero si en la instancia existen workspaces reales con ese slug, NO debemos colapsarlos a "verifika2"
-  // o se mezcla RRHH/configuración entre workspaces.
+  const normalized = fallbackNormalizeSlugLike(raw);
   if (LEGACY_TENANT_WORKSPACE_SLUGS.has(normalized)) {
     try {
       const candidates = [];
-      if (typeof state !== "undefined") {
-        if (Array.isArray(state?.workspaces)) candidates.push(...state.workspaces);
-        // Home puede renderizar cards antes de poblar state.workspaces: usamos el cache del home si existe.
-        if (Array.isArray(state?.homeWorkspacesRows)) candidates.push(...state.homeWorkspacesRows);
-      }
-      const exists = candidates.some((row) => normalizeSlugLike(row?.slug || row?.nombre || row?.name || "") === normalized);
+      const currentState = window.state || null;
+      if (Array.isArray(currentState?.workspaces)) candidates.push(...currentState.workspaces);
+      if (Array.isArray(currentState?.homeWorkspacesRows)) candidates.push(...currentState.homeWorkspacesRows);
+      const exists = candidates.some((row) => fallbackNormalizeSlugLike(row?.slug || row?.nombre || row?.name || "") === normalized);
       if (!exists) return fallback;
     } catch {
       return fallback;
@@ -51,7 +51,7 @@ const normalizeTenantWorkspaceSlug = (value, fallback = DEFAULT_TENANT_WORKSPACE
   return normalized || fallback;
 };
 
-const fetchWithTimeout = async (input, init = {}, timeoutMs = API_TIMEOUT_MS) => {
+const fallbackFetchWithTimeout = async (input, init = {}, timeoutMs = API_TIMEOUT_MS) => {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(1000, Number(timeoutMs) || API_TIMEOUT_MS));
   try {
@@ -61,7 +61,7 @@ const fetchWithTimeout = async (input, init = {}, timeoutMs = API_TIMEOUT_MS) =>
   }
 };
 
-const setUiToast = (title, detail = "") => {
+const fallbackSetUiToast = (title, detail = "") => {
   const toast = document.getElementById("uiErrorToast");
   if (!toast) return;
   toast.classList.remove("hidden");
@@ -76,14 +76,14 @@ const setUiToast = (title, detail = "") => {
   }
 };
 
-const hideUiToast = () => {
+const fallbackHideUiToast = () => {
   const toast = document.getElementById("uiErrorToast");
   if (!toast) return;
   toast.classList.add("hidden");
   toast.innerHTML = "";
 };
 
-const probeDbHealth = async () => {
+const fallbackProbeDbHealth = async () => {
   try {
     const res = await fetchWithTimeout(
       "/api/health",
@@ -98,7 +98,7 @@ const probeDbHealth = async () => {
   }
 };
 
-const sanitizeApiUrl = (value) => {
+const fallbackSanitizeApiUrl = (value) => {
   const raw = String(value || "");
   if (!raw) return raw;
   const scrubKeys = new Set(["token", "password", "activar_token", "portal_token", "firma_inmo"]);
@@ -140,7 +140,7 @@ const sanitizeApiUrl = (value) => {
   }
 };
 
-const getDeepLinkParams = () => {
+const fallbackGetDeepLinkParams = () => {
   try {
     if (window.CRMDeepLink && typeof window.CRMDeepLink.getParams === "function") {
       return window.CRMDeepLink.getParams();
@@ -159,12 +159,12 @@ const getDeepLinkParams = () => {
   return params;
 };
 
-const getDeepLinkToken = (name) => {
+const fallbackGetDeepLinkToken = (name) => {
   const params = getDeepLinkParams();
   return String(params.get(name) || "").trim();
 };
 
-const safeUrlValue = (value, { allowDataImage = false, allowBlob = false } = {}) => {
+const fallbackSafeUrlValue = (value, { allowDataImage = false, allowBlob = false } = {}) => {
   const raw = String(value || "").trim();
   if (!raw) return "";
   if (allowDataImage && raw.startsWith("data:image/")) return raw;
@@ -180,11 +180,11 @@ const safeUrlValue = (value, { allowDataImage = false, allowBlob = false } = {})
   }
 };
 
-const safeHrefUrl = (value) => safeUrlValue(value, { allowBlob: true });
-const safeImageUrl = (value) => safeUrlValue(value, { allowDataImage: true, allowBlob: true });
-const safeOpenUrl = (value) => safeUrlValue(value, { allowBlob: true });
+const fallbackSafeHrefUrl = (value) => fallbackSafeUrlValue(value, { allowBlob: true });
+const fallbackSafeImageUrl = (value) => fallbackSafeUrlValue(value, { allowDataImage: true, allowBlob: true });
+const fallbackSafeOpenUrl = (value) => fallbackSafeUrlValue(value, { allowBlob: true });
 
-const openBlobInNewTab = (blob, filename = "archivo") => {
+const fallbackOpenBlobInNewTab = (blob, filename = "archivo") => {
   if (!(blob instanceof Blob)) return false;
   const url = URL.createObjectURL(blob);
   let opened = null;
@@ -194,7 +194,12 @@ const openBlobInNewTab = (blob, filename = "archivo") => {
     opened = null;
   }
   if (!opened) {
-    downloadBlobFile(filename || "archivo", blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename || "archivo";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   }
   setTimeout(() => {
     try {
@@ -204,7 +209,7 @@ const openBlobInNewTab = (blob, filename = "archivo") => {
   return true;
 };
 
-const fetchBlobFromGet = async (path, options = {}) => {
+const fallbackFetchBlobFromGet = async (path, options = {}) => {
   const headers = new Headers(options.headers || {});
   const timeoutMs = Number(options.timeoutMs || API_TIMEOUT_MS) || API_TIMEOUT_MS;
   const res = await fetchWithTimeout(
@@ -240,6 +245,26 @@ const fetchBlobFromGet = async (path, options = {}) => {
   const filename = match && match[1] ? match[1] : String(options.filenameFallback || "archivo").trim() || "archivo";
   return { blob, filename };
 };
+
+// Workspace tenant por defecto del producto (branding de software). Mantiene compatibilidad con slugs legacy.
+const DEFAULT_TENANT_WORKSPACE_SLUG = APP_SHARED.DEFAULT_TENANT_WORKSPACE_SLUG || "verifika2";
+const LEGACY_TENANT_WORKSPACE_SLUGS = APP_SHARED.LEGACY_TENANT_WORKSPACE_SLUGS || new Set(["modernia", "grupomodernia", "grupo-modernia"]);
+const DEFAULT_TENANT_WORKSPACE_NAME = APP_SHARED.DEFAULT_TENANT_WORKSPACE_NAME || "Verifika²";
+const normalizeSlugLike = useSharedOrFallback("normalizeSlugLike", fallbackNormalizeSlugLike);
+const normalizeTenantWorkspaceSlug = useSharedOrFallback("normalizeTenantWorkspaceSlug", fallbackNormalizeTenantWorkspaceSlug);
+const fetchWithTimeout = useSharedOrFallback("fetchWithTimeout", fallbackFetchWithTimeout);
+const setUiToast = useSharedOrFallback("setUiToast", fallbackSetUiToast);
+const hideUiToast = useSharedOrFallback("hideUiToast", fallbackHideUiToast);
+const probeDbHealth = useSharedOrFallback("probeDbHealth", fallbackProbeDbHealth);
+const sanitizeApiUrl = useSharedOrFallback("sanitizeApiUrl", fallbackSanitizeApiUrl);
+const getDeepLinkParams = useSharedOrFallback("getDeepLinkParams", fallbackGetDeepLinkParams);
+const getDeepLinkToken = useSharedOrFallback("getDeepLinkToken", fallbackGetDeepLinkToken);
+const safeUrlValue = useSharedOrFallback("safeUrlValue", fallbackSafeUrlValue);
+const safeHrefUrl = useSharedOrFallback("safeHrefUrl", fallbackSafeHrefUrl);
+const safeImageUrl = useSharedOrFallback("safeImageUrl", fallbackSafeImageUrl);
+const safeOpenUrl = useSharedOrFallback("safeOpenUrl", fallbackSafeOpenUrl);
+const openBlobInNewTab = useSharedOrFallback("openBlobInNewTab", fallbackOpenBlobInNewTab);
+const fetchBlobFromGet = useSharedOrFallback("fetchBlobFromGet", fallbackFetchBlobFromGet);
 
 const api = async (path, options = {}) => {
   // Fase 5: en modo tenant, evita depender de `empresa_id` global y adjunta `workspace_id`/`workspace_company_id`
@@ -2207,6 +2232,10 @@ const state = {
   gestoriaImportCurrentLotes: [],
   gestoriaImportCurrentDocs: [],
 };
+
+try {
+  window.state = state;
+} catch (e) {}
 
 // Compatibilidad: algunos flujos legacy esperan `empresaId` en ámbito global.
 // Mantenerlo sincronizado evita errores tipo "Can't find variable: empresaId".

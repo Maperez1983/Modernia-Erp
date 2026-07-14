@@ -130,6 +130,55 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
                 server.ocr_image_docai(b"image-bytes", "image/png"),
                 ocr_service.ocr_image_docai(b"image-bytes", "image/png"),
             )
+            self.assertEqual(server.docai_available(), ocr_service.docai_available())
+
+    def test_docai_mapping_helpers_match_new_module(self):
+        doc_fields = {
+            "nombre y apellidos 1": "Ana López",
+            "nombre y apellidos 2": "Luis Pérez",
+            "dni 1": "12345678A",
+            "dni 2": "87654321B",
+            "telefono 1": "600111222",
+            "telefono 2": "600333444",
+            "correo electronico 1": "ana@example.com",
+            "correo electronico 2": "luis@example.com",
+            "fecha nacimiento 1": "1990-01-02",
+            "fecha nacimiento 2": "1992-03-04",
+            "estado civil 1": "Casada",
+            "estado civil 2": "Soltero",
+            "hijos 1": "1",
+            "hijos 2": "0",
+            "profesion 1": "Asesora",
+            "profesion 2": "Consultor",
+            "tipo contrato 1": "Indefinido",
+            "tipo contrato 2": "Temporal",
+            "ingresos nomina 1": "1200",
+            "ingresos nomina 2": "1500",
+            "patrimonio alquiler 1": "0",
+            "patrimonio alquiler 2": "1",
+            "prestamos 1": "0",
+            "prestamos 2": "1",
+        }
+        poliza_fields = {
+            "tomador": "Ana López",
+            "dni": "12345678A",
+            "telefono": "600111222",
+            "correo electronico": "ana@example.com",
+            "direccion": "Calle Falsa 123",
+            "compania": "Aseguradora Demo",
+            "ramo": "Hogar",
+            "poliza": "POL123456",
+            "fecha efecto": "2026-01-01",
+            "fecha vencimiento": "2027-01-01",
+            "prima neta": "120,00",
+            "prima total": "145,20",
+        }
+
+        self.assertEqual(server.map_docai_fields(doc_fields), ocr_service.map_docai_fields(doc_fields))
+        self.assertEqual(
+            server.map_docai_poliza_fields(poliza_fields),
+            ocr_service.map_docai_poliza_fields(poliza_fields),
+        )
 
     def test_fetch_workspace_company_ids_does_not_backfill_every_company(self):
         conn = sqlite3.connect(":memory:")
@@ -219,14 +268,20 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
             )
         with mock.patch.object(public_links.secrets, "token_urlsafe", return_value="fixed-token"):
             self.assertEqual(server.make_signature_token(), public_links.make_signature_token())
-        self.assertEqual(
-            server.hash_signature_token("abc123"),
-            public_links.hash_signature_token("abc123"),
-        )
-        self.assertEqual(
-            server.signature_request_public_payload(payload, token="ignored"),
-            public_links.signature_request_public_payload(payload, token="ignored"),
-        )
+            self.assertEqual(
+                server.hash_signature_token("abc123"),
+                public_links.hash_signature_token("abc123"),
+            )
+            self.assertEqual(
+                server.signature_request_public_payload(payload, token="ignored"),
+                public_links.signature_request_public_payload(payload, token="ignored"),
+            )
+
+    def test_safe_json_object_matches_new_module(self):
+        payload = {"foo": 1, "bar": ["a", "b"]}
+        invalid = "not json"
+        self.assertEqual(server._safe_json_object(payload), security_utils._safe_json_object(payload))
+        self.assertEqual(server._safe_json_object(invalid), security_utils._safe_json_object(invalid))
 
     def test_security_helpers_match_new_module(self):
         with tempfile.TemporaryDirectory() as tmpdir:

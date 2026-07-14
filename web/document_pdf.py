@@ -329,6 +329,207 @@ def build_company_branded_text_document_pdf(company, title, subtitle, body_lines
     )
 
 
+def _legacy_build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=None, company=None, brand_logo_url=None):
+    """
+    Variante de `build_branded_document_pdf` con estética Modernia (logo + banda dorada con título).
+    Se usa para documentos generados (no basados en plantilla) para mantener consistencia visual.
+    """
+    footer_lines = footer_lines or []
+    company = company or {}
+
+    page_width, page_height = 1240, 1754
+    margin_x, top_margin, bottom_margin = 90, 60, 90
+    content_width = page_width - (margin_x * 2)
+    logo_url = brand_logo_url or company.get("logo_url") or "/assets/grupo_modernia_logo.png"
+    # El logo del template Modernia es relativamente compacto; limitamos ancho para evitar solapes.
+    logo = load_brand_logo(logo_url, max_width=340)
+
+    # Paleta aproximada del template Modernia.
+    gold = (200, 162, 74)
+    ink = (25, 28, 31)
+    muted = (110, 116, 120)
+    bg = "white"
+
+    font_title = _document_font(30, bold=True)
+    font_subtitle = _document_font(16, bold=False)
+    font_section = _document_font(22, bold=True)
+    font_body = _document_font(17, bold=False)
+    font_kpi_value = _document_font(26, bold=True)
+    font_kpi_label = _document_font(14, bold=False)
+    font_feature_eyebrow = _document_font(13, bold=True)
+    font_feature_title = _document_font(28, bold=True)
+    font_feature_subtitle = _document_font(16, bold=False)
+    font_feature_note = _document_font(14, bold=False)
+    font_footer = _document_font(15, bold=False)
+    font_header_small = _document_font(14, bold=False)
+
+    company_head = str(company.get("razon_social") or company.get("nombre") or "").strip()
+    company_nif = str(company.get("nif") or company.get("cif") or "").strip()
+    company_addr = str(company.get("direccion_fiscal") or company.get("direccion") or "").strip()
+    company_tel = str(company.get("telefono") or "").strip()
+    company_meta_parts = []
+    if company_head:
+        company_meta_parts.append(company_head)
+    if company_nif:
+        company_meta_parts.append(f"CIF: {company_nif}")
+    if company_addr:
+        company_meta_parts.append(company_addr)
+    if company_tel:
+        company_meta_parts.append(f"Tlf: {company_tel}")
+
+    pages = []
+
+    def _draw_card_box(
+        draw_obj,
+        box,
+        *,
+        outline=None,
+        fill=None,
+        width=2,
+        radius=18,
+        shadow=False,
+        shadow_offset=4,
+        shadow_fill=(234, 236, 239),
+    ):
+        if shadow:
+            sx0, sy0, sx1, sy1 = box[0] + shadow_offset, box[1] + shadow_offset, box[2] + shadow_offset, box[3] + shadow_offset
+            try:
+                draw_obj.rounded_rectangle((sx0, sy0, sx1, sy1), radius=radius, outline=None, fill=shadow_fill, width=1)
+            except Exception:
+                draw_obj.rectangle((sx0, sy0, sx1, sy1), outline=None, fill=shadow_fill, width=1)
+        try:
+            draw_obj.rounded_rectangle(box, radius=radius, outline=outline, fill=fill, width=width)
+        except Exception:
+            draw_obj.rectangle(box, outline=outline, fill=fill, width=width)
+
+    def new_page():
+        image = Image.new("RGB", (page_width, page_height), bg)
+        draw = ImageDraw.Draw(image)
+        y = top_margin
+
+        # Header: logo + meta derecha
+        logo_bottom = y
+        if logo:
+            image.paste(logo, (margin_x, y), logo)
+            logo_bottom = y + logo.height
+        if company_meta_parts:
+            right_x = page_width - margin_x
+            meta_text = " · ".join([p for p in company_meta_parts if p])
+            draw.text((right_x, y + 12), meta_text, fill=muted, font=font_header_small, anchor="ra")
+
+        y = max(logo_bottom + 26, y + 110)
+
+        # Banda título (dorado) en ancho completo (sin remate en otro color).
+        band_h = 62
+        draw.rectangle((0, y, page_width, y + band_h), fill=gold)
+        draw.text((page_width / 2, y + 16), str(title or "").upper(), fill="white", font=font_title, anchor="mm")
+
+        y += band_h + 34
+
+        if subtitle:
+            subtitle_lines, _sub_line_height, sub_height = _pil_multiline(draw, subtitle, font_subtitle, width=96, line_gap=6)
+            draw.multiline_text((margin_x, y), "\n".join(subtitle_lines), fill=muted, font=font_subtitle, spacing=6)
+            y += sub_height + 18
+
+        return image, draw, y
+
+    image, draw, y = new_page()
+    usable_bottom = page_height - bottom_margin
+
+    def ensure_space(required_height):
+        nonlocal image, draw, y
+        if y + required_height <= usable_bottom:
+            return
+        pages.append(image)
+        image, draw, y = new_page()
+
+    def draw_kpi_row(draw_obj, x0, y0, box_w, value, label):
+        box = (x0, y0, x0 + box_w, y0 + 112)
+        _draw_card_box(draw_obj, box, outline=(210, 214, 219), fill=(255, 255, 255), width=2, radius=18, shadow=True)
+        draw_obj.text((x0 + 18, y0 + 18), str(value or "").strip(), fill=ink, font=font_kpi_value)
+        draw_obj.text((x0 + 18, y0 + 72), str(label or "").strip(), fill=muted, font=font_kpi_label)
+
+    def draw_feature_panel(draw_obj, x0, y0, box_w, title_text, subtitle_text, note_text):
+        box_h = 204
+        box = (x0, y0, x0 + box_w, y0 + box_h)
+        _draw_card_box(draw_obj, box, outline=(220, 223, 227), fill=(255, 255, 255), width=2, radius=20, shadow=True, shadow_offset=5)
+        draw_obj.text((x0 + 18, y0 + 20), str("VERIFIKA²" if not title_text else title_text).strip(), fill=gold, font=font_feature_eyebrow)
+        draw_obj.text((x0 + 18, y0 + 54), str(subtitle_text or "").strip(), fill=ink, font=font_feature_title)
+        if note_text:
+            wrapped, _line_height, total_height = _pil_multiline(draw_obj, note_text, font_feature_note, width=max(24, int(box_w / 10)), line_gap=4)
+            draw_obj.multiline_text((x0 + 18, y0 + 112), "\n".join(wrapped), fill=muted, font=font_feature_note, spacing=4)
+        return box_h
+
+    def draw_section_text(draw_obj, x0, y0, title_text, lines, body_font=font_body):
+        y_cursor = y0
+        if title_text:
+            draw_obj.text((x0, y_cursor), str(title_text).strip(), fill=ink, font=font_section)
+            title_box = draw_obj.textbbox((x0, y_cursor), str(title_text).strip(), font=font_section)
+            y_cursor = title_box[3] + 10
+        for line in lines or []:
+            if isinstance(line, (list, tuple)) and len(line) == 2:
+                raw = f"{line[0]}: {line[1]}"
+            else:
+                raw = str(line or "")
+            wrapped, _line_height, total_height = _pil_multiline(draw_obj, raw, body_font, width=94, line_gap=6)
+            draw_obj.multiline_text((x0, y_cursor), "\n".join(wrapped), fill=ink, font=body_font, spacing=6)
+            y_cursor += total_height + 8
+        return y_cursor
+
+    # Portada resumida si el documento aporta títulos/metadata sencillos.
+    title_box = (margin_x, y, page_width - margin_x, y + 250)
+    _draw_card_box(draw, title_box, outline=(226, 229, 233), fill=(255, 255, 255), width=2, radius=24, shadow=True, shadow_offset=8)
+    draw.text((margin_x + 24, y + 26), str(title or "").strip().upper(), fill=ink, font=font_feature_title)
+    if subtitle:
+        subtitle_lines, _line_height, total_height = _pil_multiline(draw, subtitle, font_feature_subtitle, width=92, line_gap=6)
+        draw.multiline_text((margin_x + 24, y + 76), "\n".join(subtitle_lines), fill=muted, font=font_feature_subtitle, spacing=6)
+    if company_head or company_nif or company_addr or company_tel:
+        company_lines = [part for part in [company_head, company_nif and f"CIF {company_nif}", company_addr, company_tel and f"Tlf {company_tel}"] if part]
+        draw_section_text(draw, margin_x + 24, y + 150, "", company_lines, body_font=font_feature_note)
+    y += 276
+
+    # Tarjetas KPI iniciales.
+    if sections:
+        first_section_title = str(sections[0][0] or "").strip()
+    else:
+        first_section_title = ""
+    draw_feature_panel(
+        draw,
+        margin_x,
+        y,
+        content_width,
+        first_section_title or "Documento",
+        str(title or "").strip().title() if title else "Documento",
+        str(subtitle or "").strip(),
+    )
+    y += 224
+
+    for heading, lines in sections:
+        if str(heading or "").strip().upper() in {"__PAGE_BREAK__", "__PAGEBREAK__"} or (
+            isinstance(lines, dict) and str(lines.get("kind") or "").strip().lower() == "page_break"
+        ):
+            pages.append(image)
+            image, draw, y = new_page()
+            continue
+        ensure_space(32)
+        y = draw_section_text(draw, margin_x, y, heading, lines, body_font=font_body)
+        y += 12
+
+    for line in footer_lines:
+        wrapped, _line_height, total_height = _pil_multiline(draw, line, font_footer, width=100, line_gap=5)
+        ensure_space(total_height + 4)
+        draw.multiline_text((margin_x, y), "\n".join(wrapped), fill=muted, font=font_footer, spacing=5)
+        y += total_height + 4
+
+    pages.append(image)
+    buffer = BytesIO()
+    if len(pages) == 1:
+        pages[0].save(buffer, format="PDF", resolution=150.0)
+    else:
+        pages[0].save(buffer, format="PDF", resolution=150.0, save_all=True, append_images=pages[1:])
+    return buffer.getvalue()
+
+
 def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=None, company=None, brand_logo_url=None):
     try:
         from . import server as runtime_server

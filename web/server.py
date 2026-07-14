@@ -378,20 +378,11 @@ def seed_workspace_service_matrix(conn, now=None):
                     pass
 
 
-def _normalize_s3_key(key):
-    return runtime_security_utils._normalize_s3_key(key)
-
-def _iter_s3_legacy_key_candidates(key: str):
-    return runtime_security_utils._iter_s3_legacy_key_candidates(key)
-
-def _is_public_doc_url(value: object) -> bool:
-    return runtime_security_utils._is_public_doc_url(value)
-
-def _looks_like_placeholder_doc_key(value: object) -> bool:
-    return runtime_security_utils._looks_like_placeholder_doc_key(value)
-
-def _normalize_doc_key_for_ui(value: object) -> str:
-    return runtime_security_utils._normalize_doc_key_for_ui(value)
+_normalize_s3_key = runtime_security_utils._normalize_s3_key
+_iter_s3_legacy_key_candidates = runtime_security_utils._iter_s3_legacy_key_candidates
+_is_public_doc_url = runtime_security_utils._is_public_doc_url
+_looks_like_placeholder_doc_key = runtime_security_utils._looks_like_placeholder_doc_key
+_normalize_doc_key_for_ui = runtime_security_utils._normalize_doc_key_for_ui
 
 
 def _doc_link_from_gestoria_doc_row(doc_row):
@@ -928,8 +919,7 @@ AUTH_SESSION_DB_REFRESH_AT = {}
 AUTH_SESSION_DB_REFRESH_SECONDS = max(15, int(os.environ.get("APP_SESSION_DB_REFRESH_SECONDS", "90") or "90"))
 
 
-def _ct_eq(a: str, b: str) -> bool:
-    return runtime_security_utils._ct_eq(a, b)
+_ct_eq = runtime_security_utils._ct_eq
 
 
 def require_ingest_api_key(handler) -> bool:
@@ -5872,8 +5862,7 @@ def build_hipotecas_firmadas_excel_workbook(items, selected_year=None):
     return wb
 
 
-def _safe_json_object(raw):
-    return runtime_security_utils._safe_json_object(raw)
+_safe_json_object = runtime_security_utils._safe_json_object
 
 
 def _get_nested(obj, path, default=""):
@@ -12054,8 +12043,7 @@ def decode_mime_text(raw):
     return "".join(parts).strip()
 
 
-def html_to_text(value):
-    return runtime_security_utils.html_to_text(value)
+html_to_text = runtime_security_utils.html_to_text
 
 
 def extract_pdf_attachment_text(pdf_bytes, max_pages=2):
@@ -18407,8 +18395,7 @@ def ocr_image_file(image_path):
                 except Exception:
                     pass
 
-def _resolve_external_ocr_config() -> tuple[str, str]:
-    return runtime_ocr_service._resolve_external_ocr_config()
+_resolve_external_ocr_config = runtime_ocr_service._resolve_external_ocr_config
 
 
 def ocr_image_external(image_bytes):
@@ -18417,6 +18404,10 @@ def ocr_image_external(image_bytes):
 
 def external_ocr_available():
     return runtime_ocr_service.external_ocr_available(resolver=_resolve_external_ocr_config)
+
+
+def ocr_image_docai(image_bytes, mime_type):
+    return runtime_ocr_service.ocr_image_docai(image_bytes, mime_type, resolver=_resolve_external_ocr_config)
 
 
 def _ocr_tools_status() -> dict:
@@ -18470,101 +18461,10 @@ def _ocr_tools_status() -> dict:
         "docai": {"available": bool(docai_available())},
     }
 
-def docai_available():
-    processor_id = os.environ.get("DOCUMENTAI_PROCESSOR_ID") or os.environ.get("DOC_AI_PROCESSOR_ID")
-    return bool(processor_id)
-
-def normalize_field_label(value):
-    value = value or ""
-    value = value.lower()
-    value = value.replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
-    value = re.sub(r"[^a-z0-9 ]+", " ", value)
-    value = re.sub(r"\s+", " ", value).strip()
-    return value
-
-def ocr_image_docai(image_bytes, mime_type):
-    return runtime_ocr_service.ocr_image_docai(image_bytes, mime_type, resolver=_resolve_external_ocr_config)
-
-def map_docai_fields(doc_fields):
-    doc_fields = doc_fields or {}
-    def doc_pick(label, idx=1):
-        key = f"{label} {idx}"
-        return doc_fields.get(key, "") or doc_fields.get(label, "")
-    fields = {}
-    fields["cliente1_nombre"] = doc_pick("nombre y apellidos", 1) or doc_pick("nombre", 1)
-    fields["cliente2_nombre"] = doc_pick("nombre y apellidos", 2) or doc_pick("nombre", 2)
-    fields["cliente1_dni"] = doc_pick("dni", 1) or doc_pick("nif", 1)
-    fields["cliente2_dni"] = doc_pick("dni", 2) or doc_pick("nif", 2)
-    fields["cliente1_telefono"] = doc_pick("telefono", 1) or doc_pick("movil", 1)
-    fields["cliente2_telefono"] = doc_pick("telefono", 2) or doc_pick("movil", 2)
-    fields["cliente1_email"] = doc_pick("correo electronico", 1) or doc_pick("email", 1)
-    fields["cliente2_email"] = doc_pick("correo electronico", 2) or doc_pick("email", 2)
-    fields["cliente1_fecha_nacimiento"] = doc_pick("fecha nacimiento", 1)
-    fields["cliente2_fecha_nacimiento"] = doc_pick("fecha nacimiento", 2)
-    fields["cliente1_estado_civil"] = doc_pick("estado civil", 1)
-    fields["cliente2_estado_civil"] = doc_pick("estado civil", 2)
-    fields["cliente1_hijos"] = doc_pick("hijos", 1)
-    fields["cliente2_hijos"] = doc_pick("hijos", 2)
-    fields["cliente1_profesion"] = doc_pick("profesion", 1)
-    fields["cliente2_profesion"] = doc_pick("profesion", 2)
-    fields["cliente1_tipo_contrato"] = doc_pick("tipo contrato", 1)
-    fields["cliente2_tipo_contrato"] = doc_pick("tipo contrato", 2)
-    fields["cliente1_ingresos"] = doc_pick("ingresos nomina", 1) or doc_pick("ingresos", 1) or doc_pick("nomina", 1)
-    fields["cliente2_ingresos"] = doc_pick("ingresos nomina", 2) or doc_pick("ingresos", 2) or doc_pick("nomina", 2)
-    fields["cliente1_patrimonio"] = doc_pick("patrimonio alquiler", 1)
-    fields["cliente2_patrimonio"] = doc_pick("patrimonio alquiler", 2)
-    fields["cliente1_prestamos"] = doc_pick("prestamos", 1)
-    fields["cliente2_prestamos"] = doc_pick("prestamos", 2)
-    return fields
-
-def map_docai_poliza_fields(doc_fields):
-    doc_fields = doc_fields or {}
-    def doc_pick(labels):
-        for label in labels:
-            key = normalize_field_label(label)
-            if doc_fields.get(key):
-                return doc_fields.get(key)
-        return ""
-    fields = {}
-    fields["tomador"] = doc_pick([
-        "tomador",
-        "asegurado",
-        "asegurado principal",
-        "titular",
-        "contratante",
-        "nombre",
-        "nombre y apellidos",
-    ])
-    fields["dni"] = doc_pick(["dni", "nif", "cif", "documento", "doc identificacion"])
-    fields["telefono"] = doc_pick(["telefono", "móvil", "movil"])
-    fields["email"] = doc_pick(["correo electronico", "email"])
-    fields["direccion"] = doc_pick(["direccion", "domicilio"])
-    fields["compania"] = doc_pick(["compania", "compañia", "aseguradora", "entidad aseguradora"])
-    fields["ramo"] = doc_pick(["ramo", "modalidad", "producto"])
-    fields["poliza_numero"] = doc_pick([
-        "poliza",
-        "numero poliza",
-        "nº poliza",
-        "número poliza",
-        "certificado",
-        "contrato",
-    ])
-    fields["fecha_efecto"] = doc_pick([
-        "fecha efecto",
-        "efecto",
-        "inicio vigencia",
-        "fecha inicio",
-        "vigencia desde",
-    ])
-    fields["fecha_vencimiento"] = doc_pick([
-        "fecha vencimiento",
-        "vencimiento",
-        "fin vigencia",
-        "vigencia hasta",
-    ])
-    fields["prima_neta"] = doc_pick(["prima neta", "neta"])
-    fields["prima_total"] = doc_pick(["prima total", "prima anual", "total recibo", "total"])
-    return fields
+docai_available = runtime_ocr_service.docai_available
+normalize_field_label = runtime_ocr_service.normalize_field_label
+map_docai_fields = runtime_ocr_service.map_docai_fields
+map_docai_poliza_fields = runtime_ocr_service.map_docai_poliza_fields
 
 def compute_ocr_quality(fields, required_keys=None):
     fields = fields or {}
@@ -18901,28 +18801,17 @@ def call_openai_content(user_content, model=None, temperature=0.0, max_tokens=70
     return extract_openai_output(res), ""
 
 
-def _is_ip_literal(hostname):
-    return runtime_security_utils._is_ip_literal(hostname)
-
-
-def _is_disallowed_hostname(hostname):
-    return runtime_security_utils._is_disallowed_hostname(hostname)
+_is_ip_literal = runtime_security_utils._is_ip_literal
+_is_disallowed_hostname = runtime_security_utils._is_disallowed_hostname
 
 
 def _domain_is_allowed(hostname):
     return runtime_security_utils._domain_is_allowed(hostname, COPILOT_WEB_ALLOWED_DOMAINS)
 
 
-def _hostname_resolves_to_disallowed_ip(hostname):
-    return runtime_security_utils._hostname_resolves_to_disallowed_ip(hostname)
-
-
-def _html_to_text(html_text):
-    return runtime_security_utils._html_to_text(html_text)
-
-
-def _extract_title(html_text):
-    return runtime_security_utils._extract_title(html_text)
+_hostname_resolves_to_disallowed_ip = runtime_security_utils._hostname_resolves_to_disallowed_ip
+_html_to_text = runtime_security_utils._html_to_text
+_extract_title = runtime_security_utils._extract_title
 
 
 def copilot_web_fetch_url(url, *, timeout_seconds=None, max_bytes=None, max_chars=None, now=None):
@@ -25134,24 +25023,11 @@ def ensure_inmueble_signature_schema(conn):
         pass
 
 
-def configured_app_base_url():
-    return runtime_public_links.configured_app_base_url()
-
-
-def resolve_public_link_base_url(base_url=""):
-    return runtime_public_links.resolve_public_link_base_url(base_url)
-
-
-def build_public_fragment_url(fragment_key, token, base_url="", path=""):
-    return runtime_public_links.build_public_fragment_url(fragment_key, token, base_url=base_url, path=path)
-
-
-def hash_signature_token(raw):
-    return runtime_public_links.hash_signature_token(raw)
-
-
-def make_signature_token():
-    return runtime_public_links.make_signature_token()
+configured_app_base_url = runtime_public_links.configured_app_base_url
+resolve_public_link_base_url = runtime_public_links.resolve_public_link_base_url
+build_public_fragment_url = runtime_public_links.build_public_fragment_url
+hash_signature_token = runtime_public_links.hash_signature_token
+make_signature_token = runtime_public_links.make_signature_token
 
 
 def _signature_request_row_by_token(conn, token):
@@ -25218,8 +25094,7 @@ def record_signature_event(conn, request_id, event, handler=None, details=None, 
     )
 
 
-def signature_request_public_payload(row, token=""):
-    return runtime_public_links.signature_request_public_payload(row, token=token)
+signature_request_public_payload = runtime_public_links.signature_request_public_payload
 
 
 def create_inmueble_signature_request(
@@ -52211,8 +52086,7 @@ def send_file(handler, path):
         handler.wfile.write(b"Failed to read file")
 
 
-def safe_resolve_under(base_dir, rel_path):
-    return runtime_security_utils.safe_resolve_under(base_dir, rel_path)
+safe_resolve_under = runtime_security_utils.safe_resolve_under
 
 
 class DbMismatchError(RuntimeError):
@@ -53829,6 +53703,7 @@ class Handler(BaseHTTPRequestHandler):
             "ui-foundation.js",
             "app-auth.js",
             "app-routing.js",
+            "app_shared.js",
             "app.js",
             "manifest.webmanifest",
             "sw.js",

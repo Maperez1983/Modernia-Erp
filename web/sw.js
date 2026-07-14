@@ -17,7 +17,8 @@ const SHELL_URLS = [
   "/ui-foundation.js?v=4",
   "/app-auth.js?v=16",
   "/app-routing.js?v=13",
-  "/app.js?v=788",
+  "/app_shared.js?v=1",
+  "/app.js?v=789",
   "/manifest.webmanifest?v=17",
   "/icons/catastro.png?v=28",
   "/assets/verifika2/verifika2_mark.svg",
@@ -54,7 +55,7 @@ const isCacheablePath = (pathname) => {
 };
 
 const normalizeCacheKey = (request) => {
-  // Keep versioned URLs for CSS/JS so deployments (e.g. app.js?v=788) bust caches reliably.
+  // Keep versioned URLs for CSS/JS so deployments (e.g. app.js?v=789) bust caches reliably.
   // We only normalize images/icons where query params are usually irrelevant.
   try {
     const url = new URL(request.url);
