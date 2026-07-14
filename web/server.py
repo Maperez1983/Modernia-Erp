@@ -19446,50 +19446,36 @@ def ocr_image_file(image_path):
                 except Exception:
                     pass
 
+def _resolve_external_ocr_config() -> tuple[str, str]:
+    credentials_path = ""
+    for env_name in ("OCR_GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS"):
+        raw_path = _env_first_line(env_name)
+        if not raw_path:
+            continue
+        try:
+            candidate = Path(raw_path).expanduser()
+        except Exception:
+            continue
+        if not candidate.is_absolute():
+            continue
+        try:
+            if not candidate.exists() or not candidate.is_file():
+                continue
+        except Exception:
+            continue
+        suffix = candidate.suffix.lower()
+        if suffix and suffix != ".json":
+            continue
+        credentials_path = str(candidate)
+        break
+    api_key = _env_first_line("GOOGLE_VISION_API_KEY") or _env_first_line("VISION_API_KEY")
+    if api_key:
+        api_key = api_key.split()[0].strip()
+    return credentials_path, api_key
+
+
 def ocr_image_external(image_bytes):
-    def _resolve_credentials_path():
-        candidates = []
-        env_path = _env_first_line("GOOGLE_APPLICATION_CREDENTIALS")
-        if env_path:
-            candidates.append(env_path)
-        # Fallbacks: allow bundling the service account in the repo (local/dev) or in the working dir (Render buildpack).
-        candidates.append(str((ROOT.parent / "vision-sa.json").resolve()))
-        candidates.append(str((ROOT / "vision-sa.json").resolve()))
-        try:
-            candidates.append(str((Path.cwd() / "vision-sa.json").resolve()))
-        except Exception:
-            pass
-        for candidate in candidates:
-            if candidate and os.path.exists(candidate):
-                return candidate
-        return ""
-
-    def _env_first_line(name):
-        raw = os.environ.get(name)
-        if raw in (None, ""):
-            return ""
-        try:
-            raw = str(raw)
-        except Exception:
-            return ""
-        for line in raw.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            # Evita que variables mal exportadas (con nuevas líneas) rompan URLs o paths.
-            if line.startswith("export "):
-                continue
-            return line.strip().strip('"').strip("'")
-        return str(raw).strip().strip('"').strip("'")
-
-    def _env_first_token(name):
-        line = _env_first_line(name)
-        if not line:
-            return ""
-        return line.split()[0].strip()
-
-    credentials_path = _resolve_credentials_path()
-    api_key = _env_first_token("GOOGLE_VISION_API_KEY") or _env_first_token("VISION_API_KEY")
+    credentials_path, api_key = _resolve_external_ocr_config()
     auth_header = None
     if credentials_path and os.path.exists(credentials_path):
         try:
@@ -19544,47 +19530,7 @@ def external_ocr_available():
     flag = (os.environ.get("OCR_EXTERNAL_ENABLED", "1") or "").strip().lower()
     if flag in {"0", "false", "no", "off"}:
         return False
-    def _resolve_credentials_path():
-        candidates = []
-        env_path = _env_first_line("GOOGLE_APPLICATION_CREDENTIALS")
-        if env_path:
-            candidates.append(env_path)
-        candidates.append(str((ROOT.parent / "vision-sa.json").resolve()))
-        candidates.append(str((ROOT / "vision-sa.json").resolve()))
-        try:
-            candidates.append(str((Path.cwd() / "vision-sa.json").resolve()))
-        except Exception:
-            pass
-        for candidate in candidates:
-            if candidate and os.path.exists(candidate):
-                return candidate
-        return ""
-
-    def _env_first_line(name):
-        raw = os.environ.get(name)
-        if raw in (None, ""):
-            return ""
-        try:
-            raw = str(raw)
-        except Exception:
-            return ""
-        for line in raw.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith("export "):
-                continue
-            return line.strip().strip('"').strip("'")
-        return str(raw).strip().strip('"').strip("'")
-
-    def _env_first_token(name):
-        line = _env_first_line(name)
-        if not line:
-            return ""
-        return line.split()[0].strip()
-
-    credentials_path = _resolve_credentials_path()
-    api_key = _env_first_token("GOOGLE_VISION_API_KEY") or _env_first_token("VISION_API_KEY")
+    credentials_path, api_key = _resolve_external_ocr_config()
     return bool(api_key) or (credentials_path and os.path.exists(credentials_path))
 
 
@@ -19622,24 +19568,9 @@ def _ocr_tools_status() -> dict:
             "/usr/local/bin/ocrmypdf",
         ]
     )
-    creds_paths = []
-    try:
-        env_creds = (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
-        if env_creds:
-            creds_paths.append(env_creds.splitlines()[0].strip().strip('"').strip("'"))
-    except Exception:
-        pass
-    try:
-        creds_paths.append(str((ROOT.parent / "vision-sa.json").resolve()))
-        creds_paths.append(str((ROOT / "vision-sa.json").resolve()))
-    except Exception:
-        pass
-    try:
-        creds_paths.append(str((Path.cwd() / "vision-sa.json").resolve()))
-    except Exception:
-        pass
-    has_creds_file = any(p and os.path.exists(p) for p in creds_paths)
-    has_api_key = bool((os.environ.get("GOOGLE_VISION_API_KEY") or os.environ.get("VISION_API_KEY") or "").strip())
+    creds_path, api_key = _resolve_external_ocr_config()
+    has_creds_file = bool(creds_path)
+    has_api_key = bool(api_key)
     return {
         "tesseract": {"exists": bool(tesseract_cmd and os.path.exists(tesseract_cmd)), "cmd": tesseract_cmd or ""},
         "pdftoppm": {"exists": bool(pdftoppm_cmd), "cmd": pdftoppm_cmd or ""},
@@ -19667,7 +19598,7 @@ def normalize_field_label(value):
     return value
 
 def ocr_image_docai(image_bytes, mime_type):
-    credentials_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    credentials_path, _ = _resolve_external_ocr_config()
     if not credentials_path or not os.path.exists(credentials_path):
         return "", {}, "Document AI: credenciales no configuradas"
     processor_id = os.environ.get("DOCUMENTAI_PROCESSOR_ID") or os.environ.get("DOC_AI_PROCESSOR_ID")

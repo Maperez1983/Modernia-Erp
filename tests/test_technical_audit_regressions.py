@@ -2,6 +2,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
@@ -9,6 +10,115 @@ from web import server
 
 
 class TechnicalAuditRegressionTests(unittest.TestCase):
+    def test_resolve_external_ocr_config_prefers_explicit_env_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            explicit_path = tmp_path / "explicit-creds.json"
+            standard_path = tmp_path / "standard-creds.json"
+            explicit_path.write_text("{}", encoding="utf-8")
+            standard_path.write_text("{}", encoding="utf-8")
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "OCR_GOOGLE_APPLICATION_CREDENTIALS": str(explicit_path),
+                    "GOOGLE_APPLICATION_CREDENTIALS": str(standard_path),
+                },
+                clear=True,
+            ):
+                self.assertEqual(
+                    server._resolve_external_ocr_config(),
+                    (str(explicit_path), ""),
+                )
+
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "GOOGLE_APPLICATION_CREDENTIALS": str(standard_path),
+                },
+                clear=True,
+            ):
+                self.assertEqual(
+                    server._resolve_external_ocr_config(),
+                    (str(standard_path), ""),
+                )
+
+    def test_resolve_external_ocr_config_rejects_missing_directory_and_non_json_paths(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            missing_path = tmp_path / "missing-creds.json"
+            directory_path = tmp_path / "creds-dir"
+            non_json_path = tmp_path / "creds.txt"
+            directory_path.mkdir()
+            non_json_path.write_text("{}", encoding="utf-8")
+
+            with mock.patch.dict(
+                os.environ,
+                {"OCR_GOOGLE_APPLICATION_CREDENTIALS": str(missing_path)},
+                clear=True,
+            ):
+                self.assertEqual(server._resolve_external_ocr_config(), ("", ""))
+
+            with mock.patch.dict(
+                os.environ,
+                {"OCR_GOOGLE_APPLICATION_CREDENTIALS": str(directory_path)},
+                clear=True,
+            ):
+                self.assertEqual(server._resolve_external_ocr_config(), ("", ""))
+
+            with mock.patch.dict(
+                os.environ,
+                {"OCR_GOOGLE_APPLICATION_CREDENTIALS": str(non_json_path)},
+                clear=True,
+            ):
+                self.assertEqual(server._resolve_external_ocr_config(), ("", ""))
+
+    def test_resolve_external_ocr_config_returns_empty_without_variables(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(server._resolve_external_ocr_config(), ("", ""))
+
+    def test_resolve_external_ocr_config_does_not_autodiscover_vision_sa_json(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            web_root = tmp_path / "web"
+            web_root.mkdir()
+            (tmp_path / "vision-sa.json").write_text("{}", encoding="utf-8")
+
+            with mock.patch.object(server, "ROOT", web_root):
+                cwd_error = AssertionError("cwd lookup is not allowed")
+                with mock.patch.object(server.Path, "cwd", side_effect=cwd_error):
+                    with mock.patch.dict(os.environ, {}, clear=True):
+                        self.assertEqual(server._resolve_external_ocr_config(), ("", ""))
+
+    def test_external_ocr_functions_share_credentials_helper(self):
+        fake_response = mock.MagicMock()
+        fake_response.read.return_value = (
+            b'{"responses":[{"fullTextAnnotation":{"text":"OCR OK"}}]}'
+        )
+        fake_response.__enter__.return_value = fake_response
+        fake_response.__exit__.return_value = None
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = Path(tmpdir)
+            explicit_path = tmp_path / "explicit-creds.json"
+            explicit_path.write_text("{}", encoding="utf-8")
+            helper = mock.Mock(
+                side_effect=[
+                    (str(explicit_path), ""),
+                    ("", "vision-key"),
+                ]
+            )
+
+            with mock.patch.object(server, "_resolve_external_ocr_config", helper):
+                with mock.patch.object(server.urllib.request, "urlopen", return_value=fake_response) as urlopen_mock:
+                    self.assertTrue(server.external_ocr_available())
+                    text, err = server.ocr_image_external(b"image-bytes")
+
+        self.assertEqual(text, "OCR OK")
+        self.assertEqual(err, "")
+        self.assertEqual(helper.call_count, 2)
+        self.assertEqual(urlopen_mock.call_count, 1)
+
     def test_fetch_workspace_company_ids_does_not_backfill_every_company(self):
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
