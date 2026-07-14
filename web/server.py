@@ -98,6 +98,16 @@ except Exception:
     load_workbook = None
     OPENPYXL_AVAILABLE = False
 
+try:
+    from . import ocr_service as runtime_ocr_service
+except ImportError:
+    import ocr_service as runtime_ocr_service
+
+try:
+    from . import public_links as runtime_public_links
+except ImportError:
+    import public_links as runtime_public_links
+
 
 ROOT = Path(__file__).resolve().parent
 ASSETS = ROOT.parent / "assets"
@@ -19454,91 +19464,15 @@ def ocr_image_file(image_path):
                     pass
 
 def _resolve_external_ocr_config() -> tuple[str, str]:
-    credentials_path = ""
-    for env_name in ("OCR_GOOGLE_APPLICATION_CREDENTIALS", "GOOGLE_APPLICATION_CREDENTIALS"):
-        raw_path = _env_first_line(env_name)
-        if not raw_path:
-            continue
-        try:
-            candidate = Path(raw_path).expanduser()
-        except Exception:
-            continue
-        if not candidate.is_absolute():
-            continue
-        try:
-            if not candidate.exists() or not candidate.is_file():
-                continue
-        except Exception:
-            continue
-        suffix = candidate.suffix.lower()
-        if suffix and suffix != ".json":
-            continue
-        credentials_path = str(candidate)
-        break
-    api_key = _env_first_line("GOOGLE_VISION_API_KEY") or _env_first_line("VISION_API_KEY")
-    if api_key:
-        api_key = api_key.split()[0].strip()
-    return credentials_path, api_key
+    return runtime_ocr_service._resolve_external_ocr_config()
 
 
 def ocr_image_external(image_bytes):
-    credentials_path, api_key = _resolve_external_ocr_config()
-    auth_header = None
-    if credentials_path and os.path.exists(credentials_path):
-        try:
-            from google.oauth2 import service_account
-            from google.auth.transport.requests import Request
-        except Exception:
-            return "", "OCR externo: instala google-auth y requests (pip install google-auth requests)"
-        try:
-            creds = service_account.Credentials.from_service_account_file(
-                credentials_path,
-                scopes=["https://www.googleapis.com/auth/cloud-platform"],
-            )
-            creds.refresh(Request())
-            auth_header = f"Bearer {creds.token}"
-        except Exception as err:
-            return "", f"OCR externo: credenciales inválidas ({err})"
-    elif not api_key:
-        return "", "OCR externo no configurado"
-    payload = {
-        "requests": [
-            {
-                "image": {"content": base64.b64encode(image_bytes).decode("utf-8")},
-                "features": [{"type": "DOCUMENT_TEXT_DETECTION"}],
-            }
-        ]
-    }
-    data = json.dumps(payload).encode("utf-8")
-    if auth_header:
-        url = "https://vision.googleapis.com/v1/images:annotate"
-        headers = {"Content-Type": "application/json", "Authorization": auth_header}
-    else:
-        url = f"https://vision.googleapis.com/v1/images:annotate?key={api_key}"
-        headers = {"Content-Type": "application/json"}
-    req = urllib.request.Request(url, data=data, headers=headers)
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            res = json.loads(resp.read().decode("utf-8"))
-    except Exception as err:
-        msg = str(err)
-        if api_key and api_key in msg:
-            msg = msg.replace(api_key, "***")
-        return "", f"OCR externo: {msg}"
-    try:
-        text = res["responses"][0].get("fullTextAnnotation", {}).get("text", "") or ""
-        if not str(text).strip():
-            return "", "OCR externo: sin texto"
-        return text, ""
-    except Exception:
-        return "", "OCR externo: sin texto"
+    return runtime_ocr_service.ocr_image_external(image_bytes, resolver=_resolve_external_ocr_config)
+
 
 def external_ocr_available():
-    flag = (os.environ.get("OCR_EXTERNAL_ENABLED", "1") or "").strip().lower()
-    if flag in {"0", "false", "no", "off"}:
-        return False
-    credentials_path, api_key = _resolve_external_ocr_config()
-    return bool(api_key) or (credentials_path and os.path.exists(credentials_path))
+    return runtime_ocr_service.external_ocr_available(resolver=_resolve_external_ocr_config)
 
 
 def _ocr_tools_status() -> dict:
@@ -19605,111 +19539,7 @@ def normalize_field_label(value):
     return value
 
 def ocr_image_docai(image_bytes, mime_type):
-    credentials_path, _ = _resolve_external_ocr_config()
-    if not credentials_path or not os.path.exists(credentials_path):
-        return "", {}, "Document AI: credenciales no configuradas"
-    processor_id = os.environ.get("DOCUMENTAI_PROCESSOR_ID") or os.environ.get("DOC_AI_PROCESSOR_ID")
-    if not processor_id:
-        return "", {}, "Document AI: falta DOCUMENTAI_PROCESSOR_ID"
-    location = os.environ.get("DOCUMENTAI_LOCATION") or "eu"
-    try:
-        from google.oauth2 import service_account
-        from google.auth.transport.requests import Request
-    except Exception:
-        return "", {}, "Document AI: instala google-auth y requests"
-    try:
-        creds = service_account.Credentials.from_service_account_file(
-            credentials_path,
-            scopes=["https://www.googleapis.com/auth/cloud-platform"],
-        )
-        creds.refresh(Request())
-        project_id = creds.project_id
-    except Exception as err:
-        return "", {}, f"Document AI: credenciales inválidas ({err})"
-    if not project_id:
-        return "", {}, "Document AI: project_id no encontrado"
-    url = (
-        f"https://{location}-documentai.googleapis.com/v1/projects/{project_id}"
-        f"/locations/{location}/processors/{processor_id}:process"
-    )
-    payload = {
-        "rawDocument": {
-            "content": base64.b64encode(image_bytes).decode("utf-8"),
-            "mimeType": mime_type or "image/jpeg",
-        }
-    }
-    data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {creds.token}"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=25) as resp:
-            res = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as err:
-        try:
-            detail = err.read().decode("utf-8")
-        except Exception:
-            detail = ""
-        return "", {}, f"Document AI: {err} {detail}".strip()
-    except Exception as err:
-        return "", {}, f"Document AI: {err}"
-    doc = res.get("document") or {}
-    text = doc.get("text", "")
-    fields = {}
-    occurrences = {}
-    for field in doc.get("pages", []) or []:
-        for form_field in field.get("formFields", []) or []:
-            name_text = ""
-            value_text = ""
-            name = form_field.get("fieldName", {}).get("textAnchor", {}).get("textSegments", [])
-            for seg in name:
-                try:
-                    start = int(seg.get("startIndex", 0))
-                    end = int(seg.get("endIndex", 0))
-                    name_text += text[start:end]
-                except Exception:
-                    continue
-            value = form_field.get("fieldValue", {}).get("textAnchor", {}).get("textSegments", [])
-            for seg in value:
-                try:
-                    start = int(seg.get("startIndex", 0))
-                    end = int(seg.get("endIndex", 0))
-                    value_text += text[start:end]
-                except Exception:
-                    continue
-            label = normalize_field_label(name_text)
-            val = value_text.strip()
-            if not label or not val:
-                continue
-            occurrences[label] = occurrences.get(label, 0) + 1
-            key = label
-            if label in (
-                "nombre y apellidos",
-                "nombre apellidos",
-                "nombre",
-                "dni",
-                "nif",
-                "telefono",
-                "movil",
-                "correo electronico",
-                "email",
-                "fecha nacimiento",
-                "estado civil",
-                "hijos",
-                "profesion",
-                "tipo contrato",
-                "ingresos nomina",
-                "ingresos",
-                "nomina",
-                "patrimonio alquiler",
-                "prestamos",
-            ):
-                suffix = "1" if occurrences[label] == 1 else "2"
-                key = f"{label} {suffix}"
-            fields[key] = val
-    return text, fields, ""
+    return runtime_ocr_service.ocr_image_docai(image_bytes, mime_type, resolver=_resolve_external_ocr_config)
 
 def map_docai_fields(doc_fields):
     doc_fields = doc_fields or {}
@@ -26426,12 +26256,24 @@ def ensure_inmueble_signature_schema(conn):
         pass
 
 
+def configured_app_base_url():
+    return runtime_public_links.configured_app_base_url()
+
+
+def resolve_public_link_base_url(base_url=""):
+    return runtime_public_links.resolve_public_link_base_url(base_url)
+
+
+def build_public_fragment_url(fragment_key, token, base_url="", path=""):
+    return runtime_public_links.build_public_fragment_url(fragment_key, token, base_url=base_url, path=path)
+
+
 def hash_signature_token(raw):
-    return hashlib.sha256(str(raw or "").encode("utf-8")).hexdigest()
+    return runtime_public_links.hash_signature_token(raw)
 
 
 def make_signature_token():
-    return secrets.token_urlsafe(32)
+    return runtime_public_links.make_signature_token()
 
 
 def _signature_request_row_by_token(conn, token):
@@ -26499,27 +26341,7 @@ def record_signature_event(conn, request_id, event, handler=None, details=None, 
 
 
 def signature_request_public_payload(row, token=""):
-    if not row:
-        return None
-    data = dict(row)
-    public = {
-        "id": data.get("id") or "",
-        "inmueble_id": data.get("inmueble_id") or "",
-        "doc_nombre": data.get("doc_nombre") or "Documento",
-        "doc_url": data.get("doc_url") or "",
-        "signer_nombre": data.get("signer_nombre") or "",
-        "signer_nif": data.get("signer_nif") or "",
-        "signer_email": data.get("signer_email") or "",
-        "purpose": data.get("purpose") or "Firma electrónica interna",
-        "status": data.get("status") or "pending",
-        "otp_required": bool(int(data.get("otp_required") or 0)),
-        "expires_at": data.get("expires_at") or "",
-        "opened_at": data.get("opened_at") or "",
-        "signed_at": data.get("signed_at") or "",
-        "signed_doc_url": data.get("signed_doc_url") or "",
-        "doc_public_url": "/api/inmueble_signature_document",
-    }
-    return public
+    return runtime_public_links.signature_request_public_payload(row, token=token)
 
 
 def create_inmueble_signature_request(
@@ -26610,7 +26432,7 @@ def create_inmueble_signature_request(
     return {
         "id": request_id,
         "token": token,
-        "public_url": f"/#firma_inmo={urllib.parse.quote(token)}",
+        "public_url": build_public_fragment_url("firma_inmo", token),
         "otp": otp,
         "expires_at": expires_at,
     }
@@ -26630,9 +26452,8 @@ def send_inmueble_signature_email(conn, request_row, *, token, otp="", base_url=
             now=now,
         )
         return {"sent": False, "reason": "smtp_no_configurado"}
-    base = str(base_url or os.environ.get("APP_BASE_URL") or os.environ.get("PUBLIC_URL") or "").strip().rstrip("/")
-    public_url = f"/#firma_inmo={urllib.parse.quote(str(token or ''))}"
-    full_url = f"{base}{public_url}" if base else public_url
+    base = resolve_public_link_base_url(base_url)
+    full_url = build_public_fragment_url("firma_inmo", token, base_url=base)
     subject = "Recordatorio de firma electrónica" if reminder else "Solicitud de firma electrónica"
     doc_name = str(row.get("doc_nombre") or "documento").strip()
     signer = str(row.get("signer_nombre") or "").strip()
@@ -26690,9 +26511,8 @@ def send_signature_webhook_message(conn, request_row, *, token, otp="", base_url
             now=now,
         )
         return {"sent": False, "reason": "webhook_no_configurado", "channel": channel}
-    base = str(base_url or os.environ.get("APP_BASE_URL") or os.environ.get("PUBLIC_URL") or "").strip().rstrip("/")
-    public_url = f"/#firma_inmo={urllib.parse.quote(str(token or ''))}"
-    full_url = f"{base}{public_url}" if base else public_url
+    base = resolve_public_link_base_url(base_url)
+    full_url = build_public_fragment_url("firma_inmo", token, base_url=base)
     message = f"Firma pendiente: {row.get('doc_nombre') or 'documento'}. Enlace: {full_url}"
     if otp:
         message += f" OTP: {otp}"
@@ -54579,18 +54399,7 @@ class Handler(BaseHTTPRequestHandler):
         }
 
     def _external_base_url(self):
-        # Prefer explicit public base URL (Render/custom domain).
-        configured = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
-        if configured:
-            return configured
-        # Some platforms expose the public URL via env vars.
-        for env_key in ("RENDER_EXTERNAL_URL", "PUBLIC_BASE_URL", "PUBLIC_URL", "APP_PUBLIC_URL"):
-            value = (os.environ.get(env_key) or "").strip().rstrip("/")
-            if value:
-                return value
-        # No inferimos el host desde cabeceras de la petición: eso permitiría
-        # generar enlaces con tokens apuntando a un dominio controlado por el cliente.
-        return "http://localhost:8000"
+        return runtime_public_links.external_base_url()
 
     def _require_api_auth(self):
         session = self._current_session()
@@ -60229,7 +60038,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 json_response(self, {"error": "No se pudo confirmar la invitación (DB no disponible). Reintenta."}, status=503)
                 return
-            invite_link = f"{self._external_base_url()}/#activar_token={urllib.parse.quote(token)}"
+            invite_link = build_public_fragment_url("activar_token", token, base_url=self._external_base_url())
             sent = False
             mail_error = None
             try:
@@ -62045,7 +61854,7 @@ class Handler(BaseHTTPRequestHandler):
                 ("C.anca", "modernia.centro@grupomodernia.es", "C", "Anca", "Administración", "Administrador", ws_centro, "Owner"),
             ]
 
-            base_url = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/") or ""
+            base_url = configured_app_base_url()
             created = []
             updated = []
             memberships = []
@@ -62136,7 +61945,7 @@ class Handler(BaseHTTPRequestHandler):
                             """,
                             (token, user_id, expires_at, "seed_modernia_users"),
                         )
-                        url = f"{base_url}/#activar_token={urllib.parse.quote(token)}" if base_url else f"/#activar_token={urllib.parse.quote(token)}"
+                        url = build_public_fragment_url("activar_token", token, base_url=base_url)
                         invites.append({"usuario": usuario_value, "email": email_value, "activar_url": url})
                     except Exception:
                         pass
@@ -62168,7 +61977,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "API error", "detail": Handler._safe_exc_detail(exc)}, status=500)
                 return
             token = str(result.get("token") or "").strip()
-            url = f"{self._external_base_url()}/#activar_token={urllib.parse.quote(token)}"
+            url = build_public_fragment_url("activar_token", token, base_url=self._external_base_url())
             json_response(
                 self,
                 {
@@ -63921,8 +63730,8 @@ class Handler(BaseHTTPRequestHandler):
                 (token, now, workspace_id, persona_id),
             )
             conn.commit()
-            base_url = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
-            kiosk_url = f"{base_url}/kiosk#token={urllib.parse.quote(token)}" if base_url else f"/kiosk#token={urllib.parse.quote(token)}"
+            base_url = configured_app_base_url()
+            kiosk_url = build_public_fragment_url("token", token, base_url=base_url, path="/kiosk")
             json_response(self, {"ok": True, "persona_id": persona_id, "persona_nombre": str(row_value(row, "nombre") or "").strip(), "token": token, "kiosk_url": kiosk_url})
             return
         elif parsed.path == "/api/workspace_kiosk_toggle":
@@ -72842,7 +72651,7 @@ class Handler(BaseHTTPRequestHandler):
             response = {
                 "ok": True,
                 "id": request_id,
-                "public_url": f"/#firma_inmo={urllib.parse.quote(token)}",
+                "public_url": build_public_fragment_url("firma_inmo", token),
                 "email": email_result,
                 "sms": sms_result,
                 "whatsapp": whatsapp_result,
@@ -79644,7 +79453,7 @@ class Handler(BaseHTTPRequestHandler):
                     (token, now, workspace_id, persona_id),
                 )
                 conn.commit()
-            url = f"{self._external_base_url()}/kiosk#token={urllib.parse.quote(token)}"
+            url = build_public_fragment_url("token", token, base_url=self._external_base_url(), path="/kiosk")
             try:
                 import qrcode
             except Exception as exc:

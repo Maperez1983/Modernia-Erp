@@ -6,6 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from web import ocr_service
+from web import public_links
 from web import server
 
 
@@ -26,10 +28,9 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
                 },
                 clear=True,
             ):
-                self.assertEqual(
-                    server._resolve_external_ocr_config(),
-                    (str(explicit_path), ""),
-                )
+                expected = (str(explicit_path), "")
+                self.assertEqual(server._resolve_external_ocr_config(), expected)
+                self.assertEqual(ocr_service._resolve_external_ocr_config(), expected)
 
             with mock.patch.dict(
                 os.environ,
@@ -38,10 +39,9 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
                 },
                 clear=True,
             ):
-                self.assertEqual(
-                    server._resolve_external_ocr_config(),
-                    (str(standard_path), ""),
-                )
+                expected = (str(standard_path), "")
+                self.assertEqual(server._resolve_external_ocr_config(), expected)
+                self.assertEqual(ocr_service._resolve_external_ocr_config(), expected)
 
     def test_resolve_external_ocr_config_rejects_missing_directory_and_non_json_paths(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -58,6 +58,7 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
                 clear=True,
             ):
                 self.assertEqual(server._resolve_external_ocr_config(), ("", ""))
+                self.assertEqual(ocr_service._resolve_external_ocr_config(), ("", ""))
 
             with mock.patch.dict(
                 os.environ,
@@ -65,6 +66,7 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
                 clear=True,
             ):
                 self.assertEqual(server._resolve_external_ocr_config(), ("", ""))
+                self.assertEqual(ocr_service._resolve_external_ocr_config(), ("", ""))
 
             with mock.patch.dict(
                 os.environ,
@@ -72,10 +74,12 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
                 clear=True,
             ):
                 self.assertEqual(server._resolve_external_ocr_config(), ("", ""))
+                self.assertEqual(ocr_service._resolve_external_ocr_config(), ("", ""))
 
     def test_resolve_external_ocr_config_returns_empty_without_variables(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertEqual(server._resolve_external_ocr_config(), ("", ""))
+            self.assertEqual(ocr_service._resolve_external_ocr_config(), ("", ""))
 
     def test_resolve_external_ocr_config_does_not_autodiscover_vision_sa_json(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -87,10 +91,12 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
             with mock.patch.object(server, "ROOT", web_root):
                 cwd_error = AssertionError("cwd lookup is not allowed")
                 with mock.patch.object(server.Path, "cwd", side_effect=cwd_error):
-                    with mock.patch.dict(os.environ, {}, clear=True):
-                        self.assertEqual(server._resolve_external_ocr_config(), ("", ""))
+                    with mock.patch.object(ocr_service.Path, "cwd", side_effect=cwd_error):
+                        with mock.patch.dict(os.environ, {}, clear=True):
+                            self.assertEqual(server._resolve_external_ocr_config(), ("", ""))
+                            self.assertEqual(ocr_service._resolve_external_ocr_config(), ("", ""))
 
-    def test_external_ocr_functions_share_credentials_helper(self):
+    def test_external_ocr_functions_match_new_module(self):
         fake_response = mock.MagicMock()
         fake_response.read.return_value = (
             b'{"responses":[{"fullTextAnnotation":{"text":"OCR OK"}}]}'
@@ -98,26 +104,28 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
         fake_response.__enter__.return_value = fake_response
         fake_response.__exit__.return_value = None
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_path = Path(tmpdir)
-            explicit_path = tmp_path / "explicit-creds.json"
-            explicit_path.write_text("{}", encoding="utf-8")
-            helper = mock.Mock(
-                side_effect=[
-                    (str(explicit_path), ""),
-                    ("", "vision-key"),
-                ]
+        helper = mock.Mock(return_value=("", "vision-key"))
+
+        with mock.patch.object(server, "_resolve_external_ocr_config", helper):
+            with mock.patch.object(ocr_service.urllib.request, "urlopen", return_value=fake_response) as urlopen_mock:
+                self.assertEqual(
+                    server.external_ocr_available(),
+                    ocr_service.external_ocr_available(resolver=server._resolve_external_ocr_config),
+                )
+                self.assertEqual(
+                    server.ocr_image_external(b"image-bytes"),
+                    ocr_service.ocr_image_external(b"image-bytes", resolver=server._resolve_external_ocr_config),
+                )
+
+        self.assertEqual(helper.call_count, 4)
+        self.assertEqual(urlopen_mock.call_count, 2)
+
+    def test_docai_ocr_matches_new_module_without_credentials(self):
+        with mock.patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(
+                server.ocr_image_docai(b"image-bytes", "image/png"),
+                ocr_service.ocr_image_docai(b"image-bytes", "image/png"),
             )
-
-            with mock.patch.object(server, "_resolve_external_ocr_config", helper):
-                with mock.patch.object(server.urllib.request, "urlopen", return_value=fake_response) as urlopen_mock:
-                    self.assertTrue(server.external_ocr_available())
-                    text, err = server.ocr_image_external(b"image-bytes")
-
-        self.assertEqual(text, "OCR OK")
-        self.assertEqual(err, "")
-        self.assertEqual(helper.call_count, 2)
-        self.assertEqual(urlopen_mock.call_count, 1)
 
     def test_fetch_workspace_company_ids_does_not_backfill_every_company(self):
         conn = sqlite3.connect(":memory:")
@@ -178,7 +186,43 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
             }
         )
         with mock.patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(server.Handler._external_base_url(handler), "http://localhost:8000")
+            expected = "http://localhost:8000"
+            self.assertEqual(server.Handler._external_base_url(handler), expected)
+            self.assertEqual(public_links.external_base_url(), expected)
+
+    def test_public_link_helpers_match_new_module(self):
+        payload = {"id": "req-1", "doc_nombre": "Contrato", "otp_required": 1}
+        with mock.patch.dict(
+            os.environ,
+            {
+                "APP_BASE_URL": "https://crm.example.com",
+                "PUBLIC_URL": "https://public.example.com",
+            },
+            clear=True,
+        ):
+            self.assertEqual(server.configured_app_base_url(), public_links.configured_app_base_url())
+            self.assertEqual(
+                server.resolve_public_link_base_url(""),
+                public_links.resolve_public_link_base_url(""),
+            )
+            self.assertEqual(
+                server.build_public_fragment_url("activar_token", "abc"),
+                public_links.build_public_fragment_url("activar_token", "abc"),
+            )
+            self.assertEqual(
+                server.build_public_fragment_url("token", "abc", base_url="https://crm.example.com", path="/kiosk"),
+                public_links.build_public_fragment_url("token", "abc", base_url="https://crm.example.com", path="/kiosk"),
+            )
+        with mock.patch.object(public_links.secrets, "token_urlsafe", return_value="fixed-token"):
+            self.assertEqual(server.make_signature_token(), public_links.make_signature_token())
+        self.assertEqual(
+            server.hash_signature_token("abc123"),
+            public_links.hash_signature_token("abc123"),
+        )
+        self.assertEqual(
+            server.signature_request_public_payload(payload, token="ignored"),
+            public_links.signature_request_public_payload(payload, token="ignored"),
+        )
 
     def test_workspace_service_alone_does_not_grant_privileged_session(self):
         self.assertFalse(server.workspace_session_is_privileged({"rol": "", "servicio": "Administración"}))
@@ -255,6 +299,7 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
         self.assertTrue(result["public_url"].startswith("/#firma_inmo="))
         row = server._signature_request_row_by_token(conn, result["token"])
         public = server.signature_request_public_payload(row, token=result["token"])
+        self.assertEqual(public, public_links.signature_request_public_payload(row, token=result["token"]))
         self.assertEqual(public["doc_public_url"], "/api/inmueble_signature_document")
         self.assertNotIn("?token=", public["doc_public_url"])
         conn.close()
