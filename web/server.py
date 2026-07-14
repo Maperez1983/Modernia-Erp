@@ -906,7 +906,9 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/inmueble_signature_public",
     "/api/inmueble_signature_document",
     "/api/workspace_portal_public",
+    "/api/workspace_portal_s3_url",
     "/api/workspace_factura_pdf_public",
+    "/api/workspace_portal_facturas_excel",
     "/api/workspace_kiosk_status",
     "/kiosk",
 }
@@ -1008,6 +1010,25 @@ def ensure_auth_sessions_table(conn):
     )
     try:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_auth_sessions_expires_at ON auth_sessions (expires_at)")
+    except Exception:
+        pass
+
+
+def ensure_login_rate_limits_table(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS login_rate_limits (
+          key TEXT PRIMARY KEY,
+          attempts INTEGER NOT NULL DEFAULT 0,
+          window_started_at REAL NOT NULL,
+          locked_until REAL NOT NULL DEFAULT 0,
+          created_at REAL NOT NULL,
+          updated_at REAL NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_login_rate_limits_locked_until ON login_rate_limits (locked_until)")
     except Exception:
         pass
 
@@ -1199,9 +1220,6 @@ APP_SUPERADMIN_ENFORCE = os.environ.get("APP_SUPERADMIN_ENFORCE", "0").strip().l
 APP_SUPERADMIN_USERNAMES = os.environ.get("APP_SUPERADMIN_USERNAMES", "").strip()
 APP_SUPERADMIN_EMAILS = os.environ.get("APP_SUPERADMIN_EMAILS", "").strip()
 APP_SUPERADMIN_IDS = os.environ.get("APP_SUPERADMIN_IDS", "").strip()
-# Compat/backfill legacy: si un workspace no tiene empresas asociadas, opcionalmente auto-vincula todas las activas.
-# En modo comercial multi-tenant se recomienda desactivarlo (0) para evitar fugas entre workspaces.
-WORKSPACE_AUTO_LINK_COMPANIES = os.environ.get("APP_WORKSPACE_AUTO_LINK_COMPANIES", "1").strip().lower() not in ("0", "false", "no", "off")
 COPILOT_WEB_TIMEOUT_SECONDS = max(3, int(os.environ.get("COPILOT_WEB_TIMEOUT_SECONDS", "15")))
 COPILOT_WEB_MAX_BYTES = max(50_000, min(int(os.environ.get("COPILOT_WEB_MAX_BYTES", "3000000")), 8_000_000))
 COPILOT_WEB_MAX_CHARS = max(10_000, min(int(os.environ.get("COPILOT_WEB_MAX_CHARS", "120000")), 300_000))
@@ -1299,11 +1317,10 @@ def app_now():
     # Fallback: naive local time (puede ser UTC si el sistema no tiene TZ configurada).
     return datetime.now()
 
-# Anti-fuerza bruta /api/login (en memoria).
+# Anti-fuerza bruta /api/login (persistente en auth store).
 LOGIN_RATE_WINDOW_SECONDS = max(60, int(os.environ.get("APP_LOGIN_RATE_WINDOW_SECONDS", "300")))
 LOGIN_RATE_MAX_ATTEMPTS = max(3, int(os.environ.get("APP_LOGIN_RATE_MAX_ATTEMPTS", "10")))
 LOGIN_RATE_LOCK_SECONDS = max(60, int(os.environ.get("APP_LOGIN_RATE_LOCK_SECONDS", "600")))
-_LOGIN_RATE_STATE = {}
 _LOGIN_RATE_LOCK = threading.Lock()
 DEFAULT_WORKSPACE_NAME = "Verifika²"
 PLATFORM_NAME = "Verifika²"
@@ -12863,6 +12880,18 @@ def _get_client_ip(handler):
         return ""
 
 
+def _request_token_param(handler, params, *param_names, header_names=("X-Access-Token",)):
+    for param_name in param_names or ("token",):
+        value = str((params.get(param_name, [""])[0] if params else "") or "").strip()
+        if value:
+            return value
+    for header_name in header_names or ():
+        value = str((handler.headers.get(header_name) or "")).strip()
+        if value:
+            return value
+    return ""
+
+
 def _login_rate_key(ip, username):
     ip = str(ip or "").strip()
     user = normalize_lookup_text(username or "")
@@ -12878,28 +12907,62 @@ def _login_rate_key(ip, username):
 def check_login_rate_limit(ip, username):
     """
     Devuelve (allowed: bool, retry_after_seconds: int).
-    Limitación básica en memoria para evitar fuerza bruta en /api/login.
+    Limitación persistente para evitar fuerza bruta en /api/login.
     """
     key = _login_rate_key(ip, username)
     if not key:
         return True, 0
     now = time.time()
     with _LOGIN_RATE_LOCK:
-        entry = _LOGIN_RATE_STATE.get(key) or {}
-        locked_until = float(entry.get("locked_until") or 0)
-        if locked_until and locked_until > now:
-            return False, int(max(1, locked_until - now))
-        attempts = entry.get("attempts") or []
-        # Limpia ventana
-        attempts = [ts for ts in attempts if (now - float(ts)) <= LOGIN_RATE_WINDOW_SECONDS]
-        entry["attempts"] = attempts
-        entry["locked_until"] = 0
-        _LOGIN_RATE_STATE[key] = entry
-        if len(attempts) >= LOGIN_RATE_MAX_ATTEMPTS:
-            entry["locked_until"] = now + LOGIN_RATE_LOCK_SECONDS
-            _LOGIN_RATE_STATE[key] = entry
-            return False, LOGIN_RATE_LOCK_SECONDS
-        return True, 0
+        try:
+            conn = open_auth_store_conn(with_row_factory=True)
+        except Exception:
+            return True, 0
+        try:
+            try:
+                ensure_login_rate_limits_table(conn)
+                conn.commit()
+            except Exception:
+                pass
+            row = conn.execute(
+                "SELECT attempts, window_started_at, locked_until FROM login_rate_limits WHERE key = ? LIMIT 1",
+                [key],
+            ).fetchone()
+            if not row:
+                return True, 0
+            attempts = int(row_value(row, "attempts", 0) or 0)
+            window_started_at = float(row_value(row, "window_started_at", now) or now)
+            locked_until = float(row_value(row, "locked_until", 0) or 0)
+            if (now - window_started_at) > LOGIN_RATE_WINDOW_SECONDS:
+                try:
+                    conn.execute("DELETE FROM login_rate_limits WHERE key = ?", [key])
+                    conn.commit()
+                except Exception:
+                    pass
+                return True, 0
+            if locked_until and locked_until > now:
+                return False, int(max(1, locked_until - now))
+            if attempts >= LOGIN_RATE_MAX_ATTEMPTS:
+                locked_until = now + LOGIN_RATE_LOCK_SECONDS
+                try:
+                    conn.execute(
+                        """
+                        UPDATE login_rate_limits
+                        SET locked_until = ?, updated_at = ?
+                        WHERE key = ?
+                        """,
+                        [float(locked_until), float(now), key],
+                    )
+                    conn.commit()
+                except Exception:
+                    pass
+                return False, LOGIN_RATE_LOCK_SECONDS
+            return True, 0
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def register_login_attempt(ip, username, ok=False):
@@ -12908,19 +12971,63 @@ def register_login_attempt(ip, username, ok=False):
         return
     now = time.time()
     with _LOGIN_RATE_LOCK:
-        if ok:
-            # En login correcto, limpiamos para no penalizar.
-            _LOGIN_RATE_STATE.pop(key, None)
+        try:
+            conn = open_auth_store_conn(with_row_factory=True)
+        except Exception:
             return
-        entry = _LOGIN_RATE_STATE.get(key) or {}
-        attempts = entry.get("attempts") or []
-        attempts.append(now)
-        # Limpiar ventana
-        attempts = [ts for ts in attempts if (now - float(ts)) <= LOGIN_RATE_WINDOW_SECONDS]
-        entry["attempts"] = attempts
-        if len(attempts) >= LOGIN_RATE_MAX_ATTEMPTS:
-            entry["locked_until"] = now + LOGIN_RATE_LOCK_SECONDS
-        _LOGIN_RATE_STATE[key] = entry
+        try:
+            try:
+                ensure_login_rate_limits_table(conn)
+                conn.commit()
+            except Exception:
+                pass
+            if ok:
+                try:
+                    conn.execute("DELETE FROM login_rate_limits WHERE key = ?", [key])
+                    conn.commit()
+                except Exception:
+                    pass
+                return
+            row = conn.execute(
+                "SELECT attempts, window_started_at, locked_until FROM login_rate_limits WHERE key = ? LIMIT 1",
+                [key],
+            ).fetchone()
+            attempts = 0
+            window_started_at = now
+            locked_until = 0.0
+            if row:
+                attempts = int(row_value(row, "attempts", 0) or 0)
+                window_started_at = float(row_value(row, "window_started_at", now) or now)
+                locked_until = float(row_value(row, "locked_until", 0) or 0)
+                if (now - window_started_at) > LOGIN_RATE_WINDOW_SECONDS:
+                    attempts = 0
+                    window_started_at = now
+                    locked_until = 0.0
+            attempts += 1
+            if attempts >= LOGIN_RATE_MAX_ATTEMPTS:
+                locked_until = now + LOGIN_RATE_LOCK_SECONDS
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO login_rate_limits (
+                      key, attempts, window_started_at, locked_until, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET
+                      attempts = excluded.attempts,
+                      window_started_at = excluded.window_started_at,
+                      locked_until = excluded.locked_until,
+                      updated_at = excluded.updated_at
+                    """,
+                    [key, int(attempts), float(window_started_at), float(locked_until), float(window_started_at), float(now)],
+                )
+                conn.commit()
+            except Exception:
+                pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def send_mail_smtp(subject, to_email, text_body, html_body=None):
@@ -26472,10 +26579,8 @@ def signature_request_public_payload(row, token=""):
         "opened_at": data.get("opened_at") or "",
         "signed_at": data.get("signed_at") or "",
         "signed_doc_url": data.get("signed_doc_url") or "",
+        "doc_public_url": "/api/inmueble_signature_document",
     }
-    if token:
-        public["token"] = token
-        public["doc_public_url"] = f"/api/inmueble_signature_document?token={urllib.parse.quote(token)}"
     return public
 
 
@@ -26567,7 +26672,7 @@ def create_inmueble_signature_request(
     return {
         "id": request_id,
         "token": token,
-        "public_url": f"/?firma_inmo={urllib.parse.quote(token)}",
+        "public_url": f"/#firma_inmo={urllib.parse.quote(token)}",
         "otp": otp,
         "expires_at": expires_at,
     }
@@ -26588,7 +26693,7 @@ def send_inmueble_signature_email(conn, request_row, *, token, otp="", base_url=
         )
         return {"sent": False, "reason": "smtp_no_configurado"}
     base = str(base_url or os.environ.get("APP_BASE_URL") or os.environ.get("PUBLIC_URL") or "").strip().rstrip("/")
-    public_url = f"/?firma_inmo={urllib.parse.quote(str(token or ''))}"
+    public_url = f"/#firma_inmo={urllib.parse.quote(str(token or ''))}"
     full_url = f"{base}{public_url}" if base else public_url
     subject = "Recordatorio de firma electrónica" if reminder else "Solicitud de firma electrónica"
     doc_name = str(row.get("doc_nombre") or "documento").strip()
@@ -26648,7 +26753,7 @@ def send_signature_webhook_message(conn, request_row, *, token, otp="", base_url
         )
         return {"sent": False, "reason": "webhook_no_configurado", "channel": channel}
     base = str(base_url or os.environ.get("APP_BASE_URL") or os.environ.get("PUBLIC_URL") or "").strip().rstrip("/")
-    public_url = f"/?firma_inmo={urllib.parse.quote(str(token or ''))}"
+    public_url = f"/#firma_inmo={urllib.parse.quote(str(token or ''))}"
     full_url = f"{base}{public_url}" if base else public_url
     message = f"Firma pendiente: {row.get('doc_nombre') or 'documento'}. Enlace: {full_url}"
     if otp:
@@ -36041,6 +36146,7 @@ def ensure_tables(db_path):
     except Exception:
         apply_schema_file(conn, ROOT.parent / "schema.sql")
     ensure_auth_sessions_table(conn)
+    ensure_login_rate_limits_table(conn)
     ensure_s3_grants_table(conn)
     # === Workspace companies v2 rollout (Fase 4) ===
     # Añade `workspace_company_id` de forma retrocompatible: no rompe queries legacy por `empresa_id`,
@@ -39928,60 +40034,7 @@ def fetch_workspace_company_ids(conn, workspace_id):
     if inferred_ids:
         return inferred_ids
 
-    if not WORKSPACE_AUTO_LINK_COMPANIES:
-        return []
-
-    # Safety: en entornos multi-workspace, nunca debemos auto-vincular "todas las empresas" a un
-    # workspace vacío (crearía contaminación de datos entre clientes).
-    # Solo permitimos el autolink en setups legacy de 1 workspace, o en el workspace legacy del "grupo".
-    ws_total_rows = _safe_fetchall("SELECT COUNT(*) AS total FROM workspaces")
-    ws_total_row = ws_total_rows[0] if ws_total_rows else None
-    try:
-        ws_total = int(row_value(ws_total_row, "total") or row_value(ws_total_row, 0) or 0)
-    except Exception:
-        ws_total = 0
-    if ws_total > 1:
-        ws_rows = _safe_fetchall("SELECT slug, nombre FROM workspaces WHERE id = ? LIMIT 1", (ws_id,))
-        ws_row = ws_rows[0] if ws_rows else None
-        ws_slug = str(row_value(ws_row, "slug") or "") if ws_row else ""
-        ws_name = str(row_value(ws_row, "nombre") or "") if ws_row else ""
-        ws_key = normalize_workspace_slug(ws_slug or ws_name or "")
-        legacy_group_keys = {
-            "modernia",
-            "grupomodernia",
-            "grupo-modernia",
-            "verifika",
-            "verifika2",
-            "verifika-2",
-        }
-        if ws_key not in legacy_group_keys:
-            return []
-
-    # Backfill: si el workspace no tiene empresas asociadas, no podemos mostrar RRHH/operativa.
-    # Creamos los links por defecto usando empresas activas existentes.
-    all_rows = _safe_fetchall("SELECT id FROM empresas WHERE COALESCE(activo, 1) = 1 ORDER BY nombre")
-    fallback = [str(row_value(row, "id") or row_value(row, 0) or "").strip() for row in (all_rows or [])]
-    fallback = [eid for eid in fallback if eid]
-    if not fallback:
-        return []
-    now = datetime.now(timezone.utc).isoformat()
-    for eid in fallback:
-        try:
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO workspace_empresas (
-                  id, workspace_id, empresa_id, rol, created_at, updated_at
-                ) VALUES (?, ?, ?, 'operativa', datetime(?), datetime(?))
-                """,
-                (os.urandom(16).hex(), ws_id, eid, now, now),
-            )
-        except Exception:
-            _rollback_best_effort(conn)
-    try:
-        conn.commit()
-    except Exception:
-        _rollback_best_effort(conn)
-    return fallback
+    return []
 
 
 def resolve_workspace_scope_empresa_ids(conn, workspace_id, *, empresa_id=""):
@@ -46819,7 +46872,6 @@ def fetch_workspace_portal_public(conn, token):
           p.cliente_id,
           p.estado,
           COALESCE(p.importador_facturas, 0) AS importador_facturas,
-          p.token,
           p.ultimo_acceso_at,
           c.nombre AS cliente_nombre,
           COALESCE(c.email, '') AS email,
@@ -54068,10 +54120,16 @@ class Handler(BaseHTTPRequestHandler):
             return True
         if forced in ("0", "false", "no", "off"):
             return False
-        # Only mark cookies Secure when we are confident the client is using HTTPS.
-        # Rely on proxy headers instead of environment detection: some deployments may
-        # expose HTTP (or omit X-Forwarded-Proto) and a Secure cookie would never be sent
-        # back by the browser, causing a login loop.
+        # Production and hosted deployments should use Secure cookies whenever the
+        # public base URL is HTTPS or the platform is known to terminate TLS.
+        for env_key in ("APP_BASE_URL", "RENDER_EXTERNAL_URL", "PUBLIC_BASE_URL", "PUBLIC_URL", "APP_PUBLIC_URL"):
+            configured = (os.environ.get(env_key) or "").strip().lower()
+            if configured.startswith("https://"):
+                return True
+        if os.environ.get("RENDER"):
+            return True
+        # Local/dev fall back: honor proxy headers if present to avoid login loops
+        # when the app is exposed behind HTTPS in a non-Render environment.
         forwarded_proto = (self.headers.get("X-Forwarded-Proto") or "").strip().lower()
         if forwarded_proto:
             forwarded_proto = forwarded_proto.split(",", 1)[0].strip()
@@ -54197,13 +54255,8 @@ class Handler(BaseHTTPRequestHandler):
             value = (os.environ.get(env_key) or "").strip().rstrip("/")
             if value:
                 return value
-        # Fall back to proxy headers / Host. Render sets X-Forwarded-* when behind the edge proxy.
-        forwarded_proto = (self.headers.get("X-Forwarded-Proto") or "").strip()
-        proto = (forwarded_proto.split(",")[0].strip() if forwarded_proto else "") or ("https" if os.environ.get("RENDER") else "http")
-        forwarded_host = (self.headers.get("X-Forwarded-Host") or "").strip()
-        host = (forwarded_host.split(",")[0].strip() if forwarded_host else "") or (self.headers.get("Host") or "").strip()
-        if host:
-            return f"{proto}://{host}"
+        # No inferimos el host desde cabeceras de la petición: eso permitiría
+        # generar enlaces con tokens apuntando a un dominio controlado por el cliente.
         return "http://localhost:8000"
 
     def _require_api_auth(self):
@@ -54865,7 +54918,7 @@ class Handler(BaseHTTPRequestHandler):
   <div class="card">
     <p class="muted">Fichaje rápido por QR. Escanea tu QR (o pega el token). Si tu empresa ha configurado PIN de kiosko, introdúcelo.</p>
     <label class="muted">Token (QR)
-      <input id="tokenInput" autocomplete="off" placeholder="Pega token o abre /kiosk?token=..." value="{html.escape(token) if token else ""}" />
+      <input id="tokenInput" autocomplete="off" placeholder="Pega token o abre /kiosk#token=..." value="{html.escape(token) if token else ""}" />
     </label>
     <label class="muted">PIN kiosko (si aplica)
       <input id="pinInput" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN (opcional)" />
@@ -54918,7 +54971,10 @@ class Handler(BaseHTTPRequestHandler):
       const token = readToken();
       if (!token) {{ statusEl.textContent = "Token vacío."; return; }}
       statusEl.textContent = "Consultando…";
-      const res = await fetch("/api/workspace_kiosk_status?token=" + encodeURIComponent(token)).then(r => r.json()).catch(() => ({{error:"Error"}}));
+      const res = await fetch("/api/workspace_kiosk_status", {{
+        credentials: "same-origin",
+        headers: {{ "X-Access-Token": token }},
+      }}).then(r => r.json()).catch(() => ({{error:"Error"}}));
       if (res.error) {{ statusEl.textContent = res.error; return; }}
       const t = res.today || {{}};
       const label = t.open ? "Fichaje abierto: falta salida" : (t.missing_checkin ? "Hoy sin fichaje" : "Hoy fichaje cerrado");
@@ -59840,7 +59896,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 json_response(self, {"error": "No se pudo confirmar la invitación (DB no disponible). Reintenta."}, status=503)
                 return
-            invite_link = f"{self._external_base_url()}/?activar_token={urllib.parse.quote(token)}"
+            invite_link = f"{self._external_base_url()}/#activar_token={urllib.parse.quote(token)}"
             sent = False
             mail_error = None
             try:
@@ -61747,7 +61803,7 @@ class Handler(BaseHTTPRequestHandler):
                             """,
                             (token, user_id, expires_at, "seed_modernia_users"),
                         )
-                        url = f"{base_url}/?activar_token={urllib.parse.quote(token)}" if base_url else f"/?activar_token={urllib.parse.quote(token)}"
+                        url = f"{base_url}/#activar_token={urllib.parse.quote(token)}" if base_url else f"/#activar_token={urllib.parse.quote(token)}"
                         invites.append({"usuario": usuario_value, "email": email_value, "activar_url": url})
                     except Exception:
                         pass
@@ -61779,7 +61835,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "API error", "detail": Handler._safe_exc_detail(exc)}, status=500)
                 return
             token = str(result.get("token") or "").strip()
-            url = f"{self._external_base_url()}/?activar_token={urllib.parse.quote(token)}"
+            url = f"{self._external_base_url()}/#activar_token={urllib.parse.quote(token)}"
             json_response(
                 self,
                 {
@@ -63533,7 +63589,7 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             base_url = (os.environ.get("APP_BASE_URL") or "").strip().rstrip("/")
-            kiosk_url = f"{base_url}/kiosk?token={urllib.parse.quote(token)}" if base_url else f"/kiosk?token={urllib.parse.quote(token)}"
+            kiosk_url = f"{base_url}/kiosk#token={urllib.parse.quote(token)}" if base_url else f"/kiosk#token={urllib.parse.quote(token)}"
             json_response(self, {"ok": True, "persona_id": persona_id, "persona_nombre": str(row_value(row, "nombre") or "").strip(), "token": token, "kiosk_url": kiosk_url})
             return
         elif parsed.path == "/api/workspace_kiosk_toggle":
@@ -72453,7 +72509,7 @@ class Handler(BaseHTTPRequestHandler):
             response = {
                 "ok": True,
                 "id": request_id,
-                "public_url": f"/?firma_inmo={urllib.parse.quote(token)}",
+                "public_url": f"/#firma_inmo={urllib.parse.quote(token)}",
                 "email": email_result,
                 "sms": sms_result,
                 "whatsapp": whatsapp_result,
@@ -77956,7 +78012,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/auth_invite_status":
-            token = (params.get("token", [""])[0] or "").strip()
+            token = _request_token_param(self, params, "token")
             if not token:
                 json_response(self, {"error": "token requerido"}, status=400)
                 return
@@ -79171,7 +79227,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/workspace_kiosk_status":
-            token = (params.get("token", [""])[0] or "").strip()
+            token = _request_token_param(self, params, "token")
             if not token:
                 json_response(self, {"error": "token requerido"}, status=400)
                 return
@@ -79255,7 +79311,7 @@ class Handler(BaseHTTPRequestHandler):
                     (token, now, workspace_id, persona_id),
                 )
                 conn.commit()
-            url = f"{self._external_base_url()}/kiosk?token={urllib.parse.quote(token)}"
+            url = f"{self._external_base_url()}/kiosk#token={urllib.parse.quote(token)}"
             try:
                 import qrcode
             except Exception as exc:
@@ -79862,7 +79918,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/workspace_portal_public":
-            token = params.get("token", [""])[0]
+            token = _request_token_param(self, params, "token")
             if not token:
                 json_response(self, {"error": "token requerido"}, status=400)
                 return
@@ -79874,7 +79930,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/inmueble_signature_public":
-            token = params.get("token", [""])[0]
+            token = _request_token_param(self, params, "token")
             if not token:
                 json_response(self, {"error": "token requerido"}, status=400)
                 return
@@ -79911,7 +79967,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/inmueble_signature_document":
-            token = params.get("token", [""])[0]
+            token = _request_token_param(self, params, "token")
             if not token:
                 json_response(self, {"error": "token requerido"}, status=400)
                 return
@@ -79938,7 +79994,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/workspace_portal_facturas_excel":
-            token = (params.get("token", [""])[0] or "").strip()
+            token = _request_token_param(self, params, "token")
             if not token:
                 json_response(self, {"error": "token requerido"}, status=400)
                 return
@@ -80038,7 +80094,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/workspace_portal_s3_url":
-            token = (params.get("token", [""])[0] or "").strip()
+            token = _request_token_param(self, params, "token")
             key = (params.get("key", [""])[0] or "").strip()
             if not token or not key:
                 json_response(self, {"error": "token y key requeridos"}, status=400)
@@ -80094,7 +80150,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/workspace_factura_pdf_public":
             invoice_id = params.get("id", [""])[0]
-            token = params.get("token", [""])[0]
+            token = _request_token_param(self, params, "token")
             payload = fetch_workspace_invoice_pdf_payload(conn, invoice_id, token=token)
             if not payload:
                 json_response(self, {"error": "factura no encontrada"}, status=404)

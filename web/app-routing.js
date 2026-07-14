@@ -1,6 +1,25 @@
 (function () {
+  const getRouteParams = () => {
+    try {
+      if (window.CRMDeepLink && typeof window.CRMDeepLink.getParams === "function") {
+        return window.CRMDeepLink.getParams();
+      }
+    } catch {}
+    const params = new URLSearchParams(window.location.search || "");
+    const hash = String(window.location.hash || "").replace(/^#/, "");
+    if (hash) {
+      const hashParams = new URLSearchParams(hash);
+      hashParams.forEach((value, key) => {
+        if (!params.has(key)) {
+          params.set(key, value);
+        }
+      });
+    }
+    return params;
+  };
+
   function handleRoute(deps) {
-    const params = new URLSearchParams(window.location.search);
+    const params = getRouteParams();
     if (params.has("firma_inmo")) {
       deps.openInmuebleSignaturePublic?.(params.get("firma_inmo") || "");
       deps.ui?.refreshContext(deps.state);

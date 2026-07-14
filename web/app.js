@@ -4,7 +4,7 @@ try { window.__APP_JS_LOADED = true; } catch (e) {}
 const API_TIMEOUT_MS = 90000;
 
 // Versión del service worker (ver `web/sw.js`). Se usa para forzar refresh si el usuario se queda con JS antiguo.
-const APP_SW_VERSION = "v369";
+const APP_SW_VERSION = "v372";
 
 // Simuladores (vista filtrada)
 const SIMULADORES_PANE_STORAGE_KEY = "crm.simuladores.pane";
@@ -101,24 +101,147 @@ const probeDbHealth = async () => {
 const sanitizeApiUrl = (value) => {
   const raw = String(value || "");
   if (!raw) return raw;
-  const [base, query] = raw.split("?", 2);
-  if (!query) return base;
-  const scrubKeys = new Set(["token", "password", "activar_token", "portal_token"]);
-  const parts = query
-    .split("&")
-    .filter(Boolean)
-    .map((part) => {
-      const [k, v = ""] = part.split("=", 2);
-      const key = String(k || "").trim();
-      if (!key) return "";
-      if (scrubKeys.has(key)) return `${key}=***`;
-      return `${key}=${v}`;
-    })
-    .filter(Boolean);
-  return parts.length ? `${base}?${parts.join("&")}` : base;
+  const scrubKeys = new Set(["token", "password", "activar_token", "portal_token", "firma_inmo"]);
+  const scrubParams = (query = "") => {
+    if (!query) return "";
+    const params = new URLSearchParams(query);
+    for (const key of scrubKeys) {
+      if (params.has(key)) params.set(key, "***");
+    }
+    return params.toString();
+  };
+  try {
+    const url = new URL(raw, window.location.origin);
+    const search = scrubParams(url.search.replace(/^\?/, ""));
+    url.search = search ? `?${search}` : "";
+    if (url.hash && url.hash.includes("=")) {
+      const hashParams = new URLSearchParams(url.hash.slice(1));
+      for (const key of scrubKeys) {
+        if (hashParams.has(key)) hashParams.set(key, "***");
+      }
+      url.hash = hashParams.toString() ? `#${hashParams.toString()}` : "";
+    }
+    return url.toString();
+  } catch {
+    const [base, query] = raw.split("?", 2);
+    if (!query) return base;
+    const parts = query
+      .split("&")
+      .filter(Boolean)
+      .map((part) => {
+        const [k, v = ""] = part.split("=", 2);
+        const key = String(k || "").trim();
+        if (!key) return "";
+        if (scrubKeys.has(key)) return `${key}=***`;
+        return `${key}=${v}`;
+      })
+      .filter(Boolean);
+    return parts.length ? `${base}?${parts.join("&")}` : base;
+  }
 };
 
-const api = async (path) => {
+const getDeepLinkParams = () => {
+  try {
+    if (window.CRMDeepLink && typeof window.CRMDeepLink.getParams === "function") {
+      return window.CRMDeepLink.getParams();
+    }
+  } catch {}
+  const params = new URLSearchParams(window.location.search || "");
+  const hash = String(window.location.hash || "").replace(/^#/, "");
+  if (hash) {
+    const hashParams = new URLSearchParams(hash);
+    hashParams.forEach((value, key) => {
+      if (!params.has(key)) {
+        params.set(key, value);
+      }
+    });
+  }
+  return params;
+};
+
+const getDeepLinkToken = (name) => {
+  const params = getDeepLinkParams();
+  return String(params.get(name) || "").trim();
+};
+
+const safeUrlValue = (value, { allowDataImage = false, allowBlob = false } = {}) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  if (allowDataImage && raw.startsWith("data:image/")) return raw;
+  if (allowBlob && raw.startsWith("blob:")) return raw;
+  if (/^(javascript|vbscript):/i.test(raw)) return "";
+  if (/^data:/i.test(raw) && !(allowDataImage && raw.startsWith("data:image/"))) return "";
+  try {
+    const url = new URL(raw, window.location.origin);
+    if (!["http:", "https:"].includes(url.protocol)) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+};
+
+const safeHrefUrl = (value) => safeUrlValue(value, { allowBlob: true });
+const safeImageUrl = (value) => safeUrlValue(value, { allowDataImage: true, allowBlob: true });
+const safeOpenUrl = (value) => safeUrlValue(value, { allowBlob: true });
+
+const openBlobInNewTab = (blob, filename = "archivo") => {
+  if (!(blob instanceof Blob)) return false;
+  const url = URL.createObjectURL(blob);
+  let opened = null;
+  try {
+    opened = window.open(url, "_blank", "noopener,noreferrer");
+  } catch {
+    opened = null;
+  }
+  if (!opened) {
+    downloadBlobFile(filename || "archivo", blob);
+  }
+  setTimeout(() => {
+    try {
+      URL.revokeObjectURL(url);
+    } catch {}
+  }, 60000);
+  return true;
+};
+
+const fetchBlobFromGet = async (path, options = {}) => {
+  const headers = new Headers(options.headers || {});
+  const timeoutMs = Number(options.timeoutMs || API_TIMEOUT_MS) || API_TIMEOUT_MS;
+  const res = await fetchWithTimeout(
+    path,
+    {
+      cache: "no-store",
+      credentials: "same-origin",
+      headers,
+    },
+    timeoutMs
+  );
+  if (!res.ok) {
+    let detail = "";
+    try {
+      detail = await res.text();
+    } catch {
+      detail = "";
+    }
+    let message = detail || `HTTP ${res.status}`;
+    try {
+      const parsed = detail ? JSON.parse(detail) : null;
+      if (parsed && parsed.error) {
+        message = parsed.detail ? `${parsed.error} · ${parsed.detail}` : parsed.error;
+      }
+    } catch {}
+    const error = new Error(message);
+    error.status = res.status;
+    throw error;
+  }
+  const blob = await res.blob();
+  const disposition = String(res.headers.get("Content-Disposition") || "");
+  const match = disposition.match(/filename="?([^";]+)"?/i);
+  const filename = match && match[1] ? match[1] : String(options.filenameFallback || "archivo").trim() || "archivo";
+  return { blob, filename };
+};
+
+const api = async (path, options = {}) => {
   // Fase 5: en modo tenant, evita depender de `empresa_id` global y adjunta `workspace_id`/`workspace_company_id`
   // a llamadas GET que aún van por querystring.
   try {
@@ -166,10 +289,13 @@ const api = async (path) => {
   const maxAttempts = 3;
   const retryableStatuses = new Set([502, 503, 504]);
   let lastError = null;
+  const requestOptions = options && typeof options === "object" ? { ...options } : {};
+  const requestHeaders = new Headers(requestOptions.headers || {});
+  delete requestOptions.headers;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     let res;
     try {
-      res = await fetchWithTimeout(path, { cache: "no-store", credentials: "same-origin" });
+      res = await fetchWithTimeout(path, { cache: "no-store", credentials: "same-origin", ...requestOptions, headers: requestHeaders });
     } catch (err) {
       const message =
         err?.name === "AbortError" ? "Tiempo de espera agotado." : "No se pudo conectar con el servidor.";
@@ -843,7 +969,7 @@ const uploadFileToPortalS3 = async (file, token, statusEl, category = "") => {
   const fileToUpload = optimized.file || file;
   const contentType = guessMimeType(fileToUpload) || "application/octet-stream";
   const payload = {
-    token,
+    token: String(token || "").trim(),
     filename: fileToUpload.name || "archivo.pdf",
     content_type: contentType,
     category: String(category || "").trim(),
@@ -911,15 +1037,16 @@ const extractS3KeyFromUrl = (value = "") => {
 const buildPhotoSrc = (photoUrl = "") => {
   const raw = String(photoUrl || "").trim();
   if (!raw) return "";
-  if (raw.startsWith("data:image/")) return raw;
+  const safeRaw = safeImageUrl(raw);
+  if (safeRaw.startsWith("data:image/")) return safeRaw;
   if (raw.startsWith("s3://")) {
     const key = raw.slice(5).replace(/^\/+/, "").trim();
     return key ? `/api/s3_redirect?key=${encodeURIComponent(key)}` : "";
   }
-  if (raw.startsWith("/api/s3_redirect?key=")) return raw;
+  if (raw.startsWith("/api/s3_redirect?key=")) return safeHrefUrl(raw);
   const key = extractS3KeyFromUrl(raw);
   if (key) return `/api/s3_redirect?key=${encodeURIComponent(key)}`;
-  return raw;
+  return safeRaw;
 };
 
 const buildS3RedirectSrcFromKey = (key = "") => {
@@ -14200,7 +14327,7 @@ const renderWorkspaceRrhhHub = () => {
   const buildKioskUrl = (token = "") => {
     const t = String(token || "").trim();
     if (!t) return "";
-    return `${window.location.origin}/kiosk?token=${encodeURIComponent(t)}`;
+    return `${window.location.origin}/kiosk#token=${encodeURIComponent(t)}`;
   };
 
   const renderUsuarios = () => {
@@ -19180,23 +19307,25 @@ const renderWorkspaceBillingList = (rows = []) => {
     <div class="workspace-billing-list">
       ${state.workspaceBillingRows
         .map(
-          (row) => `
+          (row) => {
+            const facturaPdfHref = `/api/workspace_factura_pdf?id=${encodeURIComponent(row.id || "")}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}`;
+            return `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.concepto || "Movimiento sin concepto"}</strong>
-                <div class="muted">${row.empresa_nombre || "-"}${row.cliente_nombre ? ` · ${row.cliente_nombre}` : ""}</div>
-                <div class="muted">Saldo ${euroFormatter.format(Number(row.saldo_pendiente || 0))}${row.remesa_id ? " · en remesa" : ""}${row.conciliacion_estado ? ` · ${row.conciliacion_estado}` : ""}</div>
+                <strong>${escapeHtml(row.concepto || "Movimiento sin concepto")}</strong>
+                <div class="muted">${escapeHtml(row.empresa_nombre || "-")}${row.cliente_nombre ? ` · ${escapeHtml(row.cliente_nombre)}` : ""}</div>
+                <div class="muted">Saldo ${escapeHtml(euroFormatter.format(Number(row.saldo_pendiente || 0)))}${row.remesa_id ? " · en remesa" : ""}${row.conciliacion_estado ? ` · ${escapeHtml(row.conciliacion_estado)}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
-                <span>${row.fecha_emision || "Sin fecha"}</span>
-                <span>${euroFormatter.format(Number(row.total || 0))}</span>
-                <span>${row.estado || "Borrador"}</span>
-                <a class="secondary ghost button-inline" href="/api/workspace_factura_pdf?id=${encodeURIComponent(row.id || "")}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}" target="_blank" rel="noreferrer">PDF</a>
-                ${Number(row.saldo_pendiente || 0) > 0 ? `<button type="button" class="secondary ghost" data-billing-collect="${row.id}">Cobrar</button>` : ""}
-                <button type="button" class="secondary ghost" data-billing-edit="${row.id}">Editar</button>
+                <span>${escapeHtml(row.fecha_emision || "Sin fecha")}</span>
+                <span>${escapeHtml(euroFormatter.format(Number(row.total || 0)))}</span>
+                <span>${escapeHtml(row.estado || "Borrador")}</span>
+                <a class="secondary ghost button-inline" href="${escapeHtml(facturaPdfHref)}" target="_blank" rel="noreferrer">PDF</a>
+                ${Number(row.saldo_pendiente || 0) > 0 ? `<button type="button" class="secondary ghost" data-billing-collect="${escapeHtml(row.id || "")}">Cobrar</button>` : ""}
+                <button type="button" class="secondary ghost" data-billing-edit="${escapeHtml(row.id || "")}">Editar</button>
               </div>
             </div>
-          `
+          `;}
         )
         .join("")}
     </div>
@@ -19876,27 +20005,27 @@ const renderWorkspaceInboxList = (rows = []) => {
           const ocrBusy = ["pending", "processing"].includes(ocrStatus);
           const canOcrFactura = isInvoice && row.doc_key && !row.factura_id && !ocrBusy;
           const ocrLine = row.ocr_status
-            ? `OCR: ${row.ocr_status}${row.ocr_method ? ` · ${row.ocr_method}` : ""}${row.factura_id ? " · vinculada" : ""}`
+            ? `OCR: ${escapeHtml(row.ocr_status)}${row.ocr_method ? ` · ${escapeHtml(row.ocr_method)}` : ""}${row.factura_id ? " · vinculada" : ""}`
             : "";
-          const ocrErrorLine = row.ocr_error ? `OCR error: ${String(row.ocr_error).slice(0, 120)}` : "";
+          const ocrErrorLine = row.ocr_error ? `OCR error: ${escapeHtml(String(row.ocr_error).slice(0, 120))}` : "";
           return `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.nombre || "Documento"}</strong>
-                <div class="muted">${row.empresa_nombre || "-"} · ${row.servicio || "sin servicio"} · ${row.estado || "Pendiente"}</div>
+                <strong>${escapeHtml(row.nombre || "Documento")}</strong>
+                <div class="muted">${escapeHtml(row.empresa_nombre || "-")} · ${escapeHtml(row.servicio || "sin servicio")} · ${escapeHtml(row.estado || "Pendiente")}</div>
                 ${ocrLine ? `<div class="muted">${ocrLine}</div>` : ""}
                 ${ocrErrorLine ? `<div class="workspace-document-suggestion">${ocrErrorLine}</div>` : ""}
-                ${row.suggested_cliente_nombre ? `<div class="workspace-document-suggestion">Cliente sugerido: ${row.suggested_cliente_nombre}</div>` : ""}
-                ${row.requerimiento_titulo ? `<div class="muted">Requerimiento: ${row.requerimiento_titulo}</div>` : ""}
+                ${row.suggested_cliente_nombre ? `<div class="workspace-document-suggestion">Cliente sugerido: ${escapeHtml(row.suggested_cliente_nombre)}</div>` : ""}
+                ${row.requerimiento_titulo ? `<div class="muted">Requerimiento: ${escapeHtml(row.requerimiento_titulo)}</div>` : ""}
               </div>
               <div class="workspace-billing-meta">
-                <span>${row.canal_entrada || "Manual"}</span>
-                <span>${row.prioridad || "Normal"}</span>
-                ${row.doc_url ? `<a class="secondary ghost button-inline" href="${row.doc_url}" target="_blank" rel="noreferrer">Abrir</a>` : ""}
-                ${canOcrFactura ? `<button type="button" class="secondary ghost" data-inbox-ocr="${row.id}">OCR factura</button>` : ""}
-                ${row.suggested_cliente_id && !row.cliente_id ? `<button type="button" class="secondary ghost" data-inbox-accept="${row.id}">Aceptar sugerido</button>` : ""}
-                ${row.estado !== "Procesado" ? `<button type="button" class="secondary ghost" data-inbox-process="${row.id}">Procesar</button>` : ""}
-                <button type="button" class="secondary ghost" data-inbox-edit="${row.id}">Editar</button>
+                <span>${escapeHtml(row.canal_entrada || "Manual")}</span>
+                <span>${escapeHtml(row.prioridad || "Normal")}</span>
+                ${row.doc_url ? `<a class="secondary ghost button-inline" href="${escapeHtml(safeHrefUrl(row.doc_url))}" target="_blank" rel="noreferrer">Abrir</a>` : ""}
+                ${canOcrFactura ? `<button type="button" class="secondary ghost" data-inbox-ocr="${escapeHtml(row.id || "")}">OCR factura</button>` : ""}
+                ${row.suggested_cliente_id && !row.cliente_id ? `<button type="button" class="secondary ghost" data-inbox-accept="${escapeHtml(row.id || "")}">Aceptar sugerido</button>` : ""}
+                ${row.estado !== "Procesado" ? `<button type="button" class="secondary ghost" data-inbox-process="${escapeHtml(row.id || "")}">Procesar</button>` : ""}
+                <button type="button" class="secondary ghost" data-inbox-edit="${escapeHtml(row.id || "")}">Editar</button>
               </div>
             </div>
           `;
@@ -19973,13 +20102,13 @@ const renderWorkspaceSeriesList = (rows = []) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.serie || "-"}</strong>
-                <div class="muted">${row.empresa_nombre || "-"}${row.servicio ? ` · ${row.servicio}` : ""}</div>
+                <strong>${escapeHtml(row.serie || "-")}</strong>
+                <div class="muted">${escapeHtml(row.empresa_nombre || "-")}${row.servicio ? ` · ${escapeHtml(row.servicio)}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
-                <span>Prefijo ${row.prefijo || "-"}</span>
-                <span>Siguiente ${numberFormatter.format(Number(row.siguiente_numero || 1))}</span>
-                <button type="button" class="secondary ghost" data-series-edit="${row.id}">Editar</button>
+                <span>Prefijo ${escapeHtml(row.prefijo || "-")}</span>
+                <span>Siguiente ${escapeHtml(numberFormatter.format(Number(row.siguiente_numero || 1)))}</span>
+                <button type="button" class="secondary ghost" data-series-edit="${escapeHtml(row.id || "")}">Editar</button>
               </div>
             </div>
           `
@@ -20008,13 +20137,13 @@ const renderWorkspacePortalList = (rows = []) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.cliente_nombre || "-"}</strong>
-                <div class="muted">${row.email_acceso || "Sin email"} · ${row.estado || "Invitado"}</div>
-                <div class="muted">Portal: /?portal_token=${row.token || ""}</div>
+                <strong>${escapeHtml(row.cliente_nombre || "-")}</strong>
+                <div class="muted">${escapeHtml(row.email_acceso || "Sin email")} · ${escapeHtml(row.estado || "Invitado")}</div>
+                <div class="muted">Portal: /#portal_token=${escapeHtml(row.token || "")}</div>
               </div>
               <div class="workspace-billing-meta">
-                <span>Token ${String(row.token || "").slice(0, 8) || "-"}</span>
-                <span>${row.ultimo_acceso_at || "Sin acceso"}</span>
+                <span>Token ${escapeHtml(String(row.token || "").slice(0, 8) || "-")}</span>
+                <span>${escapeHtml(row.ultimo_acceso_at || "Sin acceso")}</span>
               </div>
             </div>
           `
@@ -20029,7 +20158,7 @@ const hydrateWorkspacePortalRequestTargets = (rows = []) => {
   if (!select) return;
   select.innerHTML = rows.length
     ? rows
-        .map((row) => `<option value="${row.id}">${row.cliente_nombre || "-"}${row.cliente_nif ? ` · ${row.cliente_nif}` : ""}</option>`)
+        .map((row) => `<option value="${escapeHtml(row.id || "")}">${escapeHtml(row.cliente_nombre || "-")}${row.cliente_nif ? ` · ${escapeHtml(row.cliente_nif)}` : ""}</option>`)
         .join("")
     : "<option value=''>Sin portales</option>";
 };
@@ -20068,14 +20197,14 @@ const renderWorkspacePortalRequestList = (rows = []) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.titulo || "-"}</strong>
-                <div class="muted">${row.cliente_nombre || "-"}${row.servicio ? ` · ${row.servicio}` : ""}${row.clasificacion ? ` · ${row.clasificacion}` : ""}</div>
+                <strong>${escapeHtml(row.titulo || "-")}</strong>
+                <div class="muted">${escapeHtml(row.cliente_nombre || "-")}${row.servicio ? ` · ${escapeHtml(row.servicio)}` : ""}${row.clasificacion ? ` · ${escapeHtml(row.clasificacion)}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
-                <span>${row.fecha_limite || "Sin fecha"}</span>
-                <span>${row.prioridad || "Normal"}</span>
-                <span>${row.estado || "Pendiente"}</span>
-                <button type="button" class="secondary ghost" data-portal-request-edit="${row.id}">Editar</button>
+                <span>${escapeHtml(row.fecha_limite || "Sin fecha")}</span>
+                <span>${escapeHtml(row.prioridad || "Normal")}</span>
+                <span>${escapeHtml(row.estado || "Pendiente")}</span>
+                <button type="button" class="secondary ghost" data-portal-request-edit="${escapeHtml(row.id || "")}">Editar</button>
               </div>
             </div>
           `
@@ -20125,13 +20254,13 @@ const renderWorkspaceAutomationList = (rows = []) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.nombre || "-"}</strong>
-                <div class="muted">${row.trigger_key || "-"}${row.modulo_key ? ` · ${row.modulo_key}` : ""}</div>
+                <strong>${escapeHtml(row.nombre || "-")}</strong>
+                <div class="muted">${escapeHtml(row.trigger_key || "-")}${row.modulo_key ? ` · ${escapeHtml(row.modulo_key)}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
                 <span>${row.enabled ? "Activa" : "Pausada"}</span>
-                <span>${row.action_summary || "-"}</span>
-                <button type="button" class="secondary ghost" data-automation-edit="${row.id}">Editar</button>
+                <span>${escapeHtml(row.action_summary || "-")}</span>
+                <button type="button" class="secondary ghost" data-automation-edit="${escapeHtml(row.id || "")}">Editar</button>
               </div>
             </div>
           `
@@ -25385,8 +25514,8 @@ const setPage = (page) => {
   // Diagnóstico: si la URL pide un deep-link pero acabamos en Home, lo mostramos en UI (sin depender de consola).
   try {
     if (page === "home" && isDebugEnabled()) {
-      const params = new URLSearchParams(window.location.search || "");
-      const hasDeepLink = ["holding", "crm", "clientes", "cliente", "poliza", "empresa", "agenda", "admin", "portal_token", "portal_inmo", "firma_inmo"]
+      const params = getDeepLinkParams();
+      const hasDeepLink = ["holding", "crm", "clientes", "cliente", "poliza", "empresa", "agenda", "admin", "portal_token", "portal_inmo", "firma_inmo", "activar_token"]
         .some((key) => params.has(key));
       if (hasDeepLink) {
         setUiToast("Routing: volvió a Home", `URL actual: ${window.location.href}`);
@@ -26117,7 +26246,7 @@ const openCrmInmobiliario = () => {
   const fromHome = state.currentPage === "home";
   const hadRouteParams = (() => {
     try {
-      const params = new URLSearchParams(window.location.search);
+      const params = getDeepLinkParams();
       return (
         params.has("crm")
         || params.has("empresa")
@@ -26128,6 +26257,9 @@ const openCrmInmobiliario = () => {
         || params.has("admin")
         || params.has("agenda")
         || params.has("portal_token")
+        || params.has("portal_inmo")
+        || params.has("firma_inmo")
+        || params.has("activar_token")
       );
     } catch {
       return false;
@@ -27608,7 +27740,7 @@ const openGestoriaCrm = () => {
   const fromHome = state.currentPage === "home";
   const hadRouteParams = (() => {
     try {
-      const params = new URLSearchParams(window.location.search);
+      const params = getDeepLinkParams();
       return (
         params.has("crm")
         || params.has("empresa")
@@ -27619,6 +27751,9 @@ const openGestoriaCrm = () => {
         || params.has("admin")
         || params.has("agenda")
         || params.has("portal_token")
+        || params.has("portal_inmo")
+        || params.has("firma_inmo")
+        || params.has("activar_token")
       );
     } catch {
       return false;
@@ -27779,7 +27914,7 @@ const openSegurosCrm = () => {
   const fromHome = state.currentPage === "home";
   const hadRouteParams = (() => {
     try {
-      const params = new URLSearchParams(window.location.search);
+      const params = getDeepLinkParams();
       return (
         params.has("crm")
         || params.has("empresa")
@@ -27790,6 +27925,9 @@ const openSegurosCrm = () => {
         || params.has("admin")
         || params.has("agenda")
         || params.has("portal_token")
+        || params.has("portal_inmo")
+        || params.has("firma_inmo")
+        || params.has("activar_token")
       );
     } catch {
       return false;
@@ -27856,7 +27994,7 @@ const openFinCrm = () => {
   const fromHome = state.currentPage === "home";
   const hadRouteParams = (() => {
     try {
-      const params = new URLSearchParams(window.location.search);
+      const params = getDeepLinkParams();
       return (
         params.has("crm")
         || params.has("empresa")
@@ -27867,6 +28005,9 @@ const openFinCrm = () => {
         || params.has("admin")
         || params.has("agenda")
         || params.has("portal_token")
+        || params.has("portal_inmo")
+        || params.has("firma_inmo")
+        || params.has("activar_token")
       );
     } catch {
       return false;
@@ -29746,22 +29887,31 @@ const openWorkspacePortalPublic = async (token) => {
   setModule("empresas");
   explorerSection.classList.add("hidden");
   setPage("portal-public");
+  const cleanToken = String(token || getDeepLinkToken("portal_token") || "").trim();
+  if (!cleanToken) {
+    if (workspacePortalPublicContent) {
+      workspacePortalPublicContent.innerHTML = "<p class='muted'>Token de portal requerido.</p>";
+    }
+    return;
+  }
   if (workspacePortalPublicContent) {
     workspacePortalPublicContent.innerHTML = "<p class='muted'>Cargando portal...</p>";
   }
   try {
-    const data = await api(`/api/workspace_portal_public?token=${encodeURIComponent(token)}`);
+    const data = await api("/api/workspace_portal_public", {
+      headers: { "X-Access-Token": cleanToken },
+    });
     const importadorActivo = Number(data?.importador_facturas || 0) === 1;
     const facturasRecibidas = Array.isArray(data?.facturas_recibidas) ? data.facturas_recibidas : [];
     if (workspacePortalPublicContent) {
       workspacePortalPublicContent.innerHTML = `
         <div class="form-card">
-          <h3>${getWorkspaceDisplayName(data.workspace || "Workspace")}</h3>
-          <p class="muted">${data.cliente || "Cliente"}</p>
+          <h3>${escapeHtml(getWorkspaceDisplayName(data.workspace || "Workspace"))}</h3>
+          <p class="muted">${escapeHtml(data.cliente || "Cliente")}</p>
 	          <div class="workspace-mini-kpis">
 	            <div class="workspace-mini-kpi">
 	              <span>Estado acceso</span>
-	              <strong>${data.estado || "-"}</strong>
+	              <strong>${escapeHtml(data.estado || "-")}</strong>
 	            </div>
 	            <div class="workspace-mini-kpi">
 	              <span>Pólizas</span>
@@ -29798,14 +29948,14 @@ const openWorkspacePortalPublic = async (token) => {
             ? `
               <div class="form-card">
                 <div class="section-head">
-                  <div>
-                    <h3>Importador Facturas</h3>
-                    <p class="muted">Sube tus facturas (PDF/imagen). Se procesan con OCR y se incorporan a contabilidad.</p>
-                  </div>
-                  <div class="toolbar">
-                    <a class="secondary" href="/api/workspace_portal_facturas_excel?token=${encodeURIComponent(token)}" target="_blank" rel="noreferrer">Descargar Excel</a>
-                  </div>
-                </div>
+	                  <div>
+	                    <h3>Importador Facturas</h3>
+	                    <p class="muted">Sube tus facturas (PDF/imagen). Se procesan con OCR y se incorporan a contabilidad.</p>
+	                  </div>
+	                  <div class="toolbar">
+	                    <button type="button" class="secondary" data-portal-download-excel>Descargar Excel</button>
+	                  </div>
+	                </div>
                 <form id="workspacePortalPublicFacturaForm" class="form-grid">
                   <label class="span-2">
                     Archivo (factura)
@@ -29862,7 +30012,7 @@ const openWorkspacePortalPublic = async (token) => {
                 <option value="">Sin vincular</option>
                 ${(data.requerimientos || [])
                   .filter((row) => row.estado !== "Completado")
-                  .map((row) => `<option value="${row.id}">${row.titulo || "Requerimiento"}${row.clasificacion ? ` · ${row.clasificacion}` : ""}</option>`)
+                  .map((row) => `<option value="${escapeHtml(row.id || "")}">${escapeHtml(row.titulo || "Requerimiento")}${row.clasificacion ? ` · ${escapeHtml(row.clasificacion)}` : ""}</option>`)
                   .join("")}
               </select>
             </label>
@@ -29904,25 +30054,25 @@ const openWorkspacePortalPublic = async (token) => {
 	              (data.seguros_polizas || []).length
 	                ? `
 	                    <div class="workspace-billing-list">
-	                      ${(data.seguros_polizas || [])
-	                        .map((row) => {
-	                          const poliza = row.poliza_numero || "-";
-	                          const label = `${row.compania || "-"} · ${row.ramo || "-"}`.trim();
-	                          const doc = row.poliza_url || "";
-	                          const link = doc ? `<a class="secondary ghost button-inline" href="${doc}" target="_blank" rel="noreferrer">PDF</a>` : "";
-	                          const vence = row.fecha_vencimiento || "";
-	                          const estado = row.estado || "";
-	                          return `
-	                            <div class="workspace-billing-row">
-	                              <div>
-	                                <strong>${poliza}</strong>
-	                                <div class="muted">${label}${vence ? ` · Vence ${vence}` : ""}</div>
-	                              </div>
-	                              <div class="workspace-billing-meta">
-	                                <span>${estado || "-"}</span>
-	                                ${link}
-	                              </div>
-	                            </div>
+                      ${(data.seguros_polizas || [])
+                        .map((row) => {
+                          const poliza = escapeHtml(row.poliza_numero || "-");
+                          const label = escapeHtml(`${row.compania || "-"} · ${row.ramo || "-"}`.trim());
+                          const doc = safeHrefUrl(row.poliza_url || "");
+                          const link = doc ? `<a class="secondary ghost button-inline" href="${escapeHtml(doc)}" target="_blank" rel="noreferrer">PDF</a>` : "";
+                          const vence = escapeHtml(row.fecha_vencimiento || "");
+                          const estado = escapeHtml(row.estado || "");
+                          return `
+                            <div class="workspace-billing-row">
+                              <div>
+                                <strong>${poliza}</strong>
+                                <div class="muted">${label}${vence ? ` · Vence ${vence}` : ""}</div>
+                              </div>
+                              <div class="workspace-billing-meta">
+                                <span>${estado || "-"}</span>
+                                ${link}
+                              </div>
+                            </div>
 	                          `;
 	                        })
 	                        .join("")}
@@ -29936,19 +30086,19 @@ const openWorkspacePortalPublic = async (token) => {
 	                (data.seguros_recibos || []).length
 	                  ? `
 	                      <div class="workspace-billing-list" style="margin-top:10px;">
-	                        ${(data.seguros_recibos || [])
-	                          .map((row) => {
-	                            const poliza = row.poliza_numero || "-";
-	                            const meta = `${row.compania || "-"} · ${row.ramo || "-"}`.trim();
-	                            const vence = row.fecha_vencimiento || "";
-	                            const estado = row.estado || "";
-	                            const amount = row.prima_total ? euroFormatter.format(Number(row.prima_total || 0)) : "";
-	                            const doc = row.doc_url || "";
-	                            const link = doc ? `<a class="secondary ghost button-inline" href="${doc}" target="_blank" rel="noreferrer">PDF</a>` : "";
-	                            return `
-	                              <div class="workspace-billing-row">
-	                                <div>
-	                                  <strong>${poliza}</strong>
+                        ${(data.seguros_recibos || [])
+                          .map((row) => {
+                            const poliza = escapeHtml(row.poliza_numero || "-");
+                            const meta = escapeHtml(`${row.compania || "-"} · ${row.ramo || "-"}`.trim());
+                            const vence = escapeHtml(row.fecha_vencimiento || "");
+                            const estado = escapeHtml(row.estado || "");
+                            const amount = row.prima_total ? euroFormatter.format(Number(row.prima_total || 0)) : "";
+                            const doc = safeHrefUrl(row.doc_url || "");
+                            const link = doc ? `<a class="secondary ghost button-inline" href="${escapeHtml(doc)}" target="_blank" rel="noreferrer">PDF</a>` : "";
+                            return `
+                              <div class="workspace-billing-row">
+                                <div>
+                                  <strong>${poliza}</strong>
 	                                  <div class="muted">${meta}${vence ? ` · Vence ${vence}` : ""}</div>
 	                                </div>
 	                                <div class="workspace-billing-meta">
@@ -29971,16 +30121,16 @@ const openWorkspacePortalPublic = async (token) => {
 	                (data.seguros_siniestros || []).length
 	                  ? `
 	                      <div class="workspace-billing-list" style="margin-top:10px;">
-	                        ${(data.seguros_siniestros || [])
-	                          .map((row) => {
-	                            const exp = row.numero_expediente || "Siniestro";
-	                            const meta = `${row.compania || "-"} · ${row.ramo || "-"}`.trim();
-	                            const fecha = row.fecha_siniestro || row.fecha_apertura || "";
-	                            const estado = row.estado || "";
-	                            const tipo = row.tipo || "";
-	                            return `
-	                              <div class="workspace-billing-row">
-	                                <div>
+                        ${(data.seguros_siniestros || [])
+                          .map((row) => {
+                            const exp = escapeHtml(row.numero_expediente || "Siniestro");
+                            const meta = escapeHtml(`${row.compania || "-"} · ${row.ramo || "-"}`.trim());
+                            const fecha = escapeHtml(row.fecha_siniestro || row.fecha_apertura || "");
+                            const estado = escapeHtml(row.estado || "");
+                            const tipo = escapeHtml(row.tipo || "");
+                            return `
+                              <div class="workspace-billing-row">
+                                <div>
 	                                  <strong>${exp}</strong>
 	                                  <div class="muted">${meta}${tipo ? ` · ${tipo}` : ""}${fecha ? ` · ${fecha}` : ""}</div>
 	                                </div>
@@ -30002,14 +30152,14 @@ const openWorkspacePortalPublic = async (token) => {
 	                (data.seguros_renovaciones || []).length
 	                  ? `
 	                      <div class="workspace-billing-list" style="margin-top:10px;">
-	                        ${(data.seguros_renovaciones || [])
-	                          .map((row) => {
-	                            const poliza = row.poliza_numero || "-";
-	                            const meta = `${row.compania || "-"} · ${row.ramo || "-"}`.trim();
-	                            const vence = row.fecha_vencimiento || "";
-	                            const estado = row.estado || "";
-	                            return `
-	                              <div class="workspace-billing-row">
+                        ${(data.seguros_renovaciones || [])
+                          .map((row) => {
+                            const poliza = escapeHtml(row.poliza_numero || "-");
+                            const meta = escapeHtml(`${row.compania || "-"} · ${row.ramo || "-"}`.trim());
+                            const vence = escapeHtml(row.fecha_vencimiento || "");
+                            const estado = escapeHtml(row.estado || "");
+                            return `
+                              <div class="workspace-billing-row">
 	                                <div>
 	                                  <strong>${poliza}</strong>
 	                                  <div class="muted">${meta}${vence ? ` · Vence ${vence}` : ""}</div>
@@ -30043,13 +30193,13 @@ const openWorkspacePortalPublic = async (token) => {
 	                </label>
 	                <label class="span-2">
 	                  Póliza (opcional)
-	                  <select name="seguro_id">
-	                    <option value="">Sin póliza</option>
-	                    ${(data.seguros_polizas || [])
-	                      .map((row) => `<option value="${row.id}">${row.poliza_numero || "-"} · ${row.compania || "-"} · ${row.ramo || "-"}</option>`)
-	                      .join("")}
-	                  </select>
-	                </label>
+                  <select name="seguro_id">
+                    <option value="">Sin póliza</option>
+                    ${(data.seguros_polizas || [])
+                      .map((row) => `<option value="${escapeHtml(row.id || "")}">${escapeHtml(row.poliza_numero || "-")} · ${escapeHtml(row.compania || "-")} · ${escapeHtml(row.ramo || "-")}</option>`)
+                      .join("")}
+                  </select>
+                </label>
 	                <label class="span-2">
 	                  Detalle
 	                  <textarea name="descripcion" rows="3" required placeholder="Describe el cambio que necesitas (IBAN, matrícula, conductor, coberturas, fecha efecto...)."></textarea>
@@ -30072,12 +30222,12 @@ const openWorkspacePortalPublic = async (token) => {
                           (row) => `
                             <div class="workspace-document-row">
                               <div>
-                                <strong>${row.nombre || "Documento"}</strong>
-                                <div class="muted">${row.clasificacion || "Sin clasificar"}</div>
+                                <strong>${escapeHtml(row.nombre || "Documento")}</strong>
+                                <div class="muted">${escapeHtml(row.clasificacion || "Sin clasificar")}</div>
                               </div>
                               <div class="workspace-document-meta">
-                                <span>${row.estado || "-"}</span>
-                                <span>${row.created_at || ""}</span>
+                                <span>${escapeHtml(row.estado || "-")}</span>
+                                <span>${escapeHtml(row.created_at || "")}</span>
                               </div>
                             </div>
                           `
@@ -30099,13 +30249,13 @@ const openWorkspacePortalPublic = async (token) => {
                           (row) => `
                             <div class="workspace-billing-row">
                               <div>
-                                <strong>${row.titulo || "Requerimiento"}</strong>
-                                <div class="muted">${row.descripcion || row.prioridad || ""}${row.clasificacion ? ` · ${row.clasificacion}` : ""}</div>
+                                <strong>${escapeHtml(row.titulo || "Requerimiento")}</strong>
+                                <div class="muted">${escapeHtml(row.descripcion || row.prioridad || "")}${row.clasificacion ? ` · ${escapeHtml(row.clasificacion)}` : ""}</div>
                               </div>
                               <div class="workspace-billing-meta">
-                                <span>${row.fecha_limite || "Sin fecha"}</span>
-                                <span>${row.estado || "Pendiente"}</span>
-                                ${row.estado !== "Completado" ? `<button type="button" class="secondary ghost" data-portal-request-upload="${row.id}" data-portal-request-title="${(row.titulo || "").replace(/"/g, "&quot;")}" data-portal-request-classification="${(row.clasificacion || "").replace(/"/g, "&quot;")}">Responder</button>` : ""}
+                                <span>${escapeHtml(row.fecha_limite || "Sin fecha")}</span>
+                                <span>${escapeHtml(row.estado || "Pendiente")}</span>
+                                ${row.estado !== "Completado" ? `<button type="button" class="secondary ghost" data-portal-request-upload="${escapeHtml(row.id || "")}" data-portal-request-title="${escapeHtml(row.titulo || "")}" data-portal-request-classification="${escapeHtml(row.clasificacion || "")}">Responder</button>` : ""}
                               </div>
                             </div>
                           `
@@ -30127,13 +30277,13 @@ const openWorkspacePortalPublic = async (token) => {
                           (row) => `
                             <div class="workspace-billing-row">
                               <div>
-                                <strong>${row.concepto || "Factura"}</strong>
-                                <div class="muted">${row.fecha_emision || ""}</div>
+                                <strong>${escapeHtml(row.concepto || "Factura")}</strong>
+                                <div class="muted">${escapeHtml(row.fecha_emision || "")}</div>
                               </div>
                               <div class="workspace-billing-meta">
                                 <span>${euroFormatter.format(Number(row.total || 0))}</span>
-                                <span>${row.cobrada ? "Cobrada" : row.estado || "Emitida"}</span>
-                                <a class="secondary ghost button-inline" href="/api/workspace_factura_pdf_public?token=${encodeURIComponent(token)}&id=${encodeURIComponent(row.id || "")}" target="_blank" rel="noreferrer">PDF</a>
+                                <span>${escapeHtml(row.cobrada ? "Cobrada" : row.estado || "Emitida")}</span>
+                                <button type="button" class="secondary ghost button-inline" data-portal-factura-pdf="${escapeHtml(row.id || "")}">PDF</button>
                               </div>
                             </div>
                           `
@@ -30163,13 +30313,13 @@ const openWorkspacePortalPublic = async (token) => {
         try {
           const filename = file.name || "factura";
           const nameHint = filename.replace(/\\.[a-z0-9]+$/i, "") || filename;
-          const upload = await uploadFileToPortalS3(file, token, facturaStatus, "factura");
+          const upload = await uploadFileToPortalS3(file, cleanToken, facturaStatus, "factura");
           if (!upload?.key && !upload?.public_url) throw new Error("No se pudo subir el archivo.");
           const resp = await fetch("/api/workspace_portal_upload", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              token,
+              token: cleanToken,
               nombre: nameHint,
               servicio: "gestoria",
               clasificacion: "Factura",
@@ -30180,7 +30330,7 @@ const openWorkspacePortalPublic = async (token) => {
           }).then((res) => res.json());
           if (resp?.error) throw new Error(resp.error);
           if (facturaStatus) facturaStatus.textContent = "Factura subida. Procesando OCR...";
-          await openWorkspacePortalPublic(token);
+          await openWorkspacePortalPublic(cleanToken);
         } catch (err) {
           if (facturaStatus) facturaStatus.textContent = err?.message || "No se pudo subir la factura.";
         }
@@ -30198,9 +30348,9 @@ const openWorkspacePortalPublic = async (token) => {
 	          const classificationHint = String(formData.get("clasificacion") || "").trim();
 	          const nameHint = String(formData.get("nombre") || "").trim();
 	          const isInvoice = /factura|ticket|recibo/i.test(`${classificationHint} ${nameHint} ${file.name || ""}`);
-	          const upload = await uploadFileToPortalS3(file, token, uploadStatus, isInvoice ? "factura" : "docs");
+	          const upload = await uploadFileToPortalS3(file, cleanToken, uploadStatus, isInvoice ? "factura" : "docs");
           const payload = {
-            token,
+            token: cleanToken,
             nombre: String(formData.get("nombre") || "").trim(),
             servicio: String(formData.get("servicio") || "").trim(),
             clasificacion: String(formData.get("clasificacion") || "").trim(),
@@ -30233,20 +30383,48 @@ const openWorkspacePortalPublic = async (token) => {
 	              if (uploadStatus) uploadStatus.textContent = ocrErr?.message || "OCR falló.";
 	            }
 	          }
-	          await openWorkspacePortalPublic(token);
+	          await openWorkspacePortalPublic(cleanToken);
 	        } catch (error) {
 	          if (uploadStatus) uploadStatus.textContent = error.message || "No se pudo subir el documento.";
 	        }
+	      });
+	      document.querySelector("[data-portal-download-excel]")?.addEventListener("click", async () => {
+	        try {
+	          const { blob, filename } = await fetchBlobFromGet("/api/workspace_portal_facturas_excel", {
+	            headers: { "X-Access-Token": cleanToken },
+	            filenameFallback: "facturas_portal.xlsx",
+	          });
+	          downloadBlobFile(filename || "facturas_portal.xlsx", blob);
+	        } catch (e) {
+	          alert("No se pudo descargar el Excel.");
+	        }
+	      });
+	      document.querySelectorAll("[data-portal-factura-pdf]").forEach((button) => {
+	        button.addEventListener("click", async () => {
+	          const id = String(button.dataset.portalFacturaPdf || "").trim();
+	          if (!id) return;
+	          try {
+	            const { blob, filename } = await fetchBlobFromGet(`/api/workspace_factura_pdf_public?id=${encodeURIComponent(id)}`, {
+	              headers: { "X-Access-Token": cleanToken },
+	              filenameFallback: `factura_${id}.pdf`,
+	            });
+	            openBlobInNewTab(blob, filename || `factura_${id}.pdf`);
+	          } catch (e) {
+	            alert("No se pudo abrir la factura.");
+	          }
+	        });
 	      });
       document.querySelectorAll("[data-portal-open-doc]").forEach((button) => {
         button.addEventListener("click", async () => {
           const key = String(button.dataset.portalOpenDoc || "").trim();
           if (!key) return;
           try {
-            const data = await api(`/api/workspace_portal_s3_url?token=${encodeURIComponent(token)}&key=${encodeURIComponent(key)}`);
+            const data = await api(`/api/workspace_portal_s3_url?key=${encodeURIComponent(key)}`, {
+              headers: { "X-Access-Token": cleanToken },
+            });
             const url = String(data?.url || "").trim();
             if (!url) throw new Error("no_url");
-            window.open(url, "_blank", "noopener");
+            openExternalUrl(url);
           } catch (e) {
             alert("No se pudo abrir el archivo.");
           }
@@ -30292,7 +30470,7 @@ const openWorkspacePortalPublic = async (token) => {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              token,
+              token: cleanToken,
               servicio: "seguros",
               clasificacion: "seguros_cambio",
               tipo,
@@ -30304,7 +30482,7 @@ const openWorkspacePortalPublic = async (token) => {
           if (resp?.error) throw new Error(resp.error);
           if (segurosReqStatus) segurosReqStatus.textContent = "Solicitud enviada.";
           segurosReqForm.reset();
-          await openWorkspacePortalPublic(token);
+          await openWorkspacePortalPublic(cleanToken);
         } catch (err) {
           if (segurosReqStatus) {
             segurosReqStatus.textContent = err?.message ? String(err.message) : "No se pudo enviar la solicitud.";
@@ -30333,6 +30511,7 @@ const openInmobiliariaPortalPublic = async (listingId = "") => {
       const data = await api(`/api/portal_inmueble?id=${encodeURIComponent(id)}`);
       const row = data?.row || {};
       const title = row.titulo || row.direccion || "Inmueble Verifika2";
+      const fotoUrl = safeImageUrl(row.foto || "");
       const highlights = String(row.destacados || "")
         .split("|")
         .map((v) => v.trim())
@@ -30346,7 +30525,7 @@ const openInmobiliariaPortalPublic = async (listingId = "") => {
             </div>
             <button type="button" class="secondary ghost" data-portal-inmo-back>Ver inmuebles</button>
           </div>
-          ${row.foto ? `<img src="${escapeHtml(row.foto)}" alt="${escapeHtml(title)}" style="width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin:10px 0;" />` : ""}
+          ${fotoUrl ? `<img src="${escapeHtml(fotoUrl)}" alt="${escapeHtml(title)}" style="width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin:10px 0;" />` : ""}
           <div class="workspace-mini-kpis">
             <div class="workspace-mini-kpi"><span>Precio</span><strong>${row.precio ? euroFormatter.format(Number(row.precio || 0)) : "-"}</strong></div>
             <div class="workspace-mini-kpi"><span>Superficie</span><strong>${row.m2 || "-"} m²</strong></div>
@@ -30448,11 +30627,13 @@ const openInmuebleSignaturePublic = async (token = "") => {
   explorerSection?.classList.add("hidden");
   setPage("portal-public");
   if (!workspacePortalPublicContent) return;
-  const cleanToken = String(token || "").trim();
+  const cleanToken = String(token || getDeepLinkToken("firma_inmo") || "").trim();
   workspacePortalPublicContent.innerHTML = "<p class='muted'>Cargando solicitud de firma...</p>";
   try {
     if (!cleanToken) throw new Error("Token de firma requerido.");
-    const data = await api(`/api/inmueble_signature_public?token=${encodeURIComponent(cleanToken)}`);
+    const data = await api("/api/inmueble_signature_public", {
+      headers: { "X-Access-Token": cleanToken },
+    });
     const req = data?.request || {};
     const isSigned = String(req.status || "").toLowerCase() === "signed";
     const isClosed = ["signed", "rejected", "expired"].includes(String(req.status || "").toLowerCase());
@@ -30498,8 +30679,16 @@ const openInmuebleSignaturePublic = async (token = "") => {
             </div>`
       }
     `;
-    workspacePortalPublicContent.querySelector("[data-sign-open-doc]")?.addEventListener("click", () => {
-      openExternalUrl(req.doc_public_url);
+    workspacePortalPublicContent.querySelector("[data-sign-open-doc]")?.addEventListener("click", async () => {
+      try {
+        const { blob, filename } = await fetchBlobFromGet("/api/inmueble_signature_document", {
+          headers: { "X-Access-Token": cleanToken },
+          filenameFallback: req.doc_nombre || "documento.pdf",
+        });
+        openBlobInNewTab(blob, filename || req.doc_nombre || "documento.pdf");
+      } catch (e) {
+        alert("No se pudo abrir el documento.");
+      }
     });
     workspacePortalPublicContent.querySelector("[data-sign-open-evidence]")?.addEventListener("click", () => {
       openExternalUrl(buildPhotoSrc(req.signed_doc_url));
@@ -30719,7 +30908,7 @@ const handleRoute = () => {
   // Fallback defensivo: si por caché/red falla el script `app-routing.js`, no nos quedamos en Home
   // con la query `?holding=...` sin aplicar. Replicamos el routing mínimo.
   try {
-    const params = new URLSearchParams(window.location.search);
+    const params = getDeepLinkParams();
     if (params.has("firma_inmo")) {
       openInmuebleSignaturePublic(params.get("firma_inmo") || "");
       UI?.refreshContext(state);
@@ -36882,7 +37071,7 @@ const buildCatastroButtonInner = (label) =>
   `<span class="catastro-icon catastro-icon--catastro" aria-hidden="true">${CATASTRO_ICON_HTML}</span><span>${label}</span>`;
 
 const openExternalUrl = (url, options = {}) => {
-  const href = String(url || "").trim();
+  const href = safeOpenUrl(url);
   if (!href) return;
   const allowSameTabFallback = options?.allowSameTabFallback !== false;
 
@@ -58875,7 +59064,7 @@ const renderInmuebleDocs = (rows = []) => {
         body: JSON.stringify(payload),
       }).then((r) => r.json().then((body) => ({ ok: r.ok, status: r.status, body })));
       if (!res.ok || res.body?.error) throw new Error(res.body?.error || `HTTP ${res.status}`);
-      const fullUrl = new URL(res.body.public_url || `/?firma_inmo=${encodeURIComponent(res.body.token || "")}`, window.location.origin).href;
+      const fullUrl = new URL(res.body.public_url || `/#firma_inmo=${encodeURIComponent(res.body.token || "")}`, window.location.origin).href;
       try {
         await navigator.clipboard?.writeText(fullUrl);
       } catch (e) {}
@@ -77076,14 +77265,20 @@ const submitAuthLogin = async () => {
     hideAuthOverlay,
     navigate: (query = {}) => {
       const params = new URLSearchParams();
+      const hashParams = new URLSearchParams();
       Object.entries(query || {}).forEach(([key, value]) => {
         if (value === null || value === undefined) return;
         const v = String(value);
         if (!v) return;
-        params.set(key, v);
+        if (["activar_token", "portal_token", "firma_inmo", "token"].includes(key)) {
+          hashParams.set(key, v);
+        } else {
+          params.set(key, v);
+        }
       });
       const url = new URL(window.location.href);
       url.search = params.toString();
+      url.hash = hashParams.toString() ? `#${hashParams.toString()}` : "";
       history.replaceState({}, "", url.toString());
       const prevBoot = state.booting;
       state.booting = true;

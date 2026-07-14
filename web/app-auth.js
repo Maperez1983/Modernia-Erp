@@ -1,4 +1,32 @@
 (function () {
+  const DEEP_LINK_KEYS = ["activar_token", "portal_token", "firma_inmo", "token"];
+
+  const getDeepLinkParams = () => {
+    const params = new URLSearchParams(window.location.search || "");
+    const hash = String(window.location.hash || "").replace(/^#/, "");
+    if (hash) {
+      const hashParams = new URLSearchParams(hash);
+      hashParams.forEach((value, key) => {
+        if (!params.has(key)) {
+          params.set(key, value);
+        }
+      });
+    }
+    return params;
+  };
+
+  const getDeepLinkParam = (name) => {
+    const params = getDeepLinkParams();
+    return String(params.get(name) || "").trim();
+  };
+
+  window.CRMDeepLink = window.CRMDeepLink || {};
+  Object.assign(window.CRMDeepLink, {
+    getParams: getDeepLinkParams,
+    getParam: getDeepLinkParam,
+    keys: DEEP_LINK_KEYS.slice(),
+  });
+
   function ensureRecoveryButton(deps) {
     if (deps.authRecoveryBtn && deps.authRecoveryBtn.isConnected) return deps.authRecoveryBtn;
     const status = deps.authLoginStatus;
@@ -133,7 +161,7 @@
   }
 
   async function ensureAuthAndBoot(deps) {
-    const params = new URLSearchParams(window.location.search);
+    const params = getDeepLinkParams();
     const activateToken = (params.get("activar_token") || "").trim();
     const portalToken = (params.get("portal_token") || "").trim();
     if (activateToken) {
@@ -214,7 +242,9 @@
   async function prepareActivationFlow(deps, token) {
     deps.showActivationOverlay("Validando invitación...");
     try {
-      const data = await deps.api(`/api/auth_invite_status?token=${encodeURIComponent(token)}`);
+      const data = await deps.api("/api/auth_invite_status", {
+        headers: { "X-Access-Token": token },
+      });
       if (!data?.valid) {
         if (deps.authActivateStatus) {
           deps.authActivateStatus.textContent = data?.expired ? "La invitación ha caducado." : "Invitación no válida.";
@@ -234,8 +264,7 @@
   }
 
   async function submitActivationPassword(deps) {
-    const params = new URLSearchParams(window.location.search);
-    const token = (params.get("activar_token") || "").trim();
+    const token = getDeepLinkParam("activar_token");
     const p1 = deps.authActivatePass1?.value || "";
     const p2 = deps.authActivatePass2?.value || "";
     if (!token) {
@@ -336,7 +365,7 @@
       }
       deps.hideAuthOverlay();
       try {
-        const current = new URLSearchParams(window.location.search || "");
+        const current = getDeepLinkParams();
         const hasDeepLink =
           current.has("holding") ||
           current.has("crm") ||
@@ -346,7 +375,10 @@
           current.has("empresa") ||
           current.has("agenda") ||
           current.has("admin") ||
-          current.has("portal_token");
+          current.has("portal_token") ||
+          current.has("portal_inmo") ||
+          current.has("firma_inmo") ||
+          current.has("activar_token");
         const returnUrl = String(deps.state?.postAuthReturnUrl || "").trim();
         if (!returnUrl && !hasDeepLink) {
           const targetUser = String(data?.user?.usuario || "").trim().toLowerCase();
@@ -407,7 +439,7 @@
       // no lo pisamos con la navegación "por rol" (admin/workspace). Esto evita que al entrar
       // desde una card del Home, tras re-login se pierda el destino.
       try {
-        const current = new URLSearchParams(window.location.search || "");
+        const current = getDeepLinkParams();
         const hasDeepLink =
           current.has("holding") ||
           current.has("crm") ||
@@ -417,7 +449,10 @@
           current.has("empresa") ||
           current.has("agenda") ||
           current.has("admin") ||
-          current.has("portal_token");
+          current.has("portal_token") ||
+          current.has("portal_inmo") ||
+          current.has("firma_inmo") ||
+          current.has("activar_token");
         if (hasDeepLink) {
           // Re-aplica el routing con la URL actual (en apps ya inicializadas, no se re-ejecuta `init()`).
           const query = {};
