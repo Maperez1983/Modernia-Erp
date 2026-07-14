@@ -8,6 +8,7 @@ from unittest import mock
 
 from web import ocr_service
 from web import public_links
+from web import security_utils
 from web import server
 
 
@@ -223,6 +224,51 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
             server.signature_request_public_payload(payload, token="ignored"),
             public_links.signature_request_public_payload(payload, token="ignored"),
         )
+
+    def test_security_helpers_match_new_module(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base_path = Path(tmpdir)
+            target_path = base_path / "safe" / "file.txt"
+            target_path.parent.mkdir(parents=True)
+
+            sample_html = "<p>Hello</p><script>ignored()</script>"
+            sample_strict_html = "<p>Hello</p>\n\n<p>World</p>"
+            sample_json = '{"ok": true}'
+            placeholder_key = "0123456789abcdef0123456789abcdef"
+            s3_key = r"folder\\nested\\file.pdf"
+
+            with mock.patch.object(server, "COPILOT_WEB_ALLOWED_DOMAINS", {"example.com"}):
+                self.assertEqual(server._ct_eq("abc", "abc"), security_utils._ct_eq("abc", "abc"))
+                self.assertEqual(server._ct_eq("abc", "xyz"), security_utils._ct_eq("abc", "xyz"))
+                self.assertEqual(server._normalize_s3_key(s3_key), security_utils._normalize_s3_key(s3_key))
+                self.assertEqual(
+                    server._iter_s3_legacy_key_candidates(placeholder_key),
+                    security_utils._iter_s3_legacy_key_candidates(placeholder_key),
+                )
+                self.assertEqual(server._is_public_doc_url("https://example.com/doc.pdf"), security_utils._is_public_doc_url("https://example.com/doc.pdf"))
+                self.assertEqual(server._looks_like_placeholder_doc_key(placeholder_key), security_utils._looks_like_placeholder_doc_key(placeholder_key))
+                self.assertEqual(server._normalize_doc_key_for_ui("s3://bucket/doc.pdf"), security_utils._normalize_doc_key_for_ui("s3://bucket/doc.pdf"))
+                self.assertEqual(server._safe_json_object(sample_json), security_utils._safe_json_object(sample_json))
+                self.assertEqual(server.html_to_text(sample_html), security_utils.html_to_text(sample_html))
+                self.assertEqual(server._html_to_text(sample_strict_html), security_utils._html_to_text(sample_strict_html))
+                self.assertEqual(server._extract_title("<html><head><title>  Demo  </title></head></html>"), security_utils._extract_title("<html><head><title>  Demo  </title></head></html>"))
+                self.assertEqual(server._pdf_escape("a(b)\\c"), security_utils._pdf_escape("a(b)\\c"))
+                self.assertEqual(server.safe_resolve_under(base_path, "safe/file.txt"), security_utils.safe_resolve_under(base_path, "safe/file.txt"))
+                self.assertIsNone(server.safe_resolve_under(base_path, "../escape.txt"))
+                self.assertEqual(server._domain_is_allowed("example.com"), security_utils._domain_is_allowed("example.com", {"example.com"}))
+                self.assertFalse(server._domain_is_allowed("localhost"))
+
+            with mock.patch.object(security_utils.socket, "getaddrinfo", return_value=[(None, None, None, None, ("127.0.0.1", 0))]):
+                self.assertEqual(
+                    server._hostname_resolves_to_disallowed_ip("example.com"),
+                    security_utils._hostname_resolves_to_disallowed_ip("example.com"),
+                )
+
+            with mock.patch.object(security_utils.socket, "getaddrinfo", return_value=[(None, None, None, None, ("8.8.8.8", 0))]):
+                self.assertEqual(
+                    server._hostname_resolves_to_disallowed_ip("example.com"),
+                    security_utils._hostname_resolves_to_disallowed_ip("example.com"),
+                )
 
     def test_workspace_service_alone_does_not_grant_privileged_session(self):
         self.assertFalse(server.workspace_session_is_privileged({"rol": "", "servicio": "Administración"}))

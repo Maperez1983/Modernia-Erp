@@ -28,8 +28,6 @@ import email
 import html
 import textwrap
 import xml.etree.ElementTree as ET
-import socket
-import ipaddress
 import calendar
 from collections import defaultdict, OrderedDict
 from decimal import Decimal, ROUND_HALF_UP
@@ -107,6 +105,11 @@ try:
     from . import public_links as runtime_public_links
 except ImportError:
     import public_links as runtime_public_links
+
+try:
+    from . import security_utils as runtime_security_utils
+except ImportError:
+    import security_utils as runtime_security_utils
 
 
 ROOT = Path(__file__).resolve().parent
@@ -362,59 +365,19 @@ def seed_workspace_service_matrix(conn, now=None):
 
 
 def _normalize_s3_key(key):
-    raw = str(key or "").strip().replace("\\", "/")
-    return raw.lstrip("/")
+    return runtime_security_utils._normalize_s3_key(key)
 
 def _iter_s3_legacy_key_candidates(key: str):
-    safe = _normalize_s3_key(key)
-    if not safe:
-        return []
-    candidates = [safe]
-    # Legacy compatibility: algunos flujos antiguos guardaban solo un hash/uuid (32 hex)
-    # sin prefijo ni extensión, pero el objeto en S3 podía estar bajo `docs/` o `renta(s)/`
-    # o tener `.pdf`. Probamos variantes conservadoras.
-    if re.fullmatch(r"[0-9a-fA-F]{32}", safe) and "/" not in safe:
-        prefixes = ["gestoria", "gestoria_docs", "docs", "renta", "rentas"]
-        suffixes = ["", ".pdf"]
-        for pref in prefixes:
-            for suf in suffixes:
-                candidates.append(f"{pref}/{safe}{suf}")
-        for suf in [".pdf"]:
-            candidates.append(f"{safe}{suf}")
-    # De-dup preservando orden.
-    seen = set()
-    out = []
-    for item in candidates:
-        if item and item not in seen:
-            seen.add(item)
-            out.append(item)
-    return out
+    return runtime_security_utils._iter_s3_legacy_key_candidates(key)
 
 def _is_public_doc_url(value: object) -> bool:
-    text = str(value or "").strip()
-    if not text:
-        return False
-    if text.startswith("/uploads/"):
-        return True
-    if text.startswith("s3://"):
-        return True
-    if text.startswith("http://") or text.startswith("https://"):
-        return True
-    return False
+    return runtime_security_utils._is_public_doc_url(value)
 
 def _looks_like_placeholder_doc_key(value: object) -> bool:
-    text = str(value or "").strip()
-    if not text:
-        return False
-    if "/" in text or "." in text:
-        return False
-    return bool(re.fullmatch(r"[0-9a-fA-F]{32}", text))
+    return runtime_security_utils._looks_like_placeholder_doc_key(value)
 
 def _normalize_doc_key_for_ui(value: object) -> str:
-    text = str(value or "").strip()
-    if not text or _looks_like_placeholder_doc_key(text):
-        return ""
-    return _normalize_s3_key(text) if text.startswith("s3://") else text
+    return runtime_security_utils._normalize_doc_key_for_ui(value)
 
 
 def _doc_link_from_gestoria_doc_row(doc_row):
@@ -952,10 +915,7 @@ AUTH_SESSION_DB_REFRESH_SECONDS = max(15, int(os.environ.get("APP_SESSION_DB_REF
 
 
 def _ct_eq(a: str, b: str) -> bool:
-    try:
-        return hmac.compare_digest(str(a or ""), str(b or ""))
-    except Exception:
-        return False
+    return runtime_security_utils._ct_eq(a, b)
 
 
 def require_ingest_api_key(handler) -> bool:
@@ -6141,16 +6101,7 @@ def build_hipotecas_firmadas_excel_workbook(items, selected_year=None):
 
 
 def _safe_json_object(raw):
-    try:
-        if raw is None:
-            return {}
-        text = str(raw or "").strip()
-        if not text:
-            return {}
-        parsed = json.loads(text)
-        return parsed if isinstance(parsed, dict) else {}
-    except Exception:
-        return {}
+    return runtime_security_utils._safe_json_object(raw)
 
 
 def _get_nested(obj, path, default=""):
@@ -13106,12 +13057,7 @@ def decode_mime_text(raw):
 
 
 def html_to_text(value):
-    text = str(value or "")
-    text = re.sub(r"<\s*(script|style)\b[^>]*>.*?<\s*/\s*\1\s*>", " ", text, flags=re.IGNORECASE | re.DOTALL)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = html.unescape(text)
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return runtime_security_utils.html_to_text(value)
 
 
 def extract_pdf_attachment_text(pdf_bytes, max_pages=2):
@@ -19958,93 +19904,27 @@ def call_openai_content(user_content, model=None, temperature=0.0, max_tokens=70
 
 
 def _is_ip_literal(hostname):
-    value = str(hostname or "").strip()
-    if not value:
-        return False
-    # IPv6 literal
-    if ":" in value:
-        return True
-    # IPv4 literal
-    return bool(re.match(r"^\d{1,3}(\.\d{1,3}){3}$", value))
+    return runtime_security_utils._is_ip_literal(hostname)
 
 
 def _is_disallowed_hostname(hostname):
-    host = str(hostname or "").strip().lower()
-    if not host:
-        return True
-    if host in {"localhost", "localhost.localdomain"}:
-        return True
-    if host.endswith(".local"):
-        return True
-    if _is_ip_literal(host):
-        # Block direct IPs to reduce SSRF risk (no private range checks needed if we ban IP literals).
-        return True
-    return False
+    return runtime_security_utils._is_disallowed_hostname(hostname)
 
 
 def _domain_is_allowed(hostname):
-    host = str(hostname or "").strip().lower().rstrip(".")
-    if not host or _is_disallowed_hostname(host):
-        return False
-    for allowed in COPILOT_WEB_ALLOWED_DOMAINS:
-        allowed = str(allowed or "").strip().lower().rstrip(".")
-        if not allowed:
-            continue
-        if host == allowed or host.endswith("." + allowed):
-            return True
-    return False
+    return runtime_security_utils._domain_is_allowed(hostname, COPILOT_WEB_ALLOWED_DOMAINS)
 
 
 def _hostname_resolves_to_disallowed_ip(hostname):
-    host = str(hostname or "").strip()
-    if not host:
-        return True, "hostname vacío"
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except Exception:
-        return True, "no se pudo resolver DNS"
-    ips = []
-    for info in infos or []:
-        try:
-            sockaddr = info[4]
-            ip = sockaddr[0]
-        except Exception:
-            continue
-        if not ip:
-            continue
-        ips.append(ip)
-    if not ips:
-        return True, "sin IPs resueltas"
-    for ip in ips:
-        try:
-            obj = ipaddress.ip_address(ip)
-        except Exception:
-            return True, "IP no válida"
-        # Permitimos solo direcciones globales.
-        if not getattr(obj, "is_global", False):
-            return True, f"resuelve a IP no global ({ip})"
-    return False, ""
+    return runtime_security_utils._hostname_resolves_to_disallowed_ip(hostname)
 
 
 def _html_to_text(html_text):
-    value = str(html_text or "")
-    value = re.sub(r"(?is)<(script|style|noscript)[^>]*>.*?</\\1>", " ", value)
-    value = re.sub(r"(?is)<[^>]+>", " ", value)
-    value = html.unescape(value)
-    value = re.sub(r"[\\t\\r\\f\\v]+", " ", value)
-    value = re.sub(r"\\n\\s*\\n+", "\\n\\n", value)
-    value = re.sub(r"\\s{2,}", " ", value)
-    return value.strip()
+    return runtime_security_utils._html_to_text(html_text)
 
 
 def _extract_title(html_text):
-    text = str(html_text or "")
-    m = re.search(r"(?is)<title[^>]*>(.*?)</title>", text)
-    if not m:
-        return ""
-    title = re.sub(r"(?s)<[^>]+>", " ", m.group(1))
-    title = html.unescape(re.sub(r"\\s+", " ", title)).strip()
-    return title
+    return runtime_security_utils._extract_title(html_text)
 
 
 def copilot_web_fetch_url(url, *, timeout_seconds=None, max_bytes=None, max_chars=None, now=None):
@@ -48396,7 +48276,7 @@ def binary_response(handler, data, content_type="application/octet-stream", file
 
 
 def _pdf_escape(value):
-    return str(value or "").replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    return runtime_security_utils._pdf_escape(value)
 
 
 def format_eur(value):
@@ -53660,25 +53540,7 @@ def send_file(handler, path):
 
 
 def safe_resolve_under(base_dir, rel_path):
-    """
-    Devuelve una ruta segura dentro de `base_dir` o None si intenta salir del directorio.
-    Protege contra path traversal (../) y normaliza percent-encoding.
-    """
-    base_dir = Path(base_dir).resolve()
-    rel = str(rel_path or "")
-    rel = urllib.parse.unquote(rel)
-    rel = rel.lstrip("/").replace("\\", "/")
-    if not rel:
-        return None
-    # Bloquea patrones obvios antes de resolver.
-    if rel.startswith("../") or "/../" in rel or rel.startswith("..\\") or "\\..\\" in rel:
-        return None
-    candidate = (base_dir / rel).resolve()
-    if candidate == base_dir:
-        return None
-    if base_dir not in candidate.parents:
-        return None
-    return candidate
+    return runtime_security_utils.safe_resolve_under(base_dir, rel_path)
 
 
 class DbMismatchError(RuntimeError):
