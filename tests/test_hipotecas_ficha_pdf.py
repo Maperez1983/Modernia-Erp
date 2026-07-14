@@ -3,6 +3,7 @@ import sqlite3
 import unittest
 from io import BytesIO
 
+from web import hipotecas_pdf
 from web import server
 
 
@@ -225,6 +226,23 @@ class HipotecasFichaPdfTests(unittest.TestCase):
     def tearDown(self):
         self.conn.close()
 
+    def _pdf_text(self, pdf_bytes):
+        if server.PdfReader is None:
+            return None
+        reader = server.PdfReader(BytesIO(pdf_bytes))
+        return "\n".join((page.extract_text() or "").strip() for page in reader.pages)
+
+    def _assert_same_pdf_shape(self, left, right):
+        self.assertTrue(left.startswith(b"%PDF"))
+        self.assertTrue(right.startswith(b"%PDF"))
+        self.assertGreater(len(left), 0)
+        self.assertGreater(len(right), 0)
+        if server.PdfReader is not None:
+            left_reader = server.PdfReader(BytesIO(left))
+            right_reader = server.PdfReader(BytesIO(right))
+            self.assertEqual(len(left_reader.pages), len(right_reader.pages))
+            self.assertEqual(self._pdf_text(left), self._pdf_text(right))
+
     def test_build_hipoteca_ficha_pdf_generates_full_and_sectioned_docs(self):
         row = self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone()
         payload = server.build_hipoteca_ficha_payload(self.conn, row)
@@ -258,6 +276,85 @@ class HipotecasFichaPdfTests(unittest.TestCase):
         if server.PdfReader is not None:
             reader = server.PdfReader(BytesIO(compact_pdf))
             self.assertEqual(len(reader.pages), 1)
+
+    def test_hipotecas_pdf_wrappers_match_module_builders(self):
+        row = self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone()
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
+              oficina, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan, comision_modernia,
+              inmobiliaria_compra, asesor, estado, anio, cliente_inmueble_json, hipoteca_detalle_json, liquidacion_json,
+              created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            """,
+            (
+                "h2",
+                "e1",
+                "Luis López",
+                "c1",
+                "BBVA",
+                220000,
+                175000,
+                79.54,
+                45000,
+                2800,
+                "Modernia Norte",
+                "2026-06-10",
+                "Sí",
+                "Compra",
+                "2026-06-19",
+                550,
+                550,
+                1600,
+                "Inmo Norte",
+                "María",
+                "Firmada",
+                2026,
+                row["cliente_inmueble_json"],
+                row["hipoteca_detalle_json"],
+                row["liquidacion_json"],
+                "2026-06-19",
+                "2026-06-19",
+            ),
+        )
+        self.conn.commit()
+
+        row2 = self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h2'").fetchone()
+        payload = server.build_hipoteca_ficha_payload(self.conn, row)
+        rows = [row, row2]
+        filters = {"year": "2026", "estado": "Firmada"}
+
+        self._assert_same_pdf_shape(
+            server.build_hipoteca_ficha_pdf(payload),
+            hipotecas_pdf.build_hipoteca_ficha_pdf(payload),
+        )
+        self._assert_same_pdf_shape(
+            server.build_hipoteca_ficha_pdf(payload, section="comprador"),
+            hipotecas_pdf.build_hipoteca_ficha_pdf(payload, section="comprador"),
+        )
+        self._assert_same_pdf_shape(
+            server.build_hipoteca_ficha_compact_pdf(payload),
+            hipotecas_pdf.build_hipoteca_ficha_compact_pdf(payload),
+        )
+        self.assertEqual(
+            server.build_hipotecas_bdt_listado_card_items(server.build_hipoteca_export_row(self.conn, row)),
+            hipotecas_pdf.build_hipotecas_bdt_listado_card_items(server.build_hipoteca_export_row(self.conn, row)),
+        )
+        self._assert_same_pdf_shape(
+            server.build_hipotecas_listado_pdf(self.conn, rows, filters=filters),
+            hipotecas_pdf.build_hipotecas_listado_pdf(self.conn, rows, filters=filters),
+        )
+        self._assert_same_pdf_shape(
+            server.build_hipotecas_fichas_pdf(self.conn, rows, filters=filters),
+            hipotecas_pdf.build_hipotecas_listado_pdf(self.conn, rows, filters=filters),
+        )
+        self._assert_same_pdf_shape(
+            server.build_hipotecas_bdt_listado_pdf(self.conn, rows, filters=filters),
+            hipotecas_pdf.build_hipotecas_bdt_listado_pdf(self.conn, rows, filters=filters),
+        )
 
     def test_resolve_hipoteca_bank_brand_uses_local_assets(self):
         brand = server.resolve_hipoteca_bank_brand("Banco Santander S.A.")
