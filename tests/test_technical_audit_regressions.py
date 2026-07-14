@@ -6,6 +6,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from PIL import Image, ImageDraw
+
+from web import pdf_utils
 from web import ocr_service
 from web import public_links
 from web import security_utils
@@ -349,3 +352,70 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
         self.assertEqual(public["doc_public_url"], "/api/inmueble_signature_document")
         self.assertNotIn("?token=", public["doc_public_url"])
         conn.close()
+
+    def test_pdf_helpers_match_new_module(self):
+        canvas_a = Image.new("RGB", (800, 400), "white")
+        canvas_b = Image.new("RGB", (800, 400), "white")
+        draw_a = ImageDraw.Draw(canvas_a)
+        draw_b = ImageDraw.Draw(canvas_b)
+
+        font_server = server._document_font(18, bold=True)
+        font_module = pdf_utils._document_font(18, bold=True)
+
+        self.assertEqual(server._pdf_escape("a(b)\\c"), pdf_utils._pdf_escape("a(b)\\c"))
+        self.assertEqual(server._pdf_wrap_lines("Uno dos tres", width=4), pdf_utils._pdf_wrap_lines("Uno dos tres", width=4))
+        self.assertEqual(
+            server._pdf_wrap_lines("Linea 1\n\nLinea 2", width=20),
+            pdf_utils._pdf_wrap_lines("Linea 1\n\nLinea 2", width=20),
+        )
+        self.assertEqual(
+            server._pdf_wrap_lines_px(draw_a, "Banco Santander Modernia", font_server, 120),
+            pdf_utils._pdf_wrap_lines_px(draw_b, "Banco Santander Modernia", font_module, 120),
+        )
+        self.assertEqual(
+            server._pdf_draw_justified_paragraph(draw_a, 10, 10, 180, "uno dos tres cuatro", font_server, (0, 0, 0)),
+            pdf_utils._pdf_draw_justified_paragraph(draw_b, 10, 10, 180, "uno dos tres cuatro", font_module, (0, 0, 0)),
+        )
+        self.assertEqual(server._pdf_format_number("1234.5", 1), pdf_utils._pdf_format_number("1234.5", 1))
+        self.assertEqual(font_server.getbbox("Ag"), font_module.getbbox("Ag"))
+        self.assertEqual(font_server.getbbox("Modernia"), font_module.getbbox("Modernia"))
+        self.assertEqual(server._parse_pdf_color("#abc"), pdf_utils._parse_pdf_color("#abc"))
+        self.assertEqual(server._parse_pdf_color("#abcdef"), pdf_utils._parse_pdf_color("#abcdef"))
+        self.assertEqual(
+            server._pil_multiline(draw_a, "Texto largo para probar el salto de línea", font_server, width=10),
+            pdf_utils._pil_multiline(draw_b, "Texto largo para probar el salto de línea", font_module, width=10),
+        )
+        self.assertEqual(
+            server.resolve_hipoteca_bank_brand("Banco Santander S.A."),
+            pdf_utils.resolve_hipoteca_bank_brand("Banco Santander S.A."),
+        )
+        self.assertEqual(
+            server.build_hipoteca_bank_logo_meta("Banco Santander S.A."),
+            pdf_utils.build_hipoteca_bank_logo_meta("Banco Santander S.A."),
+        )
+        self.assertEqual(
+            server.normalize_hipoteca_pdf_sort_order("ASCENDENTE"),
+            pdf_utils.normalize_hipoteca_pdf_sort_order("ASCENDENTE"),
+        )
+        self.assertEqual(
+            server._logo_badge_info_from_path("/assets/logos/santander.svg"),
+            pdf_utils._logo_badge_info_from_path("/assets/logos/santander.svg"),
+        )
+
+        badge_server = server._build_logo_badge_image(
+            "Banco Santander",
+            color="#e30613",
+            short="BS",
+            logo_on_dark=True,
+            max_width=280,
+        )
+        badge_module = pdf_utils._build_logo_badge_image(
+            "Banco Santander",
+            color="#e30613",
+            short="BS",
+            logo_on_dark=True,
+            max_width=280,
+        )
+        self.assertEqual(badge_server.size, badge_module.size)
+        self.assertEqual(badge_server.mode, badge_module.mode)
+        self.assertEqual(badge_server.tobytes(), badge_module.tobytes())
