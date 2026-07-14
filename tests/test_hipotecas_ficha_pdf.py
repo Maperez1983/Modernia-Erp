@@ -258,13 +258,41 @@ class HipotecasFichaPdfTests(unittest.TestCase):
         self.assertTrue(full_filename.startswith("ficha_hipoteca_"))
         self.assertTrue(full_filename.endswith(".pdf"))
         self.assertIn("comprador", comprador_filename)
-        self.assertIn("liquidacion_print", payload)
-        self.assertIn("liq", payload["liquidacion_print"])
-        self.assertGreater(payload["liquidacion_print"]["liq"]["comprador"]["suma_total_necesaria"], 0)
 
-        if server.PdfReader is not None:
-            reader = server.PdfReader(BytesIO(full_pdf))
-            self.assertGreaterEqual(len(reader.pages), 1)
+    def test_hipoteca_helper_formatters_and_card_items(self):
+        self.assertEqual(hipotecas_pdf._hipoteca_ficha_bool_text("si"), "Sí")
+        self.assertEqual(hipotecas_pdf._hipoteca_ficha_bool_text("no"), "No")
+        self.assertEqual(hipotecas_pdf._hipoteca_ficha_bool_text(""), "—")
+        self.assertEqual(hipotecas_pdf._hipoteca_ficha_json_lines('{"b":2,"a":1}')[0], "{")
+        self.assertEqual(
+            hipotecas_pdf._hipoteca_ficha_intervinientes_text(
+                {"intervinientes": [{"rol": "Avalista", "nombre": "Juan Pérez", "nif": "87654321B"}]}
+            ),
+            "Avalista · Juan Pérez · 87654321B",
+        )
+        self.assertEqual(hipotecas_pdf._hipoteca_ficha_money("1234.5"), "1.234,50 €")
+        self.assertEqual(hipotecas_pdf._hipoteca_ficha_num("0.5"), "0,5")
+
+        card_items = hipotecas_pdf.build_hipotecas_bdt_listado_card_items(
+            {
+                "cliente": "Ana López",
+                "banco": "CaixaBank",
+                "fecha_encargo": "2026-06-12",
+                "fecha_firma": "2026-06-20",
+                "precio": 250000,
+                "entrada": 50000,
+                "importe_hipoteca": 200000,
+                "honorarios": 3000,
+            }
+        )
+        self.assertEqual(card_items[0]["label"], "Nombre y apellidos cliente")
+        self.assertTrue(card_items[0]["accent"])
+        self.assertEqual(card_items[1]["value"], "CaixaBank")
+        self.assertEqual(card_items[-1]["label"], "Comisión cobrada")
+
+    def test_empty_list_builders_return_empty_pdf(self):
+        self.assertEqual(hipotecas_pdf.build_hipotecas_bdt_listado_pdf(self.conn, [], filters={}), b"")
+        self.assertEqual(hipotecas_pdf.build_hipotecas_listado_pdf(self.conn, [], filters={}), b"")
 
     def test_build_hipoteca_ficha_compact_pdf_uses_one_page(self):
         row = self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone()

@@ -10,3 +10,27 @@ extend-exclude = [
     "**/*_generated.py",
     "**/*_pb2.py",
 ]
+
+[tool.coverage.run]
+source = ["web"]
+branch = true
+relative_files = true
+omit = [
+    ".venv/*",
+    "tests/*",
+    "**/__pycache__/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+precision = 2
+exclude_lines = [
+    "pragma: no cover",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+[tool.coverage.xml]
+output = "coverage.xml"

@@ -1,6 +1,7 @@
 import importlib
 import unittest
 from io import BytesIO
+from unittest import mock
 
 from web import document_pdf
 from web import server
@@ -101,3 +102,26 @@ class DocumentPdfTests(unittest.TestCase):
             text = self._pdf_text(document_pdf.build_signature_evidence_pdf(request_row, evidence))
             self.assertIn("JUSTIFICANTE", text)
             self.assertIn("Contrato de prueba", text)
+
+    def test_load_brand_logo_and_modernia_brand_detection(self):
+        self.assertIsNotNone(document_pdf.load_brand_logo("/assets/logos/santander.svg", max_width=120))
+        self.assertTrue(document_pdf._company_uses_modernia_pdf_brand({"nombre": "Modernia Demo"}))
+        self.assertTrue(document_pdf._company_uses_modernia_pdf_brand({"logo_url": "/assets/grupo_modernia_logo.png"}))
+        self.assertFalse(document_pdf._company_uses_modernia_pdf_brand({"nombre": "Empresa Demo"}))
+
+        with mock.patch.object(document_pdf, "_load_image_from_path", return_value=None):
+            badge = document_pdf.load_brand_logo("https://example.com/grupo_modernia_logo.png", max_width=120)
+        self.assertIsNotNone(badge)
+        self.assertGreater(badge.width, 0)
+
+    def test_legacy_modernia_builder_emits_pdf(self):
+        pdf_bytes = document_pdf._legacy_build_modernia_branded_document_pdf(
+            "Documento Modernia",
+            "Subtítulo Modernia",
+            [("Resumen", [("Campo", "Valor"), "Línea adicional"])],
+            ["Pie 1", "Pie 2"],
+            company={"nombre": "Modernia Demo", "logo_url": "/assets/grupo_modernia_logo.png"},
+            brand_logo_url="/assets/grupo_modernia_logo.png",
+        )
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertGreater(len(pdf_bytes), 0)

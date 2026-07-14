@@ -31,9 +31,17 @@ jobs:
           fi
 
       - name: Run tests
-        run: python -m pytest
+        run: python -m pytest --cov=web --cov-report=term-missing --cov-report=html --cov-report=xml --cov-fail-under=8.5
 
       # Temporal: allow Ruff to fail while we burn down historical lint debt.
       - name: Run Ruff
         continue-on-error: true
         run: ruff check .
+
+      - name: Upload coverage HTML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-html
+          path: htmlcov
+          if-no-files-found: error
