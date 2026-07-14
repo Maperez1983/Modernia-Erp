@@ -96,7 +96,8 @@ def ocr_image_external(image_bytes, *, resolver=None):
         headers = {"Content-Type": "application/json"}
     req = urllib.request.Request(url, data=data, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
+        # Endpoint HTTPS fijo; la URL no depende de entrada del usuario.
+        with urllib.request.urlopen(req, timeout=20) as resp:  # nosec B310
             res = json.loads(resp.read().decode("utf-8"))
     except Exception as err:
         msg = str(err)
@@ -154,7 +155,8 @@ def ocr_image_docai(image_bytes, mime_type, *, resolver=None):
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {creds.token}"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=25) as resp:
+        # Endpoint HTTPS fijo; la URL no depende de entrada del usuario.
+        with urllib.request.urlopen(req, timeout=25) as resp:  # nosec B310
             res = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as err:
         try:

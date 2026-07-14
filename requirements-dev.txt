@@ -1,6 +1,7 @@
 -r requirements.txt
 
 ruff
+bandit
 mypy
 pytest
 pytest-cov

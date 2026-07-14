@@ -146,7 +146,8 @@ def _rewrite_insert_or_replace(sql):
     base = re.sub(r"^\s*INSERT\s+OR\s+REPLACE\s+", "INSERT ", sql, flags=re.IGNORECASE).rstrip().rstrip(";")
     if re.search(r"\bON\s+CONFLICT\b", base, flags=re.IGNORECASE):
         return base
-    return base + " ON CONFLICT (id) DO UPDATE SET " + ", ".join(set_cols)
+    # Columnas derivadas del SQL parseado; no depende de entrada externa.
+    return base + " ON CONFLICT (id) DO UPDATE SET " + ", ".join(set_cols)  # nosec B608
 
 
 def _qmark_to_pyformat(sql):

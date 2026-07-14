@@ -1,0 +1,10 @@
+# Bandit scans only production code under web/.
+# .venv is the local virtual environment and must not be scanned.
+# tests contains test-only code and fixtures that are not production attack surface.
+# htmlcov contains generated coverage HTML and is not source code.
+# __pycache__ contains interpreter bytecode, not Python source.
+exclude_dirs:
+  - .venv
+  - tests
+  - htmlcov
+  - __pycache__

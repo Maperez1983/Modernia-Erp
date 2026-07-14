@@ -12411,7 +12411,7 @@ def import_campaigns_from_mailbox(conn, payload, now):
                 message_id = str(msg.get("Message-ID") or "").strip()
                 seq_label = seq_id.decode("utf-8", errors="ignore") if isinstance(seq_id, (bytes, bytearray)) else str(seq_id)
                 fingerprint = f"{subject}|{sender}|{date_header}|{imap_uid or seq_label}"
-                dedupe_key = message_id or f"sha1:{hashlib.sha1(fingerprint.encode('utf-8')).hexdigest()}"
+                dedupe_key = message_id or f"sha1:{hashlib.sha1(fingerprint.encode('utf-8'), usedforsecurity=False).hexdigest()}"
                 seen = conn.execute(
                     "SELECT 1 FROM seguros_campanas_mail_seen WHERE message_id = ? LIMIT 1",
                     (dedupe_key,),
@@ -53265,7 +53265,7 @@ class Handler(BaseHTTPRequestHandler):
                 try:
                     if not getattr(Handler, "_code_sig", ""):
                         with open(__file__, "rb") as fh:
-                            Handler._code_sig = hashlib.sha1(fh.read()).hexdigest()
+                            Handler._code_sig = hashlib.sha1(fh.read(), usedforsecurity=False).hexdigest()
                 except Exception:
                     Handler._code_sig = ""
             db_source = "postgres_url" if (os.environ.get("POSTGRES_URL") or "").strip() else "database_url"
@@ -89641,7 +89641,7 @@ class Handler(BaseHTTPRequestHandler):
                 venc = (item.get("fecha_vencimiento_norm") or "").strip()
                 if not pol_key or not venc:
                     continue
-                rid = hashlib.sha1(f"{empresa_id}|{pol_key}|{venc}".encode("utf-8")).hexdigest()
+                rid = hashlib.sha1(f"{empresa_id}|{pol_key}|{venc}".encode("utf-8"), usedforsecurity=False).hexdigest()
                 renewal_ids.append(rid)
                 if backend == "postgres":
                     conn.execute(
