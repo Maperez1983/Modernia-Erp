@@ -4,6 +4,7 @@ import csv
 import json
 import math
 import os
+import logging
 import sqlite3
 import uuid
 import urllib.parse
@@ -862,6 +863,12 @@ WORKSPACE_TIME_SWEEP_STATE = {
     "last_notifications": 0,
 }
 WORKSPACE_TIME_SWEEP_STATE_LOCK = threading.Lock()
+WORKSPACE_TIME_SWEEP_LOCK = threading.Lock()
+WORKSPACE_TIME_SWEEP_SCHEMA_LOCK = threading.Lock()
+WORKSPACE_TIME_SWEEP_SCHEMA_READY = False
+WORKSPACE_TIME_SWEEP_BATCH_SIZE = max(1, int(os.environ.get("WORKSPACE_TIME_SWEEP_BATCH_SIZE", "50")))
+APP_PERFORMANCE_LOGGING = os.environ.get("APP_PERFORMANCE_LOGGING", "0").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
+LOGGER = logging.getLogger(__name__)
 LEGAL_RADAR_AUTO_SCAN_ENABLED = os.environ.get("LEGAL_RADAR_AUTO_SCAN_ENABLED", "0").strip().lower() in (
     "1",
     "true",
@@ -36558,6 +36565,10 @@ def ensure_tables(db_path):
     ensure_workspace_core_tables(conn)
     ensure_workspace_facturacion_table(conn)
     ensure_workspace_product_tables(conn)
+    try:
+        _ensure_m5_perf_indexes(conn)
+    except Exception:
+        pass
     # Seed retrocompatible: matriz servicio->empresas (por workspace).
     try:
         if not _migration_done(conn, "workspace_service_matrix_seed_v1"):
@@ -39849,6 +39860,123 @@ def _rollback_best_effort(conn):
         pass
 
 
+def _invalidate_table_columns_cache(conn, *table_names):
+    cache = getattr(conn, "__crm_table_columns_cache__", None)
+    if not isinstance(cache, dict):
+        return
+    for table_name in table_names:
+        cache.pop(str(table_name or "").strip().lower(), None)
+
+
+def _db_backend_name(conn) -> str:
+    backend = getattr(conn, "__crm_backend__", "") or ""
+    if not backend and hasattr(conn, "executescript"):
+        backend = "sqlite"
+    return backend or "sqlite"
+
+
+def _m5_migration_done(conn, key: str) -> bool:
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS crm_migrations (
+              key TEXT PRIMARY KEY,
+              applied_at TEXT NOT NULL
+            )
+            """
+        )
+    except Exception:
+        pass
+    try:
+        row = conn.execute("SELECT 1 FROM crm_migrations WHERE key = ? LIMIT 1", (str(key),)).fetchone()
+        return bool(row)
+    except Exception:
+        return False
+
+
+def _m5_migration_mark(conn, key: str) -> None:
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS crm_migrations (
+              key TEXT PRIMARY KEY,
+              applied_at TEXT NOT NULL
+            )
+            """
+        )
+    except Exception:
+        pass
+    backend = _db_backend_name(conn)
+    try:
+        if backend == "postgres":
+            conn.execute(
+                """
+                INSERT INTO crm_migrations (key, applied_at)
+                VALUES (?, CURRENT_TIMESTAMP)
+                ON CONFLICT (key) DO NOTHING
+                """,
+                (str(key),),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO crm_migrations (key, applied_at)
+                VALUES (?, CURRENT_TIMESTAMP)
+                """,
+                (str(key),),
+            )
+    except Exception:
+        pass
+
+
+def _ensure_m5_perf_indexes(conn) -> bool:
+    try:
+        if _m5_migration_done(conn, "perf_indexes_m5_v1"):
+            return False
+        # Usamos DDL estándar para que la migración funcione igual en SQLite y PostgreSQL
+        # dentro de la misma transacción de inicialización.
+        idx_prefix = "CREATE INDEX"
+        index_sql = [
+            # Sweep: filtra workspaces activos y ordena el lote de manera estable.
+            f"{idx_prefix} IF NOT EXISTS idx_workspaces_estado_updated_nombre ON workspaces (estado, updated_at, nombre)",
+            # Sweep: personal activo por workspace ordenado por nombre.
+            f"{idx_prefix} IF NOT EXISTS idx_workspace_registro_personal_ws_activo_nombre ON workspace_registro_personal (workspace_id, activo, nombre)",
+            # Sweep / alerts: localiza la configuración horaria de cada persona sin scans.
+            f"{idx_prefix} IF NOT EXISTS idx_workspace_registro_alerts_ws_persona ON workspace_registro_alerts (workspace_id, persona_id)",
+            # Sweep / alerts: última entrada del día por persona y workspace.
+            f"{idx_prefix} IF NOT EXISTS idx_workspace_registro_horario_ws_persona_fecha_hora ON workspace_registro_horario (workspace_id, persona_id, fecha, hora_inicio)",
+            # Document hub: lista documentos de gestoría por empresa en orden de creación.
+            f"{idx_prefix} IF NOT EXISTS idx_gestoria_docs_empresa_created ON gestoria_docs (empresa_id, created_at DESC)",
+            # Financiación: firmas recientes por empresa y fecha de firma.
+            f"{idx_prefix} IF NOT EXISTS idx_hipotecas_empresa_fecha_firma ON hipotecas (empresa_id, fecha_firma DESC)",
+            # Financiación: alertas y listados por empresa/estado/fecha.
+            f"{idx_prefix} IF NOT EXISTS idx_asesoramientos_fin_empresa_estado_fecha ON asesoramientos_financiacion (empresa_id, estado, fecha)",
+        ]
+        for sql in index_sql:
+            try:
+                conn.execute(sql)
+            except Exception:
+                pass
+        _m5_migration_mark(conn, "perf_indexes_m5_v1")
+        return True
+    except Exception:
+        return False
+
+
+def _perf_log_operation(operation, started_at, *, workspace_id=None, rows=None, queries=None):
+    if not APP_PERFORMANCE_LOGGING:
+        return
+    duration_ms = (time.perf_counter() - started_at) * 1000.0
+    details = [f"operation={operation}", f"duration_ms={duration_ms:.1f}"]
+    if workspace_id:
+        details.append(f"workspace_id={workspace_id}")
+    if rows is not None:
+        details.append(f"rows={int(rows)}")
+    if queries is not None:
+        details.append(f"queries={int(queries)}")
+    LOGGER.info("perf %s", " ".join(details))
+
+
 def fetch_workspace_company_ids(conn, workspace_id):
     ws_id = str(workspace_id or "").strip()
     if not ws_id:
@@ -39861,11 +39989,14 @@ def fetch_workspace_company_ids(conn, workspace_id):
             _rollback_best_effort(conn)
             return []
 
-    # Prefer v2: companies living inside the workspace.
+    # Prefer v2: only bootstrap the legacy tables when the hot-path scope tables are absent.
     try:
-        ensure_workspace_core_tables(conn)
+        if not (table_columns(conn, "workspace_companies") and table_columns(conn, "workspace_empresas")):
+            ensure_workspace_core_tables(conn)
+            _invalidate_table_columns_cache(conn, "workspace_companies", "workspace_empresas")
     except Exception:
         _rollback_best_effort(conn)
+        _invalidate_table_columns_cache(conn, "workspace_companies", "workspace_empresas")
     rows_v2 = _safe_fetchall(
         """
         SELECT legacy_empresa_id
@@ -40218,579 +40349,625 @@ def fetch_workspace_cliente_360(conn, workspace_id, cliente_id):
 
 
 def fetch_workspace_gestoria_overview(conn, workspace_id, empresa_id=None):
-    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
-    if not empresa_ids:
-        return {
-            "counts": {
-                "total": 0,
-                "activos": 0,
-                "modelos_mes": 0,
-                "rentas_pendientes_presentar": 0,
-                "acciones_pendientes": 0,
-                "presupuestos_estudio": 0,
-            },
-            "modelos_vencidos": [],
-            "rentas_pendientes": [],
-            "acciones_vencidas": [],
-            "presupuestos_estudio": [],
-        }
-    placeholders = ",".join(["?"] * len(empresa_ids))
-    service_filter = gestoria_service_sql_condition("ce")
-    today = datetime.now().date()
-    current_month = today.strftime("%Y-%m")
-
-    total = conn.execute(
-        f"""
-        SELECT COUNT(DISTINCT c.id) AS total
-        FROM clientes c
-        JOIN clientes_empresas ce ON ce.cliente_id = c.id
-        WHERE ce.empresa_id IN ({placeholders})
-          AND {service_filter}
-        """,
-        empresa_ids,
-    ).fetchone()
-    active_rows = conn.execute(
-        f"""
-        SELECT DISTINCT c.id AS cliente_id, ce.estado
-        FROM clientes c
-        JOIN clientes_empresas ce ON ce.cliente_id = c.id
-        WHERE ce.empresa_id IN ({placeholders})
-          AND {service_filter}
-        """,
-        empresa_ids,
-    ).fetchall()
-    active_ids = {row["cliente_id"] for row in active_rows if is_gestoria_dashboard_active_state(row["estado"])}
-    modelos_mes = conn.execute(
-        f"""
-        SELECT COUNT(DISTINCT m.id) AS total
-        FROM gestoria_modelos m
-        JOIN clientes_empresas ce ON ce.cliente_id = m.cliente_id
-        WHERE ce.empresa_id IN ({placeholders})
-          AND {service_filter}
-          AND m.proxima_fecha IS NOT NULL
-          AND length(m.proxima_fecha) >= 7
-          AND substr(NULLIF(m.proxima_fecha, ''), 1, 7) = ?
-        """,
-        [*empresa_ids, current_month],
-    ).fetchone()
-    modelos_vencidos = conn.execute(
-        f"""
-        SELECT DISTINCT c.nombre AS cliente, m.modelo, m.proxima_fecha, m.estado
-        FROM gestoria_modelos m
-        JOIN clientes c ON c.id = m.cliente_id
-        JOIN clientes_empresas ce ON ce.cliente_id = c.id
-        WHERE ce.empresa_id IN ({placeholders})
-          AND {service_filter}
-          AND m.proxima_fecha IS NOT NULL
-          AND date(m.proxima_fecha) < date(?)
-          AND (m.estado IS NULL OR LOWER(m.estado) != 'presentado')
-        ORDER BY m.proxima_fecha ASC
-        LIMIT 12
-        """,
-        [*empresa_ids, today.isoformat()],
-    ).fetchall()
-    acciones_pendientes = conn.execute(
-        f"""
-        SELECT COUNT(*) AS total
-        FROM acciones a
-        WHERE a.empresa_id IN ({placeholders})
-          AND LOWER(a.servicio) = 'gestoria'
-          AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
-          AND a.fecha IS NOT NULL
-          AND date(a.fecha) >= date(?)
-        """,
-        [*empresa_ids, today.isoformat()],
-    ).fetchone()
-    acciones_vencidas = conn.execute(
-        f"""
-        SELECT a.fecha, a.hora, COALESCE(c.nombre, a.cliente_nombre) AS cliente, a.tipo, a.estado
-        FROM acciones a
-        LEFT JOIN clientes c ON c.id = a.cliente_id
-        WHERE a.empresa_id IN ({placeholders})
-          AND LOWER(a.servicio) = 'gestoria'
-          AND a.fecha IS NOT NULL
-          AND date(a.fecha) < date(?)
-          AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
-        ORDER BY a.fecha ASC, a.hora ASC
-        LIMIT 12
-        """,
-        [*empresa_ids, today.isoformat()],
-    ).fetchall()
-    presupuestos_estudio = conn.execute(
-        f"""
-        SELECT p.fecha, p.fecha_seguimiento, p.titulo, p.motivo_estado, COALESCE(c.nombre, '') AS cliente
-        FROM workspace_presupuestos p
-        LEFT JOIN clientes c ON c.id = p.cliente_id
-        WHERE p.workspace_id = ?
-          AND p.empresa_id IN ({placeholders})
-          AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
-          AND LOWER(COALESCE(p.estado, '')) = 'estudio'
-        ORDER BY COALESCE(p.fecha_seguimiento, p.fecha, p.updated_at) ASC
-        LIMIT 12
-        """,
-        [workspace_id, *empresa_ids],
-    ).fetchall()
-
-    rentas_borrador_total = 0
-    rentas_borrador_preview = []
+    started_at = time.perf_counter()
+    rows_processed = 0
+    query_count = 0
     try:
-        summaries = []
-        for empresa_id in empresa_ids:
-            summaries.append(compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", limit=12))
-        rentas_borrador_total = sum(int(s.get("count") or 0) for s in summaries)
-        for s in summaries:
-            rentas_borrador_preview.extend(list(s.get("rows") or []))
-        rentas_borrador_preview.sort(key=lambda x: (str(x.get("cliente") or "").lower(), str(x.get("nif") or "")))
-        rentas_borrador_preview = rentas_borrador_preview[:12]
-    except Exception:
+        empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
+        if not empresa_ids:
+            return {
+                "counts": {
+                    "total": 0,
+                    "activos": 0,
+                    "modelos_mes": 0,
+                    "rentas_pendientes_presentar": 0,
+                    "acciones_pendientes": 0,
+                    "presupuestos_estudio": 0,
+                },
+                "modelos_vencidos": [],
+                "rentas_pendientes": [],
+                "acciones_vencidas": [],
+                "presupuestos_estudio": [],
+            }
+        placeholders = ",".join(["?"] * len(empresa_ids))
+        service_filter = gestoria_service_sql_condition("ce")
+        today = datetime.now().date()
+        current_month = today.strftime("%Y-%m")
+        active_state_sql = "LOWER(TRIM(COALESCE(ce.estado, ''))) IN ('alta', 'activo', 'activa')"
+
+        total_row = conn.execute(
+            f"""
+            SELECT
+              COUNT(DISTINCT c.id) AS total,
+              COUNT(DISTINCT CASE WHEN {active_state_sql} THEN c.id END) AS activos
+            FROM clientes c
+            JOIN clientes_empresas ce ON ce.cliente_id = c.id
+            WHERE ce.empresa_id IN ({placeholders})
+              AND {service_filter}
+            """,
+            empresa_ids,
+        ).fetchone()
+        query_count += 1
+        modelos_mes = conn.execute(
+            f"""
+            SELECT COUNT(DISTINCT m.id) AS total
+            FROM gestoria_modelos m
+            JOIN clientes_empresas ce ON ce.cliente_id = m.cliente_id
+            WHERE ce.empresa_id IN ({placeholders})
+              AND {service_filter}
+              AND m.proxima_fecha IS NOT NULL
+              AND length(m.proxima_fecha) >= 7
+              AND substr(NULLIF(m.proxima_fecha, ''), 1, 7) = ?
+            """,
+            [*empresa_ids, current_month],
+        ).fetchone()
+        query_count += 1
+        modelos_vencidos = conn.execute(
+            f"""
+            SELECT DISTINCT c.nombre AS cliente, m.modelo, m.proxima_fecha, m.estado
+            FROM gestoria_modelos m
+            JOIN clientes c ON c.id = m.cliente_id
+            JOIN clientes_empresas ce ON ce.cliente_id = c.id
+            WHERE ce.empresa_id IN ({placeholders})
+              AND {service_filter}
+              AND m.proxima_fecha IS NOT NULL
+              AND date(m.proxima_fecha) < date(?)
+              AND (m.estado IS NULL OR LOWER(m.estado) != 'presentado')
+            ORDER BY m.proxima_fecha ASC
+            LIMIT 12
+            """,
+            [*empresa_ids, today.isoformat()],
+        ).fetchall()
+        query_count += 1
+        acciones_pendientes = conn.execute(
+            f"""
+            SELECT COUNT(*) AS total
+            FROM acciones a
+            WHERE a.empresa_id IN ({placeholders})
+              AND LOWER(a.servicio) = 'gestoria'
+              AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
+              AND a.fecha IS NOT NULL
+              AND date(a.fecha) >= date(?)
+            """,
+            [*empresa_ids, today.isoformat()],
+        ).fetchone()
+        query_count += 1
+        acciones_vencidas = conn.execute(
+            f"""
+            SELECT a.fecha, a.hora, COALESCE(c.nombre, a.cliente_nombre) AS cliente, a.tipo, a.estado
+            FROM acciones a
+            LEFT JOIN clientes c ON c.id = a.cliente_id
+            WHERE a.empresa_id IN ({placeholders})
+              AND LOWER(a.servicio) = 'gestoria'
+              AND a.fecha IS NOT NULL
+              AND date(a.fecha) < date(?)
+              AND (a.estado IS NULL OR LOWER(a.estado) != 'hecho')
+            ORDER BY a.fecha ASC, a.hora ASC
+            LIMIT 12
+            """,
+            [*empresa_ids, today.isoformat()],
+        ).fetchall()
+        query_count += 1
+        presupuestos_estudio = conn.execute(
+            f"""
+            SELECT p.fecha, p.fecha_seguimiento, p.titulo, p.motivo_estado, COALESCE(c.nombre, '') AS cliente
+            FROM workspace_presupuestos p
+            LEFT JOIN clientes c ON c.id = p.cliente_id
+            WHERE p.workspace_id = ?
+              AND p.empresa_id IN ({placeholders})
+              AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
+              AND LOWER(COALESCE(p.estado, '')) = 'estudio'
+            ORDER BY COALESCE(p.fecha_seguimiento, p.fecha, p.updated_at) ASC
+            LIMIT 12
+            """,
+            [workspace_id, *empresa_ids],
+        ).fetchall()
+        query_count += 1
+
         rentas_borrador_total = 0
         rentas_borrador_preview = []
+        try:
+            summaries = [compute_gestoria_renta_pending_summary(conn, empresa_ids, ejercicio="", limit=12)]
+            query_count += 1
+            rentas_borrador_total = sum(int(s.get("count") or 0) for s in summaries)
+            for s in summaries:
+                rentas_borrador_preview.extend(list(s.get("rows") or []))
+            rentas_borrador_preview.sort(key=lambda x: (str(x.get("cliente") or "").lower(), str(x.get("nif") or "")))
+            rentas_borrador_preview = rentas_borrador_preview[:12]
+        except Exception:
+            rentas_borrador_total = 0
+            rentas_borrador_preview = []
 
-    return {
-        "counts": {
-            "total": total["total"] if total else 0,
-            "activos": len(active_ids),
-            "modelos_mes": modelos_mes["total"] if modelos_mes else 0,
-            "rentas_pendientes_presentar": int(rentas_borrador_total),
-            "acciones_pendientes": acciones_pendientes["total"] if acciones_pendientes else 0,
-            "presupuestos_estudio": len(presupuestos_estudio),
-        },
-        "modelos_vencidos": [dict(r) for r in modelos_vencidos],
-        "rentas_pendientes": rentas_borrador_preview,
-        "acciones_vencidas": [dict(r) for r in acciones_vencidas],
-        "presupuestos_estudio": [dict(r) for r in presupuestos_estudio],
-    }
+        rows_processed = (
+            len(modelos_vencidos)
+            + len(acciones_vencidas)
+            + len(presupuestos_estudio)
+            + len(rentas_borrador_preview)
+        )
+
+        return {
+            "counts": {
+                "total": total_row["total"] if total_row else 0,
+                "activos": total_row["activos"] if total_row else 0,
+                "modelos_mes": modelos_mes["total"] if modelos_mes else 0,
+                "rentas_pendientes_presentar": int(rentas_borrador_total),
+                "acciones_pendientes": acciones_pendientes["total"] if acciones_pendientes else 0,
+                "presupuestos_estudio": len(presupuestos_estudio),
+            },
+            "modelos_vencidos": [dict(r) for r in modelos_vencidos],
+            "rentas_pendientes": rentas_borrador_preview,
+            "acciones_vencidas": [dict(r) for r in acciones_vencidas],
+            "presupuestos_estudio": [dict(r) for r in presupuestos_estudio],
+        }
+    finally:
+        _perf_log_operation(
+            "fetch_workspace_gestoria_overview",
+            started_at,
+            workspace_id=str(workspace_id or "").strip() or None,
+            rows=rows_processed,
+            queries=query_count,
+        )
 
 
 def fetch_workspace_seguros_overview(conn, workspace_id, empresa_id=None):
-    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
-    if not empresa_ids:
-        return {
-            "counts": {
-                "total": 0,
-                "subidas_total": 0,
-                "en_vigor": 0,
-                "subidas_en_vigor": 0,
-                "presupuesto": 0,
-                "renovaciones_30d": 0,
-                "prima_total": 0,
-                "subidas_prima_total": 0,
-                "alertas_abiertas": 0,
-            },
-            "renovaciones_proximas": [],
-            "alertas_comerciales": [],
-            "top_companias": [],
-            "top_ramos": [],
-            "entradas_mes": [],
-            "en_vigor_por_mes": {"labels": [], "values": []},
-        }
-    placeholders = ",".join(["?"] * len(empresa_ids))
-    bucket_expr = seguro_estado_bucket_expr("s")
-    fecha_efecto_expr = seguro_date_sql("fecha_efecto", "s")
-    fecha_venc_expr = (
-        f"COALESCE({seguro_date_sql('fecha_vencimiento', 's')}, "
-        f"CASE WHEN {fecha_efecto_expr} IS NOT NULL THEN DATE({fecha_efecto_expr}, '+1 year') ELSE NULL END)"
-    )
-    compania_expr = "LOWER(TRIM(COALESCE(s.compania, '')))"
-    today = datetime.now().date().isoformat()
-    uploaded_clause = uploaded_policy_filter("s")
-    month_start = datetime.now().date().replace(day=1)
-
-    def _add_months(d, delta):
-        base = (d.year * 12 + (d.month - 1)) + int(delta)
-        year = base // 12
-        month = base % 12 + 1
-        return date(year, month, 1)
-
-    def _month_label(d):
-        months = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
-        try:
-            return f"{months[int(d.month) - 1]} {int(d.year)}"
-        except Exception:
-            return str(d)
-
-    def _money_sql(expr):
-        # Normaliza importes almacenados como:
-        # - REAL/NUMERIC (ej: 1234.56)
-        # - Texto con formato ES (ej: "7.397,96 €", "20.000")
-        base = f"COALESCE(CAST({expr} AS TEXT), '')"
-        stripped = f"REPLACE(REPLACE({base}, '€', ''), ' ', '')"
-        eu = f"REPLACE(REPLACE({stripped}, '.', ''), ',', '.')"
-        us = f"REPLACE({stripped}, ',', '')"
-        dot_count = f"(LENGTH({stripped}) - LENGTH(REPLACE({stripped}, '.', '')))"
-        backend = getattr(conn, "__crm_backend__", "") or ""
-        if backend == "postgres":
-            looks_like_dot_thousands = (
-                f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
-                f"AND RIGHT({stripped}, 3) ~ '^[0-9]{{3}}$')"
-            )
-        else:
-            looks_like_dot_thousands = (
-                f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
-                f"AND SUBSTR({stripped}, -3) GLOB '[0-9][0-9][0-9]')"
-            )
-        dot_thousands = f"REPLACE({stripped}, '.', '')"
-        normalized = (
-            f"CASE "
-            f"WHEN {stripped} LIKE '%,%' THEN {eu} "
-            f"WHEN {looks_like_dot_thousands} THEN {dot_thousands} "
-            f"ELSE {us} END"
-        )
-        return f"CAST(NULLIF({normalized}, '') AS REAL)"
-
-    money_total_expr = f"COALESCE({_money_sql('s.prima_total')}, {_money_sql('s.prima_neta')}, 0)"
-
-    totals = conn.execute(
-        f"""
-        SELECT
-          COUNT(*) AS total,
-          SUM(CASE WHEN {bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor,
-          SUM(CASE WHEN {bucket_expr} = 'presupuesto' THEN 1 ELSE 0 END) AS presupuesto,
-          SUM(CASE WHEN {fecha_venc_expr} IS NOT NULL
-                    AND DATE({fecha_venc_expr}) BETWEEN DATE(?) AND DATE(?, '+30 day')
-                    AND {bucket_expr} IN ('en_vigor', 'contratada')
-              THEN 1 ELSE 0 END) AS renovaciones_30d,
-          SUM({money_total_expr}) AS prima_total
-        FROM seguros s
-        WHERE s.empresa_id IN ({placeholders})
-          AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
-        """,
-        [today, today, *empresa_ids],
-    ).fetchone()
-
-    uploaded_totals = conn.execute(
-        f"""
-        SELECT
-          COUNT(*) AS total,
-          SUM(CASE WHEN {bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor,
-          SUM({money_total_expr}) AS prima_total
-        FROM seguros s
-        WHERE s.empresa_id IN ({placeholders})
-          AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
-          AND ({uploaded_clause})
-        """,
-        empresa_ids,
-    ).fetchone()
-
-    renovaciones = conn.execute(
-        f"""
-        SELECT
-          COALESCE(NULLIF(TRIM(s.tomador), ''), c.nombre, '') AS tomador,
-          COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía') AS compania,
-          COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS ramo,
-          {fecha_venc_expr} AS fecha_vencimiento
-        FROM seguros s
-        LEFT JOIN clientes c ON c.id = s.cliente_id
-        WHERE s.empresa_id IN ({placeholders})
-          AND {fecha_venc_expr} IS NOT NULL
-          AND DATE({fecha_venc_expr}) BETWEEN DATE(?) AND DATE(?, '+30 day')
-          AND {bucket_expr} IN ('en_vigor', 'contratada')
-          AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
-        ORDER BY DATE({fecha_venc_expr}) ASC, COALESCE(NULLIF(TRIM(s.tomador), ''), c.nombre, '') COLLATE NOCASE ASC
-        LIMIT 12
-        """,
-        [*empresa_ids, today, today],
-    ).fetchall()
-
-    alertas = conn.execute(
-        f"""
-        SELECT
-          a.fecha,
-          a.hora,
-          COALESCE(c.nombre, a.cliente_nombre, '') AS cliente,
-          a.tipo,
-          a.estado
-        FROM acciones a
-        LEFT JOIN clientes c ON c.id = a.cliente_id
-        WHERE a.empresa_id IN ({placeholders})
-          AND LOWER(TRIM(COALESCE(a.servicio, ''))) = 'seguros'
-          AND (a.estado IS NULL OR LOWER(TRIM(a.estado)) NOT IN ('hecho', 'finalizado', 'cancelado'))
-        ORDER BY
-          CASE
-            WHEN a.fecha IS NULL OR TRIM(a.fecha) = '' THEN 1
-            WHEN DATE(a.fecha) < DATE(?) THEN 0
-            ELSE 1
-          END,
-          DATE(COALESCE(a.fecha, '9999-12-31')) ASC,
-          TIME(COALESCE(a.hora, '23:59')) ASC
-        LIMIT 12
-        """,
-        [*empresa_ids, today],
-    ).fetchall()
-
-    companias_rows = conn.execute(
-        f"""
-        SELECT
-          COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía') AS label,
-          COUNT(*) AS total,
-          SUM({money_total_expr}) AS prima_total
-        FROM seguros s
-        WHERE s.empresa_id IN ({placeholders})
-          AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
-        GROUP BY COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía')
-        ORDER BY COUNT(*) DESC, label COLLATE NOCASE ASC
-        LIMIT 8
-        """,
-        empresa_ids,
-    ).fetchall()
-
-    ramos_rows = conn.execute(
-        f"""
-        SELECT
-          COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS label,
-          COUNT(*) AS total,
-          SUM({money_total_expr}) AS prima_total
-        FROM seguros s
-        WHERE s.empresa_id IN ({placeholders})
-          AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
-        GROUP BY COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo')
-        ORDER BY COUNT(*) DESC, label COLLATE NOCASE ASC
-        LIMIT 8
-        """,
-        empresa_ids,
-    ).fetchall()
-
-    # Entradas del mes (fecha efecto dentro del mes en curso).
-    month_end = _add_months(month_start, 1) - timedelta(days=1)
-    entradas = conn.execute(
-        f"""
-        SELECT
-          COALESCE(NULLIF(TRIM(s.tomador), ''), c.nombre, '') AS tomador,
-          COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía') AS compania,
-          COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS ramo,
-          NULLIF(TRIM(s.poliza_numero), '') AS poliza_numero,
-          {fecha_efecto_expr} AS fecha_efecto,
-          {bucket_expr} AS estado_bucket,
-          {money_total_expr} AS prima_total
-        FROM seguros s
-        LEFT JOIN clientes c ON c.id = s.cliente_id
-        WHERE s.empresa_id IN ({placeholders})
-          AND {fecha_efecto_expr} IS NOT NULL
-          AND DATE({fecha_efecto_expr}) BETWEEN DATE(?) AND DATE(?)
-          AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
-        ORDER BY DATE({fecha_efecto_expr}) ASC, COALESCE(NULLIF(TRIM(s.tomador), ''), c.nombre, '') COLLATE NOCASE ASC
-        LIMIT 12
-        """,
-        [*empresa_ids, month_start.isoformat(), month_end.isoformat()],
-    ).fetchall()
-
-    # Serie de cartera en vigor por mes (cierre de mes, últimos 12 meses).
-    en_vigor_labels = []
-    en_vigor_values = []
-    polizas_rows = []
+    started_at = time.perf_counter()
+    rows_processed = 0
+    query_count = 0
     try:
-        polizas_rows = conn.execute(
+        empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
+        if not empresa_ids:
+            return {
+                "counts": {
+                    "total": 0,
+                    "subidas_total": 0,
+                    "en_vigor": 0,
+                    "subidas_en_vigor": 0,
+                    "presupuesto": 0,
+                    "renovaciones_30d": 0,
+                    "prima_total": 0,
+                    "subidas_prima_total": 0,
+                    "alertas_abiertas": 0,
+                },
+                "renovaciones_proximas": [],
+                "alertas_comerciales": [],
+                "top_companias": [],
+                "top_ramos": [],
+                "entradas_mes": [],
+                "en_vigor_por_mes": {"labels": [], "values": []},
+            }
+
+        placeholders = ",".join(["?"] * len(empresa_ids))
+        bucket_expr = seguro_estado_bucket_expr("s")
+        fecha_efecto_expr = seguro_date_sql("fecha_efecto", "s")
+        fecha_venc_expr = (
+            f"COALESCE({seguro_date_sql('fecha_vencimiento', 's')}, "
+            f"CASE WHEN {fecha_efecto_expr} IS NOT NULL THEN DATE({fecha_efecto_expr}, '+1 year') ELSE NULL END)"
+        )
+        compania_expr = "LOWER(TRIM(COALESCE(s.compania, '')))"
+        today_date = datetime.now().date()
+        today = today_date.isoformat()
+        uploaded_clause = uploaded_policy_filter("s")
+        month_start = today_date.replace(day=1)
+
+        def _add_months(d, delta):
+            base = (d.year * 12 + (d.month - 1)) + int(delta)
+            year = base // 12
+            month = base % 12 + 1
+            return date(year, month, 1)
+
+        def _month_label(d):
+            months = ("ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic")
+            try:
+                return f"{months[int(d.month) - 1]} {int(d.year)}"
+            except Exception:
+                return str(d)
+
+        def _money_sql(expr):
+            # Normaliza importes almacenados como:
+            # - REAL/NUMERIC (ej: 1234.56)
+            # - Texto con formato ES (ej: "7.397,96 €", "20.000")
+            base = f"COALESCE(CAST({expr} AS TEXT), '')"
+            stripped = f"REPLACE(REPLACE({base}, '€', ''), ' ', '')"
+            eu = f"REPLACE(REPLACE({stripped}, '.', ''), ',', '.')"
+            us = f"REPLACE({stripped}, ',', '')"
+            dot_count = f"(LENGTH({stripped}) - LENGTH(REPLACE({stripped}, '.', '')))"
+            backend = getattr(conn, "__crm_backend__", "") or ""
+            if backend == "postgres":
+                looks_like_dot_thousands = (
+                    f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
+                    f"AND RIGHT({stripped}, 3) ~ '^[0-9]{{3}}$')"
+                )
+            else:
+                looks_like_dot_thousands = (
+                    f"({stripped} LIKE '%.%' AND {stripped} NOT LIKE '%,%' AND {dot_count} >= 1 "
+                    f"AND SUBSTR({stripped}, -3) GLOB '[0-9][0-9][0-9]')"
+                )
+            dot_thousands = f"REPLACE({stripped}, '.', '')"
+            normalized = (
+                f"CASE "
+                f"WHEN {stripped} LIKE '%,%' THEN {eu} "
+                f"WHEN {looks_like_dot_thousands} THEN {dot_thousands} "
+                f"ELSE {us} END"
+            )
+            return f"CAST(NULLIF({normalized}, '') AS REAL)"
+
+        money_total_expr = f"COALESCE({_money_sql('s.prima_total')}, {_money_sql('s.prima_neta')}, 0)"
+
+        totals = conn.execute(
+            f"""
+            WITH base AS (
+              SELECT
+                s.*,
+                CASE WHEN ({uploaded_clause}) THEN 1 ELSE 0 END AS is_uploaded
+              FROM seguros s
+              WHERE s.empresa_id IN ({placeholders})
+                AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
+            )
+            SELECT
+              COUNT(*) AS total,
+              SUM(CASE WHEN {bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS en_vigor,
+              SUM(CASE WHEN {bucket_expr} = 'presupuesto' THEN 1 ELSE 0 END) AS presupuesto,
+              SUM(CASE WHEN {fecha_venc_expr} IS NOT NULL
+                        AND DATE({fecha_venc_expr}) BETWEEN DATE(?) AND DATE(?, '+30 day')
+                        AND {bucket_expr} IN ('en_vigor', 'contratada')
+                  THEN 1 ELSE 0 END) AS renovaciones_30d,
+              SUM({money_total_expr}) AS prima_total,
+              SUM(CASE WHEN is_uploaded = 1 THEN 1 ELSE 0 END) AS subidas_total,
+              SUM(CASE WHEN is_uploaded = 1 AND {bucket_expr} = 'en_vigor' THEN 1 ELSE 0 END) AS subidas_en_vigor,
+              SUM(CASE WHEN is_uploaded = 1 THEN {money_total_expr} ELSE 0 END) AS subidas_prima_total
+            FROM base s
+            """,
+            [*empresa_ids, today, today],
+        ).fetchone()
+        query_count += 1
+        renovaciones = conn.execute(
             f"""
             SELECT
-              s.id,
-              s.estado,
-              s.estado_poliza,
-              {fecha_efecto_expr} AS fecha_efecto,
-              {fecha_venc_expr} AS fecha_vencimiento,
-              s.fecha_baja AS fecha_baja
+              COALESCE(NULLIF(TRIM(s.tomador), ''), c.nombre, '') AS tomador,
+              COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía') AS compania,
+              COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS ramo,
+              {fecha_venc_expr} AS fecha_vencimiento
+            FROM seguros s
+            LEFT JOIN clientes c ON c.id = s.cliente_id
+            WHERE s.empresa_id IN ({placeholders})
+              AND {fecha_venc_expr} IS NOT NULL
+              AND DATE({fecha_venc_expr}) BETWEEN DATE(?) AND DATE(?, '+30 day')
+              AND {bucket_expr} IN ('en_vigor', 'contratada')
+              AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
+            ORDER BY DATE({fecha_venc_expr}) ASC, COALESCE(NULLIF(TRIM(s.tomador), ''), c.nombre, '') COLLATE NOCASE ASC
+            LIMIT 12
+            """,
+            [*empresa_ids, today, today],
+        ).fetchall()
+        query_count += 1
+        alertas = conn.execute(
+            f"""
+            SELECT
+              a.fecha,
+              a.hora,
+              COALESCE(c.nombre, a.cliente_nombre, '') AS cliente,
+              a.tipo,
+              a.estado
+            FROM acciones a
+            LEFT JOIN clientes c ON c.id = a.cliente_id
+            WHERE a.empresa_id IN ({placeholders})
+              AND LOWER(TRIM(COALESCE(a.servicio, ''))) = 'seguros'
+              AND (a.estado IS NULL OR LOWER(TRIM(a.estado)) NOT IN ('hecho', 'finalizado', 'cancelado'))
+            ORDER BY
+              CASE
+                WHEN a.fecha IS NULL OR TRIM(a.fecha) = '' THEN 1
+                WHEN DATE(a.fecha) < DATE(?) THEN 0
+                ELSE 1
+              END,
+              DATE(COALESCE(a.fecha, '9999-12-31')) ASC,
+              TIME(COALESCE(a.hora, '23:59')) ASC
+            LIMIT 12
+            """,
+            [*empresa_ids, today],
+        ).fetchall()
+        query_count += 1
+        companias_rows = conn.execute(
+            f"""
+            SELECT
+              COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía') AS label,
+              COUNT(*) AS total,
+              SUM({money_total_expr}) AS prima_total
             FROM seguros s
             WHERE s.empresa_id IN ({placeholders})
               AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
+            GROUP BY COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía')
+            ORDER BY COUNT(*) DESC, label COLLATE NOCASE ASC
+            LIMIT 8
             """,
             empresa_ids,
         ).fetchall()
-    except Exception:
-        polizas_rows = []
-    polizas = [dict(r) for r in polizas_rows] if polizas_rows else []
-    for pol in polizas:
-        baja = parse_iso_date(pol.get("fecha_baja"))
-        venc = parse_iso_date(pol.get("fecha_vencimiento"))
-        if baja and (not venc or baja < venc):
-            pol["fecha_vencimiento"] = baja.isoformat()
-    months_start = _add_months(month_start, -11)
-    for i in range(12):
-        mstart = _add_months(months_start, i)
-        mend = _add_months(mstart, 1) - timedelta(days=1)
-        en_vigor_labels.append(_month_label(mstart))
-        count = 0
-        for pol in polizas:
-            if seguro_estado_bucket_value(pol, today=mend) == "en_vigor":
-                count += 1
-        en_vigor_values.append(count)
+        query_count += 1
+        ramos_rows = conn.execute(
+            f"""
+            SELECT
+              COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS label,
+              COUNT(*) AS total,
+              SUM({money_total_expr}) AS prima_total
+            FROM seguros s
+            WHERE s.empresa_id IN ({placeholders})
+              AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
+            GROUP BY COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo')
+            ORDER BY COUNT(*) DESC, label COLLATE NOCASE ASC
+            LIMIT 8
+            """,
+            empresa_ids,
+        ).fetchall()
+        query_count += 1
+        month_end = _add_months(month_start, 1) - timedelta(days=1)
+        entradas = conn.execute(
+            f"""
+            SELECT
+              COALESCE(NULLIF(TRIM(s.tomador), ''), c.nombre, '') AS tomador,
+              COALESCE(NULLIF(TRIM(s.compania), ''), 'Sin compañía') AS compania,
+              COALESCE(NULLIF(TRIM(s.ramo), ''), 'Sin ramo') AS ramo,
+              NULLIF(TRIM(s.poliza_numero), '') AS poliza_numero,
+              {fecha_efecto_expr} AS fecha_efecto,
+              {bucket_expr} AS estado_bucket,
+              {money_total_expr} AS prima_total
+            FROM seguros s
+            LEFT JOIN clientes c ON c.id = s.cliente_id
+            WHERE s.empresa_id IN ({placeholders})
+              AND {fecha_efecto_expr} IS NOT NULL
+              AND DATE({fecha_efecto_expr}) BETWEEN DATE(?) AND DATE(?)
+              AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
+            ORDER BY DATE({fecha_efecto_expr}) ASC, COALESCE(NULLIF(TRIM(s.tomador), ''), c.nombre, '') COLLATE NOCASE ASC
+            LIMIT 12
+            """,
+            [*empresa_ids, month_start.isoformat(), month_end.isoformat()],
+        ).fetchall()
+        query_count += 1
 
-    return {
-        "counts": {
-            "total": int((totals["total"] if totals else 0) or 0),
-            "en_vigor": int((totals["en_vigor"] if totals else 0) or 0),
-            "presupuesto": int((totals["presupuesto"] if totals else 0) or 0),
-            "renovaciones_30d": int((totals["renovaciones_30d"] if totals else 0) or 0),
-            "prima_total": round(parse_money_value(totals["prima_total"] if totals else 0), 2),
-            "subidas_total": int((uploaded_totals["total"] if uploaded_totals else 0) or 0),
-            "subidas_en_vigor": int((uploaded_totals["en_vigor"] if uploaded_totals else 0) or 0),
-            "subidas_prima_total": round(parse_money_value(uploaded_totals["prima_total"] if uploaded_totals else 0), 2),
-            "alertas_abiertas": len(alertas),
-        },
-        "renovaciones_proximas": [dict(r) for r in renovaciones],
-        "alertas_comerciales": [dict(r) for r in alertas],
-        "top_companias": [
-            {
-                "label": row["label"],
-                "total": int(row["total"] or 0),
-                "prima_total": round(parse_money_value(row["prima_total"]), 2),
-            }
-            for row in companias_rows
-        ],
-        "top_ramos": [
-            {
-                "label": row["label"],
-                "total": int(row["total"] or 0),
-                "prima_total": round(parse_money_value(row["prima_total"]), 2),
-            }
-            for row in ramos_rows
-        ],
-        "entradas_mes": [
-            {
-                "tomador": r.get("tomador") or "",
-                "compania": r.get("compania") or "",
-                "ramo": r.get("ramo") or "",
-                "poliza_numero": r.get("poliza_numero") or "",
-                "fecha_efecto": r.get("fecha_efecto") or "",
-                "estado": r.get("estado_bucket") or "",
-                "prima_total": round(parse_money_value(r.get("prima_total")), 2),
-            }
-            for r in (dict(x) for x in entradas)
-        ],
-        "en_vigor_por_mes": {"labels": en_vigor_labels, "values": en_vigor_values},
-    }
+        en_vigor_labels = []
+        en_vigor_values = []
+        polizas_rows = []
+        try:
+            polizas_rows = conn.execute(
+                f"""
+                SELECT
+                  s.id,
+                  s.estado,
+                  s.estado_poliza,
+                  {fecha_efecto_expr} AS fecha_efecto,
+                  {fecha_venc_expr} AS fecha_vencimiento,
+                  s.fecha_baja AS fecha_baja
+                FROM seguros s
+                WHERE s.empresa_id IN ({placeholders})
+                  AND ({compania_expr} = '' OR {compania_expr} != 'sin seguro')
+                """,
+                empresa_ids,
+            ).fetchall()
+            query_count += 1
+        except Exception:
+            polizas_rows = []
+        polizas = [dict(r) for r in polizas_rows] if polizas_rows else []
+        for pol in polizas:
+            baja = parse_iso_date(pol.get("fecha_baja"))
+            venc = parse_iso_date(pol.get("fecha_vencimiento"))
+            if baja and (not venc or baja < venc):
+                pol["fecha_vencimiento"] = baja.isoformat()
+        months_start = _add_months(month_start, -11)
+        for i in range(12):
+            mstart = _add_months(months_start, i)
+            mend = _add_months(mstart, 1) - timedelta(days=1)
+            en_vigor_labels.append(_month_label(mstart))
+            count = 0
+            for pol in polizas:
+                if seguro_estado_bucket_value(pol, today=mend) == "en_vigor":
+                    count += 1
+            en_vigor_values.append(count)
+
+        rows_processed = len(renovaciones) + len(alertas) + len(companias_rows) + len(ramos_rows) + len(entradas) + len(polizas)
+        return {
+            "counts": {
+                "total": int((totals["total"] if totals else 0) or 0),
+                "en_vigor": int((totals["en_vigor"] if totals else 0) or 0),
+                "presupuesto": int((totals["presupuesto"] if totals else 0) or 0),
+                "renovaciones_30d": int((totals["renovaciones_30d"] if totals else 0) or 0),
+                "prima_total": round(parse_money_value(totals["prima_total"] if totals else 0), 2),
+                "subidas_total": int((totals["subidas_total"] if totals else 0) or 0),
+                "subidas_en_vigor": int((totals["subidas_en_vigor"] if totals else 0) or 0),
+                "subidas_prima_total": round(parse_money_value(totals["subidas_prima_total"] if totals else 0), 2),
+                "alertas_abiertas": len(alertas),
+            },
+            "renovaciones_proximas": [dict(r) for r in renovaciones],
+            "alertas_comerciales": [dict(r) for r in alertas],
+            "top_companias": [
+                {
+                    "label": row["label"],
+                    "total": int(row["total"] or 0),
+                    "prima_total": round(parse_money_value(row["prima_total"]), 2),
+                }
+                for row in companias_rows
+            ],
+            "top_ramos": [
+                {
+                    "label": row["label"],
+                    "total": int(row["total"] or 0),
+                    "prima_total": round(parse_money_value(row["prima_total"]), 2),
+                }
+                for row in ramos_rows
+            ],
+            "entradas_mes": [
+                {
+                    "tomador": r.get("tomador") or "",
+                    "compania": r.get("compania") or "",
+                    "ramo": r.get("ramo") or "",
+                    "poliza_numero": r.get("poliza_numero") or "",
+                    "fecha_efecto": r.get("fecha_efecto") or "",
+                    "estado": r.get("estado_bucket") or "",
+                    "prima_total": round(parse_money_value(r.get("prima_total")), 2),
+                }
+                for r in (dict(x) for x in entradas)
+            ],
+            "en_vigor_por_mes": {"labels": en_vigor_labels, "values": en_vigor_values},
+        }
+    finally:
+        _perf_log_operation(
+            "fetch_workspace_seguros_overview",
+            started_at,
+            workspace_id=str(workspace_id or "").strip() or None,
+            rows=rows_processed,
+            queries=query_count,
+        )
 
 
 def fetch_workspace_fin_overview(conn, workspace_id, empresa_id=None):
-    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
-    if not empresa_ids:
+    started_at = time.perf_counter()
+    rows_processed = 0
+    query_count = 0
+    try:
+        empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
+        if not empresa_ids:
+            return {
+                "counts": {
+                    "total": 0,
+                    "firmadas": 0,
+                    "asesoramientos_abiertos": 0,
+                    "encargos_abiertos": 0,
+                    "comision_total": 0,
+                    "alertas_abiertas": 0,
+                },
+                "asesoramientos_abiertos": [],
+                "firmas_recientes": [],
+                "alertas_comerciales": [],
+                "top_bancos": [],
+            }
+
+        placeholders = ",".join(["?"] * len(empresa_ids))
+        total_row = conn.execute(
+            f"""
+            SELECT
+              COUNT(*) AS total,
+              SUM(CASE WHEN fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> '' THEN 1 ELSE 0 END) AS firmadas,
+              SUM(COALESCE(comision, comision_modernia, 0)) AS comision_total,
+              SUM(CASE WHEN encargo IS NOT NULL AND TRIM(encargo) <> '' AND LOWER(TRIM(encargo)) NOT IN ('no', 'rechazado', 'cancelado') THEN 1 ELSE 0 END) AS encargos_abiertos
+            FROM hipotecas
+            WHERE empresa_id IN ({placeholders})
+            """,
+            empresa_ids,
+        ).fetchone()
+        query_count += 1
+        asesoramientos_abiertos = conn.execute(
+            f"""
+            SELECT
+              COUNT(*) AS total
+            FROM asesoramientos_financiacion af
+            WHERE af.empresa_id IN ({placeholders})
+              AND LOWER(COALESCE(af.estado, '')) NOT IN ('firmada', 'cerrado', 'cerrada', 'cancelado', 'cancelada', 'rechazado', 'rechazada')
+            """,
+            empresa_ids,
+        ).fetchone()
+        query_count += 1
+        alertas = conn.execute(
+            f"""
+            SELECT
+              a.fecha,
+              a.hora,
+              COALESCE(c.nombre, a.cliente_nombre, '') AS cliente,
+              a.tipo,
+              a.estado
+            FROM acciones a
+            LEFT JOIN clientes c ON c.id = a.cliente_id
+            WHERE a.empresa_id IN ({placeholders})
+              AND LOWER(TRIM(COALESCE(a.servicio, ''))) = 'financiaciones'
+              AND (a.estado IS NULL OR LOWER(TRIM(a.estado)) NOT IN ('hecho', 'finalizado', 'cancelado'))
+            ORDER BY DATE(COALESCE(a.fecha, '9999-12-31')) ASC, TIME(COALESCE(a.hora, '23:59')) ASC
+            LIMIT 12
+            """,
+            empresa_ids,
+        ).fetchall()
+        query_count += 1
+        asesoramientos_rows = conn.execute(
+            f"""
+            SELECT
+              af.fecha,
+              af.estado,
+              COALESCE(NULLIF(TRIM(af.cliente1_nombre), ''), NULLIF(TRIM(af.cliente2_nombre), ''), c.nombre, '') AS cliente,
+              COALESCE(af.ingresos_conjuntos, 0) AS ingresos_conjuntos
+            FROM asesoramientos_financiacion af
+            LEFT JOIN clientes c ON c.id = af.cliente1_id
+            WHERE af.empresa_id IN ({placeholders})
+              AND LOWER(COALESCE(af.estado, '')) NOT IN ('firmada', 'cerrado', 'cerrada', 'cancelado', 'cancelada', 'rechazado', 'rechazada')
+            ORDER BY DATE(COALESCE(af.fecha, af.created_at)) DESC
+            LIMIT 12
+            """,
+            empresa_ids,
+        ).fetchall()
+        query_count += 1
+        firmas_rows = conn.execute(
+            f"""
+            SELECT
+              COALESCE(NULLIF(TRIM(h.cliente), ''), c.nombre, '') AS cliente,
+              COALESCE(NULLIF(TRIM(h.banco), ''), 'Sin banco') AS banco,
+              h.fecha_firma,
+              COALESCE(h.comision, h.comision_modernia, 0) AS comision
+            FROM hipotecas h
+            LEFT JOIN clientes c ON c.id = h.cliente_id
+            WHERE h.empresa_id IN ({placeholders})
+              AND h.fecha_firma IS NOT NULL
+              AND TRIM(h.fecha_firma) <> ''
+            ORDER BY DATE(h.fecha_firma) DESC
+            LIMIT 12
+            """,
+            empresa_ids,
+        ).fetchall()
+        query_count += 1
+        bancos_rows = conn.execute(
+            f"""
+            SELECT
+              COALESCE(NULLIF(TRIM(h.banco), ''), 'Sin banco') AS label,
+              COUNT(*) AS total,
+              SUM(COALESCE(h.comision, h.comision_modernia, 0)) AS comision_total
+            FROM hipotecas h
+            WHERE h.empresa_id IN ({placeholders})
+            GROUP BY COALESCE(NULLIF(TRIM(h.banco), ''), 'Sin banco')
+            ORDER BY COUNT(*) DESC, label COLLATE NOCASE ASC
+            LIMIT 8
+            """,
+            empresa_ids,
+        ).fetchall()
+        query_count += 1
+        rows_processed = len(asesoramientos_rows) + len(firmas_rows) + len(alertas) + len(bancos_rows)
         return {
             "counts": {
-                "total": 0,
-                "firmadas": 0,
-                "asesoramientos_abiertos": 0,
-                "encargos_abiertos": 0,
-                "comision_total": 0,
-                "alertas_abiertas": 0,
+                "total": int((total_row["total"] if total_row else 0) or 0),
+                "firmadas": int((total_row["firmadas"] if total_row else 0) or 0),
+                "asesoramientos_abiertos": int((asesoramientos_abiertos["total"] if asesoramientos_abiertos else 0) or 0),
+                "encargos_abiertos": int((total_row["encargos_abiertos"] if total_row else 0) or 0),
+                "comision_total": round(parse_money_value(total_row["comision_total"] if total_row else 0), 2),
+                "alertas_abiertas": len(alertas),
             },
-            "asesoramientos_abiertos": [],
-            "firmas_recientes": [],
-            "alertas_comerciales": [],
-            "top_bancos": [],
+            "asesoramientos_abiertos": [dict(r) for r in asesoramientos_rows],
+            "firmas_recientes": [
+                {
+                    **dict(r),
+                    "comision": round(parse_money_value(r["comision"]), 2),
+                }
+                for r in firmas_rows
+            ],
+            "alertas_comerciales": [dict(r) for r in alertas],
+            "top_bancos": [
+                {
+                    "label": row["label"],
+                    "total": int(row["total"] or 0),
+                    "comision_total": round(parse_money_value(row["comision_total"]), 2),
+                }
+                for row in bancos_rows
+            ],
         }
-    placeholders = ",".join(["?"] * len(empresa_ids))
-    total_row = conn.execute(
-        f"""
-        SELECT
-          COUNT(*) AS total,
-          SUM(CASE WHEN fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> '' THEN 1 ELSE 0 END) AS firmadas,
-          SUM(COALESCE(comision, comision_modernia, 0)) AS comision_total,
-          SUM(CASE WHEN encargo IS NOT NULL AND TRIM(encargo) <> '' AND LOWER(TRIM(encargo)) NOT IN ('no', 'rechazado', 'cancelado') THEN 1 ELSE 0 END) AS encargos_abiertos
-        FROM hipotecas
-        WHERE empresa_id IN ({placeholders})
-        """,
-        empresa_ids,
-    ).fetchone()
-    asesoramientos_abiertos = conn.execute(
-        f"""
-        SELECT
-          COUNT(*) AS total
-        FROM asesoramientos_financiacion af
-        WHERE af.empresa_id IN ({placeholders})
-          AND LOWER(COALESCE(af.estado, '')) NOT IN ('firmada', 'cerrado', 'cerrada', 'cancelado', 'cancelada', 'rechazado', 'rechazada')
-        """,
-        empresa_ids,
-    ).fetchone()
-    alertas = conn.execute(
-        f"""
-        SELECT
-          a.fecha,
-          a.hora,
-          COALESCE(c.nombre, a.cliente_nombre, '') AS cliente,
-          a.tipo,
-          a.estado
-        FROM acciones a
-        LEFT JOIN clientes c ON c.id = a.cliente_id
-        WHERE a.empresa_id IN ({placeholders})
-          AND LOWER(TRIM(COALESCE(a.servicio, ''))) = 'financiaciones'
-          AND (a.estado IS NULL OR LOWER(TRIM(a.estado)) NOT IN ('hecho', 'finalizado', 'cancelado'))
-        ORDER BY DATE(COALESCE(a.fecha, '9999-12-31')) ASC, TIME(COALESCE(a.hora, '23:59')) ASC
-        LIMIT 12
-        """,
-        empresa_ids,
-    ).fetchall()
-    asesoramientos_rows = conn.execute(
-        f"""
-        SELECT
-          af.fecha,
-          af.estado,
-          COALESCE(NULLIF(TRIM(af.cliente1_nombre), ''), NULLIF(TRIM(af.cliente2_nombre), ''), c.nombre, '') AS cliente,
-          COALESCE(af.ingresos_conjuntos, 0) AS ingresos_conjuntos
-        FROM asesoramientos_financiacion af
-        LEFT JOIN clientes c ON c.id = af.cliente1_id
-        WHERE af.empresa_id IN ({placeholders})
-          AND LOWER(COALESCE(af.estado, '')) NOT IN ('firmada', 'cerrado', 'cerrada', 'cancelado', 'cancelada', 'rechazado', 'rechazada')
-        ORDER BY DATE(COALESCE(af.fecha, af.created_at)) DESC
-        LIMIT 12
-        """,
-        empresa_ids,
-    ).fetchall()
-    firmas_rows = conn.execute(
-        f"""
-        SELECT
-          COALESCE(NULLIF(TRIM(h.cliente), ''), c.nombre, '') AS cliente,
-          COALESCE(NULLIF(TRIM(h.banco), ''), 'Sin banco') AS banco,
-          h.fecha_firma,
-          COALESCE(h.comision, h.comision_modernia, 0) AS comision
-        FROM hipotecas h
-        LEFT JOIN clientes c ON c.id = h.cliente_id
-        WHERE h.empresa_id IN ({placeholders})
-          AND h.fecha_firma IS NOT NULL
-          AND TRIM(h.fecha_firma) <> ''
-        ORDER BY DATE(h.fecha_firma) DESC
-        LIMIT 12
-        """,
-        empresa_ids,
-    ).fetchall()
-    bancos_rows = conn.execute(
-        f"""
-        SELECT
-          COALESCE(NULLIF(TRIM(h.banco), ''), 'Sin banco') AS label,
-          COUNT(*) AS total,
-          SUM(COALESCE(h.comision, h.comision_modernia, 0)) AS comision_total
-        FROM hipotecas h
-        WHERE h.empresa_id IN ({placeholders})
-        GROUP BY COALESCE(NULLIF(TRIM(h.banco), ''), 'Sin banco')
-        ORDER BY COUNT(*) DESC, label COLLATE NOCASE ASC
-        LIMIT 8
-        """,
-        empresa_ids,
-    ).fetchall()
-    return {
-        "counts": {
-            "total": int((total_row["total"] if total_row else 0) or 0),
-            "firmadas": int((total_row["firmadas"] if total_row else 0) or 0),
-            "asesoramientos_abiertos": int((asesoramientos_abiertos["total"] if asesoramientos_abiertos else 0) or 0),
-            "encargos_abiertos": int((total_row["encargos_abiertos"] if total_row else 0) or 0),
-            "comision_total": round(parse_money_value(total_row["comision_total"] if total_row else 0), 2),
-            "alertas_abiertas": len(alertas),
-        },
-        "asesoramientos_abiertos": [dict(r) for r in asesoramientos_rows],
-        "firmas_recientes": [
-            {
-                **dict(r),
-                "comision": round(parse_money_value(r["comision"]), 2),
-            }
-            for r in firmas_rows
-        ],
-        "alertas_comerciales": [dict(r) for r in alertas],
-        "top_bancos": [
-            {
-                "label": row["label"],
-                "total": int(row["total"] or 0),
-                "comision_total": round(parse_money_value(row["comision_total"]), 2),
-            }
-            for row in bancos_rows
-        ],
-    }
+    finally:
+        _perf_log_operation(
+            "fetch_workspace_fin_overview",
+            started_at,
+            workspace_id=str(workspace_id or "").strip() or None,
+            rows=rows_processed,
+            queries=query_count,
+        )
 
 
 def fetch_workspace_inmo_overview(conn, workspace_id, empresa_id=None):
@@ -44485,6 +44662,150 @@ def _update_alert_last_sent(conn, workspace_id, persona_id, updates, now=None):
     )
 
 
+def _ensure_workspace_time_sweep_schema(conn):
+    global WORKSPACE_TIME_SWEEP_SCHEMA_READY
+    if WORKSPACE_TIME_SWEEP_SCHEMA_READY and _m5_migration_done(conn, "workspace_time_sweep_schema_v1"):
+        return True
+    with WORKSPACE_TIME_SWEEP_SCHEMA_LOCK:
+        if WORKSPACE_TIME_SWEEP_SCHEMA_READY and _m5_migration_done(conn, "workspace_time_sweep_schema_v1"):
+            return True
+        try:
+            ensure_workspace_product_tables(conn)
+            _ensure_m5_perf_indexes(conn)
+            _m5_migration_mark(conn, "workspace_time_sweep_schema_v1")
+            WORKSPACE_TIME_SWEEP_SCHEMA_READY = True
+            return True
+        except Exception:
+            return False
+
+
+def _workspace_time_sweep_candidate_rows(conn, batch_size=None):
+    active_states = ("Activo", "ACTIVO", "activo", "Activa", "ACTIVA", "activa")
+    try:
+        limit_val = max(1, min(int(batch_size or WORKSPACE_TIME_SWEEP_BATCH_SIZE), 500))
+    except Exception:
+        limit_val = WORKSPACE_TIME_SWEEP_BATCH_SIZE
+    rows = conn.execute(
+        f"""
+        SELECT w.id
+        FROM workspaces w
+        WHERE COALESCE(w.estado, '') IN ({",".join(["?"] * len(active_states))})
+          AND EXISTS (
+            SELECT 1
+            FROM workspace_modulos wm
+            WHERE wm.workspace_id = w.id
+              AND wm.modulo_key = 'registro_horario'
+              AND COALESCE(wm.enabled, 0) = 1
+          )
+          AND EXISTS (
+            SELECT 1
+            FROM workspace_registro_personal p
+            WHERE p.workspace_id = w.id
+              AND COALESCE(p.activo, 1) = 1
+          )
+        ORDER BY COALESCE(w.updated_at, w.created_at) ASC, w.nombre COLLATE NOCASE ASC
+        LIMIT ?
+        """,
+        [*active_states, limit_val],
+    ).fetchall()
+    return [str(row_value(row, "id") or row_value(row, 0) or "").strip() for row in rows if str(row_value(row, "id") or row_value(row, 0) or "").strip()]
+
+
+def _run_workspace_time_sweep_cycle(conn, batch_size=None):
+    started_at = time.perf_counter()
+    if not WORKSPACE_TIME_SWEEP_LOCK.acquire(blocking=False):
+        return {"skipped": True, "workspaces": 0, "notifications": 0, "errors": 0, "last_error": "", "queries": 0}
+    workspaces_processed = 0
+    notifications_total = 0
+    error_count = 0
+    last_error = ""
+    try:
+        if not _ensure_workspace_time_sweep_schema(conn):
+            last_error = "workspace_time_sweep_schema_unavailable"
+            error_count = 1
+            result = {
+                "skipped": False,
+                "workspaces": 0,
+                "notifications": 0,
+                "errors": error_count,
+                "last_error": last_error,
+                "queries": 0,
+            }
+            _perf_log_operation(
+                "workspace_time_sweep_loop",
+                started_at,
+                rows=0,
+                queries=0,
+            )
+            return result
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        workspace_ids = _workspace_time_sweep_candidate_rows(conn, batch_size=batch_size)
+        for workspace_id in workspace_ids:
+            if not workspace_id:
+                continue
+            workspaces_processed += 1
+            try:
+                created = run_workspace_time_missing_sweep(conn, workspace_id)
+                if created:
+                    notifications_total += len(created)
+                    try:
+                        conn.commit()
+                    except Exception:
+                        pass
+            except Exception as exc:
+                error_count += 1
+                last_error = f"{workspace_id}: {exc}"
+                LOGGER.exception("workspace time sweep failed for workspace_id=%s", workspace_id)
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                continue
+        approx_queries = 1 + (workspaces_processed * 4)
+        _perf_log_operation(
+            "workspace_time_sweep_loop",
+            started_at,
+            rows=workspaces_processed,
+            queries=approx_queries,
+        )
+        return {
+            "skipped": False,
+            "workspaces": workspaces_processed,
+            "notifications": notifications_total,
+            "errors": error_count,
+            "last_error": last_error,
+            "queries": approx_queries,
+        }
+    except Exception as exc:
+        error_count += 1
+        if not last_error:
+            last_error = str(exc)
+        LOGGER.exception("workspace time sweep cycle failed")
+        approx_queries = 1 + (workspaces_processed * 4)
+        _perf_log_operation(
+            "workspace_time_sweep_loop",
+            started_at,
+            rows=workspaces_processed,
+            queries=approx_queries,
+        )
+        return {
+            "skipped": False,
+            "workspaces": workspaces_processed,
+            "notifications": notifications_total,
+            "errors": error_count,
+            "last_error": last_error,
+            "queries": approx_queries,
+        }
+    finally:
+        try:
+            WORKSPACE_TIME_SWEEP_LOCK.release()
+        except Exception:
+            pass
+
+
 def run_workspace_time_missing_sweep(conn, workspace_id, now=None):
     # Importante: Render suele ejecutar en UTC. Para alertas (faltan entrada/salida) usamos hora local.
     if now:
@@ -44512,24 +44833,98 @@ def run_workspace_time_missing_sweep(conn, workspace_id, now=None):
         (workspace_id,),
     ).fetchall()
     created = []
+    persona_ids = [str(row["id"] or "").strip() for row in personal if str(row["id"] or "").strip()]
+    persona_placeholders = ",".join(["?"] * len(persona_ids)) if persona_ids else ""
+    alerts_by_persona = {}
+    if persona_ids:
+        alert_rows = conn.execute(
+            f"""
+            SELECT workspace_id, empresa_id, persona_id, alert_missing_checkin, alert_missing_checkout,
+                   notify_worker, notify_admin, admin_contact, schedule
+            FROM workspace_registro_alerts
+            WHERE workspace_id = ?
+              AND persona_id IN ({persona_placeholders})
+            """,
+            [workspace_id, *persona_ids],
+        ).fetchall()
+        for alert_row in alert_rows:
+            persona_key = str(alert_row["persona_id"] or "").strip()
+            if persona_key:
+                alerts_by_persona[persona_key] = dict(alert_row)
+    turnos_by_persona = {}
+    if persona_ids:
+        turnos_rows = conn.execute(
+            f"""
+            SELECT persona_id, enabled, COALESCE(hora_inicio,'') AS hora_inicio, COALESCE(hora_fin,'') AS hora_fin
+            FROM workspace_rrhh_turnos
+            WHERE workspace_id = ?
+              AND weekday = ?
+              AND persona_id IN ({persona_placeholders})
+            """,
+            [workspace_id, int(weekday), *persona_ids],
+        ).fetchall()
+        for turno_row in turnos_rows:
+            persona_key = str(turno_row["persona_id"] or "").strip()
+            if persona_key:
+                turnos_by_persona[persona_key] = dict(turno_row)
+    today_entries = {}
+    if persona_ids:
+        entries_rows = conn.execute(
+            f"""
+            SELECT id, persona_id, hora_inicio, hora_fin
+            FROM (
+              SELECT
+                id,
+                persona_id,
+                hora_inicio,
+                hora_fin,
+                ROW_NUMBER() OVER (
+                  PARTITION BY persona_id
+                  ORDER BY COALESCE(NULLIF(hora_inicio, ''), '00:00') DESC,
+                           COALESCE(updated_at, created_at, id) DESC
+                ) AS rn
+              FROM workspace_registro_horario
+              WHERE workspace_id = ?
+                AND fecha = ?
+                AND persona_id IN ({persona_placeholders})
+            ) AS today_entries
+            WHERE rn = 1
+            """,
+            [workspace_id, today, *persona_ids],
+        ).fetchall()
+        for entry_row in entries_rows:
+            persona_key = str(entry_row["persona_id"] or "").strip()
+            if persona_key:
+                today_entries[persona_key] = dict(entry_row)
     for row in personal:
         persona_id = str(row["id"] or "").strip()
         if not persona_id:
             continue
-        prefs = fetch_workspace_alert_preferences(conn, workspace_id, persona_id=persona_id) or {}
-        turno = None
-        try:
-            turno = conn.execute(
-                """
-                SELECT enabled, COALESCE(hora_inicio,'') AS hora_inicio, COALESCE(hora_fin,'') AS hora_fin
-                FROM workspace_rrhh_turnos
-                WHERE workspace_id = ? AND persona_id = ? AND weekday = ?
-                LIMIT 1
-                """,
-                (workspace_id, persona_id, int(weekday)),
-            ).fetchone()
-        except Exception:
-            turno = None
+        alert_row = alerts_by_persona.get(persona_id)
+        if alert_row:
+            prefs = dict(alert_row)
+            prefs.setdefault("workspace_id", workspace_id)
+            prefs.setdefault("empresa_id", row["empresa_id"])
+            prefs.setdefault("persona_id", persona_id)
+            prefs.setdefault("alert_missing_checkin", row["alert_missing_checkin"])
+            prefs.setdefault("alert_missing_checkout", row["alert_missing_checkout"])
+            prefs.setdefault("notify_worker", row["alert_notify_worker"])
+            prefs.setdefault("notify_admin", row["alert_notify_admin"])
+            prefs.setdefault("admin_contact", row["alert_admin_contact"] or "")
+            prefs.setdefault("schedule", "")
+        else:
+            prefs = {
+                "workspace_id": workspace_id,
+                "empresa_id": row["empresa_id"],
+                "persona_id": persona_id,
+                "alert_missing_checkin": row["alert_missing_checkin"],
+                "alert_missing_checkout": row["alert_missing_checkout"],
+                "notify_worker": row["alert_notify_worker"],
+                "notify_admin": row["alert_notify_admin"],
+                "admin_contact": row["alert_admin_contact"] or "",
+                "schedule": "",
+            }
+        turno = turnos_by_persona.get(persona_id)
         if turno is not None:
             try:
                 if int(turno.get("enabled") or turno["enabled"] or 0) == 0:
@@ -44556,16 +44951,7 @@ def run_workspace_time_missing_sweep(conn, workspace_id, now=None):
             "empresa_id": row["empresa_id"],
             "admin_contact": prefs.get("admin_contact") or row["alert_admin_contact"] or "",
         }
-        today_entry = conn.execute(
-            """
-            SELECT id, hora_inicio, hora_fin
-            FROM workspace_registro_horario
-            WHERE workspace_id = ? AND persona_id = ? AND fecha = ?
-            ORDER BY hora_inicio DESC
-            LIMIT 1
-            """,
-            (workspace_id, persona_id, today),
-        ).fetchone()
+        today_entry = today_entries.get(persona_id)
         has_checkin = bool(today_entry and str(today_entry["hora_inicio"] or "").strip())
         open_entry = bool(today_entry and not str(today_entry["hora_fin"] or "").strip())
         if not has_checkin and now_minutes >= checkin_deadline and int(prefs.get("alert_missing_checkin") or row["alert_missing_checkin"] or 0) == 1:
@@ -44591,46 +44977,33 @@ def run_workspace_time_missing_sweep(conn, workspace_id, now=None):
 
 def workspace_time_sweep_loop(db_path, interval_seconds=300):
     while True:
+        conn = None
         try:
             conn = get_db(db_path)
-            ensure_workspace_product_tables(conn)
-            workspaces = conn.execute("SELECT id FROM workspaces").fetchall()
-            notifications_total = 0
-            workspaces_scanned = 0
-            for row in workspaces:
-                workspace_id = str(row_value(row, "id") or row_value(row, 0) or "").strip()
-                if not workspace_id:
-                    continue
-                workspaces_scanned += 1
-                enabled = conn.execute(
-                    """
-                    SELECT 1
-                    FROM workspace_modulos
-                    WHERE workspace_id = ? AND modulo_key = 'registro_horario' AND COALESCE(enabled, 0) = 1
-                    LIMIT 1
-                    """,
-                    (workspace_id,),
-                ).fetchone()
-                if not enabled:
-                    continue
-                created = run_workspace_time_missing_sweep(conn, workspace_id)
-                if created:
-                    notifications_total += len(created)
-                    conn.commit()
-            conn.close()
+            cycle = _run_workspace_time_sweep_cycle(conn, batch_size=WORKSPACE_TIME_SWEEP_BATCH_SIZE)
+            if cycle.get("skipped"):
+                time.sleep(max(60, int(interval_seconds or 300)))
+                continue
             with WORKSPACE_TIME_SWEEP_STATE_LOCK:
                 WORKSPACE_TIME_SWEEP_STATE["last_run_at"] = datetime.now().isoformat()
-                WORKSPACE_TIME_SWEEP_STATE["last_error"] = ""
-                WORKSPACE_TIME_SWEEP_STATE["last_workspaces"] = workspaces_scanned
-                WORKSPACE_TIME_SWEEP_STATE["last_notifications"] = notifications_total
+                WORKSPACE_TIME_SWEEP_STATE["last_error"] = str(cycle.get("last_error") or "")
+                WORKSPACE_TIME_SWEEP_STATE["last_workspaces"] = int(cycle.get("workspaces") or 0)
+                WORKSPACE_TIME_SWEEP_STATE["last_notifications"] = int(cycle.get("notifications") or 0)
         except Exception as exc:
             try:
-                conn.close()
+                if conn is not None:
+                    conn.close()
             except Exception:
                 pass
             with WORKSPACE_TIME_SWEEP_STATE_LOCK:
                 WORKSPACE_TIME_SWEEP_STATE["last_run_at"] = datetime.now().isoformat()
                 WORKSPACE_TIME_SWEEP_STATE["last_error"] = str(exc)
+        finally:
+            try:
+                if conn is not None:
+                    conn.close()
+            except Exception:
+                pass
         time.sleep(max(60, int(interval_seconds or 300)))
 
 
@@ -47938,11 +48311,16 @@ def suggest_workspace_document_cliente(candidates, text):
 
 
 def fetch_workspace_document_hub(conn, workspace_id, limit=20):
-    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
-    if not empresa_ids:
-        return {"rows": [], "summary": {"documentos_total": 0}}
+    started_at = time.perf_counter()
+    query_count = 0
+    processed_rows = []
+    pending_assignments = 0
     try:
+        empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+        if not empresa_ids:
+            return {"rows": [], "summary": {"documentos_total": 0}}
         placeholders = ",".join(["?"] * len(empresa_ids))
+        limit_val = max(1, min(int(limit or 20), 100))
         rows = conn.execute(
             f"""
             SELECT *
@@ -47994,41 +48372,56 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
             ORDER BY COALESCE(fecha, sort_date) DESC, sort_date DESC
             LIMIT ?
             """,
-            [*empresa_ids, *empresa_ids, max(1, min(int(limit or 20), 100))],
+            [*empresa_ids, *empresa_ids, limit_val],
         ).fetchall()
-        candidates = conn.execute(
-            f"""
-            SELECT DISTINCT c.id, c.nombre, COALESCE(c.nif, '') AS nif
-            FROM clientes c
-            JOIN clientes_empresas ce ON ce.cliente_id = c.id
-            WHERE ce.empresa_id IN ({placeholders})
-            ORDER BY LENGTH(COALESCE(c.nombre, '')) DESC, c.nombre COLLATE NOCASE ASC
-            LIMIT 500
-            """,
-            empresa_ids,
-        ).fetchall()
-        candidate_rows = [dict(row) for row in candidates]
+        query_count += 1
         processed_rows = []
-        pending_assignments = 0
+        needs_candidate_rows = False
         for row in rows:
             item = dict(row)
             item["assignable"] = 1 if item.get("source_table") == "gestoria_docs" else 0
             item["suggested_cliente_id"] = ""
             item["suggested_cliente"] = ""
             if item["assignable"] and not item.get("cliente_id"):
-                suggestion = suggest_workspace_document_cliente(
-                    candidate_rows,
-                    " ".join(
-                        part
-                        for part in [item.get("nombre"), item.get("notas"), item.get("tipo"), item.get("servicio")]
-                        if part
-                    ),
-                )
-                if suggestion:
-                    item["suggested_cliente_id"] = suggestion["id"]
-                    item["suggested_cliente"] = suggestion["nombre"]
-                    pending_assignments += 1
+                needs_candidate_rows = True
             processed_rows.append(item)
+        candidate_rows = []
+        if needs_candidate_rows:
+            candidates = conn.execute(
+                f"""
+                SELECT DISTINCT c.id, c.nombre, COALESCE(c.nif, '') AS nif
+                FROM clientes c
+                JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                WHERE ce.empresa_id IN ({placeholders})
+                ORDER BY LENGTH(COALESCE(c.nombre, '')) DESC, c.nombre COLLATE NOCASE ASC
+                LIMIT 500
+                """,
+                empresa_ids,
+            ).fetchall()
+            query_count += 1
+            candidate_rows = [dict(row) for row in candidates]
+            if candidate_rows:
+                processed_rows = []
+                pending_assignments = 0
+                for row in rows:
+                    item = dict(row)
+                    item["assignable"] = 1 if item.get("source_table") == "gestoria_docs" else 0
+                    item["suggested_cliente_id"] = ""
+                    item["suggested_cliente"] = ""
+                    if item["assignable"] and not item.get("cliente_id"):
+                        suggestion = suggest_workspace_document_cliente(
+                            candidate_rows,
+                            " ".join(
+                                part
+                                for part in [item.get("nombre"), item.get("notas"), item.get("tipo"), item.get("servicio")]
+                                if part
+                            ),
+                        )
+                        if suggestion:
+                            item["suggested_cliente_id"] = suggestion["id"]
+                            item["suggested_cliente"] = suggestion["nombre"]
+                            pending_assignments += 1
+                    processed_rows.append(item)
         total_docs = conn.execute(
             f"""
             SELECT
@@ -48039,6 +48432,7 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
             """,
             [*empresa_ids, *empresa_ids],
         ).fetchone()
+        query_count += 1
         return {
             "rows": processed_rows,
             "summary": {
@@ -48048,6 +48442,14 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
         }
     except Exception:
         return {"rows": [], "summary": {"documentos_total": 0, "pendientes_asignacion": 0}}
+    finally:
+        _perf_log_operation(
+            "fetch_workspace_document_hub",
+            started_at,
+            workspace_id=str(workspace_id or "").strip() or None,
+            rows=len(processed_rows),
+            queries=query_count,
+        )
 
 
 def json_response(handler, data, status=200, cookies=None, extra_headers=None):
