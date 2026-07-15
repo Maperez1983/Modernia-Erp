@@ -4,6 +4,7 @@ import textwrap
 import unicodedata
 import urllib.parse
 from pathlib import Path
+from typing import Any, cast
 
 from PIL import Image, ImageColor, ImageDraw, ImageFont
 
@@ -145,15 +146,16 @@ HIPOTECA_BANK_BRANDS = (
     },
 )
 
-HIPOTECA_BANK_BRAND_LOOKUP = {}
-HIPOTECA_EXPORT_BRANDS = {}
+HIPOTECA_BANK_BRAND_LOOKUP: dict[str, dict[str, Any]] = {}
+HIPOTECA_EXPORT_BRANDS: dict[str, str] = {}
 for _bank_brand in HIPOTECA_BANK_BRANDS:
-    for _alias in (_bank_brand.get("name"), *(_bank_brand.get("aliases") or ())):
+    _bank_brand_aliases = cast(tuple[str, ...], _bank_brand.get("aliases") or ())
+    for _alias in (str(_bank_brand.get("name") or ""), *_bank_brand_aliases):
         _alias_key = _normalize_lookup_text(_alias)
         if not _alias_key:
             continue
         HIPOTECA_BANK_BRAND_LOOKUP[_alias_key] = _bank_brand
-        HIPOTECA_EXPORT_BRANDS[_alias_key] = _bank_brand["name"]
+        HIPOTECA_EXPORT_BRANDS[_alias_key] = str(_bank_brand["name"])
 
 
 def resolve_hipoteca_bank_brand(value):
@@ -178,7 +180,7 @@ def resolve_hipoteca_bank_brand(value):
     if brand:
         return {
             **brand,
-            "logo_on_dark": bool(brand.get("logo_on_dark") or brand.get("logoOnDark")),
+            "logo_on_dark": bool(brand["logo_on_dark"]),
             "original": raw,
             "display_name": brand["name"],
         }

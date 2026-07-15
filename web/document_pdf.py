@@ -3,6 +3,7 @@ import textwrap
 from io import BytesIO
 from pathlib import Path
 import urllib.parse
+from typing import Any
 
 from PIL import Image, ImageDraw
 
@@ -21,7 +22,8 @@ except Exception:  # pragma: no cover
 try:
     from . import pdf_utils as runtime_pdf_utils
 except ImportError:  # pragma: no cover
-    import pdf_utils as runtime_pdf_utils
+    import pdf_utils as _runtime_pdf_utils
+    runtime_pdf_utils = _runtime_pdf_utils
 
 
 _document_font = runtime_pdf_utils._document_font
@@ -32,7 +34,9 @@ _build_logo_badge_image = runtime_pdf_utils._build_logo_badge_image
 ROOT = Path(__file__).resolve().parent
 ASSETS = ROOT.parent / "assets"
 
-_DEPENDENCIES = {}
+_DEPENDENCIES: dict[str, Any] = {}
+
+_RESAMPLE_LANCZOS = getattr(Image, "LANCZOS", getattr(Image, "BICUBIC", 0))
 
 
 def configure_dependencies(**deps):
@@ -74,7 +78,7 @@ def _load_image_from_bytes(raw_bytes, max_width=520):
         return None
     if logo.width > max_width:
         ratio = max_width / float(logo.width)
-        logo = logo.resize((int(logo.width * ratio), int(logo.height * ratio)), Image.LANCZOS)
+        logo = logo.resize((int(logo.width * ratio), int(logo.height * ratio)), _RESAMPLE_LANCZOS)
     return logo
 
 
@@ -162,13 +166,13 @@ def build_branded_document_pdf(title, subtitle, sections, footer_lines=None, bra
     def new_page():
         image = Image.new("RGB", (page_width, page_height), "white")
         draw = ImageDraw.Draw(image)
-        y = top_margin
+        y: float = float(top_margin)
         if logo:
-            image.paste(logo, (margin_x, y), logo)
+            image.paste(logo, (margin_x, int(y)), logo)
             y += logo.height + 30
         draw.text((margin_x, y), title, fill=(48, 54, 58), font=font_title)
         title_box = draw.textbbox((margin_x, y), title, font=font_title)
-        y = title_box[3] + 12
+        y = float(title_box[3]) + 12.0
         if subtitle:
             subtitle_lines, sub_line_height, sub_height = _pil_multiline(draw, subtitle, font_subtitle, width=94, line_gap=6)
             draw.multiline_text((margin_x, y), "\n".join(subtitle_lines), fill=(110, 116, 120), font=font_subtitle, spacing=6)
@@ -254,14 +258,14 @@ def build_branded_text_document_pdf(title, subtitle, body_lines, footer_lines=No
     def new_page():
         image = Image.new("RGB", (page_width, page_height), "white")
         draw = ImageDraw.Draw(image)
-        y = top_margin
+        y: float = float(top_margin)
         if logo:
-            image.paste(logo, (margin_x, y), logo)
+            image.paste(logo, (margin_x, int(y)), logo)
             y += logo.height + 30
         if title:
             draw.text((margin_x, y), title, fill=(48, 54, 58), font=font_title)
             title_box = draw.textbbox((margin_x, y), title, font=font_title)
-            y = title_box[3] + 12
+            y = float(title_box[3]) + 12.0
         if subtitle:
             subtitle_lines, sub_line_height, sub_height = _pil_multiline(draw, subtitle, font_subtitle, width=94, line_gap=6)
             draw.multiline_text((margin_x, y), "\n".join(subtitle_lines), fill=(110, 116, 120), font=font_subtitle, spacing=6)

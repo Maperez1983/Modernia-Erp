@@ -34,3 +34,37 @@ directory = "htmlcov"
 
 [tool.coverage.xml]
 output = "coverage.xml"
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+check_untyped_defs = true
+no_implicit_optional = true
+show_error_codes = true
+pretty = true
+exclude = '''(?x)(
+    ^\.venv/|
+    ^htmlcov/|
+    ^tests/e2e/|
+    (^|.*/)(__pycache__|generated)(/|$)|
+    .*\.generated\.py$|
+    .*_generated\.py$|
+    .*_pb2\.py$|
+    ^web/server\.py$
+)'''
+
+[[tool.mypy.overrides]]
+module = ["server", "web.server"]
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+module = [
+    "cairosvg",
+    "pdf_utils",
+    "server",
+    "reportlab",
+    "reportlab.*",
+]
+ignore_missing_imports = true

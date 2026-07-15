@@ -4,6 +4,7 @@ import re
 import sqlite3
 import threading
 from pathlib import Path
+from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -31,7 +32,7 @@ def _load_env_file() -> None:
 
 _load_env_file()
 
-_CONN_TRACKER = None
+_CONN_TRACKER: Any | None = None
 _CONN_TRACKER_LOCK = threading.Lock()
 
 
@@ -451,7 +452,8 @@ def open_postgres_conn(with_row_factory=False, *, skip_compat=False, connect_tim
 
 _PG_POOL_MAX = 0
 _PG_POOL_WAIT_S = 0.0
-_PG_POOL_QUEUE = None
+_PG_POOL_CREATE = object()
+_PG_POOL_QUEUE: queue.LifoQueue[Any] | None = None
 _PG_POOL_LOCK = threading.Lock()
 _PG_POOL_CREATED = 0
 
@@ -482,12 +484,13 @@ def get_postgres_pool_stats():
     """
     try:
         _pg_pool_configured()
+        pool_queue = _PG_POOL_QUEUE
         max_size = int(_PG_POOL_MAX or 0)
         wait_s = float(_PG_POOL_WAIT_S or 0.0)
         created = int(_PG_POOL_CREATED or 0)
         available = None
         try:
-            available = int(_PG_POOL_QUEUE.qsize()) if _PG_POOL_QUEUE is not None else None
+            available = int(pool_queue.qsize()) if pool_queue is not None else None
         except Exception:
             available = None
         in_use = None
@@ -575,20 +578,21 @@ def _pg_pool_acquire(dsn, *, row_factory, connect_timeout):
     # Returns a PostgresCompatConnection whose `.close()` returns the raw connection to the pool.
     global _PG_POOL_CREATED
     _pg_pool_configured()
-    if _PG_POOL_MAX <= 0:
+    pool_queue = _PG_POOL_QUEUE
+    if pool_queue is None or _PG_POOL_MAX <= 0:
         return None
     # Best-effort to reuse an existing connection.
-    raw = None
+    raw: Any = None
     try:
-        raw = _PG_POOL_QUEUE.get_nowait()
+        raw = pool_queue.get_nowait()
     except Exception:
         raw = None
     if raw is None:
         with _PG_POOL_LOCK:
             if _PG_POOL_CREATED < _PG_POOL_MAX:
                 _PG_POOL_CREATED += 1
-                raw = "CREATE"
-    if raw == "CREATE":
+                raw = _PG_POOL_CREATE
+    if raw is _PG_POOL_CREATE:
         try:
             import psycopg
         except Exception:
@@ -604,7 +608,7 @@ def _pg_pool_acquire(dsn, *, row_factory, connect_timeout):
     if raw is None:
         # Pool saturated: wait a bit to avoid opening infinite connections.
         try:
-            raw = _PG_POOL_QUEUE.get(timeout=_PG_POOL_WAIT_S)
+            raw = pool_queue.get(timeout=_PG_POOL_WAIT_S)
         except Exception:
             return None
     # Configure row_factory for this borrower (psycopg requiere callable; nunca usar None).
@@ -618,9 +622,10 @@ def _pg_pool_acquire(dsn, *, row_factory, connect_timeout):
 def _pg_pool_release(raw_conn, *, broken=False):
     global _PG_POOL_CREATED
     _pg_pool_configured()
+    pool_queue = _PG_POOL_QUEUE
     if raw_conn is None:
         return
-    if _PG_POOL_MAX <= 0:
+    if pool_queue is None or _PG_POOL_MAX <= 0:
         try:
             raw_conn.close()
         except Exception:
@@ -650,7 +655,7 @@ def _pg_pool_release(raw_conn, *, broken=False):
             _PG_POOL_CREATED = max(0, _PG_POOL_CREATED - 1)
         return
     try:
-        _PG_POOL_QUEUE.put_nowait(raw_conn)
+        pool_queue.put_nowait(raw_conn)
     except Exception:
         try:
             raw_conn.close()

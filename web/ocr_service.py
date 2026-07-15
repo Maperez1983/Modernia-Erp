@@ -169,7 +169,7 @@ def ocr_image_docai(image_bytes, mime_type, *, resolver=None):
     doc = res.get("document") or {}
     text = doc.get("text", "")
     fields = {}
-    occurrences = {}
+    occurrences: dict[str, int] = {}
     for field in doc.get("pages", []) or []:
         for form_field in field.get("formFields", []) or []:
             name_text = ""

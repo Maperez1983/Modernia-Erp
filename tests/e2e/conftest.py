@@ -6,7 +6,6 @@ import os
 import re
 import shutil
 import signal
-import socket
 import sqlite3
 import subprocess
 import sys
@@ -34,6 +33,10 @@ RESULTS_DIR = ROOT / "test-results"
 
 for directory in (SCREENSHOTS_DIR, TRACES_DIR, VIDEOS_DIR, REPORT_DIR, RESULTS_DIR):
     directory.mkdir(parents=True, exist_ok=True)
+
+
+_SERVER_PORT_RE = re.compile(r"E2E_PORT:(\d+)")
+_BROWSER_PORT_RE = re.compile(r"DevTools listening on ws://127\.0\.0\.1:(\d+)/")
 
 
 LEAFLET_STUB = r"""
@@ -111,12 +114,6 @@ def _bool_env(name: str, default: bool = False) -> bool:
     if not raw:
         return default
     return raw in {"1", "true", "yes", "si", "sí", "on"}
-
-
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
 
 
 def _utc_now() -> datetime:
@@ -734,6 +731,32 @@ def _wait_until_server_ready(base_url: str, server_log_path: Path, timeout_secon
     )
 
 
+def _wait_for_log_port(log_path: Path, pattern: re.Pattern[str], timeout_seconds: int, label: str) -> int:
+    deadline = time.time() + timeout_seconds
+    last_text = ""
+    while time.time() < deadline:
+        try:
+            last_text = log_path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            last_text = ""
+        match = pattern.search(last_text)
+        if match:
+            return int(match.group(1))
+        time.sleep(0.25)
+    tail = ""
+    try:
+        tail = log_path.read_text(encoding="utf-8", errors="replace")[-8000:]
+    except Exception:
+        tail = last_text[-8000:]
+    raise RuntimeError(f"No se pudo determinar el puerto de {label} a tiempo.\nLog:\n{tail}")
+
+
+@dataclass
+class BrowserLaunch:
+    browser: Browser
+    home_dir: Path
+
+
 def _browser_executable_candidates(playwright: Playwright | None = None) -> list[str]:
     candidates: list[str] = []
     env_candidate = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", "").strip()
@@ -827,31 +850,16 @@ def _terminate_browser_process(proc: subprocess.Popen[str]) -> None:
             pass
 
 
-@dataclass
-class BrowserLaunch:
-    browser: Browser
-    process: subprocess.Popen[str]
-    endpoint_url: str
-    user_data_dir: Path
-    log_path: Path
-    log_handle: Any
-
-
-def _launch_browser(playwright: Playwright, headless: bool) -> BrowserLaunch:
-    executable_path = _resolve_browser_executable(playwright)
-    port = _free_port()
-    user_data_dir = Path(tempfile.mkdtemp(prefix="playwright-chrome-"))
-    log_path = RESULTS_DIR / f"browser-{port}.log"
-    log_handle = log_path.open("w", encoding="utf-8")
-    args = [
-        executable_path,
-        f"--remote-debugging-port={port}",
-        f"--user-data-dir={user_data_dir}",
+def _launch_browser(playwright: Playwright, headless: bool) -> Browser:
+    home_dir = Path(tempfile.mkdtemp(prefix="playwright-home-"))
+    launch_args = [
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-dev-shm-usage",
         "--disable-background-networking",
         "--disable-breakpad",
+        "--disable-crash-reporter",
+        "--disable-crashpad-for-testing",
         "--disable-client-side-phishing-detection",
         "--disable-component-update",
         "--disable-default-apps",
@@ -860,43 +868,26 @@ def _launch_browser(playwright: Playwright, headless: bool) -> BrowserLaunch:
         "--disable-renderer-backgrounding",
         "--mute-audio",
     ]
-    if headless:
-        args.append("--headless=new")
-        args.append("--hide-scrollbars")
     if _bool_env("PLAYWRIGHT_NO_SANDBOX", False):
-        args.append("--no-sandbox")
-    args.append("about:blank")
-    proc = subprocess.Popen(
-        args,
-        cwd=str(ROOT),
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        text=True,
-        start_new_session=True,
+        launch_args.append("--no-sandbox")
+    executable_path = _resolve_browser_executable(playwright)
+    launch_env = os.environ.copy()
+    launch_env.update(
+        {
+            "HOME": str(home_dir),
+            "XDG_CONFIG_HOME": str(home_dir / ".config"),
+            "XDG_CACHE_HOME": str(home_dir / ".cache"),
+        }
     )
-    endpoint_url = f"http://127.0.0.1:{port}"
-    try:
-        _wait_until_browser_ready(endpoint_url)
-        browser = playwright.chromium.connect_over_cdp(endpoint_url)
-        return BrowserLaunch(
-            browser=browser,
-            process=proc,
-            endpoint_url=endpoint_url,
-            user_data_dir=user_data_dir,
-            log_path=log_path,
-            log_handle=log_handle,
-        )
-    except Exception:
-        _terminate_browser_process(proc)
-        try:
-            log_handle.close()
-        except Exception:
-            pass
-        try:
-            shutil.rmtree(user_data_dir, ignore_errors=True)
-        except Exception:
-            pass
-        raise
+    launch_kwargs: dict[str, Any] = {
+        "headless": headless,
+        "args": launch_args,
+        "env": launch_env,
+    }
+    if executable_path:
+        launch_kwargs["executable_path"] = executable_path
+    browser = playwright.chromium.launch(**launch_kwargs)
+    return BrowserLaunch(browser=browser, home_dir=home_dir)
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -951,13 +942,8 @@ def browser(playwright_instance: Playwright) -> Browser:
             launch.browser.close()
         except Exception:
             pass
-        _terminate_browser_process(launch.process)
         try:
-            launch.log_handle.close()
-        except Exception:
-            pass
-        try:
-            shutil.rmtree(launch.user_data_dir, ignore_errors=True)
+            shutil.rmtree(launch.home_dir, ignore_errors=True)
         except Exception:
             pass
 
@@ -991,25 +977,30 @@ def e2e_app(tmp_path) -> E2EApp:
             "OCR_WORKERS": "1",
         }
     )
-    port = _free_port()
-    server_log_path = RESULTS_DIR / f"server-{port}.log"
+    server_log_path = RESULTS_DIR / f"server-{os.getpid()}-{int(time.time() * 1000)}.log"
     server_log = server_log_path.open("w", encoding="utf-8")
+    server_script = (
+        "import sys\n"
+        "from web import server as app_server\n"
+        "\n"
+        "class RecordingThreadingHTTPServer(app_server.ThreadingHTTPServer):\n"
+        "    def __init__(self, server_address, RequestHandlerClass, bind_and_activate=True):\n"
+        "        super().__init__(server_address, RequestHandlerClass, bind_and_activate=bind_and_activate)\n"
+        "        print(f'E2E_PORT:{self.server_address[1]}', flush=True)\n"
+        "\n"
+        "app_server.ThreadingHTTPServer = RecordingThreadingHTTPServer\n"
+        "sys.argv = [\n"
+        "    'web.server',\n"
+        "    '--host', '127.0.0.1',\n"
+        "    '--port', '0',\n"
+        "    '--db', " + json.dumps(str(db_path)) + ",\n"
+        "    '--ocr-db', " + json.dumps(str(ocr_db_path)) + ",\n"
+        "    '--ocr-workers', '1',\n"
+        "]\n"
+        "app_server.main()\n"
+    )
     server_process = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "web.server",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(port),
-            "--db",
-            str(db_path),
-            "--ocr-db",
-            str(ocr_db_path),
-            "--ocr-workers",
-            "1",
-        ],
+        [sys.executable, "-c", server_script],
         cwd=str(ROOT),
         env=env,
         stdout=server_log,
@@ -1017,23 +1008,45 @@ def e2e_app(tmp_path) -> E2EApp:
         text=True,
         start_new_session=True,
     )
-    base_url = f"http://127.0.0.1:{port}"
-    app = E2EApp(
-        base_url=base_url,
-        db_path=db_path,
-        ocr_db_path=ocr_db_path,
-        uploads_dir=uploads_dir,
-        server_log_path=server_log_path,
-        server_process=server_process,
-        data=data,
-    )
+    app: E2EApp | None = None
     try:
+        port = _wait_for_log_port(server_log_path, _SERVER_PORT_RE, timeout_seconds=60, label="servidor E2E")
+        base_url = f"http://127.0.0.1:{port}"
+        app = E2EApp(
+            base_url=base_url,
+            db_path=db_path,
+            ocr_db_path=ocr_db_path,
+            uploads_dir=uploads_dir,
+            server_log_path=server_log_path,
+            server_process=server_process,
+            data=data,
+        )
         _wait_until_server_ready(base_url, server_log_path)
         app.seed_database()
         yield app
     finally:
         try:
-            app.stop()
+            if app is not None:
+                app.stop()
+            else:
+                if server_process.poll() is None:
+                    try:
+                        if hasattr(signal, "SIGTERM"):
+                            os.killpg(server_process.pid, signal.SIGTERM)
+                        else:
+                            server_process.terminate()
+                    except Exception:
+                        try:
+                            server_process.terminate()
+                        except Exception:
+                            pass
+                    try:
+                        server_process.wait(timeout=15)
+                    except Exception:
+                        try:
+                            server_process.kill()
+                        except Exception:
+                            pass
         finally:
             try:
                 server_log.close()
