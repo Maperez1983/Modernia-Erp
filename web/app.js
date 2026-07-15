@@ -15579,7 +15579,7 @@ const renderWorkspaceRrhhHub = () => {
       </div>
 	    `;
 		  };
-	
+
 	  const renderTurnos = () => {
 	    if (!selectedPersonaId || scopeAll) {
 	      return `
@@ -16359,7 +16359,7 @@ const renderWorkspaceRrhhHub = () => {
 	      renderWorkspaceRrhhHub();
 	    });
 	  });
-	
+
 	  const turnosForm = document.getElementById("workspaceRrhhTurnosForm");
 	  if (turnosForm) {
 	    turnosForm.addEventListener("submit", async (event) => {
@@ -17743,7 +17743,7 @@ const renderWorkspaceRrhhHub = () => {
 	      }
 	    });
 	  }
-	
+
 	  const kioskUrlInput = document.getElementById("rrhhMemberKioskUrl");
 	  const kioskQrImg = document.getElementById("rrhhMemberKioskQr");
   const kioskGenerateBtn = workspaceRrhhHub.querySelector("[data-rrhh-member-kiosk-generate]");
@@ -24478,7 +24478,7 @@ const renderWorkspaceFincasBudgetsList = () => {
             </div>
 
             <div class="muted" data-fincas-budget-status style="grid-column: 1 / -1;"></div>
-	
+
 	            <div class="modal-actions" style="grid-column: 1 / -1;">
 	              <button type="button" class="secondary danger" data-fincas-budget-delete-modal>Borrar</button>
 	              <button type="submit" class="primary">Guardar</button>

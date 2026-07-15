@@ -118,4 +118,3 @@ class PrivilegeEscalationRegressionTests(unittest.TestCase):
                 "de una sesión no privilegiada."
             ),
         )
-

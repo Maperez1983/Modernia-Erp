@@ -114,4 +114,3 @@ Base de analisis: `web/server.py`, `web/app.js`, `web/app-auth.js`, `web/app-rou
 | D0-D30 | Estabilizacion | Validar o versionar los artefactos esperados por el servidor, cerrar smoke tests de auth y health, y comprobar que CI y Render arrancan con el mismo contrato. | Alta |
 | D31-D60 | Cutover workspace-first | Reducir la duplicacion `empresa_id` / `workspace_company_id`, mover los workarounds de frontend al backend, y endurecer cookies, scoping y permisos con tests de regresion. | Alta |
 | D61-D90 | Rendimiento y limpieza | Partir `web/server.py` por dominios, reforzar caches e indices en rutas calientes, ampliar la E2E opcional y retirar stubs o vistas legacy ya sustituidas. | Media |
-
