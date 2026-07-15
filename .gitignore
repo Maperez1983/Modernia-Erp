@@ -6,6 +6,7 @@ __pycache__/
 .coverage.*
 coverage.xml
 htmlcov/
+node_modules/
 bandit-report.json
 pip-audit-report.json
 test-results/
@@ -13,3 +14,4 @@ playwright-report/
 traces/
 screenshots/
 videos/
+.eslintcache

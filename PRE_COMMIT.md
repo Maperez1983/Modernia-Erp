@@ -4,6 +4,13 @@
 
 ## Hooks que se ejecutan
 
+- `eslint` sobre estos archivos JavaScript del frontend:
+  - `web/app.js`
+  - `web/app-auth.js`
+  - `web/app-routing.js`
+  - `web/app_shared.js`
+  - `web/ui-foundation.js`
+  - `web/sw.js`
 - `ruff` sobre los archivos Python staged.
 - `mypy` sobre estos módulos:
   - `web/auth_security.py`
@@ -25,6 +32,11 @@
 - `check-added-large-files`
 - `detect-private-key`
 - `mixed-line-ending`
+
+## Requisito para ESLint
+
+El hook de ESLint usa `npx --no-install eslint` y no instala dependencias por su cuenta.
+Antes de usar `pre-commit`, ejecuta `npm ci` para que exista `node_modules/` con la versión fijada en `package-lock.json`.
 
 ## Hooks que no se ejecutan
 

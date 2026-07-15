@@ -2921,6 +2921,19 @@ const gestoriaFactSection = document.getElementById("gestoriaFactSection");
 const gestoriaBudgetQuickForm = document.getElementById("gestoriaBudgetQuickForm");
 const gestoriaBudgetQuickStatus = document.getElementById("gestoriaBudgetQuickStatus");
 const gestoriaBudgetTipoTrabajo = document.getElementById("gestoriaBudgetTipoTrabajo");
+const gestoriaBudgetTipoCategoria = document.getElementById("gestoriaBudgetTipoCategoria");
+const gestoriaSocioCliente = document.getElementById("gestoriaSocioCliente");
+const clienteInmoFicha = document.getElementById("clienteInmoFicha");
+const clienteHipotecaFicha = document.getElementById("clienteHipotecaFicha");
+const segurosPresupuestosList = document.getElementById("segurosPresupuestosList");
+const hipotecaBdtViewCards = document.getElementById("hipotecaBdtViewCards");
+const hipotecaBdtViewTable = document.getElementById("hipotecaBdtViewTable");
+const inmoDashboardEmpresaScope = document.getElementById("inmoDashboardEmpresaScope");
+const fincasDashboardEmpresaScope = document.getElementById("fincasDashboardEmpresaScope");
+const simHubIrpfBtn = document.getElementById("simHubIrpfBtn");
+const simHubPlusvaliaBtn = document.getElementById("simHubPlusvaliaBtn");
+const simHubAlquilerBtn = document.getElementById("simHubAlquilerBtn");
+const simHubVerTodoBtn = document.getElementById("simHubVerTodoBtn");
 const gestoriaTrabajoTipoSelect = document.getElementById("gestoriaTrabajoTipoSelect");
 const gestoriaTrabajoTiposCard = document.getElementById("gestoriaTrabajoTiposCard");
 const gestoriaTrabajoTiposTable = document.getElementById("gestoriaTrabajoTiposTable");
@@ -4547,6 +4560,22 @@ const formatEuros = (value) => {
   }
   const num = Number(text);
   return euroFormatter.format(Number.isFinite(num) ? num : 0);
+};
+
+const formatMoney = (value) => formatEuros(value);
+
+const formatDateTime = (value) => {
+  if (value === null || value === undefined || value === "") return "";
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(date);
+  } catch {
+    return date.toLocaleString("es-ES");
+  }
 };
 
 const formatEurosCompact = (value) => formatEuros(value).replace(/\s/g, "");
@@ -9802,7 +9831,7 @@ const renderWorkspaceClientDetail = (payload = null) => {
         <div class="workspace-mini-kpis">
           <div class="workspace-mini-kpi"><span>Servicios activos</span><strong>${numberFormatter.format(servicios.length)}</strong></div>
           <div class="workspace-mini-kpi"><span>Documentos</span><strong>${numberFormatter.format(Number(docsSummary.total || 0))}</strong></div>
-          <div class="workspace-mini-kpi"><span>Facturación</span><strong>${currency(Number(dashboard?.rentabilidad?.cobrado || 0))}</strong></div>
+          <div class="workspace-mini-kpi"><span>Facturación</span><strong>${formatMoney(Number(dashboard?.rentabilidad?.cobrado || 0))}</strong></div>
           <div class="workspace-mini-kpi"><span>Tareas pendientes</span><strong>${numberFormatter.format(Number(dashboard.tareas_pendientes || 0))}</strong></div>
         </div>
       </div>
@@ -9842,10 +9871,10 @@ const renderWorkspaceClientDetail = (payload = null) => {
           <h4>Resumen económico</h4>
           ${renderList(
             [
-              `Cobrado: ${currency(Number(dashboard?.rentabilidad?.cobrado || 0))}`,
-              `Realizado: ${currency(Number(dashboard?.rentabilidad?.realizado || 0))}`,
-              `Margen: ${currency(Number(dashboard?.rentabilidad?.margen || 0))}`,
-              `Primas: ${currency(Number(dashboard.primas_total || 0))}`,
+              `Cobrado: ${formatMoney(Number(dashboard?.rentabilidad?.cobrado || 0))}`,
+              `Realizado: ${formatMoney(Number(dashboard?.rentabilidad?.realizado || 0))}`,
+              `Margen: ${formatMoney(Number(dashboard?.rentabilidad?.margen || 0))}`,
+              `Primas: ${formatMoney(Number(dashboard.primas_total || 0))}`,
             ],
             "Sin datos económicos."
           )}
@@ -11858,7 +11887,7 @@ const renderWorkspaceCompanies = (rows = []) => {
           await postJsonWithDbRetry("/api/workspace_empresa_link", {
             workspace_id: state.currentWorkspaceId,
             empresa_id: empresaId,
-            rol,
+            rol: role,
           });
           if (status) status.textContent = "Empresa vinculada.";
           await loadWorkspaceDetail(state.currentWorkspaceId);
@@ -16797,6 +16826,7 @@ const renderWorkspaceRrhhHub = () => {
 	      const yearSel = document.getElementById("rrhhEconProductividadYear");
 	      const ejercicio = String(yearSel?.value || new Date().getFullYear()).trim();
 	      const serviceKey = String(state.workspaceRrhhEconomicosProductividadService || "renta").trim().toLowerCase();
+	      const autoEnabled = state.workspaceRrhhEconomicosProductividadAutoEnabled !== false;
 	      const canEditEconomicos = Boolean(getAuthScopeUser && isPrivilegedUser && isPrivilegedUser(getAuthScopeUser()));
 	      const query = String(state.workspaceRrhhEconomicosProductividadQuery || "").trim().toLowerCase();
 	      const estado = String(state.workspaceRrhhEconomicosProductividadEstado || "").trim().toLowerCase();
@@ -26721,10 +26751,81 @@ const setCrmClienteModalOpen = (open = false) => {
 	  syncCrmModalOpenState();
 	};
 
+const resolveInmoClienteLinkScope = (scope = {}) => {
+  const workspaceId = String(scope?.workspace_id || "").trim();
+  const explicitEmpresaId = String(scope?.empresa_id || "").trim();
+  const isInmoCompany = (company = null) => {
+    const name = String(company?.nombre || company?.razon_social || company?.name || "").trim().toLowerCase();
+    if (!name) return false;
+    const preferred = String(SERVICE_COMPANY_MAP?.Inmobiliaria || "").trim().toLowerCase();
+    return (
+      (preferred && name === preferred)
+      || name.includes("inmobiliaria")
+      || name.includes("inmo")
+    );
+  };
+  const resolveWorkspaceCompany = (candidateId = "") => {
+    const id = String(candidateId || "").trim();
+    if (!id) return null;
+    return (
+      resolveEmpresaById(id)
+      || (typeof getWorkspaceCompanyById === "function" ? getWorkspaceCompanyById(id) : null)
+    );
+  };
+  const resolveCandidateEmpresaId = (candidateId = "") => {
+    const company = resolveWorkspaceCompany(candidateId);
+    if (!isInmoCompany(company)) return "";
+    const legacyId = String(resolveLegacyEmpresaId(company) || "").trim();
+    return legacyId || "";
+  };
+  const resolveTenantInmoEmpresaId = () => {
+    const helperEmpresa = resolveCrmInmoEmpresa();
+    if (isInmoCompany(helperEmpresa)) {
+      const empresaId = String(resolveLegacyEmpresaId(helperEmpresa) || "").trim();
+      if (empresaId) return empresaId;
+    }
+    const serviceCandidates = [
+      state.crmInmoEmpresaId,
+      getStoredServiceCompanyId("inmobiliaria"),
+      getWorkspaceDefaultCompanyIdForServiceKey("inmobiliaria"),
+    ];
+    for (const candidateId of serviceCandidates) {
+      const empresaId = resolveCandidateEmpresaId(candidateId);
+      if (empresaId) return empresaId;
+    }
+    const workspaceCandidates = [
+      state.currentWorkspaceCompanyWsId,
+      state.currentWorkspaceCompanyId,
+    ];
+    for (const candidateId of workspaceCandidates) {
+      const id = String(candidateId || "").trim();
+      if (!id) continue;
+      const company =
+        (typeof getWorkspaceCompanyById === "function" ? getWorkspaceCompanyById(id) : null)
+        || resolveEmpresaById(id);
+      if (!isInmoCompany(company)) continue;
+      const empresaId = String(resolveLegacyEmpresaId(company) || "").trim();
+      if (empresaId) return empresaId;
+    }
+    return "";
+  };
+  if (workspaceId) {
+    const empresaId = explicitEmpresaId ? resolveCandidateEmpresaId(explicitEmpresaId) : resolveTenantInmoEmpresaId();
+    return empresaId ? { workspace_id: workspaceId, empresa_id: empresaId } : null;
+  }
+  const empresa = explicitEmpresaId ? resolveWorkspaceCompany(explicitEmpresaId) : resolveCrmInmoEmpresa();
+  const empresaId = explicitEmpresaId ? resolveCandidateEmpresaId(explicitEmpresaId) : String(isInmoCompany(empresa) ? resolveLegacyEmpresaId(empresa) : "").trim();
+  return empresaId ? { empresa_id: empresaId } : null;
+};
+
 const createCrmClienteQuick = async (payload = {}, opts = {}) => {
   const scope = resolveInmoScopeParams() || {};
   if (!scope.workspace_id && !scope.empresa_id && !isTenantWorkspaceMode()) {
     throw new Error("Sin empresa Inmobiliaria.");
+  }
+  const linkScope = resolveInmoClienteLinkScope(scope);
+  if (!linkScope) {
+    throw new Error("No se pudo resolver la empresa Inmobiliaria activa.");
   }
   const preferExisting = opts?.preferExisting !== false;
   const nombre = String(payload?.nombre || "").trim();
@@ -26785,14 +26886,14 @@ const createCrmClienteQuick = async (payload = {}, opts = {}) => {
     throw new Error("No se pudo crear el cliente.");
   }
 
-		await postJsonWithDbRetry(
-		  "/api/clientes_link",
-		  {
-		    cliente_id: clienteId,
-		    ...(isTenantWorkspaceMode() && state.currentWorkspaceId ? { workspace_id: state.currentWorkspaceId } : { empresa_id: resolveLegacyEmpresaId(empresa) }),
-		    servicio: "Inmobiliaria",
-		    captado_por_user_id: captado_por_user_id || undefined,
-		    procedencia_canal: procedencia_canal || undefined,
+	await postJsonWithDbRetry(
+	  "/api/clientes_link",
+	  {
+	    cliente_id: clienteId,
+	    ...linkScope,
+	    servicio: "Inmobiliaria",
+	    captado_por_user_id: captado_por_user_id || undefined,
+	    procedencia_canal: procedencia_canal || undefined,
 		    procedencia_cliente_id: procedencia_cliente_id || undefined,
 		    estado: "Activo",
 	    fecha_inicio: new Date().toISOString().slice(0, 10),
@@ -33995,6 +34096,7 @@ const hydrateGestoriaTrabajoTipoSelect = (selectEl, rows = [], { placeholder = "
     opt.dataset.sla = String(row.sla_dias ?? "");
     opt.dataset.ivaPct = String(row.iva_pct ?? "");
     opt.dataset.precioBase = String(row.precio_base ?? "");
+    opt.dataset.plantillaJson = String(row.plantilla_json || "");
     selectEl.appendChild(opt);
   });
   const match = active.find((row) => String(row.nombre || "").trim() === current);
@@ -34015,19 +34117,85 @@ const getGestoriaTipoMeta = (selectEl) => {
     sla_dias: Number.isFinite(sla) ? sla : null,
     iva_pct: Number.isFinite(ivaPct) ? ivaPct : null,
     precio_base: Number.isFinite(precioBase) ? precioBase : null,
+    plantilla_json: String(opt.dataset.plantillaJson || "").trim(),
   };
 };
 
 const bindGestoriaTipoDefaults = (selectEl, handler) => {
   if (!selectEl) return;
   if (selectEl.dataset.boundDefaults === "1") {
-    handler(selectEl);
     return;
   }
   selectEl.dataset.boundDefaults = "1";
-  const apply = () => handler(selectEl);
-  selectEl.addEventListener("change", apply);
-  apply();
+  selectEl.addEventListener("change", () => handler(selectEl));
+};
+
+const hydrateGestoriaBudgetCategorySelect = (selectEl, currentValue = "") => {
+  if (!selectEl) return;
+  const current = String(currentValue || selectEl.value || "").trim().toLowerCase();
+  selectEl.innerHTML = "";
+  selectEl.appendChild(createOption("", "Todas las categorías"));
+  GESTORIA_TRABAJO_CATEGORIES.forEach((item) => {
+    selectEl.appendChild(createOption(item.key, item.label));
+  });
+  const matched = GESTORIA_TRABAJO_CATEGORIES.some((item) => item.key === current) ? current : "";
+  selectEl.value = matched;
+};
+
+const filterGestoriaTrabajoTiposByCategory = (rows = [], category = "") => {
+  const items = Array.isArray(rows) ? rows : [];
+  const cat = normalizeGestoriaTrabajoCategory(category);
+  if (!cat || cat === "todos") return items;
+  return items.filter((row) => {
+    const rowCategory =
+      normalizeGestoriaTrabajoCategory(row?.categoria) ||
+      classifyGestoriaTrabajoCategory(row?.nombre || row?.tipo_key || "");
+    return rowCategory === cat;
+  });
+};
+
+const renderGestoriaBudgetTipoTemplateFields = () => {
+  if (!gestoriaBudgetQuickForm) return {};
+  const meta = getGestoriaTipoMeta(gestoriaBudgetTipoTrabajo);
+  gestoriaBudgetQuickForm.dataset.gestoriaBudgetTipo = meta.tipo_key || "";
+  gestoriaBudgetQuickForm.dataset.gestoriaBudgetCategoria = meta.categoria || "";
+  return meta;
+};
+
+const isGestoriaBudgetQuickFieldManual = (input) =>
+  String(input?.dataset?.gestoriaBudgetManual || "").trim() === "1";
+
+const markGestoriaBudgetQuickFieldManual = (input) => {
+  if (!input) return;
+  const hasValue = String(input.value || "").trim().length > 0;
+  if (!hasValue) {
+    try {
+      delete input.dataset.gestoriaBudgetManual;
+    } catch (e) {}
+    return;
+  }
+  input.dataset.gestoriaBudgetManual = "1";
+};
+
+const shouldApplyGestoriaBudgetQuickDefault = (input) => {
+  if (!input) return false;
+  const current = String(input.value || "").trim();
+  return !current || !isGestoriaBudgetQuickFieldManual(input);
+};
+
+const applyGestoriaBudgetTipoDefaults = () => {
+  if (!gestoriaBudgetQuickForm || !gestoriaBudgetTipoTrabajo) return {};
+  const meta = renderGestoriaBudgetTipoTemplateFields();
+  const subtotalInput = gestoriaBudgetQuickForm.querySelector('[name="subtotal"]');
+  const ivaPctInput = gestoriaBudgetQuickForm.querySelector('[name="iva_pct"]');
+  if (shouldApplyGestoriaBudgetQuickDefault(subtotalInput)) {
+    subtotalInput.value = meta.precio_base && meta.precio_base > 0 ? String(meta.precio_base) : "";
+  }
+  if (shouldApplyGestoriaBudgetQuickDefault(ivaPctInput)) {
+    ivaPctInput.value = meta.iva_pct !== null && meta.iva_pct !== undefined ? String(meta.iva_pct) : "";
+  }
+  syncGestoriaBudgetQuickComputed();
+  return meta;
 };
 
 const persistGestoriaTrabajoTipo = async (payload = {}) => {
@@ -34076,6 +34244,169 @@ const seedGestoriaTrabajoTipoTemplate = ({ tipo_key = "", categoria = "" } = {})
     null,
     2
   );
+
+const readGestoriaBudgetTipoTemplatePayload = () => {
+  const meta = getGestoriaTipoMeta(gestoriaBudgetTipoTrabajo);
+  if (!meta.nombre) return null;
+  const rawTemplate = String(meta.plantilla_json || "").trim();
+  if (rawTemplate) {
+    try {
+      return JSON.stringify(JSON.parse(rawTemplate));
+    } catch {}
+  }
+  try {
+    const template = JSON.parse(seedGestoriaTrabajoTipoTemplate({
+      tipo_key: meta.tipo_key,
+      categoria: meta.categoria,
+    }));
+    template.nombre = meta.nombre || undefined;
+    template.sla_dias = meta.sla_dias ?? undefined;
+    template.iva_pct = meta.iva_pct ?? undefined;
+    template.precio_base = meta.precio_base ?? undefined;
+    return JSON.stringify(template);
+  } catch {
+    return seedGestoriaTrabajoTipoTemplate({
+      tipo_key: meta.tipo_key,
+      categoria: meta.categoria,
+    });
+  }
+};
+
+const GESTORIA_CORE_TRABAJO_TIPOS = [
+  { tipo_key: "laboral", nombre: "Laboral (general)", categoria: "laboral", orden: 10, color: "#0B1D33", sla_dias: 7, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "alta_baja_autonomo", nombre: "Alta/Baja autónomo", categoria: "laboral", orden: 12, color: "#0B1D33", sla_dias: 2, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "nominas", nombre: "Nóminas", categoria: "laboral", orden: 14, color: "#0B1D33", sla_dias: 5, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "contratos", nombre: "Contratos", categoria: "laboral", orden: 16, color: "#0B1D33", sla_dias: 5, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "seguros_sociales", nombre: "Seguros sociales", categoria: "laboral", orden: 18, color: "#0B1D33", sla_dias: 5, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "fiscal", nombre: "Fiscal (general)", categoria: "fiscal", orden: 20, color: "#0B1D33", sla_dias: 7, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "modelos_hacienda", nombre: "Modelos Hacienda", categoria: "fiscal", orden: 22, color: "#0B1D33", sla_dias: 5, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "modelo_303_iva", nombre: "Modelo 303 (IVA)", categoria: "fiscal", orden: 24, color: "#0B1D33", sla_dias: 5, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "modelo_111_retenciones", nombre: "Modelo 111 (retenciones)", categoria: "fiscal", orden: 26, color: "#0B1D33", sla_dias: 5, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "modelo_130_irpf", nombre: "Modelo 130 (IRPF)", categoria: "fiscal", orden: 28, color: "#0B1D33", sla_dias: 5, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "modelo_200_is", nombre: "Modelo 200 (Impuesto Sociedades)", categoria: "fiscal", orden: 30, color: "#0B1D33", sla_dias: 10, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "modelo_390_resumen_iva", nombre: "Modelo 390 (resumen IVA)", categoria: "fiscal", orden: 32, color: "#0B1D33", sla_dias: 7, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "requerimientos_aeat", nombre: "Requerimientos AEAT", categoria: "fiscal", orden: 34, color: "#0B1D33", sla_dias: 7, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "contable", nombre: "Contable (general)", categoria: "contable", orden: 40, color: "#0B1D33", sla_dias: 10, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "contabilidad_mensual", nombre: "Contabilidad mensual", categoria: "contable", orden: 42, color: "#0B1D33", sla_dias: 10, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "cierre_anual", nombre: "Cierre contable anual", categoria: "contable", orden: 44, color: "#0B1D33", sla_dias: 20, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "libros_contables", nombre: "Libros contables", categoria: "contable", orden: 46, color: "#0B1D33", sla_dias: 20, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "registro_mercantil", nombre: "Registro Mercantil", categoria: "registro", orden: 50, color: "#0B1D33", sla_dias: 15, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "deposito_cuentas", nombre: "Depósito de cuentas", categoria: "registro", orden: 52, color: "#0B1D33", sla_dias: 20, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "constitucion_sociedad", nombre: "Constitución sociedad", categoria: "sociedades", orden: 60, color: "#0B1D33", sla_dias: 30, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "modificacion_sociedad", nombre: "Modificación sociedad", categoria: "sociedades", orden: 62, color: "#0B1D33", sla_dias: 30, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "disolucion_sociedad", nombre: "Disolución sociedad", categoria: "sociedades", orden: 64, color: "#0B1D33", sla_dias: 30, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "renta", nombre: "Renta (general)", categoria: "rentas", orden: 70, color: "#0B1D33", sla_dias: 7, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "irpf_modelo_100", nombre: "IRPF · Modelo 100", categoria: "rentas", orden: 72, color: "#0B1D33", sla_dias: 7, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "patrimonio", nombre: "Patrimonio", categoria: "rentas", orden: 74, color: "#0B1D33", sla_dias: 10, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "trafico", nombre: "Tráfico (general)", categoria: "trafico", orden: 80, color: "#0B1D33", sla_dias: 7, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "transferencia_vehiculo", nombre: "Transferencia vehículo", categoria: "trafico", orden: 82, color: "#0B1D33", sla_dias: 7, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "matriculacion", nombre: "Matriculación", categoria: "trafico", orden: 84, color: "#0B1D33", sla_dias: 10, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "baja_vehiculo", nombre: "Baja vehículo", categoria: "trafico", orden: 86, color: "#0B1D33", sla_dias: 7, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "expedientes_admin", nombre: "Expedientes administrativos", categoria: "expedientes", orden: 90, color: "#0B1D33", sla_dias: 20, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "imv", nombre: "Ingreso Mínimo Vital (IMV)", categoria: "expedientes", orden: 92, color: "#0B1D33", sla_dias: 20, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "subvenciones", nombre: "Subvenciones", categoria: "expedientes", orden: 94, color: "#0B1D33", sla_dias: 30, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "tasaciones", nombre: "Tasaciones", categoria: "tasaciones", orden: 100, color: "#0B1D33", sla_dias: 10, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "herencias", nombre: "Herencias", categoria: "herencias", orden: 110, color: "#0B1D33", sla_dias: 30, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "plusvalia_municipal", nombre: "Plusvalía municipal", categoria: "herencias", orden: 112, color: "#0B1D33", sla_dias: 30, iva_pct: 21.0, precio_base: 0.0 },
+  { tipo_key: "otros", nombre: "Otros", categoria: "otros", orden: 999, color: "#6B778A", sla_dias: 0, iva_pct: 21.0, precio_base: 0.0 },
+];
+
+const normalizeGestoriaCoreCatalogText = (value) => String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+const normalizeGestoriaCoreCatalogNumber = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const num = Number(raw);
+  return Number.isFinite(num) ? num : null;
+};
+
+const buildGestoriaCoreCatalogPlan = (rows = [], { deactivateOthers = false } = {}) => {
+  const items = Array.isArray(rows) ? rows : [];
+  const rowsByKey = new Map();
+  items.forEach((row) => {
+    const key = String(row?.tipo_key || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+    if (key && !rowsByKey.has(key)) {
+      rowsByKey.set(key, row);
+    }
+  });
+  const coreKeys = new Set(GESTORIA_CORE_TRABAJO_TIPOS.map((item) => item.tipo_key));
+  const upserts = GESTORIA_CORE_TRABAJO_TIPOS.map((item) => {
+    const existing = rowsByKey.get(item.tipo_key) || null;
+    const desired = {
+      id: String(existing?.id || "").trim(),
+      tipo_key: item.tipo_key,
+      nombre: item.nombre,
+      categoria: item.categoria,
+      activo: 1,
+      orden: item.orden,
+      color: item.color,
+      sla_dias: item.sla_dias,
+      iva_pct: item.iva_pct,
+      precio_base: item.precio_base,
+      plantilla_json: String(existing?.plantilla_json || "").trim(),
+    };
+    const needsPersist =
+      !existing ||
+      Number(existing?.activo ?? 1) === 0 ||
+      normalizeGestoriaCoreCatalogText(existing?.nombre) !== normalizeGestoriaCoreCatalogText(item.nombre) ||
+      normalizeGestoriaCoreCatalogText(existing?.categoria) !== normalizeGestoriaCoreCatalogText(item.categoria) ||
+      normalizeGestoriaCoreCatalogText(existing?.color) !== normalizeGestoriaCoreCatalogText(item.color) ||
+      normalizeGestoriaCoreCatalogNumber(existing?.orden) !== normalizeGestoriaCoreCatalogNumber(item.orden) ||
+      normalizeGestoriaCoreCatalogNumber(existing?.sla_dias) !== normalizeGestoriaCoreCatalogNumber(item.sla_dias) ||
+      normalizeGestoriaCoreCatalogNumber(existing?.iva_pct) !== normalizeGestoriaCoreCatalogNumber(item.iva_pct) ||
+      normalizeGestoriaCoreCatalogNumber(existing?.precio_base) !== normalizeGestoriaCoreCatalogNumber(item.precio_base);
+    return {
+      key: item.tipo_key,
+      existing,
+      desired,
+      needsPersist,
+      isInsert: !existing,
+      isReactivated: Boolean(existing && Number(existing?.activo ?? 1) === 0),
+    };
+  });
+  const deactivateRows = deactivateOthers
+    ? items.filter((row) => {
+        const key = String(row?.tipo_key || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+        return key && !coreKeys.has(key) && Number(row?.activo ?? 1) !== 0;
+      })
+    : [];
+  return { upserts, deactivateRows, coreKeys };
+};
+
+const seedGestoriaCoreServicios = async ({ deactivateOthers = false } = {}) => {
+  const empresa = resolveCrmGestoriaEmpresa();
+  const empresaId = resolveLegacyEmpresaId(empresa);
+  if (!empresaId) throw new Error("Sin workspace.");
+  const params = buildGestoriaWorkspaceParams({ include_inactive: "1" });
+  const response = await api(`/api/gestoria_trabajo_tipos?${params.toString()}`);
+  const rows = Array.isArray(response?.rows) ? response.rows : [];
+  const plan = buildGestoriaCoreCatalogPlan(rows, { deactivateOthers });
+  let inserted = 0;
+  let updated = 0;
+  let reactivated = 0;
+  let deactivated = 0;
+
+  for (const item of plan.upserts) {
+    if (!item.needsPersist) continue;
+    await persistGestoriaTrabajoTipo(item.desired);
+    if (item.isInsert) {
+      inserted += 1;
+    } else if (item.isReactivated) {
+      reactivated += 1;
+    } else {
+      updated += 1;
+    }
+  }
+
+  if (deactivateOthers && plan.deactivateRows.length) {
+    for (const row of plan.deactivateRows) {
+      await persistGestoriaTrabajoTipo({ ...row, activo: 0 });
+      deactivated += 1;
+    }
+  }
+
+  await loadGestoriaTrabajoTipos({ force: true }).catch(() => {});
+  return { inserted, updated, reactivated, deactivated, rows: state.gestoriaTrabajoTiposCache?.rows || rows };
+};
 
 const openGestoriaTrabajoTipoTemplateModal = (row = {}) => {
   if (!gestoriaTrabajoTipoTemplateModal || !gestoriaTrabajoTipoTemplateJson) return false;
@@ -34175,6 +34506,7 @@ if (gestoriaTrabajoTipoTemplateSaveBtn) {
       const refreshed = await loadGestoriaTrabajoTipos({ force: true });
       hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, refreshed, { placeholder: "Tipo de gestión" });
       hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, refreshed);
+      applyGestoriaBudgetTipoDefaults();
       renderGestoriaTrabajoTiposAdmin(refreshed);
       closeGestoriaTrabajoTipoTemplateModal();
     } catch (e) {
@@ -34293,6 +34625,7 @@ const renderGestoriaTrabajoTiposAdmin = (rows = []) => {
         const refreshed = await loadGestoriaTrabajoTipos({ force: true });
         hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, refreshed, { placeholder: "Tipo de gestión" });
         hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, refreshed);
+        applyGestoriaBudgetTipoDefaults();
         renderGestoriaTrabajoTiposAdmin(refreshed);
       } catch (e) {
         window.alert(String(e?.message || e || "No se pudo guardar."));
@@ -34310,6 +34643,7 @@ const renderGestoriaTrabajoTiposAdmin = (rows = []) => {
         const refreshed = await loadGestoriaTrabajoTipos({ force: true });
         hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, refreshed, { placeholder: "Tipo de gestión" });
         hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, refreshed);
+        applyGestoriaBudgetTipoDefaults();
         renderGestoriaTrabajoTiposAdmin(refreshed);
       } catch (e) {
         window.alert(String(e?.message || e || "No se pudo borrar."));
@@ -38694,7 +39028,7 @@ const renderGestoriaContaTasks = (rows = []) => {
     btn.textContent = "Abrir ficha";
     btn.addEventListener("click", () => {
       if (row.cliente_id) {
-        openCliente(row.cliente_id);
+        openClienteDetail(row.cliente_id);
       }
     });
     actionTd.appendChild(btn);
@@ -38829,7 +39163,7 @@ const loadGestoriaContaQueue = () => {
       });
       tr.addEventListener("click", () => {
         if (row.cliente_id) {
-          openCliente(row.cliente_id);
+          openClienteDetail(row.cliente_id);
         }
       });
       tbody.appendChild(tr);
@@ -38884,7 +39218,8 @@ const loadGestoriaTrabajosOverview = () => {
     .then((rows) => {
       hydrateGestoriaTrabajoTipoSelect(gestoriaTrabajoTipoSelect, rows, { placeholder: "Tipo de gestión" });
       hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, rows);
-      bindGestoriaTipoDefaults(gestoriaTrabajoTipoSelect, () => {
+      applyGestoriaBudgetTipoDefaults();
+      const applyGestoriaTrabajoTipoDefaults = () => {
         if (!gestoriaTrabajoForm || !gestoriaTrabajoTipoSelect) return;
         const meta = getGestoriaTipoMeta(gestoriaTrabajoTipoSelect);
         const slaInput = gestoriaTrabajoForm.querySelector('[name="sla_dias"]');
@@ -38897,7 +39232,9 @@ const loadGestoriaTrabajosOverview = () => {
         if (importeInput && (!String(importeInput.value || "").trim() || currentImporte === 0) && meta.precio_base && meta.precio_base > 0) {
           importeInput.value = String(meta.precio_base);
         }
-      });
+      };
+      bindGestoriaTipoDefaults(gestoriaTrabajoTipoSelect, applyGestoriaTrabajoTipoDefaults);
+      applyGestoriaTrabajoTipoDefaults();
     })
     .catch(() => {});
   fetchGestoriaTrabajosForDashboard().then((data) => {
@@ -47653,8 +47990,6 @@ const renderClientesDashboardList = (container, items, emptyText, labelFormatter
 
 const renderClientesDashboard = (rows = [], dataColumns = []) => {
   if (!clientesDashboardPanel) return;
-  clientesDashboardPanel.classList.add("hidden");
-  return;
   const isClientesModule = state.currentModule === "clientes" && state.currentPage !== "cliente";
   clientesDashboardPanel.classList.toggle("hidden", !isClientesModule);
   if (!isClientesModule) return;
@@ -47738,8 +48073,6 @@ const renderClientesDashboard = (rows = [], dataColumns = []) => {
 
 const loadClientesDashboard = () => {
   if (!clientesDashboardPanel) return Promise.resolve();
-  clientesDashboardPanel.classList.add("hidden");
-  return Promise.resolve();
   if (state.currentModule !== "clientes" || state.currentPage === "cliente") {
     clientesDashboardPanel.classList.add("hidden");
     return Promise.resolve();
@@ -49558,7 +49891,7 @@ const runCurrentInmuebleConversion = (destino) => {
       loadCrmCaptaciones();
       loadCrmInmuebles();
       if (state.currentInmuebleId) {
-        openInmuebleDetail(state.currentInmuebleId, state.currentInmuebleOriginView || "inmuebles");
+        openInmuebleDetail(state.currentInmuebleId, state.currentInmuebleOriginView || "inmuebles", { keepTab: true });
       }
       if (destino === "compraventa") {
         loadCrmCompraventas();
@@ -52936,6 +53269,7 @@ const refreshCurrentInmuebleProfile = () => {
   const actividad = Array.isArray(context.actividad) ? context.actividad : [];
   const compradores = Array.isArray(context.compradores) ? context.compradores : [];
   const servicios = Array.isArray(context.servicios) ? context.servicios : [];
+  const ownerNames = propietarios.map((item) => item.nombre).filter(Boolean);
 
   const resolveInmoStageKey = () => {
     const key = normalizeSimple(captacion.situacion_comercial || inmueble.estado || "");
@@ -53138,7 +53472,6 @@ const refreshCurrentInmuebleProfile = () => {
       primaryPrice ? `${getInmoPrimaryPriceLabel()} ${formatDisplayCell("precio_objetivo", primaryPrice)}` : "",
       inmueble.precio_valoracion ? `Valoración ${formatDisplayCell("precio_valoracion", inmueble.precio_valoracion)}` : "",
     ].filter(Boolean).join(" · ");
-    const ownerNames = propietarios.map((item) => item.nombre).filter(Boolean);
     const metrics = [
       {
         label: "Estado",
@@ -58080,9 +58413,11 @@ const openInmueblePersonasModal = async () => {
   document.body.classList.add("modal-open");
 };
 
-const openInmuebleDetail = (id, originView = "") => {
+const openInmuebleDetail = (id, originView = "", options = {}) => {
   if (!inmuebleDetail) return;
   const hasPendingPrefill = Boolean(state.pendingInmuebleCitaPrefill);
+  const keepTab = Boolean(options?.keepTab);
+  const tabToRestore = keepTab ? normalizeInmuebleTabKey(state.currentInmuebleTabKey || "datos") : "datos";
   state.currentInmuebleId = id;
   pendingInlineEdits.inmueble.clear();
   pendingInlineEdits.captacion.clear();
@@ -58113,7 +58448,7 @@ const openInmuebleDetail = (id, originView = "") => {
   } catch (e) {}
   if (inmuebleTitle) inmuebleTitle.textContent = "Cargando ficha...";
   if (inmuebleSubtitle) inmuebleSubtitle.textContent = String(id || "").trim() || "Id sin asignar";
-  setInmuebleTab("datos");
+  setInmuebleTab(tabToRestore);
   // Evita que “Nueva actividad” herede datos del inmueble anterior.
   resetInmuebleActividadForm();
   window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
@@ -58291,7 +58626,7 @@ const openInmuebleDetail = (id, originView = "") => {
       syncInmuebleArchivePendingButton();
       syncInmuebleEncargoCloseButton();
       if (!hasPendingPrefill) {
-        setInmuebleTab("datos");
+        setInmuebleTab(tabToRestore);
       }
     })
     .catch((error) => {
@@ -58564,7 +58899,7 @@ if (inmuebleEncargoCloseSubmitBtn) {
       try {
         const empresaId = String(state.currentInmuebleContext?.inmueble?.empresa_id || "").trim();
         if (empresaId) {
-          loadInmuebleDetail(state.currentInmuebleId, { keepTab: true });
+          openInmuebleDetail(state.currentInmuebleId, state.currentInmuebleOriginView || "inmuebles", { keepTab: true });
           loadCrmAgenda();
           if (typeof loadCrmCompraventas === "function") loadCrmCompraventas();
           if (typeof loadCrmAlquileres === "function") loadCrmAlquileres();
@@ -59718,7 +60053,7 @@ const loadInmuebleActividad = (inmuebleId, scopeOrEmpresaId) => {
             return;
           }
           loadInmuebleActividad(inmuebleId, empresaId);
-          openInmuebleDetail(inmuebleId, state.currentInmuebleOriginView || "inmuebles");
+          openInmuebleDetail(inmuebleId, state.currentInmuebleOriginView || "inmuebles", { keepTab: true });
         } catch (err) {
           alert(err?.message || "No se pudo borrar la cita.");
         }
@@ -59841,7 +60176,7 @@ const closeInmuebleWorkflowAction = (row, empresaId) => {
         }
         if (state.currentInmuebleId && empresaId) {
           loadInmuebleActividad(state.currentInmuebleId, empresaId);
-          openInmuebleDetail(state.currentInmuebleId, state.currentInmuebleOriginView || "inmuebles");
+          openInmuebleDetail(state.currentInmuebleId, state.currentInmuebleOriginView || "inmuebles", { keepTab: true });
         }
         const typeKey = normalizeInmoActionType(type);
         if (shouldOpenEncargoCloseFromAction(typeKey, resultado) && data?.inmueble_id) {
@@ -61932,8 +62267,6 @@ const renderGestoriaRentaDashboard = (payload) => {
   const prevCobrosMonths = Array.isArray(prevPayload?.cobros_months) ? prevPayload.cobros_months : [];
   const prevCobroSeries = prevPayload?.cobro_series || {};
 
-  const formatMoney = (value) => euroFormatter.format(Number(value || 0));
-
   const downloadGestoriaRentaExport = async ({ kind = "all", fields = "full", responsableKey = "", query = "" } = {}) => {
     const workspaceId = String(state.currentWorkspaceId || "").trim();
     if (!workspaceId) return;
@@ -63475,8 +63808,21 @@ const loadSegurosCrm = () => {
   const empresa = resolveCrmSegurosEmpresa();
   if (!empresa) {
     segurosCrmTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
-    state.segurosCrmData = null;
+    state.segurosCrmData = { columns: [], rows: [] };
+    state.segurosRamosSource = null;
+    state.segurosComisionesRows = [];
+    state.segurosInsightsLastKey = "";
+    state.segurosInsightsLastAt = 0;
     state.segurosRenovarPendientesIds = [];
+    state.segurosCrmEstadoContains = "";
+    state.segurosCrmFilterRamo = "";
+    state.segurosCrmFilterCompania = "";
+    try {
+      renderSegurosPresupuestos({ columns: [], rows: [] });
+    } catch (error) {}
+    try {
+      refreshSegurosOcrComisionSuggestion();
+    } catch (error) {}
     populateSegurosOperationalSelects();
     renderSegurosRamosDashboard();
     if (segurosComplianceKpis) segurosComplianceKpis.innerHTML = "<p class='muted'>Sin empresa.</p>";
@@ -63565,6 +63911,9 @@ const loadSegurosCrm = () => {
       }
     }
     state.segurosCrmData = { columns, rows };
+    try {
+      renderSegurosPresupuestos(data);
+    } catch (error) {}
     renderTableInto({ columns, rows }, segurosCrmTable, segurosCrmInfo, "Seguros");
     if (
       segurosCrmInfo &&
@@ -63582,74 +63931,79 @@ const loadSegurosCrm = () => {
       const suffix = tags.length ? ` · ${tags.join(" · ")}` : "";
       segurosCrmInfo.textContent = `${segurosCrmInfo.textContent} (filtro activo${suffix})`;
     }
-    refreshSegurosColaboradoresList(columns, rows);
-    refreshSegurosRamosList(columns, rows, seguroOcrCompania ? seguroOcrCompania.value : "");
-    renderSegurosUpdateSelect(data);
-    renderSegurosChecklistSelect(data);
-    renderSegurosAiSelect(data);
-    const empresaId = resolveLegacyEmpresaId(empresa);
-    loadSegurosOportunidades(empresaId);
-    loadAcciones("seguros", empresaId, segurosAgendaTable, segurosAgendaInfo);
-    loadSegurosOfertas();
-    loadSegurosReferidos();
-    loadSegurosCampanas();
-    loadSegurosComisiones();
-    loadSegurosInsights(empresaId);
-    loadSegurosAlertas();
-    loadSegurosKpis();
-    loadSegurosDataQuality();
-    renderSegurosRamosDashboard();
-    populateSegurosOperationalSelects();
-    loadSegurosComplianceForm(segurosCompliancePoliza ? segurosCompliancePoliza.value : "");
-    loadSegurosComplianceKpis(empresaId);
-    loadSegurosEventos(segurosEventosPolizaId ? segurosEventosPolizaId.value : "");
-    loadSegurosReclamaciones(empresaId);
-    loadSegurosRecibos();
-    loadSegurosSiniestros();
-    hydrateSegurosRecibosFormSelects().catch(() => {});
-    hydrateSegurosSiniestrosFormSelects().catch(() => {});
-    if (state.segurosTab === "contabilidad") {
-      loadSegurosContabilidad();
-    }
-    if (segurosPreferenciasClientes) {
-      populateAgendaClientes(
-        segurosPreferenciasClientes,
-        segurosPreferenciasClienteInput,
-        segurosPreferenciasClienteId
-      );
-    }
-    if (segurosOfertasClientes) {
-      populateAgendaClientes(
-        segurosOfertasClientes,
-        segurosOfertasClienteInput,
-        segurosOfertasClienteId
-      );
-    }
-    if (segurosReferidosClientes) {
-      populateAgendaClientes(
-        segurosReferidosClientes,
-        segurosReferidosClienteInput,
-        segurosReferidosClienteId
-      );
-    }
-    if (segurosRecClientes) {
-      populateAgendaClientes(
-        segurosRecClientes,
-        segurosRecClienteInput,
-        segurosRecClienteId
-      );
-    }
-    if (state.segurosTab === "dashboard") {
-      const dashboardEmpresaId = resolveSegurosDashboardEmpresaId();
-      if (dashboardEmpresaId) {
-        window.requestAnimationFrame(() => renderFincasDashboard(dashboardEmpresaId));
+    try {
+      refreshSegurosColaboradoresList(columns, rows);
+      refreshSegurosRamosList(columns, rows, seguroOcrCompania ? seguroOcrCompania.value : "");
+      renderSegurosUpdateSelect(data);
+      renderSegurosChecklistSelect(data);
+      renderSegurosAiSelect(data);
+      const empresaId = resolveLegacyEmpresaId(empresa);
+      loadSegurosOportunidades(empresaId);
+      loadAcciones("seguros", empresaId, segurosAgendaTable, segurosAgendaInfo);
+      loadSegurosOfertas();
+      loadSegurosReferidos();
+      loadSegurosCampanas();
+      loadSegurosComisiones();
+      loadSegurosInsights(empresaId);
+      loadSegurosAlertas();
+      loadSegurosKpis();
+      loadSegurosDataQuality();
+      renderSegurosRamosDashboard();
+      populateSegurosOperationalSelects();
+      loadSegurosComplianceForm(segurosCompliancePoliza ? segurosCompliancePoliza.value : "");
+      loadSegurosComplianceKpis(empresaId);
+      loadSegurosEventos(segurosEventosPolizaId ? segurosEventosPolizaId.value : "");
+      loadSegurosReclamaciones(empresaId);
+      loadSegurosRecibos();
+      loadSegurosSiniestros();
+      hydrateSegurosRecibosFormSelects().catch(() => {});
+      hydrateSegurosSiniestrosFormSelects().catch(() => {});
+      if (state.segurosTab === "contabilidad") {
+        loadSegurosContabilidad();
       }
-    }
+      if (segurosPreferenciasClientes) {
+        populateAgendaClientes(
+          segurosPreferenciasClientes,
+          segurosPreferenciasClienteInput,
+          segurosPreferenciasClienteId
+        );
+      }
+      if (segurosOfertasClientes) {
+        populateAgendaClientes(
+          segurosOfertasClientes,
+          segurosOfertasClienteInput,
+          segurosOfertasClienteId
+        );
+      }
+      if (segurosReferidosClientes) {
+        populateAgendaClientes(
+          segurosReferidosClientes,
+          segurosReferidosClienteInput,
+          segurosReferidosClienteId
+        );
+      }
+      if (segurosRecClientes) {
+        populateAgendaClientes(
+          segurosRecClientes,
+          segurosRecClienteInput,
+          segurosRecClienteId
+        );
+      }
+      if (state.segurosTab === "dashboard") {
+        const dashboardEmpresaId = resolveSegurosDashboardEmpresaId();
+        if (dashboardEmpresaId) {
+          window.requestAnimationFrame(() => renderFincasDashboard(dashboardEmpresaId));
+        }
+      }
+    } catch (dashboardError) {}
   }).catch((error) => {
     const message = error?.data?.error || error?.message || "No se pudieron cargar las pólizas.";
     segurosCrmTable.innerHTML = `<p class='muted'>${message}</p>`;
     segurosCrmInfo.textContent = "";
     state.segurosCrmData = { columns: [], rows: [] };
+    try {
+      renderSegurosPresupuestos({ columns: [], rows: [] });
+    } catch (renderError) {}
     renderSegurosRamosDashboard();
   });
 };
@@ -69180,6 +69534,25 @@ const populateGestoriaSocioCambioSocioSelect = (rows = [], selectedId = "") => {
   }
 };
 
+const populateGestoriaSocioClienteSelect = (rows = [], selectedId = "") => {
+  if (!gestoriaSocioCliente) return;
+  const preserve = String(selectedId || gestoriaSocioCliente.value || "").trim();
+  gestoriaSocioCliente.innerHTML = "";
+  gestoriaSocioCliente.appendChild(createOption("", "Selecciona cliente"));
+  (rows || []).forEach((row) => {
+    const nombre = String(row?.nombre || "").trim() || "Sin nombre";
+    const nif = String(row?.nif || row?.dni || row?.cif || "").trim();
+    const servicio = String(row?.servicio || "").trim();
+    const label = [nombre, nif ? ` · ${nif}` : "", servicio ? ` · ${servicio}` : ""].join("");
+    gestoriaSocioCliente.appendChild(createOption(String(row?.id || "").trim(), label));
+  });
+  if (preserve && Array.from(gestoriaSocioCliente.options).some((opt) => opt.value === preserve)) {
+    gestoriaSocioCliente.value = preserve;
+  } else {
+    gestoriaSocioCliente.value = "";
+  }
+};
+
 const populateGestoriaSocioCambioSociedadSelect = (rows = [], selectedId = "") => {
   if (!gestoriaSocioCambioSociedad) return;
   const preserve = String(selectedId || gestoriaSocioCambioSociedad.value || "").trim();
@@ -73816,7 +74189,7 @@ const loadGestoriaModelos = (clienteIdOrOpts, empresaId = "") => {
         del.type = "button";
         del.textContent = "Eliminar";
         del.addEventListener("click", () => {
-          deleteGestoriaModelo(row.id, clienteId);
+          deleteGestoriaModelo(row.id, scope);
         });
         actionTd.appendChild(del);
         tr.appendChild(actionTd);
@@ -73837,7 +74210,11 @@ const saveGestoriaModeloField = (id, field, value) => {
   });
 };
 
-const deleteGestoriaModelo = (id, clienteId) => {
+const deleteGestoriaModelo = (id, scopeOrClienteId = "") => {
+  const scope =
+    scopeOrClienteId && typeof scopeOrClienteId === "object"
+      ? scopeOrClienteId
+      : { clienteId: String(scopeOrClienteId || "").trim() };
   fetch("/api/gestoria_modelos_delete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -73845,7 +74222,7 @@ const deleteGestoriaModelo = (id, clienteId) => {
   })
     .then((res) => res.json())
     .then(() => {
-      loadGestoriaModelos(clienteId);
+      loadGestoriaModelos(scope);
     });
 };
 
@@ -74161,14 +74538,33 @@ const syncGestoriaBudgetQuickComputed = () => {
   const ivaPctInput = gestoriaBudgetQuickForm.querySelector('[name="iva_pct"]');
   const ivaInput = gestoriaBudgetQuickForm.querySelector('[name="impuestos"]');
   const totalInput = gestoriaBudgetQuickForm.querySelector('[name="total"]');
-  const subtotal = parseMoneyValue(subtotalInput?.value || "");
-  const ivaPct = Math.max(0, Math.min(100, parseMoneyValue(ivaPctInput?.value || "")));
-  const ivaManual = parseMoneyValue(ivaInput?.value || "");
-  const iva = subtotal > 0 ? (subtotal * ivaPct) / 100 : ivaManual;
-  const total = subtotal + iva;
-  if (ivaPctInput) ivaPctInput.value = ivaPct ? String(ivaPct) : "";
-  if (ivaInput) ivaInput.value = iva > 0 ? iva.toFixed(2) : "";
-  if (totalInput) totalInput.value = total > 0 ? total.toFixed(2) : "";
+  const subtotalRaw = String(subtotalInput?.value || "").trim();
+  const ivaPctRaw = String(ivaPctInput?.value || "").trim();
+  const ivaRaw = String(ivaInput?.value || "").trim();
+  const totalRaw = String(totalInput?.value || "").trim();
+  const subtotal = parseMoneyValue(subtotalRaw);
+  const ivaPct = Math.max(0, Math.min(100, parseMoneyValue(ivaPctRaw)));
+  const ivaPctManual = isGestoriaBudgetQuickFieldManual(ivaPctInput);
+  const ivaManual = isGestoriaBudgetQuickFieldManual(ivaInput);
+  const totalManual = isGestoriaBudgetQuickFieldManual(totalInput);
+  const hasSubtotal = Boolean(subtotalRaw);
+  const hasIvaPct = Boolean(ivaPctRaw);
+  const hasIva = Boolean(ivaRaw);
+  const computedIva = subtotal * (ivaPct / 100);
+  const effectiveIva = ivaManual ? parseMoneyValue(ivaRaw) : computedIva;
+  if (ivaPctInput && !ivaPctManual) {
+    ivaPctInput.value = hasSubtotal || hasIvaPct || hasIva ? (ivaPct ? String(ivaPct) : "") : "";
+  }
+  if (ivaInput && !ivaManual) {
+    ivaInput.value = hasSubtotal || hasIvaPct || hasIva ? computedIva.toFixed(2) : "";
+  }
+  if (totalInput && !totalManual) {
+    if (!hasSubtotal && !hasIvaPct && !hasIva && !totalRaw) {
+      totalInput.value = "";
+    } else {
+      totalInput.value = (subtotal + effectiveIva).toFixed(2);
+    }
+  }
 };
 
 const renderGestoriaBudgetsList = (rows = []) => {
@@ -74229,43 +74625,25 @@ const loadGestoriaFact = () => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   if (gestoriaBudgetsInfo) gestoriaBudgetsInfo.textContent = "Cargando presupuestos...";
-	  loadGestoriaTrabajoTipos()
-	    .then((rows) => {
-	      hydrateGestoriaBudgetCategorySelect(gestoriaBudgetTipoCategoria);
-	      const baseRows = Array.isArray(rows) ? rows : [];
-	      const applyFilter = () => {
-	        const source = Array.isArray(state.gestoriaTrabajoTiposCache?.rows) ? state.gestoriaTrabajoTiposCache.rows : baseRows;
-	        const filtered = filterGestoriaTrabajoTiposByCategory(source, gestoriaBudgetTipoCategoria?.value || "");
-	        hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, filtered);
-	        renderGestoriaBudgetTipoTemplateFields();
-	      };
-	      if (gestoriaBudgetTipoCategoria && gestoriaBudgetTipoCategoria.dataset.bound !== "1") {
-	        gestoriaBudgetTipoCategoria.dataset.bound = "1";
-	        gestoriaBudgetTipoCategoria.addEventListener("change", () => {
-	          applyFilter();
-	          try { syncGestoriaBudgetQuickComputed(); } catch (e) {}
-	        });
-	      }
-	      applyFilter();
-	      renderGestoriaTrabajoTiposAdmin(rows);
-	      bindGestoriaTipoDefaults(gestoriaBudgetTipoTrabajo, () => {
-	        if (!gestoriaBudgetQuickForm || !gestoriaBudgetTipoTrabajo) return;
-	        const meta = getGestoriaTipoMeta(gestoriaBudgetTipoTrabajo);
-        const subtotalInput = gestoriaBudgetQuickForm.querySelector('[name="subtotal"]');
-        const ivaPctInput = gestoriaBudgetQuickForm.querySelector('[name="iva_pct"]');
-        const currentSubtotal = parseMoneyValue(String(subtotalInput?.value || "").trim());
-        if (subtotalInput && (!String(subtotalInput.value || "").trim() || currentSubtotal === 0) && meta.precio_base && meta.precio_base > 0) {
-          subtotalInput.value = String(meta.precio_base);
-        }
-	        const currentIvaPct = parseMoneyValue(String(ivaPctInput?.value || "").trim());
-	        if (ivaPctInput && (!String(ivaPctInput.value || "").trim() || currentIvaPct === 0) && meta.iva_pct !== null) {
-	          ivaPctInput.value = String(meta.iva_pct);
-	        }
-	        renderGestoriaBudgetTipoTemplateFields();
-	        syncGestoriaBudgetQuickComputed();
-	      });
-	    })
-	    .catch(() => {});
+  loadGestoriaTrabajoTipos()
+    .then((rows) => {
+      hydrateGestoriaBudgetCategorySelect(gestoriaBudgetTipoCategoria);
+      const baseRows = Array.isArray(rows) ? rows : [];
+      const applyFilter = () => {
+        const source = Array.isArray(state.gestoriaTrabajoTiposCache?.rows) ? state.gestoriaTrabajoTiposCache.rows : baseRows;
+        const filtered = filterGestoriaTrabajoTiposByCategory(source, gestoriaBudgetTipoCategoria?.value || "");
+        hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, filtered);
+        applyGestoriaBudgetTipoDefaults();
+      };
+      if (gestoriaBudgetTipoCategoria && gestoriaBudgetTipoCategoria.dataset.bound !== "1") {
+        gestoriaBudgetTipoCategoria.dataset.bound = "1";
+        gestoriaBudgetTipoCategoria.addEventListener("change", applyFilter);
+      }
+      applyFilter();
+      renderGestoriaTrabajoTiposAdmin(rows);
+      bindGestoriaTipoDefaults(gestoriaBudgetTipoTrabajo, applyGestoriaBudgetTipoDefaults);
+    })
+    .catch(() => {});
   const servicio = String(gestoriaBudgetsServicioFilter?.value || "gestoria").trim().toLowerCase();
   const estado = String(gestoriaBudgetsEstadoFilter?.value || "all").trim();
   const params = new URLSearchParams({
@@ -78175,7 +78553,7 @@ if (crmClienteCreateForm) {
       loadCrmClientes({ force: true });
       if (clienteId) {
         try {
-          addCrmRecentItem({ kind: "cliente", view: "clientes", id: clienteId });
+          pushCrmRecentItem({ kind: "cliente", view: "clientes", id: clienteId });
         } catch (e) {}
       }
     } catch (error) {
@@ -83921,7 +84299,7 @@ if (gestoriaBudgetsEstadoFilter) {
   });
 }
 
-	if (gestoriaTrabajoTipoReloadBtn) {
+if (gestoriaTrabajoTipoReloadBtn) {
 	  gestoriaTrabajoTipoReloadBtn.addEventListener("click", async () => {
 	    try {
 	      const rows = await loadGestoriaTrabajoTipos({ force: true });
@@ -83929,7 +84307,7 @@ if (gestoriaBudgetsEstadoFilter) {
 	      hydrateGestoriaBudgetCategorySelect(gestoriaBudgetTipoCategoria);
 	      const filtered = filterGestoriaTrabajoTiposByCategory(rows, gestoriaBudgetTipoCategoria?.value || "");
 	      hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, filtered);
-	      renderGestoriaBudgetTipoTemplateFields();
+	      applyGestoriaBudgetTipoDefaults();
 	      renderGestoriaTrabajoTiposAdmin(rows);
 	    } catch (e) {}
 	  });
@@ -83952,10 +84330,10 @@ if (gestoriaBudgetsEstadoFilter) {
 		      hydrateGestoriaBudgetCategorySelect(gestoriaBudgetTipoCategoria);
 		      const filtered = filterGestoriaTrabajoTiposByCategory(rows, gestoriaBudgetTipoCategoria?.value || "");
 		      hydrateGestoriaTrabajoTipoSelect(gestoriaBudgetTipoTrabajo, filtered);
-		      renderGestoriaBudgetTipoTemplateFields();
+		      applyGestoriaBudgetTipoDefaults();
 		      renderGestoriaTrabajoTiposAdmin(rows);
 		      if (gestoriaTrabajoTiposInfo) {
-		        gestoriaTrabajoTiposInfo.textContent = `Catálogo core instalado: +${res.inserted || 0} nuevos, ${res.updated || 0} actualizados, ${res.deactivated || 0} desactivados.`;
+		        gestoriaTrabajoTiposInfo.textContent = `Catálogo core instalado: +${res.inserted || 0} nuevos, ${res.updated || 0} actualizados, ${res.reactivated || 0} reactivados, ${res.deactivated || 0} desactivados.`;
 		      }
 		    } catch (e) {
 		      window.alert(String(e?.message || e || "No se pudo instalar el catálogo core."));
@@ -83988,9 +84366,12 @@ if (gestoriaTrabajoTipoAddBtn) {
 }
 
 if (gestoriaBudgetQuickForm) {
-  ["subtotal", "iva_pct", "impuestos"].forEach((name) => {
+  ["subtotal", "iva_pct", "impuestos", "total"].forEach((name) => {
     const input = gestoriaBudgetQuickForm.querySelector(`[name="${name}"]`);
-    input?.addEventListener("input", () => syncGestoriaBudgetQuickComputed());
+    input?.addEventListener("input", () => {
+      markGestoriaBudgetQuickFieldManual(input);
+      syncGestoriaBudgetQuickComputed();
+    });
   });
   syncGestoriaBudgetQuickComputed();
   gestoriaBudgetQuickForm.addEventListener("submit", async (event) => {
@@ -90557,5 +90938,5 @@ try {
 } catch (e) {}
 
 try {
-  syncGestoriaRentaQuickRemesaToggle();
+  syncGestoriaRentaRemesaToggles();
 } catch (e) {}

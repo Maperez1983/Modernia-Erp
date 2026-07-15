@@ -20,6 +20,12 @@ repos:
 
   - repo: local
     hooks:
+      - id: eslint
+        name: eslint (staged browser JS)
+        entry: npx --no-install eslint
+        language: system
+        files: ^web/(app|app-auth|app-routing|app_shared|ui-foundation|sw)\.js$
+
       - id: ruff
         name: ruff check (staged Python files)
         entry: python -m ruff check --force-exclude

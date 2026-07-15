@@ -216,7 +216,7 @@ return {{
             self.skipTest("node no está disponible")
 
         root = Path(__file__).resolve().parents[1]
-        for rel_path in ("web/app_shared.js", "web/app.js", "web/sw.js"):
+        for rel_path in ("web/app_shared.js", "web/ui-foundation.js", "web/app.js", "web/sw.js"):
             subprocess.run(
                 [node, "--check", str(root / rel_path)],
                 check=True,

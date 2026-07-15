@@ -1,0 +1,15 @@
+{
+  "name": "crm-modernia-limpio",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Development tooling for CRM Modernia Limpio",
+  "scripts": {
+    "lint:js": "eslint web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js",
+    "lint:js:quiet": "eslint --quiet web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js",
+    "lint:js:fix": "eslint --fix web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js"
+  },
+  "devDependencies": {
+    "eslint": "^10.7.0",
+    "globals": "^17.7.0"
+  }
+}
