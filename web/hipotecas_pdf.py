@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 import json
+import importlib
 from io import BytesIO
+from types import ModuleType
+from typing import Any
 
+_pypdf: ModuleType | None
 try:
-    from pypdf import PdfReader, PdfWriter
+    _pypdf = importlib.import_module("pypdf")
 except Exception:  # pragma: no cover
-    PdfReader = None
-    PdfWriter = None
+    _pypdf = None
+
+PdfReader: Any | None = getattr(_pypdf, "PdfReader", None) if _pypdf is not None else None
+PdfWriter: Any | None = getattr(_pypdf, "PdfWriter", None) if _pypdf is not None else None
 
 try:
     from . import pdf_utils as runtime_pdf_utils
 except ImportError:  # pragma: no cover
-    import pdf_utils as runtime_pdf_utils
+    import pdf_utils as runtime_pdf_utils  # type: ignore[no-redef]
 
 
 normalize_lookup_text = runtime_pdf_utils._normalize_lookup_text
@@ -19,7 +25,13 @@ build_hipoteca_bank_logo_meta = runtime_pdf_utils.build_hipoteca_bank_logo_meta
 normalize_hipoteca_pdf_sort_order = runtime_pdf_utils.normalize_hipoteca_pdf_sort_order
 
 
-_DEPENDENCIES = {}
+_DEPENDENCIES: dict[str, Any] = {}
+
+
+def _dict_or_empty(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    return {}
 
 
 def configure_dependencies(**deps):
@@ -135,33 +147,35 @@ def build_hipotecas_bdt_listado_card_items(item):
 
 def build_hipoteca_ficha_pdf(payload, section=None):
     payload = payload or {}
-    liq_payload = payload.get("liquidacion_print")
-    if not isinstance(liq_payload, dict) or not liq_payload:
-        liq_payload = _dep("compute_hipoteca_liquidacion_print_data")(
-            payload,
-            _dep("_safe_json_object")(payload.get("liquidacion_json") or "{}"),
+    liq_payload = _dict_or_empty(payload.get("liquidacion_print"))
+    if not liq_payload:
+        liq_payload = _dict_or_empty(
+            _dep("compute_hipoteca_liquidacion_print_data")(
+                payload,
+                _dep("_safe_json_object")(payload.get("liquidacion_json") or "{}"),
+            )
         )
-    liq = liq_payload.get("liq") if isinstance(liq_payload.get("liq"), dict) else {}
-    flags = liq_payload.get("flags") if isinstance(liq_payload.get("flags"), dict) else {}
+    liq = _dict_or_empty(liq_payload.get("liq"))
+    flags = _dict_or_empty(liq_payload.get("flags"))
 
-    cliente_inmueble = _dep("_safe_json_object")(payload.get("cliente_inmueble_json") or "{}")
-    hipoteca_detalle = _dep("_safe_json_object")(payload.get("hipoteca_detalle_json") or "{}")
+    cliente_inmueble = _dict_or_empty(_dep("_safe_json_object")(payload.get("cliente_inmueble_json") or "{}"))
+    hipoteca_detalle = _dict_or_empty(_dep("_safe_json_object")(payload.get("hipoteca_detalle_json") or "{}"))
 
-    comprador = liq.get("comprador") if isinstance(liq.get("comprador"), dict) else {}
-    gastos_cv = comprador.get("gastos_compraventa") if isinstance(comprador.get("gastos_compraventa"), dict) else {}
-    hip = comprador.get("hipoteca") if isinstance(comprador.get("hipoteca"), dict) else {}
-    entregas = comprador.get("entregas") if isinstance(comprador.get("entregas"), dict) else {}
-    prestamo = liq.get("prestamo") if isinstance(liq.get("prestamo"), dict) else {}
-    vendedor = liq.get("vendedor") if isinstance(liq.get("vendedor"), dict) else {}
-    vendedor_ded = vendedor.get("deducciones") if isinstance(vendedor.get("deducciones"), dict) else {}
-    vendedor_vendedores = vendedor.get("vendedores") if isinstance(vendedor.get("vendedores"), dict) else {}
-    vend_v1 = vendedor_vendedores.get("v1") if isinstance(vendedor_vendedores.get("v1"), dict) else {}
-    vend_v2 = vendedor_vendedores.get("v2") if isinstance(vendedor_vendedores.get("v2"), dict) else {}
-    cuadre = liq.get("cuadre") if isinstance(liq.get("cuadre"), dict) else {}
-    cuadre_cheq1 = cuadre.get("cheque1") if isinstance(cuadre.get("cheque1"), dict) else {}
-    cuadre_cheq2 = cuadre.get("cheque2") if isinstance(cuadre.get("cheque2"), dict) else {}
-    cuadre_gastos = cuadre.get("gastos_escrituras") if isinstance(cuadre.get("gastos_escrituras"), dict) else {}
-    notaria = liq.get("notaria") if isinstance(liq.get("notaria"), dict) else {}
+    comprador = _dict_or_empty(liq.get("comprador"))
+    gastos_cv = _dict_or_empty(comprador.get("gastos_compraventa"))
+    hip = _dict_or_empty(comprador.get("hipoteca"))
+    entregas = _dict_or_empty(comprador.get("entregas"))
+    prestamo = _dict_or_empty(liq.get("prestamo"))
+    vendedor = _dict_or_empty(liq.get("vendedor"))
+    vendedor_ded = _dict_or_empty(vendedor.get("deducciones"))
+    vendedor_vendedores = _dict_or_empty(vendedor.get("vendedores"))
+    vend_v1 = _dict_or_empty(vendedor_vendedores.get("v1"))
+    vend_v2 = _dict_or_empty(vendedor_vendedores.get("v2"))
+    cuadre = _dict_or_empty(liq.get("cuadre"))
+    cuadre_cheq1 = _dict_or_empty(cuadre.get("cheque1"))
+    cuadre_cheq2 = _dict_or_empty(cuadre.get("cheque2"))
+    cuadre_gastos = _dict_or_empty(cuadre.get("gastos_escrituras"))
+    notaria = _dict_or_empty(liq.get("notaria"))
 
     def text(value, default="—"):
         raw = str(value or "").strip()
@@ -320,16 +334,16 @@ def build_hipoteca_ficha_pdf(payload, section=None):
         ("Comentarios", nested(hipoteca_detalle, "comentarios")),
     ]
 
-    comprador = liq.get("comprador") if isinstance(liq.get("comprador"), dict) else {}
-    vendedor = liq.get("vendedor") if isinstance(liq.get("vendedor"), dict) else {}
-    vendedor_ded = vendedor.get("deducciones") if isinstance(vendedor.get("deducciones"), dict) else {}
-    vendedor_vendedores = vendedor.get("vendedores") if isinstance(vendedor.get("vendedores"), dict) else {}
-    vend_v1 = vendedor_vendedores.get("v1") if isinstance(vendedor_vendedores.get("v1"), dict) else {}
-    vend_v2 = vendedor_vendedores.get("v2") if isinstance(vendedor_vendedores.get("v2"), dict) else {}
-    cuadre = liq.get("cuadre") if isinstance(liq.get("cuadre"), dict) else {}
-    cuadre_cheq1 = cuadre.get("cheque1") if isinstance(cuadre.get("cheque1"), dict) else {}
-    cuadre_cheq2 = cuadre.get("cheque2") if isinstance(cuadre.get("cheque2"), dict) else {}
-    cuadre_gastos = cuadre.get("gastos_escrituras") if isinstance(cuadre.get("gastos_escrituras"), dict) else {}
+    comprador = _dict_or_empty(liq.get("comprador"))
+    vendedor = _dict_or_empty(liq.get("vendedor"))
+    vendedor_ded = _dict_or_empty(vendedor.get("deducciones"))
+    vendedor_vendedores = _dict_or_empty(vendedor.get("vendedores"))
+    vend_v1 = _dict_or_empty(vendedor_vendedores.get("v1"))
+    vend_v2 = _dict_or_empty(vendedor_vendedores.get("v2"))
+    cuadre = _dict_or_empty(liq.get("cuadre"))
+    cuadre_cheq1 = _dict_or_empty(cuadre.get("cheque1"))
+    cuadre_cheq2 = _dict_or_empty(cuadre.get("cheque2"))
+    cuadre_gastos = _dict_or_empty(cuadre.get("gastos_escrituras"))
 
     comprador_lines = [
         ("Cliente", text(nested(comprador, "cliente", payload.get("cliente")))),
@@ -802,7 +816,7 @@ def build_hipotecas_listado_pdf(conn, rows, section=None, filters=None):
             filter_parts.insert(0, f"{total} operación(es)")
     subtitle = " · ".join(filter_parts) if filter_parts else f"{total} operación(es)"
 
-    sections = []
+    sections: list[tuple[str, Any]] = []
     for idx, payload in enumerate(payloads, start=1):
         cliente = str(payload.get("cliente") or "").strip() or f"Hipoteca {idx}"
         banco = str(payload.get("banco") or "").strip() or "-"
