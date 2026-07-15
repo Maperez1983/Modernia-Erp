@@ -104,7 +104,8 @@ Leyenda:
 
 ## Dependencias principales
 - Hecho: el runtime base declarado en el repo es Python 3.11.11.
-- Hecho: dependencias principales de ejecucion: `google-auth`, `requests`, `boto3`, `openpyxl`, `Pillow`, `psycopg[binary]`, `pypdf`, `reportlab`, `cairosvg`, `qrcode`, `tzdata`, `playwright`, `opencv-python-headless`, `onnxruntime` y `rembg`.
+- Hecho: dependencias principales de ejecucion: `google-auth`, `requests`, `boto3`, `openpyxl`, `Pillow`, `psycopg[binary]`, `pypdf`, `reportlab`, `cairosvg`, `qrcode`, `tzdata`, `opencv-python-headless`, `onnxruntime` y `rembg`.
+- Hecho: Playwright se usa para E2E y vive en dependencias de desarrollo, no en runtime.
 - Hecho: dependencias de desarrollo: `ruff`, `mypy`, `pytest`, `pytest-cov`, `factory-boy`, `pre-commit` y `types-requests`.
 - Hecho: el frontend depende de Google Fonts y Leaflet desde CDN.
 - Inferencia: varias dependencias son opcionales en tiempo de ejecucion; el codigo comprueba su disponibilidad y activa fallbacks en funcion del entorno.

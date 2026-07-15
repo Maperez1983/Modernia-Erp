@@ -8,3 +8,8 @@ coverage.xml
 htmlcov/
 bandit-report.json
 pip-audit-report.json
+test-results/
+playwright-report/
+traces/
+screenshots/
+videos/
