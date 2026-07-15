@@ -9,6 +9,6 @@ reportlab==4.2.5
 cairosvg>=2.7.1
 qrcode==7.4.2
 tzdata
-opencv-python-headless>=4.10.0.84
+opencv-python-headless>=5.0.0.93
 onnxruntime>=1.18.1
 sentry-sdk
