@@ -2,6 +2,21 @@ from __future__ import annotations
 
 
 def test_normal_user_cannot_access_admin_route(page, e2e_app):
+    page.add_init_script(
+        """
+        (() => {
+          const nativeSetTimeout = window.setTimeout.bind(window);
+          window.__adminRetryTimers = [];
+          window.setTimeout = function(fn, delay, ...args) {
+            const label = typeof fn === "function" ? String(fn) : String(fn || "");
+            if (label.includes("openAdmin")) {
+              window.__adminRetryTimers.push({ delay: Number(delay) || 0, label });
+            }
+            return nativeSetTimeout(fn, delay, ...args);
+          };
+        })();
+        """
+    )
     e2e_app.login(page, e2e_app.data.normal_username, e2e_app.data.normal_password)
     page.wait_for_url("**/*", timeout=30_000)
     page.locator("#authLoginOverlay").wait_for(state="hidden")
@@ -14,6 +29,13 @@ def test_normal_user_cannot_access_admin_route(page, e2e_app):
     page.wait_for_load_state("domcontentloaded")
     page.locator("#adminSection").wait_for(state="hidden")
     assert page.locator("#adminSection").is_hidden()
+    page.wait_for_timeout(250)
+    admin_retry_timers = page.evaluate(
+        """
+        () => (window.__adminRetryTimers || []).filter((item) => String(item.label || "").includes("openAdmin"))
+        """
+    )
+    assert admin_retry_timers == []
     assert e2e_app.session_user(page)["usuario"] == e2e_app.data.normal_username
 
 

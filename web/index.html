@@ -5708,71 +5708,6 @@
           <div class="crm-header">
             <div>
               <h3>Gestoría · Inbox documental</h3>
-              <p class="muted">Histórico de clientes y expedientes incorporados desde cargas previas.</p>
-            </div>
-          </div>
-          <div class="crm-split">
-            <div class="form-card">
-              <h3>Base importada</h3>
-              <p class="muted">Histórico de clientes y expedientes incorporados desde cargas previas.</p>
-              <div id="gestoriaBdtTable"></div>
-              <div class="footer" id="gestoriaBdtInfo"></div>
-            </div>
-            <div class="form-card">
-              <h3>Documentos recientes</h3>
-              <p class="muted">Últimos documentos recibidos o registrados en gestoría.</p>
-              <div id="gestoriaDocsRecent"></div>
-              <div class="footer" id="gestoriaDocsRecentInfo"></div>
-            </div>
-          </div>
-          <div class="crm-split">
-            <div class="form-card">
-              <h3>Registrar documento</h3>
-              <p class="muted">Da entrada a documentación manual antes de enviarla a revisión o expediente.</p>
-              <form id="gestoriaDocsForm" class="form-grid">
-                <label>
-                  Cliente
-                  <select id="gestoriaDocsCliente" name="cliente_id" required></select>
-                </label>
-                <label>
-                  Nombre documento
-                  <input name="nombre" required />
-                </label>
-                <label>
-                  Tipo
-                  <input name="tipo" placeholder="Contrato, DNI, escritura..." />
-                </label>
-                <label>
-                  Fecha
-                  <input name="fecha" type="date" />
-                </label>
-                <label>
-                  Estado
-                  <select name="estado">
-                    <option>Pendiente</option>
-                    <option>Recibido</option>
-                    <option>Validado</option>
-                  </select>
-                </label>
-                <label>
-                  Notas
-                  <input name="notas" />
-                </label>
-                <label class="span-2">
-                  Archivo
-              </div>
-              <div class="form-actions">
-                <button type="submit">Guardar y asignar</button>
-                <span id="gestoriaAltaStatus" class="muted"></span>
-              </div>
-            </form>
-          </div>
-        </div>
-        </div>
-        <div id="gestoriaDocsSection" class="hidden">
-          <div class="crm-header">
-            <div>
-              <h3>Gestoría · Inbox documental</h3>
               <p class="muted">Entrada documental del despacho, histórico importado y actividad reciente.</p>
             </div>
           </div>
@@ -11812,6 +11747,90 @@
 
     <div id="uiErrorToast" class="ui-error-toast hidden" role="alert"></div>
 
+            <script>
+              (function () {
+                if (window.__CRMDeferredSections) return;
+                const groups = {
+                  gestoria: {
+                    mountId: "crmGestoriaMount",
+                    ids: [
+                      "gestoriaDashboardSection",
+                      "gestoriaCrmSection",
+                      "gestoriaDocsSection",
+                      "gestoriaAgendaSection",
+                      "gestoriaFactSection",
+                      "gestoriaContaSection",
+                    ],
+                  },
+                  seguros: {
+                    mountId: "crmSegurosMount",
+                    ids: ["segurosCrmSection"],
+                  },
+                  fin: {
+                    mountId: "crmFinMount",
+                    ids: ["hipotecaSection", "finSimSection"],
+                  },
+                };
+                const nodes = new Map();
+                const getNode = (id) => nodes.get(id) || document.getElementById(id) || null;
+                const detachNode = (id) => {
+                  const node = getNode(id);
+                  if (!node) return null;
+                  nodes.set(id, node);
+                  if (node.parentNode) {
+                    node.parentNode.removeChild(node);
+                  }
+                  return node;
+                };
+                const mountGroup = (name) => {
+                  const group = groups[name];
+                  const mount = group ? document.getElementById(group.mountId) : null;
+                  if (!group || !mount) return;
+                  group.ids.forEach((id) => {
+                    const node = getNode(id);
+                    if (node && node.parentElement !== mount) {
+                      mount.appendChild(node);
+                      nodes.set(id, node);
+                    }
+                  });
+                };
+                const releaseGroup = (name) => {
+                  const group = groups[name];
+                  if (!group) return;
+                  group.ids.forEach((id) => {
+                    const node = getNode(id);
+                    if (node && node.parentNode) {
+                      node.parentNode.removeChild(node);
+                    }
+                    if (node) nodes.set(id, node);
+                  });
+                };
+                const sync = (activeGroup = "") => {
+                  Object.keys(groups).forEach((name) => {
+                    if (name === activeGroup) {
+                      mountGroup(name);
+                    } else {
+                      releaseGroup(name);
+                    }
+                  });
+                };
+                Object.values(groups).forEach((group) => {
+                  group.ids.forEach((id) => {
+                    if (document.getElementById(id)) {
+                      detachNode(id);
+                    }
+                  });
+                });
+                window.__CRMDeferredSections = {
+                  getNode,
+                  ensureMounted: mountGroup,
+                  release: releaseGroup,
+                  sync,
+                  groups,
+                };
+                sync("");
+              })();
+            </script>
 			    <script src="app-auth.js?v=16"></script>
         <script>
           (function () {
@@ -11826,7 +11845,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=1",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=789",
+              "app.js?v=790",
             ];
 
             const getParams = () => {

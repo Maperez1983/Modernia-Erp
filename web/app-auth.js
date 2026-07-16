@@ -205,6 +205,7 @@
     }
     const user = await fetchCurrentSessionUser();
     if (!user) {
+      try { deps.state.authSessionResolved = true; } catch {}
       // No bloqueamos la UI esperando el cold start: mostramos login y dejamos el health probe en background.
       deps.showAuthOverlay("Arrancando servidor... (Render puede tardar 1-2 min)");
       try {
@@ -224,6 +225,7 @@
       try { document.body.classList.remove("auth-pending"); } catch {}
       return;
     }
+    try { deps.state.authSessionResolved = true; } catch {}
     deps.setAuthUi(user);
     deps.hideAuthOverlay();
     if (!deps.state.appInitialized) {

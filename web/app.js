@@ -12,6 +12,80 @@ const useSharedOrFallback = (name, fallback) => {
   const sharedValue = APP_SHARED && APP_SHARED[name];
   return typeof sharedValue === "function" ? sharedValue.bind(APP_SHARED) : fallback;
 };
+const getDeferredSectionsRegistry = () => window.__CRMDeferredSections || null;
+const nativeGetElementById = document.getElementById.bind(document);
+const escapeDeferredSelectorValue = (value) =>
+  String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"');
+const findDeferredDomNode = (id) => {
+  const targetId = String(id || "").trim();
+  if (!targetId) return null;
+  const registry = getDeferredSectionsRegistry();
+  if (!registry || !registry.groups) return null;
+  const groups = Object.values(registry.groups || {});
+  for (const group of groups) {
+    const groupIds = Array.isArray(group?.ids) ? group.ids : [];
+    for (const rootId of groupIds) {
+      const root =
+        registry && typeof registry.getNode === "function"
+          ? registry.getNode(rootId)
+          : nativeGetElementById(rootId);
+      if (!root) continue;
+      if (String(root.id || "") === targetId) return root;
+      if (typeof root.querySelector !== "function") continue;
+      try {
+        const found = root.querySelector(`[id="${escapeDeferredSelectorValue(targetId)}"]`);
+        if (found) return found;
+      } catch (e) {}
+    }
+  }
+  return null;
+};
+const resolveDeferredDomNode = (id) => {
+  const direct = nativeGetElementById(id);
+  if (direct) return direct;
+  return findDeferredDomNode(id);
+};
+const syncDeferredCrmVerticals = (view = "") => {
+  const registry = getDeferredSectionsRegistry();
+  if (registry && typeof registry.sync === "function") {
+    registry.sync(view);
+  }
+  const vertical = view === "seguros" ? "seguros" : view === "fin" ? "fin" : "";
+  try {
+    if (segurosCrmSection) {
+      segurosCrmSection.classList.toggle("hidden", vertical !== "seguros");
+    }
+  } catch (e) {}
+  try {
+    if (hipotecaSection) {
+      hipotecaSection.classList.toggle("hidden", vertical !== "fin" || currentTab === "fin-sim");
+    }
+  } catch (e) {}
+  try {
+    if (finSimSection) {
+      finSimSection.classList.toggle("hidden", vertical !== "fin" || currentTab !== "fin-sim");
+    }
+  } catch (e) {}
+  if (view === "gestoria" || view === "seguros" || view === "fin") {
+    try {
+      if (typeof populateResponsableSelects === "function") populateResponsableSelects();
+    } catch (e) {}
+    try {
+      if (typeof populateAsesorSelects === "function") populateAsesorSelects();
+    } catch (e) {}
+    try {
+      if (typeof refreshSegurosColaboradoresList === "function") refreshSegurosColaboradoresList();
+    } catch (e) {}
+  }
+};
+try {
+  if (!document.__crmDeferredGetElementByIdPatched) {
+    document.__crmDeferredGetElementByIdPatched = true;
+    document.getElementById = (id) => nativeGetElementById(id) || findDeferredDomNode(id);
+  }
+} catch (e) {}
 const API_TIMEOUT_MS = APP_SHARED.API_TIMEOUT_MS || 90000;
 const APP_SW_VERSION = APP_SHARED.APP_SW_VERSION || "v372";
 
@@ -1988,6 +2062,7 @@ const RoutingModule = window.CRMAppRouting || null;
 const state = {
   appInitialized: false,
   authUser: null,
+  authSessionResolved: false,
   empresas: [],
   tablas: [],
   resumen: [],
@@ -2780,8 +2855,8 @@ const clienteServiciosSegurosCard = document.getElementById("clienteServiciosSeg
 const clienteServiciosInmoCard = document.getElementById("clienteServiciosInmoCard");
 const clienteServiciosHipotecasCard = document.getElementById("clienteServiciosHipotecasCard");
 const clienteProfesionalScope = document.getElementById("clienteProfesionalScope");
-const responsableSelects = document.querySelectorAll(".responsable-select");
-const asesorSelects = document.querySelectorAll(".asesor-select");
+const getResponsableSelects = () => Array.from(document.querySelectorAll(".responsable-select"));
+const getAsesorSelects = () => Array.from(document.querySelectorAll(".asesor-select"));
 const clienteProfesionalSection = document.getElementById("clienteProfesionalSection");
 const clienteProfesionalList = document.getElementById("clienteProfesionalList");
 const clienteProfesionalHint = document.getElementById("clienteProfesionalHint");
@@ -2817,7 +2892,7 @@ const gestoriaDashTab = document.getElementById("gestoriaDashTab");
 const gestoriaDocsTab = document.getElementById("gestoriaDocsTab");
 const gestoriaAgendaTab = document.getElementById("gestoriaAgendaTab");
 const crmSection = document.getElementById("crmSection");
-const gestoriaCrmSection = document.getElementById("gestoriaCrmSection");
+const gestoriaCrmSection = resolveDeferredDomNode("gestoriaCrmSection");
 const gestoriaCrmViews = document.getElementById("gestoriaCrmViews");
 const gestoriaCrmViewCrm = document.getElementById("gestoriaCrmViewCrm");
 const gestoriaCrmViewBdt = document.getElementById("gestoriaCrmViewBdt");
@@ -2857,7 +2932,7 @@ const gestoriaBdtInfo = document.getElementById("gestoriaBdtInfo");
 	const gestoriaActaFirmaForm = document.getElementById("gestoriaActaFirmaForm");
 	const gestoriaActaFirmaStatus = document.getElementById("gestoriaActaFirmaStatus");
 	const gestoriaActaFirmaTable = document.getElementById("gestoriaActaFirmaTable");
-const gestoriaDashboardSection = document.getElementById("gestoriaDashboardSection");
+const gestoriaDashboardSection = resolveDeferredDomNode("gestoriaDashboardSection");
 const gestoriaDashboardTabs = document.getElementById("gestoriaDashboardTabs");
 const gestoriaDashboardPaneGeneral = document.getElementById("gestoriaDashboardPaneGeneral");
 const gestoriaSeniorCockpit = document.getElementById("gestoriaSeniorCockpit");
@@ -2911,13 +2986,13 @@ const gestoriaDashDocsInfo = document.getElementById("gestoriaDashDocsInfo");
 const gestoriaKpiRentasSinResponsable = document.getElementById("gestoriaKpiRentasSinResponsable");
 const gestoriaKpiRentasSinCobrar = document.getElementById("gestoriaKpiRentasSinCobrar");
 const gestoriaKpiRentasSinRemesar = document.getElementById("gestoriaKpiRentasSinRemesar");
-const gestoriaDocsSection = document.getElementById("gestoriaDocsSection");
-const gestoriaContaSection = document.getElementById("gestoriaContaSection");
-const gestoriaAgendaSection = document.getElementById("gestoriaAgendaSection");
-const segurosCrmSection = document.getElementById("segurosCrmSection");
+const gestoriaDocsSection = resolveDeferredDomNode("gestoriaDocsSection");
+const gestoriaContaSection = resolveDeferredDomNode("gestoriaContaSection");
+const gestoriaAgendaSection = resolveDeferredDomNode("gestoriaAgendaSection");
+const segurosCrmSection = resolveDeferredDomNode("segurosCrmSection");
 const finCrmSection = document.getElementById("finCrmSection");
-const finSimSection = document.getElementById("finSimSection");
-const gestoriaFactSection = document.getElementById("gestoriaFactSection");
+const finSimSection = resolveDeferredDomNode("finSimSection");
+const gestoriaFactSection = resolveDeferredDomNode("gestoriaFactSection");
 const gestoriaBudgetQuickForm = document.getElementById("gestoriaBudgetQuickForm");
 const gestoriaBudgetQuickStatus = document.getElementById("gestoriaBudgetQuickStatus");
 const gestoriaBudgetTipoTrabajo = document.getElementById("gestoriaBudgetTipoTrabajo");
@@ -4003,7 +4078,7 @@ const inmuebleSubtitle = document.getElementById("inmuebleSubtitle");
 const aieSection = document.getElementById("aieSection");
 const aieForm = document.getElementById("aieForm");
 const aieFormStatus = document.getElementById("aieFormStatus");
-const hipotecaSection = document.getElementById("hipotecaSection");
+const hipotecaSection = resolveDeferredDomNode("hipotecaSection");
 const hipotecaClienteForm = document.getElementById("hipotecaClienteForm");
 const hipotecaClienteFormStatus = document.getElementById("hipotecaClienteFormStatus");
 const hipotecaClienteTipoPersona = document.getElementById("hipotecaClienteTipoPersona");
@@ -30922,7 +30997,42 @@ const openInmuebleSignaturePublic = async (token = "") => {
 
 const openAdmin = () => {
   const user = getAuthScopeUser();
-  if (!canAccessAdminPanel(user)) return;
+  if (!user) {
+    if (!state.authSessionResolved) {
+      state.pendingAdminRoute = true;
+      if (!state.adminOpenRetryScheduled) {
+        state.adminOpenRetryScheduled = true;
+        window.setTimeout(() => {
+          state.adminOpenRetryScheduled = false;
+          if (!state.pendingAdminRoute) {
+            return;
+          }
+          if (!state.authSessionResolved) {
+            return;
+          }
+          const resolvedUser = getAuthScopeUser();
+          if (!resolvedUser || !canAccessAdminPanel(resolvedUser)) {
+            state.pendingAdminRoute = false;
+            return;
+          }
+          try {
+            openAdmin();
+          } catch (e) {}
+        }, 0);
+      }
+      return;
+    }
+    state.pendingAdminRoute = false;
+    state.adminOpenRetryScheduled = false;
+    return;
+  }
+  if (!canAccessAdminPanel(user)) {
+    state.pendingAdminRoute = false;
+    state.adminOpenRetryScheduled = false;
+    return;
+  }
+  state.pendingAdminRoute = false;
+  state.adminOpenRetryScheduled = false;
   setModule("empresas");
   state.workspaceRrhhEntry = "";
   state.workspaceRrhhJumpPersonaId = "";
@@ -30930,7 +31040,9 @@ const openAdmin = () => {
   state.workspaceRrhhEquipoMemberKey = "";
   state.workspaceRrhhEquipoMemberPersonaId = "";
   state.workspaceRrhhEquipoMemberUserId = "";
-  explorerSection.classList.add("hidden");
+  if (explorerSection) {
+    explorerSection.classList.add("hidden");
+  }
   setPage("admin");
   if (adminSection) {
     adminSection.classList.remove("hidden");
@@ -30976,11 +31088,16 @@ const goHome = () => {
   updateExplorerHeader("");
   renderDashboard("", "");
   setTab("operativa");
+  try {
+    syncDeferredCrmVerticals("");
+  } catch (e) {}
   if (crmSection) crmSection.classList.add("hidden");
   if (gestoriaCrmSection) gestoriaCrmSection.classList.add("hidden");
   if (finCrmSection) finCrmSection.classList.add("hidden");
   if (gestoriaFactSection) gestoriaFactSection.classList.add("hidden");
-  explorerSection.classList.add("hidden");
+  if (explorerSection) {
+    explorerSection.classList.add("hidden");
+  }
   updateTableVisibility();
   if (homeSection) {
     homeSection.classList.remove("hidden");
@@ -31344,7 +31461,15 @@ const setTab = (tabName) => {
     btn.classList.toggle("active", btn.dataset.tab === normalized);
   });
   try {
-    mountCrmVerticalViews();
+    const deferredView =
+      normalized === "seguros-crm"
+        ? "seguros"
+        : normalized === "fin-crm" || normalized === "fin-sim"
+          ? "fin"
+          : String(normalized || "").startsWith("gestoria-")
+            ? "gestoria"
+            : "";
+    syncDeferredCrmVerticals(deferredView);
   } catch (e) {}
   try {
     syncExplorerLightningSidebar();
@@ -39591,6 +39716,7 @@ const populateServiciosSelect = (selectEl, selectedValue = "") => {
 };
 
 const populateResponsableSelects = () => {
+  const responsableSelects = getResponsableSelects();
   if (!responsableSelects || !responsableSelects.length) return;
   const users = state.usersList || [];
   responsableSelects.forEach((selectEl) => {
@@ -39653,6 +39779,7 @@ const populateResponsableSelects = () => {
 };
 
 const populateAsesorSelects = () => {
+  const asesorSelects = getAsesorSelects();
   if (!asesorSelects || !asesorSelects.length) return;
   const users = state.usersList || [];
   asesorSelects.forEach((selectEl) => {
@@ -41301,9 +41428,13 @@ const updateTableVisibility = () => {
     if (finDashboardSection) finDashboardSection.classList.add("hidden");
     if (fincasDashboardSection) fincasDashboardSection.classList.add("hidden");
     if (fincasBdtTabs) fincasBdtTabs.classList.add("hidden");
-    tablaSelect.classList.add("hidden");
+    if (tablaSelect) {
+      tablaSelect.classList.add("hidden");
+    }
   } else {
-    tablaSelect.classList.toggle("hidden", currentTab === "gestoria-crm" || currentTab === "gestoria-docs");
+    if (tablaSelect) {
+      tablaSelect.classList.toggle("hidden", currentTab === "gestoria-crm" || currentTab === "gestoria-docs");
+    }
     if (currentTab !== "operativa") {
       if (dashboardSection) dashboardSection.classList.add("hidden");
       if (finDashboardSection) finDashboardSection.classList.add("hidden");
@@ -41416,6 +41547,9 @@ const updateEstudioAltaTabs = () => {
     if (vertical === "seguros") nextView = "seguros";
     if (vertical === "fin") nextView = "fin";
   }
+  try {
+    syncDeferredCrmVerticals(nextView);
+  } catch (e) {}
   state.crmWorkspaceView = nextView;
   syncCrmLegalAvailability();
   syncCrmTecnocloudChrome();
@@ -77526,6 +77660,9 @@ const loadTable = () => {
 const setAuthUi = (user) => {
   state.authUser = user || null;
   if (user) {
+    state.authSessionResolved = true;
+  }
+  if (user) {
     const userValue =
       (user.usuario || "").trim()
       || (user.nombre_completo || "").trim()
@@ -77566,6 +77703,29 @@ const setAuthUi = (user) => {
   try {
     if (user && state.currentPage === "home") {
       loadSegurosRenewalAlertForUser();
+    }
+  } catch (e) {}
+  try {
+    if (
+      user &&
+      new URLSearchParams(window.location.search || "").has("admin") &&
+      state.currentPage !== "admin" &&
+      canAccessAdminPanel(user)
+    ) {
+      state.pendingAdminRoute = false;
+      state.adminOpenRetryScheduled = false;
+      window.setTimeout(() => {
+        try {
+          openAdmin();
+        } catch (e) {}
+      }, 0);
+    } else if (
+      user &&
+      new URLSearchParams(window.location.search || "").has("admin") &&
+      state.currentPage !== "admin"
+    ) {
+      state.pendingAdminRoute = false;
+      state.adminOpenRetryScheduled = false;
     }
   } catch (e) {}
 };
@@ -77875,8 +78035,9 @@ const init = async () => {
     if (dbStatus) {
       dbStatus.textContent = "";
     }
-    tableContainer.innerHTML =
-      "<p class='muted'>Error al cargar los datos.</p>";
+    if (tableContainer) {
+      tableContainer.innerHTML = "<p class='muted'>Error al cargar los datos.</p>";
+    }
     renderCompanyCards();
     UI?.boot(state);
   } finally {
@@ -77884,7 +78045,9 @@ const init = async () => {
   }
 };
 
-applyBtn.addEventListener("click", loadTable);
+if (applyBtn) {
+  applyBtn.addEventListener("click", loadTable);
+}
 if (searchInput) {
   searchInput.addEventListener("input", () => {
     scheduleSave("global-search", () => {
@@ -77901,28 +78064,30 @@ if (searchInput) {
     }
   });
 }
-resetBtn.addEventListener("click", () => {
-  empresaSelect.value = "";
-  searchInput.value = "";
-  if (state.currentModule === "clientes") {
-    state.clientesShowAll = false;
-    if (clientesAltaSection) {
-      clientesAltaSection.dataset.mode = "list";
-      clientesAltaSection.classList.add("hidden");
+if (resetBtn) {
+  resetBtn.addEventListener("click", () => {
+    empresaSelect.value = "";
+    searchInput.value = "";
+    if (state.currentModule === "clientes") {
+      state.clientesShowAll = false;
+      if (clientesAltaSection) {
+        clientesAltaSection.dataset.mode = "list";
+        clientesAltaSection.classList.add("hidden");
+      }
+      updateExplorerHeader("Clientes");
+      setTab("operativa");
+      loadClientesTable();
+      updateTableVisibility();
+      return;
     }
-    updateExplorerHeader("Clientes");
     setTab("operativa");
-    loadClientesTable();
+    updateExplorerHeader("");
+    renderDashboard("", "");
+    explorerSection.classList.add("hidden");
     updateTableVisibility();
-    return;
-  }
-  setTab("operativa");
-  updateExplorerHeader("");
-  renderDashboard("", "");
-  explorerSection.classList.add("hidden");
-  updateTableVisibility();
-  loadTable();
-});
+    loadTable();
+  });
+}
 
 if (bdtYearFilter) {
   bdtYearFilter.addEventListener("change", loadTable);
@@ -88835,7 +89000,6 @@ if (authActivateForm) {
 }
 
 initDensityToggle();
-mountCrmVerticalViews();
 UI?.boot(state);
 // Pintamos al menos las tarjetas base del home aunque la carga de datos falle o tarde.
 renderCompanyCards();
