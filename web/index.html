@@ -3,19 +3,20 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content="Verifika² CRM 360 para inmobiliaria, gestoría, seguros y financiación con acceso local, portal público y workspaces." />
     <meta name="theme-color" content="#0B1D33" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
 							    <link rel="stylesheet" href="styles.css?v=269" />
-	    <link rel="manifest" href="manifest.webmanifest?v=17" />
+	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
-    <link rel="apple-touch-icon" sizes="167x167" href="/icons/ios/v27/apple-touch-icon-167.png" />
-    <link rel="apple-touch-icon" sizes="152x152" href="/icons/ios/v27/apple-touch-icon-152.png" />
-    <link rel="apple-touch-icon" sizes="120x120" href="/icons/ios/v27/apple-touch-icon-120.png" />
-    <link rel="apple-touch-icon-precomposed" href="/icons/ios/v27/apple-touch-icon-180.png" />
+    <link rel="apple-touch-icon" sizes="167x167" href="/icons/ios/v28/apple-touch-icon-167.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/ios/v28/apple-touch-icon-152.png" />
+    <link rel="apple-touch-icon" sizes="120x120" href="/icons/ios/v28/apple-touch-icon-120.png" />
+    <link rel="apple-touch-icon-precomposed" href="/icons/ios/v28/apple-touch-icon-180.png" />
 	    <link rel="preconnect" href="https://fonts.googleapis.com" />
 	    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 	    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
@@ -24,7 +25,7 @@
   <body class="auth-pending theme-operativa">
     <header>
       <div class="brand" id="brandHome">
-        <img src="/assets/verifika2/verifika2_wordmark_traced_dark.svg" alt="Verifika²" />
+        <img src="/assets/verifika2/verifika2_wordmark_dark.svg" alt="Verifika²" />
         <div class="brand-copy">
           <span class="brand-kicker">Verifika²</span>
           <h1>CRM 360</h1>
@@ -11847,7 +11848,7 @@
 
             const fetchMe = async () => {
               try {
-                const res = await fetch("/api/me", { cache: "no-store", credentials: "same-origin" });
+                const res = await fetch("/api/session_state", { cache: "no-store", credentials: "same-origin" });
                 if (!res.ok) return null;
                 const data = await res.json().catch(() => null);
                 return data?.user || null;
@@ -11884,7 +11885,7 @@
                     setStatus(data?.error || "No se pudo iniciar sesión.");
                     return;
                   }
-                  // Verifica que la cookie funciona (api/me debe devolver usuario).
+                  // Verifica que la cookie funciona (session_state debe devolver usuario).
                   const me = await fetchMe();
                   if (!me) {
                     setStatus("Sesión creada pero el navegador no mantiene la cookie. Prueba ?nosw=1 y revisa bloqueos de cookies.");
@@ -11907,7 +11908,7 @@
 		    <script>
 					      (function () {
 					        if (!("serviceWorker" in navigator)) return;
-					        const TARGET_SW = "/sw.js?v=372";
+				        const TARGET_SW = "/sw.js?v=373";
 				        try {
 				          const params = new URLSearchParams(window.location.search || "");
               const keepSw = (params.get("keep_sw") || "").trim() === "1";

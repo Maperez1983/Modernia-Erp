@@ -45,9 +45,11 @@ Antes de usar `pre-commit`, ejecuta `npm ci` para que exista `node_modules/` con
 - `Coverage`
 - `pytest`
 - `Playwright`
+- `Lighthouse CI`
 - `CodeQL`
 
 Esas comprobaciones siguen en CI porque son más pesadas y no aportan suficiente valor en un hook local antes de cada commit.
+Lighthouse además necesita arrancar servidor local, Chromium y generar informes, así que se ejecuta bajo demanda o en GitHub Actions.
 
 ## Instalación
 

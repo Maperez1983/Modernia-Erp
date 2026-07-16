@@ -95,7 +95,7 @@ Leyenda:
 - Inferencia: la cobertura es util pero parcial; los endpoints mas voluminosos de `web/server.py` y muchos generadores documentales no parecen estar cubiertos con el mismo nivel de detalle.
 
 ## Despliegue en GitHub y Render
-- Hecho: el unico workflow tracked en `.github/workflows/` es `ci.yml`; se dispara en `push` y `pull_request` contra `main`.
+- Hecho: los workflows tracked en `.github/workflows/` cubren CI, Playwright, CodeQL y Lighthouse; se disparan en `push`, `pull_request` y, cuando aplica, `workflow_dispatch` o `schedule` contra `main`.
 - Hecho: el servidor escucha en `0.0.0.0` por defecto y toma el puerto desde `PORT`, que es la convencion que espera Render.
 - Hecho: `/api/health` distingue readiness real de liveness y puede devolver `503` mientras la base de datos se esta bootstrappeando.
 - Hecho: `web/index.html` registra el service worker al cargar la ventana y tiene logica para desregistrar SWs antiguos y limpiar caches si detecta una version desalineada.

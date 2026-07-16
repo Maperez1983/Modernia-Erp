@@ -25257,6 +25257,12 @@ const loadWorkspaceDetail = async (workspaceId) => {
 };
 
 const loadWorkspaceCentral = async () => {
+  if (!state.authUser) {
+    clearCurrentWorkspaceUi();
+    renderWorkspaceList([]);
+    updateWorkspaceEntryChrome();
+    return;
+  }
   // Si la DB está fría, /api/workspaces puede tardar 30s por timeout. Mejor gatear con /api/health (rápido)
   // y reintentar con backoff.
   const health = await probeDbHealth();
@@ -32426,12 +32432,12 @@ const createWordmarkLogoDataUri = (label, options = {}) => {
 const COMPANY_LOGOS = {
   "FINCAS VELAZQUEZ": "/assets/logos/fincas-velazquez.png",
   // Rebranding: evitamos mostrar el logo legacy "Grupo Modernia" en dashboards del CRM (identidad Verifika²).
-  "FINANCIACIONES MODERNIA": "/assets/verifika2/verifika2_wordmark_traced_dark.svg",
+  "FINANCIACIONES MODERNIA": "/assets/verifika2/verifika2_wordmark_dark.svg",
   "INVERSURE HOMES": "/assets/logos/inversure-homes.svg",
   "INMOVERE PROYECT": "/assets/logos/xp-renova.svg",
   "XP RENOVA": "/assets/logos/xp-renova.svg",
-  "MODERNIA ASESORES": "/assets/verifika2/verifika2_wordmark_traced_dark.svg",
-  "GRUPO MODERNIA": "/assets/verifika2/verifika2_wordmark_traced_dark.svg",
+  "MODERNIA ASESORES": "/assets/verifika2/verifika2_wordmark_dark.svg",
+  "GRUPO MODERNIA": "/assets/verifika2/verifika2_wordmark_dark.svg",
   ALLIANZ: "/assets/logos/allianz.svg",
   ARAG: "/assets/logos/arag.svg",
   AXA: "/assets/logos/axa.svg",

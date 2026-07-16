@@ -884,6 +884,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/health",
     "/api/build_info",
     "/api/me",
+    "/api/session_state",
     "/api/auth_invite_status",
     "/api/portal_inmuebles",
     "/api/portal_inmueble",
@@ -53398,7 +53399,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 # Algunos endpoints no dependen del DB principal (Postgres/SQLite) y deben seguir
                 # funcionando aunque el backend esté en bootstrap o saturado (p.ej. polling de OCR).
-                if parsed.path not in {"/api/ocr_job"}:
+                if parsed.path not in {"/api/ocr_job", "/api/session_state"}:
                     self._ensure_db_ready()
                 self.handle_api(parsed)
             except DbUnavailableError:
@@ -53651,7 +53652,7 @@ class Handler(BaseHTTPRequestHandler):
             # Compat: iOS/PWA cachea rutas antiguas y puede pedir iconos de versiones previas.
             # Respondemos con los iconos actuales si existen, para evitar 404 al abrir desde
             # acceso directo en pantalla de inicio.
-            CURRENT_ICON_VERSION = 27
+            CURRENT_ICON_VERSION = 28
             try:
                 # /icons/ios/vXX/<file> -> /icons/ios/v{CURRENT_ICON_VERSION}/<file>
                 parts = [p for p in (parsed.path or "").split("/") if p]
@@ -76403,9 +76404,62 @@ class Handler(BaseHTTPRequestHandler):
             current = (params.get("servicio", [""])[0] or "").strip()
             if not current:
                 params["servicio"] = [",".join(sorted(allowed_services))]
+        if path == "/api/session_state":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"ok": True, "user": None})
+                return
+            try:
+                conn = get_db(self.db_path)
+                self._track_conn(conn)
+            except DbUnavailableError:
+                json_response(self, {"ok": True, "user": self._auth_user_payload(session)})
+                return
+            try:
+                ensure_usuarios_schema(conn)
+                conn.commit()
+            except Exception:
+                pass
+            try:
+                user = conn.execute(
+                    """
+                    SELECT id, nombre, apellido, usuario, email, servicio, rol, activo
+                    FROM usuarios
+                    WHERE id = ? AND activo = 1
+                    """,
+                    (session.get("user_id"),),
+                ).fetchone()
+            except DbUnavailableError:
+                json_response(self, {"ok": True, "user": self._auth_user_payload(session)})
+                return
+            if not user:
+                delete_auth_session(session.get("token"))
+                json_response(
+                    self,
+                    {"ok": True, "user": None},
+                    cookies=[self._build_session_cookie("", max_age=0)],
+                )
+                return
+            refreshed_session = dict(session)
+            refreshed_session.update(
+                {
+                    "nombre": user["nombre"] or "",
+                    "apellido": user["apellido"] or "",
+                    "usuario": user["usuario"] or "",
+                    "email": user["email"] or "",
+                    "servicio": user["servicio"] or "",
+                    "rol": user["rol"] or "",
+                }
+            )
+            with AUTH_SESSIONS_LOCK:
+                token = refreshed_session.get("token")
+                if token in AUTH_SESSIONS:
+                    AUTH_SESSIONS[token].update(refreshed_session)
+            json_response(self, {"ok": True, "user": self._auth_user_payload(refreshed_session)})
+            return
         conn = get_db(self.db_path)
         self._track_conn(conn)
-        if path in ("/api/me", "/api/auth_invite_status", "/api/usuarios"):
+        if path in ("/api/me", "/api/session_state", "/api/auth_invite_status", "/api/usuarios"):
             try:
                 ensure_usuarios_schema(conn)
                 conn.commit()

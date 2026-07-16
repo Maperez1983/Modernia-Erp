@@ -14,4 +14,11 @@ playwright-report/
 traces/
 screenshots/
 videos/
+.lighthouseci/
+lighthouse-results/
+.*/report.html
+.*/report.json
+/*.report.html
+/*.report.json
+/manifest.json
 .eslintcache

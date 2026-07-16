@@ -1,5 +1,6 @@
 (function () {
   const DEEP_LINK_KEYS = ["activar_token", "portal_token", "firma_inmo", "token"];
+  const SESSION_STATE_ENDPOINT = "/api/session_state";
 
   const getDeepLinkParams = () => {
     const params = new URLSearchParams(window.location.search || "");
@@ -137,7 +138,7 @@
       const timer = setTimeout(() => controller.abort(), 4500);
       let res;
       try {
-        res = await fetch("/api/me", {
+        res = await fetch(SESSION_STATE_ENDPOINT, {
           cache: "no-store",
           credentials: "same-origin",
           signal: controller.signal,
@@ -206,20 +207,20 @@
     if (!user) {
       // No bloqueamos la UI esperando el cold start: mostramos login y dejamos el health probe en background.
       deps.showAuthOverlay("Arrancando servidor... (Render puede tardar 1-2 min)");
-      waitForHealth(deps, { maxMs: 120000, requestTimeoutMs: 12000 }).then(async (ok) => {
-        if (!ok) return;
-        const userReady = await fetchCurrentSessionUser();
-        if (!userReady) {
-          if (deps?.authLoginStatus) deps.authLoginStatus.textContent = "";
-          return;
-        }
-        deps.setAuthUi(userReady);
-        deps.hideAuthOverlay();
-        if (!deps.state.appInitialized) {
-          await deps.init();
-          deps.state.appInitialized = true;
-        }
-      }).catch(() => {});
+      try {
+        await fetch("/health", { cache: "no-store", credentials: "same-origin" });
+      } catch {}
+      const userReady = await fetchCurrentSessionUser();
+      if (!userReady) {
+        if (deps?.authLoginStatus) deps.authLoginStatus.textContent = "";
+        return;
+      }
+      deps.setAuthUi(userReady);
+      deps.hideAuthOverlay();
+      if (!deps.state.appInitialized) {
+        await deps.init();
+        deps.state.appInitialized = true;
+      }
       try { document.body.classList.remove("auth-pending"); } catch {}
       return;
     }
@@ -364,6 +365,7 @@
         } catch {}
       }
       deps.hideAuthOverlay();
+      try { document.body.classList.remove("auth-pending"); } catch {}
       try {
         const current = getDeepLinkParams();
         const hasDeepLink =

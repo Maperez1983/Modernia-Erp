@@ -171,11 +171,19 @@ def _is_critical_response(response) -> bool:
         return True
     return basename in {
         "index.html",
+        "manifest.webmanifest",
         "app_shared.js",
         "app-auth.js",
         "app-routing.js",
         "app.js",
         "ui-foundation.js",
+        "icon-192.png",
+        "icon-512.png",
+        "apple-touch-icon-180.png",
+        "apple-touch-icon-167.png",
+        "apple-touch-icon-152.png",
+        "apple-touch-icon-120.png",
+        "verifika2_wordmark_dark.svg",
     }
 
 

@@ -6,9 +6,14 @@
   "scripts": {
     "lint:js": "eslint web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js",
     "lint:js:quiet": "eslint --quiet web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js",
-    "lint:js:fix": "eslint --fix web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js"
+    "lint:js:fix": "eslint --fix web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js",
+    "lighthouse": "node scripts/lighthouse-local.cjs",
+    "lighthouse:collect": "lhci collect",
+    "lighthouse:assert": "lhci assert",
+    "lighthouse:local": "node scripts/lighthouse-local.cjs"
   },
   "devDependencies": {
+    "@lhci/cli": "^0.14.0",
     "eslint": "^10.7.0",
     "globals": "^17.7.0"
   }
