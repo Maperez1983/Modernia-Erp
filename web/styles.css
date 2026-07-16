@@ -40,6 +40,10 @@
   --chart-tooltip-fg: rgba(255, 255, 255, 0.96);
 }
 
+html {
+  scrollbar-gutter: stable;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -11602,6 +11606,7 @@ body.auth-pending #authLoginOverlay.auth-login-overlay.hidden {
 
 .auth-login-card {
   width: min(460px, 100%);
+  min-height: 300px;
   background: #fff;
   border: 1px solid rgba(226, 232, 240, 0.9);
   border-radius: 20px;
@@ -11704,7 +11709,8 @@ body.auth-pending #authLoginOverlay.auth-login-overlay.hidden {
 }
 
 .auth-login-actions .muted {
-  min-height: 1.2em;
+  min-height: 2.7em;
+  line-height: 1.35;
 }
 
 .auth-login-card .success {
@@ -12810,6 +12816,13 @@ body.theme-operativa .meta-user select {
 
 body.theme-operativa #authLogoutBtn {
   justify-self: start;
+}
+
+body.theme-operativa #authSessionPill.hidden,
+body.theme-operativa #authLogoutBtn.hidden {
+  display: inline-flex !important;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 body.theme-operativa .meta-status {
