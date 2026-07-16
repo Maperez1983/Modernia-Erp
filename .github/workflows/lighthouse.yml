@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      LHCI_TMPDIR: ${{ runner.temp }}/lhci
+      LHCI_TMPDIR: ${{ github.workspace }}/.lhci
 
     steps:
       - name: Checkout repository
@@ -62,5 +62,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lighthouse-results
-          path: ${{ runner.temp }}/lhci/lighthouse-results
+          path: ${{ github.workspace }}/.lhci/lighthouse-results
           if-no-files-found: ignore
