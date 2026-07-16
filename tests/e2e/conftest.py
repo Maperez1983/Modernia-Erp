@@ -980,6 +980,7 @@ def e2e_app(tmp_path) -> E2EApp:
             "LEGAL_RADAR_AUTO_SCAN_ENABLED": "0",
             "LEGAL_RADAR_AUTO_IMPORT_ENABLED": "0",
             "APP_PERFORMANCE_LOGGING": "0",
+            "APP_HTTP_COMPRESSION": "1",
             "APP_WORKSPACE_MEMBERSHIP_ENFORCE": "0",
             "APP_S3_SCOPE_ENFORCE": "0",
             "OCR_WORKERS": "1",

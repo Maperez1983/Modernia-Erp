@@ -9,17 +9,25 @@ def test_initial_load(page, e2e_app):
     assert page.locator("#authLoginForm").is_visible()
     assert page.locator("#authLoginUser").is_visible()
     assert page.locator("#authLoginPass").is_visible()
+    assert page.locator("main").evaluate("el => getComputedStyle(el).visibility") == "hidden"
+    assert page.evaluate("window.__APP_JS_LOADED === true") is False
+    assert page.evaluate("window.__APP_JS_EXPECTED === true") is False
 
     scripts = page.evaluate(
         """
         () => Array.from(document.querySelectorAll('script[src]')).map((script) => script.getAttribute('src') || '')
         """
     )
-    shared_index = next(i for i, src in enumerate(scripts) if "app_shared.js" in src)
-    app_index = next(i for i, src in enumerate(scripts) if "app.js" in src)
-    auth_index = next(i for i, src in enumerate(scripts) if "app-auth.js" in src)
-    routing_index = next(i for i, src in enumerate(scripts) if "app-routing.js" in src)
+    assert scripts == ["app-auth.js?v=16"]
 
-    assert auth_index < routing_index
-    assert routing_index < shared_index
-    assert shared_index < app_index
+    resources = page.evaluate(
+        """
+        () => Array.from(performance.getEntriesByType('resource')).map((entry) => entry.name)
+        """
+    )
+    assert not any("app.js?v=789" in name for name in resources)
+    assert not any("ui-foundation.js?v=5" in name for name in resources)
+    assert not any("app-routing.js?v=13" in name for name in resources)
+    assert not any("app_shared.js?v=1" in name for name in resources)
+    assert not any("leaflet.css" in name for name in resources)
+    assert not any("leaflet.js" in name for name in resources)

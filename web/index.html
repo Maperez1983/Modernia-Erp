@@ -19,8 +19,7 @@
     <link rel="apple-touch-icon-precomposed" href="/icons/ios/v28/apple-touch-icon-180.png" />
 	    <link rel="preconnect" href="https://fonts.googleapis.com" />
 	    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-	    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" />
-	    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+	    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600&family=Source+Sans+3:wght@400;600;700&display=swap" />
 	  </head>
   <body class="auth-pending theme-operativa">
     <header>
@@ -11813,8 +11812,121 @@
 
     <div id="uiErrorToast" class="ui-error-toast hidden" role="alert"></div>
 
-				    <script src="ui-foundation.js?v=5"></script>
 			    <script src="app-auth.js?v=16"></script>
+        <script>
+          (function () {
+            if (window.__APP_SHELL_BOOTSTRAP__) return;
+            window.__APP_SHELL_BOOTSTRAP__ = true;
+
+            const FULL_FONTS_HREF = "https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap";
+            const LEAFLET_CSS_HREF = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+            const DEEP_LINK_KEYS = ["activar_token", "portal_token", "firma_inmo", "portal_inmo", "holding", "workspace", "crm", "cliente", "poliza", "agenda", "admin", "token"];
+            const APP_SHELL_SCRIPTS = [
+              "ui-foundation.js?v=5",
+              "app-routing.js?v=13",
+              "app_shared.js?v=1",
+              "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
+              "app.js?v=789",
+            ];
+
+            const getParams = () => {
+              const params = new URLSearchParams(window.location.search || "");
+              const hash = String(window.location.hash || "").replace(/^#/, "");
+              if (hash) {
+                const hashParams = new URLSearchParams(hash);
+                hashParams.forEach((value, key) => {
+                  if (!params.has(key)) {
+                    params.set(key, value);
+                  }
+                });
+              }
+              return params;
+            };
+
+            const loadStylesheet = (href) =>
+              new Promise((resolve, reject) => {
+                const existing = Array.from(document.querySelectorAll('link[data-crm-dynamic="1"]')).find((node) => node.dataset.crmHref === href);
+                if (existing) {
+                  if (existing.sheet) {
+                    resolve(existing);
+                    return;
+                  }
+                  existing.addEventListener("load", () => resolve(existing), { once: true });
+                  existing.addEventListener("error", () => reject(new Error(`No se pudo cargar ${href}`)), { once: true });
+                  return;
+                }
+                const link = document.createElement("link");
+                link.rel = "stylesheet";
+                link.href = href;
+                link.dataset.crmDynamic = "1";
+                link.dataset.crmHref = href;
+                link.addEventListener("load", () => resolve(link), { once: true });
+                link.addEventListener("error", () => reject(new Error(`No se pudo cargar ${href}`)), { once: true });
+                document.head.appendChild(link);
+              });
+
+            const loadScript = (src) =>
+              new Promise((resolve, reject) => {
+                const existing = Array.from(document.querySelectorAll('script[data-crm-dynamic="1"]')).find((node) => node.dataset.crmSrc === src);
+                if (existing) {
+                  if (existing.dataset.crmLoaded === "1") {
+                    resolve(existing);
+                    return;
+                  }
+                  existing.addEventListener("load", () => resolve(existing), { once: true });
+                  existing.addEventListener("error", () => reject(new Error(`No se pudo cargar ${src}`)), { once: true });
+                  return;
+                }
+                const script = document.createElement("script");
+                script.src = src;
+                script.async = false;
+                script.dataset.crmDynamic = "1";
+                script.dataset.crmSrc = src;
+                script.addEventListener(
+                  "load",
+                  () => {
+                    script.dataset.crmLoaded = "1";
+                    resolve(script);
+                  },
+                  { once: true }
+                );
+                script.addEventListener("error", () => reject(new Error(`No se pudo cargar ${src}`)), { once: true });
+                document.head.appendChild(script);
+              });
+
+            const loadAppShell = async () => {
+              if (window.__APP_JS_LOADED || window.__APP_SHELL_LOADING__) return window.__APP_SHELL_LOADING__ || Promise.resolve();
+              window.__APP_JS_EXPECTED = true;
+              window.__APP_SHELL_LOADING__ = (async () => {
+                await loadStylesheet(FULL_FONTS_HREF).catch(() => null);
+                await loadStylesheet(LEAFLET_CSS_HREF).catch(() => null);
+                for (const src of APP_SHELL_SCRIPTS) {
+                  await loadScript(src);
+                }
+              })();
+              return window.__APP_SHELL_LOADING__;
+            };
+
+            const hasShellRoute = () => {
+              const params = getParams();
+              return DEEP_LINK_KEYS.some((key) => params.has(key));
+            };
+
+            const boot = async () => {
+              if (hasShellRoute()) {
+                await loadAppShell();
+                return;
+              }
+              const auth = window.CRMAppAuth || null;
+              if (!auth || typeof auth.fetchCurrentSessionUser !== "function") return;
+              const user = await auth.fetchCurrentSessionUser();
+              if (!user) return;
+              await loadAppShell();
+            };
+
+            boot().catch(() => {});
+          })();
+        </script>
         <script>
           (function () {
             // Standalone auth bootstrap:
@@ -11846,7 +11958,7 @@
             // Si en unos segundos no ha cargado `app.js`, avisamos (no bloquea el login).
             setTimeout(() => {
               try {
-                if (!window.__APP_JS_LOADED) {
+                if (window.__APP_JS_EXPECTED && !window.__APP_JS_LOADED) {
                   setStatus("No cargó la app completa. Prueba recargar con ?nosw=1 (limpia cache) e inténtalo de nuevo.");
                 }
               } catch {}
@@ -11866,6 +11978,59 @@
                 return data?.user || null;
               } catch {
                 return null;
+              }
+            };
+
+            const resolvePostLoginUrl = (user) => {
+              try {
+                const current = new URL(window.location.href);
+                const params = new URLSearchParams(current.search || "");
+                const hashParams = new URLSearchParams(String(current.hash || "").replace(/^#/, ""));
+                const hasDeepLink =
+                  params.has("holding") ||
+                  params.has("crm") ||
+                  params.has("clientes") ||
+                  params.has("cliente") ||
+                  params.has("poliza") ||
+                  params.has("empresa") ||
+                  params.has("agenda") ||
+                  params.has("admin") ||
+                  params.has("portal_token") ||
+                  params.has("portal_inmo") ||
+                  params.has("firma_inmo") ||
+                  params.has("activar_token") ||
+                  hashParams.has("portal_token") ||
+                  hashParams.has("portal_inmo") ||
+                  hashParams.has("firma_inmo") ||
+                  hashParams.has("activar_token");
+                if (hasDeepLink) {
+                  return current.toString();
+                }
+                const targetUser = String(user?.usuario || "").trim().toLowerCase();
+                const targetRole = String(user?.rol || "").trim().toLowerCase();
+                const targetService = String(user?.servicio || "").trim().toLowerCase();
+                const query = new URLSearchParams();
+                if (targetUser === "workspace") {
+                  query.set("holding", "1");
+                  query.set("mode", "tenant");
+                  query.set("workspace", "verifika2");
+                  query.set("view", "overview");
+                } else if (targetRole === "administrador" || targetService === "administración" || targetService === "administracion") {
+                  query.set("holding", "1");
+                  query.set("mode", "platform");
+                  query.set("view", "overview");
+                  try {
+                    const workspaceId = String(localStorage.getItem("crm.currentWorkspaceId") || "").trim();
+                    if (workspaceId) query.set("workspace", workspaceId);
+                  } catch {}
+                }
+                if (query.toString()) {
+                  current.search = query.toString();
+                  current.hash = "";
+                }
+                return current.toString();
+              } catch {
+                return window.location.href;
               }
             };
 
@@ -11899,13 +12064,15 @@
                   }
                   // Verifica que la cookie funciona (session_state debe devolver usuario).
                   const me = await fetchMe();
-                  if (!me) {
+                  const user = data?.user || me;
+                  if (!user) {
                     setStatus("Sesión creada pero el navegador no mantiene la cookie. Prueba ?nosw=1 y revisa bloqueos de cookies.");
                     return;
                   }
                   setStatus("Acceso correcto. Cargando…");
                   try { document.body.classList.remove("auth-pending"); } catch {}
-                  setTimeout(() => window.location.reload(), 200);
+                  const nextUrl = resolvePostLoginUrl(user);
+                  setTimeout(() => window.location.assign(nextUrl), 200);
                 } catch {
                   setStatus("Error de conexión al iniciar sesión.");
                 }
@@ -11913,10 +12080,6 @@
             }
           })();
         </script>
-				    <script src="app-routing.js?v=13"></script>
-					    <script src="app_shared.js?v=1"></script>
-				    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-				    <script src="app.js?v=789"></script>
 		    <script>
 					      (function () {
 					        if (!("serviceWorker" in navigator)) return;

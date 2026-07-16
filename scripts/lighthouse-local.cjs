@@ -52,6 +52,7 @@ function touchFile(filePath) {
     LHCI_DB_PATH: dbPath,
     LHCI_OCR_DB_PATH: ocrDbPath,
     LHCI_TMPDIR: tempDir,
+    APP_HTTP_COMPRESSION: '1',
   };
 
   console.log(`Lighthouse temp dir: ${tempDir}`);

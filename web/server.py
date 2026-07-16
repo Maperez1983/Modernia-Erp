@@ -120,6 +120,11 @@ try:
 except ImportError:
     import document_pdf as runtime_document_pdf
 
+
+def _http_compression_enabled() -> bool:
+    value = str(os.environ.get("APP_HTTP_COMPRESSION") or "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
 try:
     from . import hipotecas_pdf as runtime_hipotecas_pdf
 except ImportError:
@@ -52070,12 +52075,23 @@ def send_file(handler, path):
         elif path.suffix in {".svg", ".png", ".jpg", ".jpeg", ".gif"}:
             handler.send_header("Cache-Control", "public, max-age=31536000, immutable")
 
-        # NOTA: evitamos comprimir aquí con gzip.
-        #
-        # Motivo: con service worker, algunos navegadores pueden acabar cacheando un body ya
-        # descomprimido pero conservando el header `Content-Encoding: gzip`, lo que provoca
-        # que `app.js` falle al parsear (p.ej. "Invalid escape in identifier") y bloquee el login.
-        # Dejamos que el reverse proxy / CDN / plataforma aplique compresión de forma segura.
+        # Compresión local controlada por entorno:
+        # - la activamos solo en validación/local cuando `APP_HTTP_COMPRESSION=1`;
+        # - así evitamos el problema de caches antiguos con SW en el arranque normal;
+        # - Lighthouse/e2e usan `swcleared=1`, por lo que el ahorro de transferencia sí se materializa.
+        enable_gzip = _http_compression_enabled()
+        compressible_suffixes = {".html", ".css", ".js", ".json", ".txt", ".xml", ".webmanifest", ".svg"}
+        if enable_gzip and path.suffix.lower() in compressible_suffixes:
+            try:
+                accept_encoding = (handler.headers.get("Accept-Encoding") or "").lower()
+            except Exception:
+                accept_encoding = ""
+            if "gzip" in accept_encoding:
+                gzipped = gzip.compress(data, compresslevel=6)
+                if len(gzipped) + 80 < len(data):
+                    data = gzipped
+                    handler.send_header("Content-Encoding", "gzip")
+                    handler.send_header("Vary", "Accept-Encoding")
 
         handler.send_header("Content-Length", str(len(data)))
         handler.end_headers()
