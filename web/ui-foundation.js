@@ -509,49 +509,56 @@
   };
 
   const ensureContextBar = () => {
-    if (contextBar) return contextBar;
+    if (contextBar && contextBar.isConnected) return contextBar;
+    contextBar = document.getElementById("uiContextBar");
     const header = document.querySelector("header");
-    if (!header) return null;
-    contextBar = document.createElement("div");
-    contextBar.className = "ui-context-bar";
-    contextBar.innerHTML = `
-      <div class="ui-context-copy">
-        <strong id="uiContextTitle">Inicio</strong>
-        <span id="uiContextMeta">Atajos: / buscar · Esc cerrar modal</span>
-      </div>
-      <div class="ui-context-actions">
-        <span id="uiContextDrafts" class="pill hidden"></span>
-        <button id="uiContextBackBtn" type="button" class="secondary ghost hidden" data-ui-action="holding-back">Volver al panel</button>
-        <button type="button" class="secondary ghost" data-ui-action="focus-search">Buscar</button>
-        <button type="button" class="secondary ghost" data-ui-action="focus-primary">Acción principal</button>
-      </div>
-    `;
-    header.insertAdjacentElement("afterend", contextBar);
+    if (!contextBar && header) {
+      contextBar = document.createElement("div");
+      contextBar.id = "uiContextBar";
+      contextBar.className = "ui-context-bar";
+      contextBar.innerHTML = `
+        <div class="ui-context-copy">
+          <strong id="uiContextTitle">Inicio</strong>
+          <span id="uiContextMeta">Atajos: / buscar · Esc cerrar modal</span>
+        </div>
+        <div class="ui-context-actions">
+          <span id="uiContextDrafts" class="pill hidden"></span>
+          <button id="uiContextBackBtn" type="button" class="secondary ghost hidden" data-ui-action="holding-back">Volver al panel</button>
+          <button type="button" class="secondary ghost" data-ui-action="focus-search">Buscar</button>
+          <button type="button" class="secondary ghost" data-ui-action="focus-primary">Acción principal</button>
+        </div>
+      `;
+      header.insertAdjacentElement("afterend", contextBar);
+    }
+    if (!contextBar) return null;
     contextTitle = contextBar.querySelector("#uiContextTitle");
     contextMeta = contextBar.querySelector("#uiContextMeta");
     contextDrafts = contextBar.querySelector("#uiContextDrafts");
     contextBackBtn = contextBar.querySelector("#uiContextBackBtn");
-    contextBar.addEventListener("click", (event) => {
-      const action = event.target.closest("[data-ui-action]")?.dataset.uiAction;
-      if (action === "focus-search") {
-        const target = Array.from(
-          document.querySelectorAll('input[type="search"], input[id*="Search"], input[placeholder*="Buscar"], input[placeholder*="buscar"]')
-        ).find(isVisible);
-        target?.focus();
-      }
-      if (action === "focus-primary") {
-        const target = Array.from(document.querySelectorAll("button, .btn")).find(
-          (el) => isVisible(el) && !el.classList.contains("secondary") && !el.classList.contains("ghost")
-        );
-        target?.focus();
-      }
-      if (action === "holding-back") {
-        const btn = document.getElementById("holdingBackBtn");
-        if (isVisible(btn)) {
-          btn.click();
+    if (contextBar.dataset.uiBound !== "1") {
+      contextBar.addEventListener("click", (event) => {
+        const action = event.target.closest("[data-ui-action]")?.dataset.uiAction;
+        if (action === "focus-search") {
+          const target = Array.from(
+            document.querySelectorAll('input[type="search"], input[id*="Search"], input[placeholder*="Buscar"], input[placeholder*="buscar"]')
+          ).find(isVisible);
+          target?.focus();
         }
-      }
-    });
+        if (action === "focus-primary") {
+          const target = Array.from(document.querySelectorAll("button, .btn")).find(
+            (el) => isVisible(el) && !el.classList.contains("secondary") && !el.classList.contains("ghost")
+          );
+          target?.focus();
+        }
+        if (action === "holding-back") {
+          const btn = document.getElementById("holdingBackBtn");
+          if (isVisible(btn)) {
+            btn.click();
+          }
+        }
+      });
+      contextBar.dataset.uiBound = "1";
+    }
     return contextBar;
   };
 

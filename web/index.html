@@ -9,7 +9,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-							    <link rel="stylesheet" href="styles.css?v=269" />
+							    <link rel="stylesheet" href="styles.css?v=270" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -40,6 +40,18 @@
         <button id="authLogoutBtn" class="secondary ghost hidden" type="button">Salir</button>
       </div>
       </header>
+    <div id="uiContextBar" class="ui-context-bar">
+      <div class="ui-context-copy">
+        <strong id="uiContextTitle">Inicio</strong>
+        <span id="uiContextMeta">Atajos: / buscar · Esc cerrar modal</span>
+      </div>
+      <div class="ui-context-actions">
+        <span id="uiContextDrafts" class="pill hidden"></span>
+        <button id="uiContextBackBtn" type="button" class="secondary ghost hidden" data-ui-action="holding-back">Volver al panel</button>
+        <button type="button" class="secondary ghost" data-ui-action="focus-search">Buscar</button>
+        <button type="button" class="secondary ghost" data-ui-action="focus-primary">Acción principal</button>
+      </div>
+    </div>
     <div id="renewalAlert" class="alert hidden"></div>
     <div id="segurosRenewalAlert" class="alert hidden"></div>
     <div id="legalRadarAlert" class="alert hidden"></div>
@@ -11801,7 +11813,7 @@
 
     <div id="uiErrorToast" class="ui-error-toast hidden" role="alert"></div>
 
-				    <script src="ui-foundation.js?v=4"></script>
+				    <script src="ui-foundation.js?v=5"></script>
 			    <script src="app-auth.js?v=16"></script>
         <script>
           (function () {

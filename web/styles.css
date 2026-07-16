@@ -66,12 +66,12 @@ body {
   text-size-adjust: 100%;
 }
 
-body.auth-pending main {
-  visibility: hidden;
-}
-
+body.auth-pending main,
 body.auth-locked main {
   visibility: hidden;
+  content-visibility: hidden;
+  contain-intrinsic-size: 610px;
+  min-height: 610px;
 }
 
 /* Cuando el usuario está dentro de un CRM vertical queremos "modo app":
