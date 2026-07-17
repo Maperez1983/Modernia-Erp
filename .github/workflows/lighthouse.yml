@@ -62,6 +62,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: lighthouse-results
-          path: ${{ github.workspace }}/.lhci/lighthouse-results
+          path: ${{ env.LHCI_TMPDIR }}
           include-hidden-files: true
           if-no-files-found: ignore

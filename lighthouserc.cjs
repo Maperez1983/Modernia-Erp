@@ -23,13 +23,25 @@ function resolveChromePath() {
   return undefined;
 }
 
+function ensureSwClearedUrl(rawUrl, fallbackPort) {
+  const fallback = `http://127.0.0.1:${fallbackPort}/?swcleared=1`;
+  const candidate = String(rawUrl || '').trim() || fallback;
+  try {
+    const url = new URL(candidate, fallback);
+    url.searchParams.set('swcleared', '1');
+    return url.toString();
+  } catch {
+    return fallback;
+  }
+}
+
 const defaultPort = Number(process.env.LHCI_PORT || process.env.PORT || 41765);
 const resolvedPort = Number.isFinite(defaultPort) && defaultPort > 0 ? defaultPort : 41765;
 const tempDir = process.env.LHCI_TMPDIR || path.join(os.tmpdir(), 'lhci-crm-modernia');
 const dbPath = process.env.LHCI_DB_PATH || path.join(tempDir, 'lighthouse.sqlite');
 const ocrDbPath = process.env.LHCI_OCR_DB_PATH || path.join(tempDir, 'ocr.sqlite');
 const uploadsDir = process.env.LHCI_UPLOADS_DIR || path.join(tempDir, 'uploads');
-const baseUrl = process.env.LHCI_BASE_URL || `http://127.0.0.1:${resolvedPort}/?swcleared=1`;
+const baseUrl = ensureSwClearedUrl(process.env.LHCI_BASE_URL || `http://127.0.0.1:${resolvedPort}/`, resolvedPort);
 const chromePath = resolveChromePath();
 const managedServer = String(process.env.LHCI_MANAGED_SERVER || '').trim() === '1';
 

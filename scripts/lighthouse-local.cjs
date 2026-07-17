@@ -30,6 +30,35 @@ function getFreePort() {
   });
 }
 
+function resolveChromePath() {
+  const candidates = [
+    process.env.CHROME_PATH,
+    process.env.LHCI_CHROME_PATH,
+    process.platform === 'darwin' ? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' : '',
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
+
+function ensureSwClearedUrl(rawUrl, fallbackPort) {
+  const fallback = `http://127.0.0.1:${fallbackPort}/?swcleared=1`;
+  const candidate = String(rawUrl || '').trim() || fallback;
+  try {
+    const url = new URL(candidate, fallback);
+    if (!url.searchParams.has('swcleared')) {
+      url.searchParams.set('swcleared', '1');
+    }
+    return url.toString();
+  } catch {
+    return fallback;
+  }
+}
+
 function ensureFile(filePath) {
   fs.mkdirSync(path.dirname(filePath), {recursive: true});
   fs.writeFileSync(filePath, '');
@@ -180,6 +209,248 @@ function curlStatus(url, timeoutSeconds, options = {}) {
   };
 }
 
+function parseHeaderBlocks(headersText) {
+  const normalized = String(headersText || '').replace(/\r\n/g, '\n').trim();
+  if (!normalized) return [];
+  const lines = normalized.split('\n');
+  const blocks = [];
+  let current = [];
+  for (const line of lines) {
+    if (!line) {
+      if (current.length) {
+        blocks.push(current);
+        current = [];
+      }
+      continue;
+    }
+    if (/^HTTP\/\d(?:\.\d)?\s+\d+/.test(line)) {
+      if (current.length) {
+        blocks.push(current);
+      }
+      current = [line];
+      continue;
+    }
+    current.push(line);
+  }
+  if (current.length) {
+    blocks.push(current);
+  }
+  return blocks.map((block) => {
+    const statusLine = block[0] || '';
+    const headers = [];
+    const headerMap = {};
+    for (const line of block.slice(1)) {
+      const idx = line.indexOf(':');
+      if (idx <= 0) continue;
+      const key = line.slice(0, idx).trim();
+      const value = line.slice(idx + 1).trim();
+      headers.push({key, value});
+      const lower = key.toLowerCase();
+      if (!Object.prototype.hasOwnProperty.call(headerMap, lower)) {
+        headerMap[lower] = value;
+      }
+    }
+    return {statusLine, headers, headerMap};
+  });
+}
+
+function printHeaderBlocks(url, blocks) {
+  if (!blocks.length) {
+    console.log(`[lighthouse][diag] ${url} response headers: none captured`);
+    return;
+  }
+  blocks.forEach((block, index) => {
+    const label = index === blocks.length - 1 ? 'final' : `redirect-${index + 1}`;
+    console.log(`[lighthouse][diag] ${label} response: ${block.statusLine}`);
+    block.headers.forEach(({key, value}) => {
+      console.log(`[lighthouse][diag]   ${key}: ${value}`);
+    });
+  });
+}
+
+function runCurlDiagnostic(url, timeoutSeconds, tempDir) {
+  const diagnosticDir = path.join(tempDir, 'diagnostics');
+  fs.mkdirSync(diagnosticDir, {recursive: true});
+  const bodyPath = path.join(diagnosticDir, 'audit-body.html');
+  const headersPath = path.join(diagnosticDir, 'audit-headers.txt');
+  const result = spawnSync(
+    'curl',
+    [
+      '--silent',
+      '--show-error',
+      '--location',
+      '--max-redirs',
+      '10',
+      '--max-time',
+      String(timeoutSeconds),
+      '--dump-header',
+      headersPath,
+      '--output',
+      bodyPath,
+      '--write-out',
+      '%{http_code}\t%{url_effective}\t%{content_type}\t%{size_download}\t%{redirect_url}',
+      url,
+    ],
+    {encoding: 'utf8'}
+  );
+
+  const rawStdout = String(result.stdout || '').replace(/\r\n/g, '\n').trim();
+  const writeOutParts = rawStdout ? rawStdout.split('\t') : [];
+  const code = Number(writeOutParts[0] || 0);
+  const effectiveUrl = String(writeOutParts[1] || '').trim();
+  const contentType = String(writeOutParts[2] || '').trim();
+  const sizeDownload = Number(writeOutParts[3] || 0);
+  const redirectUrl = String(writeOutParts[4] || '').trim();
+  const headersText = fs.existsSync(headersPath) ? fs.readFileSync(headersPath, 'utf8') : '';
+  const bodySize = fs.existsSync(bodyPath) ? fs.statSync(bodyPath).size : 0;
+  return {
+    url,
+    code: Number.isFinite(code) ? code : 0,
+    effectiveUrl: effectiveUrl || url,
+    contentType: contentType || '',
+    sizeDownload: Number.isFinite(sizeDownload) ? sizeDownload : bodySize,
+    redirectUrl: redirectUrl || '',
+    headersText,
+    bodyPath,
+    bodySize,
+    stderr: String(result.stderr || '').trim(),
+    status: typeof result.status === 'number' ? result.status : null,
+    signal: result.signal || null,
+    error: result.error ? result.error.message : '',
+  };
+}
+
+async function runBrowserDiagnostic(url, chromePath, tempDir) {
+  let puppeteer = null;
+  try {
+    puppeteer = require('puppeteer-core');
+  } catch (error) {
+    console.log(
+      `[lighthouse][diag] puppeteer-core no disponible, se omite la comprobacion del navegador: ${error?.message || error}`
+    );
+    return null;
+  }
+  if (!chromePath) {
+    console.log('[lighthouse][diag] Chrome no encontrado, se omite la comprobacion del navegador.');
+    return null;
+  }
+
+  const flags = [
+    '--no-sandbox',
+    '--disable-crashpad-for-testing',
+    '--disable-dev-shm-usage',
+    '--disable-background-networking',
+    '--disable-breakpad',
+    '--disable-client-side-phishing-detection',
+    '--disable-component-update',
+    '--disable-default-apps',
+    '--disable-extensions',
+    '--disable-popup-blocking',
+    '--disable-renderer-backgrounding',
+    '--mute-audio',
+    '--disable-gpu',
+  ];
+
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      executablePath: chromePath,
+      headless: true,
+      args: flags,
+    });
+  } catch (error) {
+    console.log(`[lighthouse][diag] puppeteer.launch error: ${error?.stack || error?.message || error}`);
+    return null;
+  }
+
+  try {
+    const page = await browser.newPage();
+    const initialUrl = url;
+    page.on('requestfailed', (request) => {
+      const failure = request.failure() || {};
+      console.log(
+        `[lighthouse][diag] requestfailed ${request.resourceType()} ${request.method()} ${request.url()} ${failure.errorText || failure.error_text || 'requestfailed'}`
+      );
+    });
+    page.on('response', (response) => {
+      const request = response.request();
+      if (request.resourceType() === 'document' || response.status() >= 300) {
+        const headers = response.headers ? response.headers() : {};
+        const location = headers.location || headers.Location || '';
+        console.log(
+          `[lighthouse][diag] response ${response.status()} ${request.resourceType()} ${request.method()} ${request.url()}${location ? ` location=${location}` : ''}`
+        );
+      }
+    });
+    page.on('pageerror', (error) => {
+      console.log(`[lighthouse][diag] pageerror ${error?.stack || error?.message || error}`);
+    });
+    page.on('framenavigated', (frame) => {
+      if (frame === page.mainFrame()) {
+        console.log(`[lighthouse][diag] framenavigated ${frame.url()}`);
+      }
+    });
+    page.on('console', (message) => {
+      const type = String(message.type() || '').trim();
+      if (!type || type === 'debug' || type === 'log') return;
+      console.log(`[lighthouse][diag] console ${type} ${message.text()}`);
+    });
+
+    let navigationResponse = null;
+    try {
+      navigationResponse = await page.goto(url, {waitUntil: 'domcontentloaded', timeout: 30000});
+      if (navigationResponse) {
+        console.log(
+          `[lighthouse][diag] page.goto -> ${navigationResponse.status()} ${navigationResponse.url()}`
+        );
+      } else {
+        console.log('[lighthouse][diag] page.goto -> sin respuesta');
+      }
+    } catch (error) {
+      console.log(`[lighthouse][diag] page.goto error: ${error?.stack || error?.message || error}`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 4000));
+    const finalUrl = page.url();
+    console.log(`[lighthouse][diag] final URL ${finalUrl}`);
+    if (finalUrl !== initialUrl && finalUrl.includes('swcleared=1') && !initialUrl.includes('swcleared=1')) {
+      console.log(
+        '[lighthouse][diag] auto-navigation detected: the shell rewrites / to add swcleared=1 in web/index.html:12124-12130'
+      );
+    }
+    return {initialUrl, finalUrl, navigationResponse: navigationResponse ? navigationResponse.url() : ''};
+  } catch (error) {
+    console.log(`[lighthouse][diag] browser diagnostic error: ${error?.stack || error?.message || error}`);
+    return null;
+  } finally {
+    if (browser) {
+      try {
+        await browser.close();
+      } catch (error) {
+        console.log(`[lighthouse][diag] browser.close error: ${error?.stack || error?.message || error}`);
+      }
+    }
+  }
+}
+
+async function runPreLhciDiagnostics({auditUrl, tempDir, chromePath}) {
+  console.log(`[lighthouse][diag] GET audit url: ${auditUrl}`);
+  const curlResult = runCurlDiagnostic(auditUrl, 15, tempDir);
+  const blocks = parseHeaderBlocks(curlResult.headersText);
+  const finalBlock = blocks.length ? blocks[blocks.length - 1] : null;
+  const contentType = finalBlock?.headerMap?.['content-type'] || curlResult.contentType || 'n/a';
+  const contentLength = finalBlock?.headerMap?.['content-length'] || curlResult.bodySize || curlResult.sizeDownload || 'n/a';
+  console.log(
+    `[lighthouse][diag] curl status=${curlResult.code || curlResult.status || 0} final=${curlResult.effectiveUrl} content-type=${contentType} content-length=${contentLength}`
+  );
+  if (curlResult.redirectUrl) {
+    console.log(`[lighthouse][diag] redirect-url: ${curlResult.redirectUrl}`);
+  }
+  printHeaderBlocks(auditUrl, blocks);
+  console.log(`[lighthouse][diag] body saved to ${curlResult.bodyPath}`);
+  await runBrowserDiagnostic(auditUrl, chromePath, tempDir);
+}
+
 function describeStatus(result) {
   if (!result) return 'sin respuesta';
   if (result.code === 200) return 'HTTP 200';
@@ -216,7 +487,7 @@ function spawnServer({port, tempDir, dbPath, ocrDbPath, serverLogPath}) {
     ...process.env,
     ...sharedEnv,
     LHCI_PORT: String(port),
-    LHCI_BASE_URL: `http://127.0.0.1:${port}/?swcleared=1`,
+    LHCI_BASE_URL: ensureSwClearedUrl(`http://127.0.0.1:${port}/`, port),
     LHCI_DB_PATH: dbPath,
     LHCI_OCR_DB_PATH: ocrDbPath,
     LHCI_TMPDIR: tempDir,
@@ -413,8 +684,11 @@ function runCommand(command, args, env) {
   ensureFile(ocrDbPath);
   fs.mkdirSync(uploadsDir, {recursive: true});
 
-  const auditUrl = `http://127.0.0.1:${port}/?swcleared=1`;
+  const rawAuditUrl = process.env.LHCI_BASE_URL || `http://127.0.0.1:${port}/`;
+  const auditUrl = ensureSwClearedUrl(rawAuditUrl, port);
   const healthUrl = `http://127.0.0.1:${port}/api/health`;
+  const chromePath = resolveChromePath();
+  const diagnosticsEnabled = String(process.env.LHCI_DIAGNOSTIC || '').trim() === '1';
   const sharedDbEnv = {
     ...process.env,
     PYTHONUNBUFFERED: '1',
@@ -444,6 +718,9 @@ function runCommand(command, args, env) {
   };
   console.log(`Lighthouse temp dir: ${tempDir}`);
   console.log(`Lighthouse server log: ${path.join(tempDir, 'lighthouse-server.log')}`);
+  if (String(rawAuditUrl).trim() !== String(auditUrl).trim()) {
+    console.log(`[lighthouse] audit URL normalized: ${rawAuditUrl} -> ${auditUrl}`);
+  }
   console.log(`Lighthouse base URL: ${auditUrl}`);
 
   const server = spawnServer({
@@ -501,6 +778,12 @@ function runCommand(command, args, env) {
     console.log(
       `[lighthouse] servidor listo tras ${Math.ceil(ready.elapsedMs / 1000)}s y ${ready.attempt} comprobaciones.`
     );
+
+    if (diagnosticsEnabled) {
+      console.log('[lighthouse] Pre-LHCI diagnostics enabled.');
+      await runPreLhciDiagnostics({auditUrl, tempDir, chromePath});
+      console.log('[lighthouse] Pre-LHCI diagnostics completed.');
+    }
 
     await runCommand('npx', ['--no-install', 'lhci', 'autorun'], baseEnv);
   } catch (error) {
