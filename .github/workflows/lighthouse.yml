@@ -63,4 +63,5 @@ jobs:
         with:
           name: lighthouse-results
           path: ${{ github.workspace }}/.lhci/lighthouse-results
+          include-hidden-files: true
           if-no-files-found: ignore

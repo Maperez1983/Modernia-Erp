@@ -31,6 +31,7 @@ const ocrDbPath = process.env.LHCI_OCR_DB_PATH || path.join(tempDir, 'ocr.sqlite
 const uploadsDir = process.env.LHCI_UPLOADS_DIR || path.join(tempDir, 'uploads');
 const baseUrl = process.env.LHCI_BASE_URL || `http://127.0.0.1:${resolvedPort}/?swcleared=1`;
 const chromePath = resolveChromePath();
+const managedServer = String(process.env.LHCI_MANAGED_SERVER || '').trim() === '1';
 
 const startServerCommand = [
   'PYTHONUNBUFFERED=1',
@@ -54,9 +55,13 @@ module.exports = {
     collect: {
       url: [baseUrl],
       numberOfRuns: 3,
-      startServerCommand,
-      startServerReadyPattern: 'Servidor activo',
-      startServerReadyTimeout: 120000,
+      ...(managedServer
+        ? {}
+        : {
+            startServerCommand,
+            startServerReadyPattern: 'Servidor activo',
+            startServerReadyTimeout: 120000,
+          }),
       ...(chromePath ? {chromePath} : {}),
       settings: {
         chromeFlags: '--no-sandbox --disable-crashpad-for-testing --disable-dev-shm-usage --disable-background-networking --disable-breakpad --disable-client-side-phishing-detection --disable-component-update --disable-default-apps --disable-extensions --disable-popup-blocking --disable-renderer-backgrounding --mute-audio --disable-gpu',
