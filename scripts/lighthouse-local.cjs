@@ -204,6 +204,14 @@ function tailText(text, maxLines = 80) {
   return lines.slice(Math.max(0, lines.length - maxLines)).join('\n');
 }
 
+function readDiagnosticFileText(filePath) {
+  try {
+    return String(fs.readFileSync(filePath, 'utf8') || '');
+  } catch {
+    return '';
+  }
+}
+
 function createSanitizedConsoleLineWriter(writeFn) {
   const decoder = new StringDecoder('utf8');
   let buffer = '';
@@ -1461,6 +1469,32 @@ async function runBrowserDiagnostic(url, chromePath, tempDir, recorder, options 
       console.log(`[lighthouse][diag] page.goto error: ${entry.stack || entry.message}`);
     }
 
+    let inspection = null;
+    if (typeof options.inspectBrowser === 'function') {
+      try {
+        inspection = await options.inspectBrowser({
+          phase: options.inspectPhase || 'browser-diagnostic',
+          browser,
+          browserPid,
+          browserVersion,
+          browserPath: chromePath,
+          launcherPath: chromePath,
+          url,
+          profileDir,
+          flags: launchFlags,
+          tempDir,
+        });
+      } catch (error) {
+        const entry = sanitizeDiagnosticValue({
+          phase: 'inspect',
+          message: error?.message || String(error || 'Unknown browser inspect error'),
+          stack: error?.stack || '',
+        });
+        recorder?.record('browser-error', entry);
+        console.log(`[lighthouse][diag] browser inspect error: ${entry.stack || entry.message}`);
+      }
+    }
+
     await new Promise((resolve) => setTimeout(resolve, 4000));
     const finalUrl = page.url();
     const sanitizedFinalUrl = sanitizeDiagnosticUrl(finalUrl);
@@ -1499,6 +1533,7 @@ async function runBrowserDiagnostic(url, chromePath, tempDir, recorder, options 
       chromeStderrPath,
       launchDurationMs: Date.now() - startedAt,
       lifecycleEvents: lifecycleEvents.filter(Boolean),
+      inspection: inspection ? sanitizeDiagnosticValue(inspection) : null,
     };
     recorder?.record('browser-summary', summary);
     if (
@@ -1603,6 +1638,10 @@ function isDiagnosticMatrixEnabled() {
   return isTruthyEnvFlag(process.env.LHCI_DIAGNOSTIC_MATRIX);
 }
 
+function isBrowserMatrixDiagnosticEnabled() {
+  return isTruthyEnvFlag(process.env.LHCI_BROWSER_MATRIX_DIAGNOSTIC);
+}
+
 function buildDiagnosticMatrixCases(auditUrl) {
   const rootUrl = new URL(auditUrl);
   rootUrl.searchParams.delete('swcleared');
@@ -1632,6 +1671,379 @@ function buildDiagnosticMatrixCases(auditUrl) {
       url: ensureSwClearedUrl(probeUrl.toString(), 0),
     },
   ];
+}
+
+function buildBrowserMatrixVariants(chromePath, env = process.env) {
+  const resolvePath = (value) => sanitizeDiagnosticText(String(value || '').trim());
+  return [
+    {
+      id: 'V1',
+      label: 'playwright-chromium-current',
+      source: 'current-playwright-chromium',
+      executablePath: resolvePath(chromePath),
+      captureStrace: true,
+    },
+    {
+      id: 'V2',
+      label: 'runner-google-chrome-stable',
+      source: 'runner-google-chrome-stable',
+      executablePath: resolvePath(
+        env.LHCI_BROWSER_MATRIX_V2_PATH ||
+          env.GOOGLE_CHROME_PATH ||
+          env.GOOGLE_CHROME_STABLE_PATH ||
+          env.CHROME_PATH
+      ),
+      captureStrace: true,
+    },
+    {
+      id: 'V3',
+      label: 'playwright-chromium-previous',
+      source: 'playwright-1.54.0-chromium',
+      executablePath: resolvePath(env.LHCI_BROWSER_MATRIX_V3_PATH),
+      captureStrace: false,
+    },
+    {
+      id: 'V4',
+      label: 'official-browser-alt',
+      source: 'official-browser-alternative',
+      executablePath: resolvePath(env.LHCI_BROWSER_MATRIX_V4_PATH),
+      captureStrace: false,
+    },
+  ];
+}
+
+function buildBrowserMatrixArtifacts(tempDir, variantId) {
+  const caseDir = path.join(tempDir, 'browser-matrix-linux', variantId);
+  return {
+    caseDir,
+    prelaunchSnapshotPath: path.join(caseDir, 'prelaunch-snapshot.json'),
+    runtimeSnapshotPath: path.join(caseDir, 'runtime-snapshot.json'),
+    directStraceDir: path.join(caseDir, 'direct-strace'),
+    lighthouseStraceDir: path.join(caseDir, 'lighthouse-strace'),
+    directLauncherPath: path.join(caseDir, 'direct-launcher.cjs'),
+    lighthouseLauncherPath: path.join(caseDir, 'lighthouse-launcher.cjs'),
+    browserNetLogPath: path.join(caseDir, 'browser-netlog.json'),
+    browserChromeStderrPath: path.join(caseDir, 'browser-stderr.log'),
+    directProfileDir: path.join(caseDir, 'direct-profile'),
+    directNetLogPath: path.join(caseDir, 'direct-netlog.json'),
+    directChromeStderrPath: path.join(caseDir, 'direct-chrome-stderr.log'),
+    lighthouseProfileDir: path.join(caseDir, 'lighthouse-profile'),
+    lighthouseNetLogPath: path.join(caseDir, 'lighthouse-netlog.json'),
+    lighthouseChromeStderrPath: path.join(caseDir, 'lighthouse-chrome-stderr.log'),
+    directSnapshotPath: path.join(caseDir, 'direct-snapshot.json'),
+    lighthouseSnapshotPath: path.join(caseDir, 'lighthouse-snapshot.json'),
+    straceSummaryPath: path.join(caseDir, 'strace-summary.json'),
+  };
+}
+
+function runDiagnosticCommand(command, args, env = process.env) {
+  const result = spawnSync(command, args, {
+    cwd: process.cwd(),
+    env,
+    encoding: 'utf8',
+    timeout: 30000,
+    killSignal: 'SIGKILL',
+  });
+  return {
+    command,
+    args: [...args],
+    status: result.status,
+    signal: result.signal,
+    stdout: sanitizeDiagnosticText(result.stdout || ''),
+    stderr: sanitizeDiagnosticText(result.stderr || ''),
+    error: sanitizeDiagnosticText(result.error ? result.error.message || String(result.error) : ''),
+  };
+}
+
+function captureProcFdListing(pid) {
+  const targetPid = Number(pid || 0);
+  const snapshot = {
+    pid: targetPid || null,
+    available: false,
+    count: 0,
+    entries: [],
+    error: '',
+  };
+  if (!targetPid || process.platform !== 'linux' || !fs.existsSync('/proc')) {
+    snapshot.error = targetPid ? 'procfs unavailable' : 'missing pid';
+    return snapshot;
+  }
+  const fdDir = path.join('/proc', String(targetPid), 'fd');
+  try {
+    const entries = fs
+      .readdirSync(fdDir)
+      .sort((left, right) => Number(left) - Number(right))
+      .map((fdName) => {
+        const fdPath = path.join(fdDir, fdName);
+        let target = '';
+        try {
+          target = fs.readlinkSync(fdPath);
+        } catch (error) {
+          target = `ERROR: ${error?.message || String(error || 'Unknown fd error')}`;
+        }
+        return {
+          fd: Number(fdName),
+          target: sanitizeDiagnosticText(target),
+        };
+      });
+    snapshot.available = true;
+    snapshot.count = entries.length;
+    snapshot.entries = entries;
+  } catch (error) {
+    snapshot.error = sanitizeDiagnosticText(error?.message || String(error || 'Unknown fd listing error'));
+  }
+  return snapshot;
+}
+
+function parseProcessTableRows(stdout) {
+  return String(stdout || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const match = line.match(/^(\d+)\s+(\d+)\s+(.*)$/);
+      if (!match) {
+        return null;
+      }
+      return {
+        pid: Number(match[1]),
+        ppid: Number(match[2]),
+        command: sanitizeDiagnosticText(match[3] || ''),
+      };
+    })
+    .filter(Boolean);
+}
+
+function captureProcessTable() {
+  const result = runDiagnosticCommand('ps', ['-A', '-o', 'pid=', '-o', 'ppid=', '-o', 'command=']);
+  const rows = result.status === 0 ? parseProcessTableRows(result.stdout) : [];
+  return {
+    ...result,
+    available: result.status === 0,
+    rows,
+  };
+}
+
+function collectDescendantProcessRows(rows, rootPid) {
+  const targetPid = Number(rootPid || 0);
+  if (!targetPid || !Array.isArray(rows) || !rows.length) {
+    return [];
+  }
+  const childrenByPid = new Map();
+  for (const row of rows) {
+    if (!childrenByPid.has(row.ppid)) {
+      childrenByPid.set(row.ppid, []);
+    }
+    childrenByPid.get(row.ppid).push(row);
+  }
+  const seen = new Set();
+  const queue = [targetPid];
+  const descendants = [];
+  while (queue.length) {
+    const parentPid = queue.shift();
+    const children = childrenByPid.get(parentPid) || [];
+    for (const child of children) {
+      if (seen.has(child.pid)) {
+        continue;
+      }
+      seen.add(child.pid);
+      descendants.push(child);
+      queue.push(child.pid);
+    }
+  }
+  return descendants;
+}
+
+function findNetworkServicePid(rows, browserPid) {
+  const descendants = collectDescendantProcessRows(rows, browserPid);
+  for (const row of descendants) {
+    const command = String(row.command || '');
+    if (
+      /NetworkService/i.test(command) ||
+      /network\.mojom\.NetworkService/i.test(command) ||
+      /--type=utility/i.test(command) ||
+      /network service/i.test(command)
+    ) {
+      return row.pid;
+    }
+  }
+  return null;
+}
+
+function captureUlimitSnapshot() {
+  const result = runDiagnosticCommand('sh', ['-lc', 'ulimit -n']);
+  return {
+    ...result,
+    value: result.status === 0 ? String(result.stdout || '').trim() : '',
+  };
+}
+
+function createBrowserMatrixLauncherScript({scriptPath, browserPath, stracePrefix}) {
+  const source = `#!/usr/bin/env node
+'use strict';
+const {spawn} = require('child_process');
+const browserPath = ${JSON.stringify(browserPath)};
+const stracePrefix = ${JSON.stringify(stracePrefix)};
+const traceArgs = [
+  '-ff',
+  '-e',
+  'trace=clone,fork,vfork,execve,dup,dup2,dup3,close,fcntl,pipe,pipe2,socket,socketpair',
+  '-o',
+  stracePrefix,
+  browserPath,
+  ...process.argv.slice(2),
+];
+const child = spawn('strace', traceArgs, {
+  stdio: 'inherit',
+});
+child.once('error', (error) => {
+  console.error(error && error.stack ? error.stack : error);
+  process.exit(1);
+});
+child.once('exit', (code, signal) => {
+  process.exit(typeof code === 'number' ? code : signal ? 1 : 0);
+});
+`;
+  fs.mkdirSync(path.dirname(scriptPath), {recursive: true});
+  fs.writeFileSync(scriptPath, source, 'utf8');
+  try {
+    fs.chmodSync(scriptPath, 0o755);
+  } catch {}
+  return scriptPath;
+}
+
+function captureBrowserMatrixSnapshot({
+  phase,
+  variant,
+  browserPid,
+  browserVersion,
+  browserPath,
+  launcherPath,
+  tempDir,
+  caseDir,
+  recorder,
+}) {
+  const processTable = captureProcessTable();
+  const networkServicePid = findNetworkServicePid(processTable.rows, browserPid);
+  const snapshot = {
+    phase,
+    variantId: variant.id,
+    label: variant.label,
+    source: variant.source,
+    browserPid: browserPid || null,
+    browserVersion: sanitizeDiagnosticText(browserVersion || ''),
+    browserPath: sanitizeDiagnosticText(browserPath || ''),
+    launcherPath: sanitizeDiagnosticText(launcherPath || ''),
+    nodePid: process.pid,
+    tempDir: sanitizeDiagnosticText(tempDir || ''),
+    caseDir: sanitizeDiagnosticText(caseDir || ''),
+    nodeUlimit: captureUlimitSnapshot(),
+    nodeFds: captureProcFdListing(process.pid),
+    browserFds: captureProcFdListing(browserPid),
+    processTable: {
+      ...processTable,
+      descendants: collectDescendantProcessRows(processTable.rows, browserPid),
+      networkServicePid,
+    },
+    networkServicePid,
+    networkServiceFds: captureProcFdListing(networkServicePid),
+  };
+  const jsonPath = path.join(caseDir, `${phase}-snapshot.json`);
+  const logPath = path.join(caseDir, `${phase}-snapshot.log`);
+  try {
+    fs.mkdirSync(caseDir, {recursive: true});
+    fs.writeFileSync(jsonPath, `${JSON.stringify(snapshot, null, 2)}\n`);
+    fs.writeFileSync(
+      logPath,
+      [
+        `[browser-matrix][${variant.id}][${phase}] browserPid=${snapshot.browserPid || 'n/a'}`,
+        `[browser-matrix][${variant.id}][${phase}] networkServicePid=${snapshot.networkServicePid || 'n/a'}`,
+        `[browser-matrix][${variant.id}][${phase}] nodeFds=${snapshot.nodeFds.count || 0}`,
+        `[browser-matrix][${variant.id}][${phase}] browserFds=${snapshot.browserFds.count || 0}`,
+        `[browser-matrix][${variant.id}][${phase}] networkServiceFds=${snapshot.networkServiceFds.count || 0}`,
+        `[browser-matrix][${variant.id}][${phase}] ulimit=${snapshot.nodeUlimit.value || 'n/a'}`,
+      ].join('\n') + '\n',
+      'utf8'
+    );
+  } catch (error) {
+    recorder?.record('browser-matrix-snapshot-write-error', {
+      phase,
+      variantId: variant.id,
+      message: sanitizeDiagnosticText(error?.message || String(error || 'Unknown snapshot error')),
+    });
+  }
+  recorder?.record('browser-matrix-snapshot', {
+    phase,
+    variantId: variant.id,
+    jsonPath,
+    logPath,
+    browserPid: snapshot.browserPid,
+    networkServicePid: snapshot.networkServicePid,
+    nodeFds: snapshot.nodeFds.count,
+    browserFds: snapshot.browserFds.count,
+    networkServiceFds: snapshot.networkServiceFds.count,
+    ulimit: snapshot.nodeUlimit.value,
+  });
+  return {
+    ...snapshot,
+    jsonPath,
+    logPath,
+  };
+}
+
+function summarizeBrowserMatrixStrace(caseDir, variantId) {
+  const straceDir = path.join(caseDir, 'strace');
+  const summaryPath = path.join(caseDir, 'strace-summary.json');
+  const summary = {
+    available: false,
+    variantId,
+    straceDir,
+    files: [],
+    firstSuspiciousLine: null,
+    fdOwnershipViolation: false,
+    networkServiceRestart: false,
+    error: '',
+  };
+  try {
+    const entries = fs.existsSync(straceDir) ? fs.readdirSync(straceDir).sort() : [];
+    summary.files = entries.map((name) => path.join(straceDir, name));
+    for (const filePath of summary.files) {
+      const text = sanitizeDiagnosticText(fs.readFileSync(filePath, 'utf8'));
+      const lines = text.split(/\r?\n/);
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index];
+        if (!line) continue;
+        const suspicious =
+          /dup2|dup3|close|fcntl|FD_CLOEXEC|execve|pipe2|socketpair/i.test(line) ||
+          /FD ownership violation/i.test(line) ||
+          /Network service crashed or was terminated/i.test(line);
+        if (!suspicious) continue;
+        summary.available = true;
+        summary.firstSuspiciousLine = {
+          filePath,
+          lineNumber: index + 1,
+          text: line,
+        };
+        summary.fdOwnershipViolation = /FD ownership violation/i.test(line);
+        summary.networkServiceRestart = /Network service crashed or was terminated/i.test(line);
+        break;
+      }
+      if (summary.firstSuspiciousLine) break;
+    }
+    if (summary.files.length) {
+      summary.available = true;
+    }
+    fs.writeFileSync(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
+  } catch (error) {
+    summary.error = sanitizeDiagnosticText(error?.message || String(error || 'Unknown strace summary error'));
+    try {
+      fs.writeFileSync(summaryPath, `${JSON.stringify(summary, null, 2)}\n`);
+    } catch {}
+  }
+  return {
+    ...summary,
+    summaryPath,
+  };
 }
 
 function buildDiagnosticCaseArtifacts(tempDir, caseId) {
@@ -1913,7 +2325,17 @@ function createJsonlArtifactRecorder(filePath) {
   };
 }
 
-async function runLighthouseMatrixAudit({url, chromePath, userDataDir, flags, recorder, netLogPath = '', chromeStderrPath = ''}) {
+async function runLighthouseMatrixAudit({
+  url,
+  chromePath,
+  userDataDir,
+  flags,
+  recorder,
+  netLogPath = '',
+  chromeStderrPath = '',
+  inspectBrowser = null,
+  inspectPhase = '',
+}) {
   let puppeteer = null;
   try {
     puppeteer = require('puppeteer-core');
@@ -2014,6 +2436,35 @@ async function runLighthouseMatrixAudit({url, chromePath, userDataDir, flags, re
     try {
       browserVersion = sanitizeDiagnosticText(await browser.version());
     } catch {}
+    const inspectionPromise =
+      typeof inspectBrowser === 'function'
+        ? Promise.resolve()
+            .then(() =>
+              inspectBrowser({
+                phase: inspectPhase || 'lighthouse-matrix',
+                browser,
+                browserPid: browser?.process ? (browser.process() ? browser.process().pid || null : null) : null,
+                browserVersion,
+                browserPath: chromePath,
+                launcherPath: chromePath,
+                userDataDir,
+                url,
+                flags: launchFlags,
+                netLogPath,
+                chromeStderrPath,
+              })
+            )
+            .catch((error) => {
+              recorder?.record('lighthouse-error', {
+                phase: 'inspect',
+                url: sanitizeDiagnosticUrl(url),
+                userDataDir,
+                chromePath,
+                error: sanitizeDiagnosticText(error?.message || String(error || 'Unknown lighthouse inspect error')),
+              });
+              return null;
+            })
+        : Promise.resolve(null);
     const runnerResult = await lighthouse(
       url,
       {
@@ -2023,6 +2474,7 @@ async function runLighthouseMatrixAudit({url, chromePath, userDataDir, flags, re
       },
       defaultConfig
     );
+    const inspection = await inspectionPromise;
     const runtimeError = runnerResult?.lhr?.runtimeError || null;
     const summary = {
       url: sanitizeDiagnosticUrl(url),
@@ -2043,6 +2495,7 @@ async function runLighthouseMatrixAudit({url, chromePath, userDataDir, flags, re
           }
         : null,
       exitCode: runtimeError ? 1 : 0,
+      inspection: inspection ? sanitizeDiagnosticValue(inspection) : null,
     };
     recorder?.record('lighthouse-summary', summary);
     return summary;
@@ -2313,6 +2766,313 @@ async function runDiagnosticMatrix({auditUrl, tempDir, chromePath}) {
     cases: matrix.cases.length,
   });
   netLogArtifacts.recordEntry('matrix-complete', {
+    exitCode: matrix.exitCode,
+    cases: matrix.cases.length,
+  });
+  writeSummary();
+  return matrix;
+}
+
+async function runBrowserMatrixDiagnostic({auditUrl, tempDir, chromePath}) {
+  const logPath = path.join(tempDir, 'browser-matrix-linux.log');
+  const jsonPath = path.join(tempDir, 'browser-matrix-linux.json');
+  const recorder = createJsonlArtifactRecorder(logPath);
+  const baseFlags = getDiagnosticChromeFlags();
+  const variants = buildBrowserMatrixVariants(chromePath);
+  const matrix = {
+    generatedAt: new Date().toISOString(),
+    auditUrl: sanitizeDiagnosticUrl(auditUrl),
+    chromePath: sanitizeDiagnosticText(chromePath || ''),
+    environment: collectDiagnosticEnvironmentSummary(),
+    variants: variants.map((variant) => ({
+      id: variant.id,
+      label: variant.label,
+      source: variant.source,
+      executablePath: variant.executablePath,
+      captureStrace: variant.captureStrace,
+    })),
+    cases: [],
+    exitCode: 0,
+    logPath,
+    jsonPath,
+  };
+
+  const writeSummary = () => {
+    try {
+      fs.writeFileSync(jsonPath, `${JSON.stringify(matrix, null, 2)}\n`);
+    } catch (error) {
+      console.log(
+        `[lighthouse][diag] no se pudo escribir ${jsonPath}: ${error?.stack || error?.message || error}`
+      );
+    }
+  };
+
+  recorder.record('browser-matrix-start', {
+    auditUrl,
+    chromePath,
+    environment: matrix.environment,
+    variants: variants.map((variant) => ({
+      id: variant.id,
+      label: variant.label,
+      source: variant.source,
+      executablePath: variant.executablePath,
+      captureStrace: variant.captureStrace,
+    })),
+  });
+  writeSummary();
+
+  for (const variant of variants) {
+    const artifacts = buildBrowserMatrixArtifacts(tempDir, variant.id);
+    fs.mkdirSync(artifacts.caseDir, {recursive: true});
+    fs.mkdirSync(artifacts.directProfileDir, {recursive: true});
+    fs.mkdirSync(artifacts.lighthouseProfileDir, {recursive: true});
+    fs.mkdirSync(artifacts.directStraceDir, {recursive: true});
+    fs.mkdirSync(artifacts.lighthouseStraceDir, {recursive: true});
+
+    let directChromePath = variant.executablePath;
+    let lighthouseChromePath = variant.executablePath;
+    if (variant.captureStrace && variant.executablePath) {
+      directChromePath = createBrowserMatrixLauncherScript({
+        scriptPath: artifacts.directLauncherPath,
+        browserPath: variant.executablePath,
+        stracePrefix: path.join(artifacts.directStraceDir, 'trace'),
+      });
+      lighthouseChromePath = createBrowserMatrixLauncherScript({
+        scriptPath: artifacts.lighthouseLauncherPath,
+        browserPath: variant.executablePath,
+        stracePrefix: path.join(artifacts.lighthouseStraceDir, 'trace'),
+      });
+    }
+
+    const caseSummary = {
+      id: variant.id,
+      label: variant.label,
+      source: variant.source,
+      browserPath: variant.executablePath,
+      directChromePath,
+      lighthouseChromePath,
+      captureStrace: variant.captureStrace,
+      profiles: {
+        direct: artifacts.directProfileDir,
+        lighthouse: artifacts.lighthouseProfileDir,
+      },
+      artifacts: {
+        caseDir: artifacts.caseDir,
+        prelaunchSnapshotPath: artifacts.prelaunchSnapshotPath,
+        runtimeSnapshotPath: artifacts.runtimeSnapshotPath,
+        directSnapshotPath: artifacts.directSnapshotPath,
+        lighthouseSnapshotPath: artifacts.lighthouseSnapshotPath,
+        directNetLogPath: artifacts.directNetLogPath,
+        lighthouseNetLogPath: artifacts.lighthouseNetLogPath,
+        directChromeStderrPath: artifacts.directChromeStderrPath,
+        lighthouseChromeStderrPath: artifacts.lighthouseChromeStderrPath,
+        straceSummaryPath: artifacts.straceSummaryPath,
+      },
+      prelaunchSnapshot: null,
+      runtimeSnapshot: null,
+      directNavigation: null,
+      lighthouse: null,
+      straceSummary: null,
+      exitCode: 0,
+    };
+
+    recorder.record('browser-matrix-case-start', {
+      id: variant.id,
+      label: variant.label,
+      source: variant.source,
+      browserPath: variant.executablePath,
+      captureStrace: variant.captureStrace,
+      profiles: caseSummary.profiles,
+      artifacts: caseSummary.artifacts,
+    });
+
+    caseSummary.prelaunchSnapshot = captureBrowserMatrixSnapshot({
+      phase: 'prelaunch',
+      variant,
+      browserPid: null,
+      browserVersion: '',
+      browserPath: variant.executablePath,
+      launcherPath: directChromePath,
+      tempDir,
+      caseDir: artifacts.caseDir,
+      recorder,
+    });
+
+    const directStartedAt = Date.now();
+    const directResult = await runBrowserDiagnostic(
+      auditUrl,
+      directChromePath,
+      tempDir,
+      {
+        record: (event, data) =>
+          recorder.record(`browser-matrix-${variant.id}-direct-${event}`, data),
+        diagnosticPath: path.join(artifacts.caseDir, 'direct-navigation-diagnostic.log'),
+      },
+      {
+        profileDir: artifacts.directProfileDir,
+        flags: baseFlags,
+        waitMs: 4000,
+        includeLifecycleEvents: true,
+        netLogPath: artifacts.directNetLogPath,
+        chromeStderrPath: artifacts.directChromeStderrPath,
+        inspectPhase: 'direct-navigation',
+        inspectBrowser: async ({
+          browser,
+          browserPid,
+          browserVersion,
+          browserPath,
+          launcherPath,
+          flags,
+          tempDir: inspectTempDir,
+        }) => {
+          await sleep(250);
+          return captureBrowserMatrixSnapshot({
+            phase: 'direct',
+            variant,
+            browserPid,
+            browserVersion,
+            browserPath,
+            launcherPath,
+            tempDir: inspectTempDir,
+            caseDir: artifacts.caseDir,
+            recorder,
+          });
+        },
+      }
+    );
+    caseSummary.directNavigation = directResult
+      ? {
+          ...directResult,
+          durationMs: Date.now() - directStartedAt,
+          exitCode: directResult.exitCode || 0,
+          netLog: readDiagnosticNetLog(artifacts.directNetLogPath, auditUrl, {
+            variantId: variant.id,
+            kind: 'direct-navigation',
+          }),
+        }
+      : {
+          exitCode: 1,
+          durationMs: Date.now() - directStartedAt,
+          error: 'direct navigation failed',
+          netLog: readDiagnosticNetLog(artifacts.directNetLogPath, auditUrl, {
+            variantId: variant.id,
+            kind: 'direct-navigation',
+          }),
+        };
+    if (caseSummary.directNavigation.exitCode !== 0) {
+      matrix.exitCode = 1;
+    }
+
+    const lighthouseStartedAt = Date.now();
+    const lighthouseResult = await runLighthouseMatrixAudit({
+      url: auditUrl,
+      chromePath: lighthouseChromePath,
+      userDataDir: artifacts.lighthouseProfileDir,
+      flags: baseFlags,
+      recorder: {
+        record: (event, data) =>
+          recorder.record(`browser-matrix-${variant.id}-lighthouse-${event}`, data),
+      },
+      netLogPath: artifacts.lighthouseNetLogPath,
+      chromeStderrPath: artifacts.lighthouseChromeStderrPath,
+      inspectPhase: 'lighthouse-navigation',
+      inspectBrowser: async ({
+        browser,
+        browserPid,
+        browserVersion,
+        browserPath,
+        launcherPath,
+        userDataDir,
+        flags,
+        netLogPath,
+        chromeStderrPath,
+      }) => {
+        await sleep(750);
+        return captureBrowserMatrixSnapshot({
+          phase: 'lighthouse',
+          variant,
+          browserPid,
+          browserVersion,
+          browserPath,
+          launcherPath,
+          tempDir,
+          caseDir: artifacts.caseDir,
+          recorder,
+        });
+      },
+    });
+    caseSummary.lighthouse = lighthouseResult
+      ? {
+          ...lighthouseResult,
+          durationMs: Date.now() - lighthouseStartedAt,
+          exitCode: lighthouseResult.exitCode || 0,
+          netLog: readDiagnosticNetLog(artifacts.lighthouseNetLogPath, auditUrl, {
+            variantId: variant.id,
+            kind: 'lighthouse-run',
+          }),
+        }
+      : {
+          exitCode: 1,
+          durationMs: Date.now() - lighthouseStartedAt,
+          error: 'lighthouse run failed',
+          netLog: readDiagnosticNetLog(artifacts.lighthouseNetLogPath, auditUrl, {
+            variantId: variant.id,
+            kind: 'lighthouse-run',
+          }),
+        };
+    if ((lighthouseResult && lighthouseResult.exitCode) || !lighthouseResult || lighthouseResult.error) {
+      matrix.exitCode = 1;
+      if (caseSummary.lighthouse && typeof caseSummary.lighthouse.exitCode !== 'number') {
+        caseSummary.lighthouse.exitCode = 1;
+      }
+    }
+
+    caseSummary.runtimeSnapshot = caseSummary.lighthouse?.inspection || caseSummary.directNavigation?.inspection || null;
+    caseSummary.directNavigation.stderrFlags = {
+      fdOwnershipViolation: /FD ownership violation/i.test(readDiagnosticFileText(artifacts.directChromeStderrPath)),
+      networkServiceRestart: /Network service crashed or was terminated/i.test(
+        readDiagnosticFileText(artifacts.directChromeStderrPath)
+      ),
+      errAborted: /ERR_ABORTED/i.test(
+        String(caseSummary.directNavigation.failureErrorText || '') + String(caseSummary.lighthouse?.runtimeError?.message || '')
+      ),
+    };
+    caseSummary.lighthouse.stderrFlags = {
+      fdOwnershipViolation: /FD ownership violation/i.test(readDiagnosticFileText(artifacts.lighthouseChromeStderrPath)),
+      networkServiceRestart: /Network service crashed or was terminated/i.test(
+        readDiagnosticFileText(artifacts.lighthouseChromeStderrPath)
+      ),
+      errAborted: /ERR_ABORTED/i.test(
+        String(caseSummary.lighthouse?.runtimeError?.message || '') + String(caseSummary.directNavigation?.failureErrorText || '')
+      ),
+    };
+
+    caseSummary.straceSummary = summarizeBrowserMatrixStrace(artifacts.caseDir, variant.id);
+    if (caseSummary.straceSummary.firstSuspiciousLine) {
+      recorder.record('browser-matrix-strace-summary', {
+        variantId: variant.id,
+        ...caseSummary.straceSummary,
+      });
+    }
+
+    caseSummary.exitCode =
+      Number(caseSummary.directNavigation?.exitCode || 0) ||
+      Number(caseSummary.lighthouse?.exitCode || 0) ||
+      0;
+    if (caseSummary.exitCode !== 0) {
+      matrix.exitCode = 1;
+    }
+
+    matrix.cases.push(caseSummary);
+    recorder.record('browser-matrix-case-complete', {
+      id: variant.id,
+      label: variant.label,
+      exitCode: caseSummary.exitCode,
+    });
+    writeSummary();
+  }
+
+  recorder.record('browser-matrix-complete', {
     exitCode: matrix.exitCode,
     cases: matrix.cases.length,
   });
@@ -2776,6 +3536,7 @@ function runCommand(command, args, env, options = {}) {
   const chromePath = resolveChromePath();
   const diagnosticsEnabled = String(process.env.LHCI_DIAGNOSTIC || '').trim() === '1';
   const matrixEnabled = isDiagnosticMatrixEnabled();
+  const browserMatrixEnabled = isBrowserMatrixDiagnosticEnabled();
   const localOrigin = new URL(`http://127.0.0.1:${port}/`).origin;
   const auditOrigin = new URL(auditUrl).origin;
   const useExternalBaseUrl = Boolean(String(process.env.LHCI_BASE_URL || '').trim()) && auditOrigin !== localOrigin;
@@ -2828,7 +3589,7 @@ function runCommand(command, args, env, options = {}) {
         dbPath,
         ocrDbPath,
         serverLogPath: path.join(tempDir, 'lighthouse-server.log'),
-        diagnosticMode: matrixEnabled,
+        diagnosticMode: matrixEnabled || browserMatrixEnabled,
         serverObservationPath: path.join(tempDir, 'lighthouse-server-observations.jsonl'),
       });
 
@@ -2884,6 +3645,16 @@ function runCommand(command, args, env, options = {}) {
         ? `[lighthouse] destino externo listo tras ${Math.ceil(ready.elapsedMs / 1000)}s y ${ready.attempt} comprobaciones.`
         : `[lighthouse] servidor listo tras ${Math.ceil(ready.elapsedMs / 1000)}s y ${ready.attempt} comprobaciones.`
     );
+
+    if (browserMatrixEnabled) {
+      console.log('[lighthouse] Browser matrix diagnostic enabled.');
+      const matrix = await runBrowserMatrixDiagnostic({auditUrl, tempDir, chromePath});
+      console.log(`[lighthouse] Browser matrix diagnostic completed with exit code ${matrix.exitCode}.`);
+      if (matrix.exitCode !== 0) {
+        throw new Error(`Browser matrix diagnostic failed with exit code ${matrix.exitCode}`);
+      }
+      return;
+    }
 
     if (matrixEnabled) {
       console.log('[lighthouse] Lighthouse diagnostic matrix enabled.');

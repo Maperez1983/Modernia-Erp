@@ -120,6 +120,22 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
         assert "lighthouse-netlog-*.json" in matrix_upload_block
         assert "chrome-stderr*.log" in matrix_upload_block
 
+    def test_browser_matrix_workflow_adds_linux_diagnostic_job_and_artifacts(self):
+        assert "browser-matrix-diagnostic" in LIGHTHOUSE_WORKFLOW
+        assert "browser-matrix-artifacts" in LIGHTHOUSE_WORKFLOW
+        browser_job_block = LIGHTHOUSE_WORKFLOW.split("browser-matrix-diagnostic:", 1)[1]
+        assert 'LHCI_BROWSER_MATRIX_DIAGNOSTIC: "1"' in browser_job_block
+        assert "continue-on-error: true" in browser_job_block
+        assert "if: always()" in browser_job_block
+        assert "Upload Browser matrix diagnostics" in browser_job_block
+        upload_block = browser_job_block.split("- name: Upload Browser matrix diagnostics", 1)[1]
+        assert "browser-matrix-linux.json" in upload_block
+        assert "browser-matrix-linux.log" in upload_block
+        assert "browser-matrix-linux" in upload_block
+        assert "lighthouse-server.log" in upload_block
+        assert "lighthouse-server-observations.jsonl" in upload_block
+        assert "if-no-files-found: error" in upload_block
+
     def test_package_json_declares_puppeteer_core(self):
         package_json = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
         assert "puppeteer-core" in package_json["devDependencies"]
@@ -1237,6 +1253,8 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                 """
                 const assert = require("assert");
                 const source = [
+                  'function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }',
+                  'function readDiagnosticFileText(filePath) { try { return String(fs.readFileSync(filePath, "utf8") || ""); } catch { return ""; } }',
                   'const { StringDecoder } = require("node:string_decoder");',
                   'const { ensureSwClearedUrl } = require("./scripts/lighthouse-url.cjs");',
                   __SOURCE__,
@@ -1284,6 +1302,8 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                 const {EventEmitter} = require("events");
                 let spawnSync = require("child_process").spawnSync;
                 const source = [
+                  'function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }',
+                  'function readDiagnosticFileText(filePath) { try { return String(fs.readFileSync(filePath, "utf8") || ""); } catch { return ""; } }',
                   'const { StringDecoder } = require("node:string_decoder");',
                   'const { ensureSwClearedUrl } = require("./scripts/lighthouse-url.cjs");',
                   __SOURCE__,
@@ -1517,6 +1537,315 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                       delete process.env.LHCI_DIAGNOSTIC_MATRIX;
                     } else {
                       process.env.LHCI_DIAGNOSTIC_MATRIX = originalEnv;
+                    }
+                  }
+                })().catch((error) => {
+                  console.error(error && error.stack ? error.stack : error);
+                  process.exit(1);
+                });
+                """
+            )
+            .replace("__SOURCE__", json.dumps(chunk))
+        )
+        run_node_script(script)
+
+    def test_browser_matrix_mode_is_disabled_by_default_and_builds_four_variants(self):
+        chunk = extract_chunk("const DIAGNOSTIC_REDACTED_VALUE", "function describeStatus")
+        script = (
+            dedent(
+                """
+                const assert = require("assert");
+                const source = [
+                  'const { StringDecoder } = require("node:string_decoder");',
+                  'const { ensureSwClearedUrl } = require("./scripts/lighthouse-url.cjs");',
+                  __SOURCE__,
+                ].join("\\n");
+                const factory = new Function(
+                  source + "\\nreturn { isBrowserMatrixDiagnosticEnabled, buildBrowserMatrixVariants };"
+                );
+                const api = factory();
+                const originalEnv = process.env.LHCI_BROWSER_MATRIX_DIAGNOSTIC;
+
+                try {
+                  delete process.env.LHCI_BROWSER_MATRIX_DIAGNOSTIC;
+                  assert.strictEqual(api.isBrowserMatrixDiagnosticEnabled(), false);
+                  process.env.LHCI_BROWSER_MATRIX_DIAGNOSTIC = "1";
+                  assert.strictEqual(api.isBrowserMatrixDiagnosticEnabled(), true);
+
+                  const variants = api.buildBrowserMatrixVariants("/tmp/current-chrome", {
+                    LHCI_BROWSER_MATRIX_V2_PATH: "/tmp/google-chrome-stable",
+                    LHCI_BROWSER_MATRIX_V3_PATH: "/tmp/chromium-previous",
+                    LHCI_BROWSER_MATRIX_V4_PATH: "/tmp/chrome-beta",
+                  });
+
+                  assert.deepStrictEqual(variants.map((variant) => variant.id), ["V1", "V2", "V3", "V4"]);
+                  assert.strictEqual(variants[0].executablePath, "/tmp/current-chrome");
+                  assert.strictEqual(variants[1].executablePath, "/tmp/google-chrome-stable");
+                  assert.strictEqual(variants[2].executablePath, "/tmp/chromium-previous");
+                  assert.strictEqual(variants[3].executablePath, "/tmp/chrome-beta");
+                  assert.strictEqual(variants[0].captureStrace, true);
+                  assert.strictEqual(variants[1].captureStrace, true);
+                  assert.strictEqual(variants[2].captureStrace, false);
+                  assert.strictEqual(variants[3].captureStrace, false);
+                } finally {
+                  if (originalEnv === undefined) {
+                    delete process.env.LHCI_BROWSER_MATRIX_DIAGNOSTIC;
+                  } else {
+                    process.env.LHCI_BROWSER_MATRIX_DIAGNOSTIC = originalEnv;
+                  }
+                }
+                """
+            )
+            .replace("__SOURCE__", json.dumps(chunk))
+        )
+        run_node_script(script)
+
+    def test_browser_matrix_runs_variants_and_writes_artifacts_with_independent_profiles(self):
+        chunk = extract_chunk("const DIAGNOSTIC_REDACTED_VALUE", "function describeStatus")
+        script = (
+            dedent(
+                """
+                const assert = require("assert");
+                const fs = require("fs");
+                const os = require("os");
+                const path = require("path");
+                const Module = require("module");
+                const {EventEmitter} = require("events");
+                let spawnSync = require("child_process").spawnSync;
+                const source = [
+                  'function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }',
+                  'function readDiagnosticFileText(filePath) { try { return String(fs.readFileSync(filePath, "utf8") || ""); } catch { return ""; } }',
+                  'const { StringDecoder } = require("node:string_decoder");',
+                  'const { ensureSwClearedUrl } = require("./scripts/lighthouse-url.cjs");',
+                  __SOURCE__,
+                ].join("\\n");
+                const factory = new Function(
+                  "require",
+                  "fs",
+                  "path",
+                  "Module",
+                  "EventEmitter",
+                  "process",
+                  "console",
+                  "setTimeout",
+                  "spawnSync",
+                  source + "\\nreturn { runBrowserMatrixDiagnostic };"
+                );
+                const api = factory(require, fs, path, Module, EventEmitter, process, console, setTimeout, spawnSync);
+
+                const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "lhci-browser-matrix-"));
+                const launchCalls = [];
+                const lighthouseCalls = [];
+                const originalLoad = Module._load;
+                const originalSetTimeout = global.setTimeout;
+                const originalEnv = process.env.LHCI_BROWSER_MATRIX_DIAGNOSTIC;
+                const originalV2Path = process.env.LHCI_BROWSER_MATRIX_V2_PATH;
+                const originalV3Path = process.env.LHCI_BROWSER_MATRIX_V3_PATH;
+                const originalV4Path = process.env.LHCI_BROWSER_MATRIX_V4_PATH;
+                process.env.LHCI_BROWSER_MATRIX_DIAGNOSTIC = "1";
+                process.env.LHCI_BROWSER_MATRIX_V2_PATH = "/fake/google-chrome-stable";
+                process.env.LHCI_BROWSER_MATRIX_V3_PATH = "/fake/playwright-chromium-previous";
+                process.env.LHCI_BROWSER_MATRIX_V4_PATH = "/fake/chrome-beta";
+
+                let activeVariant = "";
+
+                const makeRequest = (url, failed = false) => ({
+                  url: () => url,
+                  method: () => "GET",
+                  resourceType: () => "document",
+                  isNavigationRequest: () => true,
+                  frame: () => ({url: () => "about:blank"}),
+                  redirectChain: () => [],
+                  failure: () => (failed ? {errorText: "net::ERR_ABORTED"} : {}),
+                });
+
+                const makeResponse = (url) => ({
+                  request: () => makeRequest(url),
+                  headers: () => ({
+                    "content-type": "text/html; charset=utf-8",
+                    "content-length": "12",
+                  }),
+                  status: () => 200,
+                  url: () => url,
+                  fromCache: () => false,
+                });
+
+                const makeBrowser = (launchOptions) => {
+                  const browser = new EventEmitter();
+                  const page = new EventEmitter();
+                  let currentUrl = "about:blank";
+                  page.url = () => currentUrl;
+                  page.mainFrame = () => ({url: () => currentUrl, name: () => ""});
+                  page.goto = async (url) => {
+                    currentUrl = url;
+                    page.emit("request", makeRequest(url, String(launchOptions.userDataDir || "").includes("V2")));
+                    page.emit("domcontentloaded");
+                    if (String(launchOptions.userDataDir || "").includes("V2")) {
+                      page.emit("requestfailed", makeRequest(url, true));
+                      throw new Error("net::ERR_ABORTED");
+                    }
+                    page.emit("response", makeResponse(url));
+                    page.emit("framenavigated", {url: () => url, name: () => ""});
+                    page.emit("console", {type: () => "warn", text: () => "Authorization: Bearer abc Cookie: session=abc"});
+                    page.emit("pageerror", new Error("pageerror token=abc"));
+                    page.emit("load");
+                    return makeResponse(url);
+                  };
+                  browser.process = () => ({pid: launchCalls.length + 4100});
+                  browser.wsEndpoint = () => `ws://127.0.0.1:${launchCalls.length + 6100}/devtools/browser/test`;
+                  browser.version = async () => "Chrome/143.0.7499.4";
+                  browser.newPage = async () => page;
+                  browser.close = async () => {
+                    page.emit("close");
+                    browser.emit("disconnected");
+                  };
+                  return browser;
+                };
+
+                Module._load = function(request, parent, isMain) {
+                  if (request === "puppeteer-core") {
+                    return {
+                      launch: async (options) => {
+                        launchCalls.push({kind: "puppeteer", options});
+                        activeVariant = String(options.userDataDir || "").match(/V[1-4]/)?.[0] || "";
+                        return makeBrowser(options);
+                      },
+                    };
+                  }
+                  if (request === "lighthouse") {
+                    return {
+                      default: async (url, flags, config) => {
+                        lighthouseCalls.push({url, flags, config, variant: activeVariant});
+                        if (activeVariant === "V3") {
+                          return {
+                            lhr: {
+                              userAgent: "Chrome/143.0.7499.4",
+                              requestedUrl: url,
+                              finalUrl: url,
+                              finalDisplayedUrl: url,
+                              runtimeError: {
+                                code: "FAILED_DOCUMENT_REQUEST",
+                                message: "net::ERR_ABORTED",
+                              },
+                            },
+                          };
+                        }
+                        return {
+                          lhr: {
+                            userAgent: "Chrome/143.0.7499.4",
+                            requestedUrl: url,
+                            finalUrl: url,
+                            finalDisplayedUrl: url,
+                            runtimeError: null,
+                          },
+                        };
+                      },
+                      defaultConfig: {},
+                    };
+                  }
+                  return originalLoad.apply(this, arguments);
+                };
+                global.setTimeout = (fn) => {
+                  fn();
+                  return 0;
+                };
+
+                (async () => {
+                  try {
+                    const matrix = await api.runBrowserMatrixDiagnostic({
+                      auditUrl: "http://user:pass@example.test/path?foo=1&swcleared=1#frag",
+                      tempDir,
+                      chromePath: "/fake/current-chrome",
+                    });
+
+                    assert.strictEqual(matrix.exitCode, 1);
+                    assert.strictEqual(matrix.cases.length, 4);
+                    assert.strictEqual(matrix.variants.length, 4);
+                    assert.ok(matrix.auditUrl.includes("swcleared=1"));
+                    assert.ok(!matrix.auditUrl.includes("user:pass@"));
+                    assert.strictEqual(matrix.cases[0].captureStrace, true);
+                    assert.strictEqual(matrix.cases[1].captureStrace, true);
+                    assert.strictEqual(matrix.cases[2].captureStrace, false);
+                    assert.strictEqual(matrix.cases[3].captureStrace, false);
+                    assert.ok(matrix.cases[0].directNavigation.exitCode === 0);
+                    assert.ok(matrix.cases[1].directNavigation.exitCode === 1);
+                    assert.ok(matrix.cases[2].lighthouse.exitCode === 1);
+                    assert.ok(matrix.cases[3].lighthouse.exitCode === 0);
+                    assert.ok(matrix.environment.platform);
+                    assert.ok(matrix.environment.arch);
+                    assert.ok(matrix.environment.nodeVersion);
+
+                    assert.strictEqual(launchCalls.length, 8);
+                    const launchPaths = launchCalls.map((entry) => entry.options.executablePath);
+                    assert.ok(launchPaths.some((entry) => String(entry).includes("direct-launcher.cjs")));
+                    assert.ok(launchPaths.some((entry) => String(entry).includes("lighthouse-launcher.cjs")));
+                    assert.ok(launchCalls.every((entry) => entry.options.args.some((arg) => String(arg).startsWith("--log-net-log="))));
+
+                    const directProfiles = launchCalls
+                      .filter((entry) => entry.kind === "puppeteer")
+                      .filter((entry) => String(entry.options.userDataDir || "").includes("direct-profile"))
+                      .map((entry) => entry.options.userDataDir);
+                    const lighthouseProfiles = launchCalls
+                      .filter((entry) => entry.kind === "puppeteer")
+                      .filter((entry) => String(entry.options.userDataDir || "").includes("lighthouse-profile"))
+                      .map((entry) => entry.options.userDataDir);
+                    assert.strictEqual(new Set(directProfiles).size, 4);
+                    assert.strictEqual(new Set(lighthouseProfiles).size, 4);
+
+                    const jsonPath = path.join(tempDir, "browser-matrix-linux.json");
+                    const logPath = path.join(tempDir, "browser-matrix-linux.log");
+                    assert.ok(fs.existsSync(jsonPath));
+                    assert.ok(fs.existsSync(logPath));
+                    const jsonText = fs.readFileSync(jsonPath, "utf8");
+                    const logText = fs.readFileSync(logPath, "utf8");
+                    assert.ok(jsonText.includes('"id": "V1"'));
+                    assert.ok(jsonText.includes('"id": "V4"'));
+                    assert.ok(jsonText.includes('"variants"'));
+                    assert.ok(logText.includes("browser-matrix-case-start"));
+                    assert.ok(logText.includes("browser-matrix-case-complete"));
+
+                    for (const caseSummary of matrix.cases) {
+                      assert.ok(fs.existsSync(caseSummary.artifacts.prelaunchSnapshotPath));
+                      assert.ok(fs.existsSync(caseSummary.artifacts.directSnapshotPath));
+                      assert.ok(fs.existsSync(caseSummary.artifacts.lighthouseSnapshotPath));
+                      assert.ok(fs.existsSync(caseSummary.artifacts.straceSummaryPath));
+                      assert.ok(caseSummary.prelaunchSnapshot);
+                      assert.ok(caseSummary.directNavigation);
+                      assert.ok(caseSummary.lighthouse);
+                    }
+
+                    const straceWrappers = [
+                      path.join(tempDir, "browser-matrix-linux", "V1", "direct-launcher.cjs"),
+                      path.join(tempDir, "browser-matrix-linux", "V1", "lighthouse-launcher.cjs"),
+                      path.join(tempDir, "browser-matrix-linux", "V2", "direct-launcher.cjs"),
+                      path.join(tempDir, "browser-matrix-linux", "V2", "lighthouse-launcher.cjs"),
+                    ];
+                    for (const filePath of straceWrappers) {
+                      assert.ok(fs.existsSync(filePath));
+                      assert.ok(fs.readFileSync(filePath, "utf8").includes("strace"));
+                    }
+                  } finally {
+                    Module._load = originalLoad;
+                    global.setTimeout = originalSetTimeout;
+                    if (originalEnv === undefined) {
+                      delete process.env.LHCI_BROWSER_MATRIX_DIAGNOSTIC;
+                    } else {
+                      process.env.LHCI_BROWSER_MATRIX_DIAGNOSTIC = originalEnv;
+                    }
+                    if (originalV2Path === undefined) {
+                      delete process.env.LHCI_BROWSER_MATRIX_V2_PATH;
+                    } else {
+                      process.env.LHCI_BROWSER_MATRIX_V2_PATH = originalV2Path;
+                    }
+                    if (originalV3Path === undefined) {
+                      delete process.env.LHCI_BROWSER_MATRIX_V3_PATH;
+                    } else {
+                      process.env.LHCI_BROWSER_MATRIX_V3_PATH = originalV3Path;
+                    }
+                    if (originalV4Path === undefined) {
+                      delete process.env.LHCI_BROWSER_MATRIX_V4_PATH;
+                    } else {
+                      process.env.LHCI_BROWSER_MATRIX_V4_PATH = originalV4Path;
                     }
                   }
                 })().catch((error) => {

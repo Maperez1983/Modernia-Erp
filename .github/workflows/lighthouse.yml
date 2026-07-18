@@ -88,3 +88,131 @@ jobs:
             ${{ env.LHCI_TMPDIR }}/lighthouse-diagnostic-matrix/**/chrome-stderr*.log
             ${{ env.LHCI_TMPDIR }}/lighthouse-diagnostic-matrix/**/navigation-diagnostic.log
           if-no-files-found: error
+
+  browser-matrix-diagnostic:
+    name: Browser matrix diagnostic
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    env:
+      LHCI_TMPDIR: ${{ github.workspace }}/browser-matrix-artifacts
+      LHCI_BROWSER_MATRIX_DIAGNOSTIC: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.11"
+
+      - name: Install Python dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Ensure strace is available
+        run: |
+          if ! command -v strace >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y strace
+          fi
+
+      - name: Resolve current Chromium path
+        run: |
+          CHROME_PATH=$(python - <<'PY'
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              print(p.chromium.executable_path)
+          PY
+          )
+          echo "CHROME_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
+          echo "LHCI_BROWSER_MATRIX_V1_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
+
+      - name: Resolve Chrome stable path
+        run: |
+          CHROME_STABLE_PATH=$(command -v google-chrome || command -v google-chrome-stable || true)
+          if [ -z "$CHROME_STABLE_PATH" ]; then
+            echo "::error::No se encontró Google Chrome estable en el runner."
+            exit 1
+          fi
+          echo "LHCI_BROWSER_MATRIX_V2_PATH=$CHROME_STABLE_PATH" >> "$GITHUB_ENV"
+          "$CHROME_STABLE_PATH" --version || true
+
+      - name: Install previous Chromium for diagnostics
+        run: |
+          V3_VENV="$RUNNER_TEMP/playwright-154"
+          python -m venv "$V3_VENV"
+          "$V3_VENV/bin/pip" install playwright==1.54.0
+          "$V3_VENV/bin/python" -m playwright install chromium
+          V3_PATH=$("$V3_VENV/bin/python" - <<'PY'
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as p:
+              print(p.chromium.executable_path)
+          PY
+          )
+          if [ -z "$V3_PATH" ]; then
+            echo "::error::No se pudo resolver el Chromium anterior para la matriz de navegadores."
+            exit 1
+          fi
+          echo "LHCI_BROWSER_MATRIX_V3_PATH=$V3_PATH" >> "$GITHUB_ENV"
+          "$V3_PATH" --version || true
+
+      - name: Resolve alternate browser path
+        run: |
+          V4_PATH=$(command -v google-chrome-beta || command -v google-chrome-unstable || command -v chromium || command -v chromium-browser || true)
+          if [ -z "$V4_PATH" ]; then
+            python -m playwright install chrome-beta
+            V4_PATH=$(python - <<'PY'
+          import os
+          import stat
+          from pathlib import Path
+
+          cache_root = Path.home() / ".cache" / "ms-playwright"
+          candidates = []
+          for pattern in ("**/chrome-beta*/chrome", "**/chrome_beta*/chrome", "**/chrome-*/chrome"):
+              candidates.extend(cache_root.glob(pattern))
+          for candidate in candidates:
+              try:
+                  if candidate.is_file() and os.access(candidate, os.X_OK):
+                      print(candidate)
+                      raise SystemExit(0)
+              except Exception:
+                  continue
+          raise SystemExit(1)
+          PY
+            )
+          fi
+          if [ -z "$V4_PATH" ]; then
+            echo "::error::No se pudo resolver un navegador alternativo para la matriz."
+            exit 1
+          fi
+          echo "LHCI_BROWSER_MATRIX_V4_PATH=$V4_PATH" >> "$GITHUB_ENV"
+          "$V4_PATH" --version || true
+
+      - name: Run Browser matrix diagnostics
+        run: npm run lighthouse
+
+      - name: Upload Browser matrix diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-matrix-diagnostics
+          path: |
+            ${{ env.LHCI_TMPDIR }}/browser-matrix-linux.json
+            ${{ env.LHCI_TMPDIR }}/browser-matrix-linux.log
+            ${{ env.LHCI_TMPDIR }}/lighthouse-server.log
+            ${{ env.LHCI_TMPDIR }}/lighthouse-server-observations.jsonl
+            ${{ env.LHCI_TMPDIR }}/browser-matrix-linux
+          if-no-files-found: error
