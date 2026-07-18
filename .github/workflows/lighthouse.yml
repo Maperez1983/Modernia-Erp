@@ -65,16 +65,18 @@ jobs:
           path: ${{ env.LHCI_TMPDIR }}/lighthouse-results
           if-no-files-found: error
 
-      - name: Run Lighthouse diagnostics
+      - name: Run Lighthouse diagnostic matrix
         if: failure()
         env:
-          LHCI_DIAGNOSTIC: 1
+          LHCI_DIAGNOSTIC_MATRIX: 1
         run: npm run lighthouse
 
-      - name: Upload Lighthouse diagnostics
+      - name: Upload Lighthouse diagnostic matrix
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: lighthouse-diagnostics
-          path: ${{ env.LHCI_TMPDIR }}/navigation-diagnostic.log
+          name: lighthouse-diagnostic-matrix
+          path: |
+            ${{ env.LHCI_TMPDIR }}/lighthouse-diagnostic-matrix.json
+            ${{ env.LHCI_TMPDIR }}/lighthouse-diagnostic-matrix.log
           if-no-files-found: error

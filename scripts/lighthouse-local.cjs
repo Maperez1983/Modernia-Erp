@@ -762,7 +762,7 @@ function runCurlDiagnostic(url, timeoutSeconds, recorder) {
   return summary;
 }
 
-async function runBrowserDiagnostic(url, chromePath, tempDir, recorder) {
+async function runBrowserDiagnostic(url, chromePath, tempDir, recorder, options = {}) {
   let puppeteer = null;
   try {
     puppeteer = require('puppeteer-core');
@@ -782,25 +782,16 @@ async function runBrowserDiagnostic(url, chromePath, tempDir, recorder) {
     return null;
   }
 
-  const flags = [
-    '--no-sandbox',
-    '--disable-crashpad-for-testing',
-    '--disable-dev-shm-usage',
-    '--disable-background-networking',
-    '--disable-breakpad',
-    '--disable-client-side-phishing-detection',
-    '--disable-component-update',
-    '--disable-default-apps',
-    '--disable-extensions',
-    '--disable-popup-blocking',
-    '--disable-renderer-backgrounding',
-    '--mute-audio',
-    '--disable-gpu',
-  ];
+  const flags = Array.isArray(options.flags) && options.flags.length ? options.flags : getDiagnosticChromeFlags();
+  const profileDir = options.profileDir ? path.resolve(options.profileDir) : '';
+  const captureLifecycleEvents = Boolean(options.includeLifecycleEvents);
+  const startedAt = Date.now();
 
   recorder?.record('browser-start', {
     url,
     flags,
+    profileDir,
+    executablePath: chromePath,
   });
 
   let browser;
@@ -809,6 +800,7 @@ async function runBrowserDiagnostic(url, chromePath, tempDir, recorder) {
       executablePath: chromePath,
       headless: true,
       args: flags,
+      ...(profileDir ? {userDataDir: profileDir} : {}),
     });
   } catch (error) {
     console.log(`[lighthouse][diag] puppeteer.launch error: ${error?.stack || error?.message || error}`);
@@ -824,9 +816,23 @@ async function runBrowserDiagnostic(url, chromePath, tempDir, recorder) {
     const page = await browser.newPage();
     const initialUrl = url;
     const sanitizedInitialUrl = sanitizeDiagnosticUrl(initialUrl);
+    const browserProcess = browser.process ? browser.process() : null;
+    const browserPid = browserProcess && typeof browserProcess.pid === 'number' ? browserProcess.pid : null;
+    let browserVersion = '';
+    try {
+      browserVersion = sanitizeDiagnosticText(await browser.version());
+    } catch {}
+    const getPageUrl = () => {
+      try {
+        return page.url();
+      } catch {
+        return '';
+      }
+    };
     let mainNavigationRequestEntry = null;
     let mainNavigationResponseEntry = null;
     let mainNavigationFailureEntry = null;
+    let lifecycleEvents = [];
     browser.on('targetchanged', (target) => {
       const entry = sanitizeDiagnosticValue({
         targetType: target.type(),
@@ -834,6 +840,47 @@ async function runBrowserDiagnostic(url, chromePath, tempDir, recorder) {
       });
       recorder?.record('targetchanged', entry);
     });
+    if (captureLifecycleEvents) {
+      browser.on('disconnected', () => {
+        const entry = recorder?.record('browser-disconnected', {
+          phase: 'browser',
+          url: sanitizeDiagnosticUrl(getPageUrl()),
+          browserPid,
+        });
+        lifecycleEvents.push(entry);
+      });
+      page.on('domcontentloaded', () => {
+        const entry = recorder?.record('domcontentloaded', {
+          url: sanitizeDiagnosticUrl(getPageUrl()),
+          isMainFrame: true,
+        });
+        lifecycleEvents.push(entry);
+      });
+      page.on('load', () => {
+        const entry = recorder?.record('load', {
+          url: sanitizeDiagnosticUrl(getPageUrl()),
+          isMainFrame: true,
+        });
+        lifecycleEvents.push(entry);
+      });
+      page.on('close', () => {
+        const entry = recorder?.record('close', {
+          phase: 'page',
+          url: sanitizeDiagnosticUrl(getPageUrl()),
+          browserPid,
+        });
+        lifecycleEvents.push(entry);
+      });
+      page.on('error', (error) => {
+        const entry = recorder?.record('crash', {
+          message: error?.message || String(error || 'Unknown page crash'),
+          stack: error?.stack || '',
+          url: sanitizeDiagnosticUrl(getPageUrl()),
+          browserPid,
+        });
+        lifecycleEvents.push(entry);
+      });
+    }
     page.on('request', (request) => {
       const entry = sanitizeDiagnosticValue(describeRequestEvent(request));
       recorder?.record('request', entry);
@@ -958,6 +1005,12 @@ async function runBrowserDiagnostic(url, chromePath, tempDir, recorder) {
       failureErrorText: sanitizeDiagnosticText(
         mainNavigationFailureEntry?.errorText || navigationError?.message || ''
       ),
+      browserPid,
+      browserVersion,
+      profileDir,
+      flags,
+      launchDurationMs: Date.now() - startedAt,
+      lifecycleEvents: lifecycleEvents.filter(Boolean),
     };
     recorder?.record('browser-summary', summary);
     if (
@@ -973,6 +1026,12 @@ async function runBrowserDiagnostic(url, chromePath, tempDir, recorder) {
       initialUrl: sanitizedInitialUrl,
       finalUrl: sanitizedFinalUrl,
       navigationResponse: navigationResponse ? sanitizeDiagnosticUrl(navigationResponse.url()) : '',
+      browserPid,
+      browserVersion,
+      profileDir,
+      flags,
+      launchDurationMs: Date.now() - startedAt,
+      exitCode: mainNavigationFailureEntry || navigationError ? 1 : 0,
     };
   } catch (error) {
     const entry = sanitizeDiagnosticValue({
@@ -1020,6 +1079,370 @@ async function runPreLhciDiagnostics({auditUrl, tempDir, chromePath}) {
     curlStatus: curlResult.code,
     finalUrl: curlResult.effectiveUrl,
   });
+}
+
+function getDiagnosticChromeFlags() {
+  return [
+    '--no-sandbox',
+    '--disable-crashpad-for-testing',
+    '--disable-dev-shm-usage',
+    '--disable-background-networking',
+    '--disable-breakpad',
+    '--disable-client-side-phishing-detection',
+    '--disable-component-update',
+    '--disable-default-apps',
+    '--disable-extensions',
+    '--disable-popup-blocking',
+    '--disable-renderer-backgrounding',
+    '--mute-audio',
+    '--disable-gpu',
+  ];
+}
+
+function isTruthyEnvFlag(value) {
+  return String(value || '').trim() === '1';
+}
+
+function isDiagnosticMatrixEnabled() {
+  return isTruthyEnvFlag(process.env.LHCI_DIAGNOSTIC_MATRIX);
+}
+
+function buildDiagnosticMatrixCases(auditUrl) {
+  const rootUrl = new URL(auditUrl);
+  rootUrl.searchParams.delete('swcleared');
+
+  const probeUrl = new URL('/kiosk', auditUrl);
+  probeUrl.searchParams.delete('swcleared');
+
+  return [
+    {
+      id: 'A',
+      label: 'app-root-without-swcleared',
+      url: rootUrl.toString(),
+    },
+    {
+      id: 'B',
+      label: 'app-root-with-swcleared',
+      url: ensureSwClearedUrl(auditUrl, 0),
+    },
+    {
+      id: 'C',
+      label: 'probe-without-swcleared',
+      url: probeUrl.toString(),
+    },
+    {
+      id: 'D',
+      label: 'probe-with-swcleared',
+      url: ensureSwClearedUrl(probeUrl.toString(), 0),
+    },
+  ];
+}
+
+function createJsonlArtifactRecorder(filePath) {
+  fs.mkdirSync(path.dirname(filePath), {recursive: true});
+  try {
+    fs.writeFileSync(filePath, '');
+  } catch {}
+
+  let seq = 0;
+  const startedAt = Date.now();
+
+  const record = (event, data = {}) => {
+    const sanitizedData = sanitizeDiagnosticValue(data);
+    const entry = {
+      seq: ++seq,
+      ts: new Date().toISOString(),
+      elapsedMs: Date.now() - startedAt,
+      event,
+      ...sanitizedData,
+    };
+    try {
+      fs.appendFileSync(filePath, `${JSON.stringify(entry)}\n`);
+    } catch (error) {
+      console.log(
+        `[lighthouse][diag] no se pudo escribir ${filePath}: ${error?.stack || error?.message || error}`
+      );
+    }
+    return entry;
+  };
+
+  return {
+    filePath,
+    record,
+    startedAt,
+  };
+}
+
+async function runLighthouseMatrixAudit({url, chromePath, userDataDir, flags, recorder}) {
+  let puppeteer = null;
+  try {
+    puppeteer = require('puppeteer-core');
+  } catch (error) {
+    const summary = {
+      url: sanitizeDiagnosticUrl(url),
+      pid: null,
+      port: null,
+      userDataDir,
+      chromePath,
+      flags: [...flags, '--headless=new'],
+      durationMs: 0,
+      error: sanitizeDiagnosticText(error?.message || String(error || 'Unknown require error')),
+      exitCode: 1,
+    };
+    recorder?.record('lighthouse-error', {
+      phase: 'require',
+      ...summary,
+    });
+    return summary;
+  }
+  const lighthouseModule = require('lighthouse');
+  const lighthouse = lighthouseModule.default || lighthouseModule;
+  const defaultConfig = lighthouseModule.defaultConfig || undefined;
+  const startedAt = Date.now();
+  const launchFlags = [...flags, '--headless=new'];
+  let browser = null;
+  let port = null;
+  try {
+    browser = await puppeteer.launch({
+      executablePath: chromePath,
+      headless: true,
+      args: launchFlags,
+      userDataDir,
+    });
+    const wsEndpoint = typeof browser.wsEndpoint === 'function' ? browser.wsEndpoint() : '';
+    try {
+      port = Number(new URL(wsEndpoint).port) || null;
+    } catch {
+      port = null;
+    }
+    if (!port) {
+      throw new Error('No se pudo derivar el puerto DevTools de Puppeteer para Lighthouse.');
+    }
+  } catch (error) {
+    const summary = {
+      url: sanitizeDiagnosticUrl(url),
+      pid: null,
+      port,
+      userDataDir,
+      chromePath,
+      flags: launchFlags,
+      durationMs: Date.now() - startedAt,
+      error: sanitizeDiagnosticText(error?.message || String(error || 'Unknown chrome launch error')),
+      exitCode: 1,
+    };
+    recorder?.record('lighthouse-error', {
+      phase: 'launch',
+      ...summary,
+    });
+    if (browser) {
+      try {
+        await browser.close();
+      } catch {}
+    }
+    return summary;
+  }
+  recorder?.record('lighthouse-launch', {
+    url: sanitizeDiagnosticUrl(url),
+    pid: browser?.process ? (browser.process() ? browser.process().pid || null : null) : null,
+    port,
+    userDataDir,
+    chromePath,
+    flags: launchFlags,
+  });
+
+  try {
+    const runnerResult = await lighthouse(
+      url,
+      {
+        port,
+        logLevel: 'error',
+        output: 'json',
+      },
+      defaultConfig
+    );
+    const runtimeError = runnerResult?.lhr?.runtimeError || null;
+    const summary = {
+      url: sanitizeDiagnosticUrl(url),
+      pid: browser?.process ? (browser.process() ? browser.process().pid || null : null) : null,
+      port,
+      userDataDir,
+      chromePath,
+      flags: launchFlags,
+      durationMs: Date.now() - startedAt,
+      browserVersion: String(runnerResult?.lhr?.userAgent || ''),
+      requestedUrl: sanitizeDiagnosticUrl(runnerResult?.lhr?.requestedUrl || url || ''),
+      finalUrl: sanitizeDiagnosticUrl(runnerResult?.lhr?.finalUrl || ''),
+      finalDisplayedUrl: sanitizeDiagnosticUrl(runnerResult?.lhr?.finalDisplayedUrl || ''),
+      runtimeError: runtimeError
+        ? {
+            code: runtimeError.code || '',
+            message: runtimeError.message || '',
+          }
+        : null,
+      exitCode: runtimeError ? 1 : 0,
+    };
+    recorder?.record('lighthouse-summary', summary);
+    return summary;
+  } catch (error) {
+    const summary = {
+      url: sanitizeDiagnosticUrl(url),
+      pid: browser?.process ? (browser.process() ? browser.process().pid || null : null) : null,
+      port,
+      userDataDir,
+      chromePath,
+      flags: launchFlags,
+      durationMs: Date.now() - startedAt,
+      error: sanitizeDiagnosticText(error?.message || String(error || 'Unknown lighthouse error')),
+      exitCode: 1,
+    };
+    recorder?.record('lighthouse-error', summary);
+    return summary;
+  } finally {
+    try {
+      await browser?.close();
+    } catch (error) {
+      recorder?.record('lighthouse-error', {
+        url: sanitizeDiagnosticUrl(url),
+        userDataDir,
+        chromePath,
+        error: sanitizeDiagnosticText(error?.message || String(error || 'Unknown chrome close error')),
+      });
+    }
+  }
+}
+
+async function runDiagnosticMatrix({auditUrl, tempDir, chromePath}) {
+  const logPath = path.join(tempDir, 'lighthouse-diagnostic-matrix.log');
+  const jsonPath = path.join(tempDir, 'lighthouse-diagnostic-matrix.json');
+  const recorder = createJsonlArtifactRecorder(logPath);
+  const matrix = {
+    generatedAt: new Date().toISOString(),
+    auditUrl: sanitizeDiagnosticUrl(auditUrl),
+    chromePath: sanitizeDiagnosticText(chromePath || ''),
+    cases: [],
+    exitCode: 0,
+    logPath,
+    jsonPath,
+  };
+  const cases = buildDiagnosticMatrixCases(auditUrl);
+  const baseFlags = getDiagnosticChromeFlags();
+
+  const writeSummary = () => {
+    try {
+      fs.writeFileSync(jsonPath, `${JSON.stringify(matrix, null, 2)}\n`);
+    } catch (error) {
+      console.log(
+        `[lighthouse][diag] no se pudo escribir ${jsonPath}: ${error?.stack || error?.message || error}`
+      );
+    }
+  };
+
+  recorder.record('matrix-start', {
+    auditUrl,
+    chromePath,
+    cases: cases.map((item) => ({id: item.id, label: item.label, url: item.url})),
+  });
+  writeSummary();
+
+  for (const matrixCase of cases) {
+    const caseDir = path.join(tempDir, 'lighthouse-diagnostic-matrix', matrixCase.id);
+    const directProfileDir = path.join(caseDir, 'direct-profile');
+    const lighthouseProfileDir = path.join(caseDir, 'lighthouse-profile');
+    fs.mkdirSync(directProfileDir, {recursive: true});
+    fs.mkdirSync(lighthouseProfileDir, {recursive: true});
+
+    const caseSummary = {
+      id: matrixCase.id,
+      label: matrixCase.label,
+      url: sanitizeDiagnosticUrl(matrixCase.url),
+      profiles: {
+        direct: directProfileDir,
+        lighthouse: lighthouseProfileDir,
+      },
+      directNavigation: null,
+      lighthouse: null,
+      exitCode: 0,
+    };
+
+    recorder.record('case-start', {
+      id: matrixCase.id,
+      label: matrixCase.label,
+      url: matrixCase.url,
+      profiles: caseSummary.profiles,
+    });
+
+    const directStartedAt = Date.now();
+    const directResult = await runBrowserDiagnostic(
+      matrixCase.url,
+      chromePath,
+      tempDir,
+      {
+        record: (event, data) =>
+          recorder.record(`case-${matrixCase.id}-direct-${event}`, data),
+        diagnosticPath: path.join(caseDir, 'navigation-diagnostic.log'),
+      },
+      {
+        profileDir: directProfileDir,
+        flags: baseFlags,
+        waitMs: 4000,
+        includeLifecycleEvents: true,
+      }
+    );
+    caseSummary.directNavigation = directResult
+      ? {
+          ...directResult,
+          durationMs: Date.now() - directStartedAt,
+          exitCode: directResult.exitCode || 0,
+        }
+      : {
+          exitCode: 1,
+          durationMs: Date.now() - directStartedAt,
+          error: 'direct navigation failed',
+        };
+    if (caseSummary.directNavigation.exitCode !== 0) {
+      matrix.exitCode = 1;
+    }
+
+    const lighthouseResult = await runLighthouseMatrixAudit({
+      url: matrixCase.url,
+      chromePath,
+      userDataDir: lighthouseProfileDir,
+      flags: baseFlags,
+      recorder: {
+        record: (event, data) => recorder.record(`case-${matrixCase.id}-lighthouse-${event}`, data),
+      },
+    });
+    caseSummary.lighthouse = lighthouseResult;
+    if ((lighthouseResult && lighthouseResult.exitCode) || !lighthouseResult || lighthouseResult.error) {
+      matrix.exitCode = 1;
+      if (caseSummary.lighthouse && typeof caseSummary.lighthouse.exitCode !== 'number') {
+        caseSummary.lighthouse.exitCode = 1;
+      }
+    }
+
+    caseSummary.exitCode =
+      Number(caseSummary.directNavigation?.exitCode || 0) ||
+      Number(caseSummary.lighthouse?.exitCode || 0) ||
+      0;
+    if (caseSummary.exitCode !== 0) {
+      matrix.exitCode = 1;
+    }
+
+    matrix.cases.push(caseSummary);
+    recorder.record('case-complete', {
+      id: matrixCase.id,
+      label: matrixCase.label,
+      exitCode: caseSummary.exitCode,
+    });
+    writeSummary();
+  }
+
+  recorder.record('matrix-complete', {
+    exitCode: matrix.exitCode,
+    cases: matrix.cases.length,
+  });
+  writeSummary();
+  return matrix;
 }
 
 function describeStatus(result) {
@@ -1413,6 +1836,7 @@ function runCommand(command, args, env, options = {}) {
   const auditUrl = ensureSwClearedUrl(rawAuditUrl, port);
   const chromePath = resolveChromePath();
   const diagnosticsEnabled = String(process.env.LHCI_DIAGNOSTIC || '').trim() === '1';
+  const matrixEnabled = isDiagnosticMatrixEnabled();
   const localOrigin = new URL(`http://127.0.0.1:${port}/`).origin;
   const auditOrigin = new URL(auditUrl).origin;
   const useExternalBaseUrl = Boolean(String(process.env.LHCI_BASE_URL || '').trim()) && auditOrigin !== localOrigin;
@@ -1519,6 +1943,18 @@ function runCommand(command, args, env, options = {}) {
         ? `[lighthouse] destino externo listo tras ${Math.ceil(ready.elapsedMs / 1000)}s y ${ready.attempt} comprobaciones.`
         : `[lighthouse] servidor listo tras ${Math.ceil(ready.elapsedMs / 1000)}s y ${ready.attempt} comprobaciones.`
     );
+
+    if (matrixEnabled) {
+      console.log('[lighthouse] Lighthouse diagnostic matrix enabled.');
+      const matrix = await runDiagnosticMatrix({auditUrl, tempDir, chromePath});
+      console.log(
+        `[lighthouse] Lighthouse diagnostic matrix completed with exit code ${matrix.exitCode}.`
+      );
+      if (matrix.exitCode !== 0) {
+        throw new Error(`Lighthouse diagnostic matrix failed with exit code ${matrix.exitCode}`);
+      }
+      return;
+    }
 
     if (diagnosticsEnabled) {
       console.log('[lighthouse] Pre-LHCI diagnostics enabled.');

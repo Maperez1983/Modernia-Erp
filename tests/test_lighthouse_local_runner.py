@@ -75,7 +75,10 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
             def log_message(self, format, *args):
                 return
 
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        try:
+            server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        except PermissionError as exc:
+            raise unittest.SkipTest(f"no se puede abrir un puerto local en este entorno: {exc}") from exc
         server.daemon_threads = True
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -90,22 +93,25 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
             "- name: Upload Lighthouse artifacts",
             1,
         )[0]
-        diagnostics_block = LIGHTHOUSE_WORKFLOW.split("- name: Run Lighthouse diagnostics", 1)[1].split(
-            "- name: Upload Lighthouse diagnostics",
+        diagnostics_block = LIGHTHOUSE_WORKFLOW.split("- name: Run Lighthouse diagnostic matrix", 1)[1].split(
+            "- name: Upload Lighthouse diagnostic matrix",
             1,
         )[0]
         results_upload_block = LIGHTHOUSE_WORKFLOW.split("- name: Upload Lighthouse artifacts", 1)[1].split(
-            "- name: Run Lighthouse diagnostics",
+            "- name: Run Lighthouse diagnostic matrix",
             1,
         )[0]
+        matrix_upload_block = LIGHTHOUSE_WORKFLOW.split("- name: Upload Lighthouse diagnostic matrix", 1)[1]
 
         assert "LHCI_DIAGNOSTIC: 1" not in measured_block
+        assert "LHCI_DIAGNOSTIC_MATRIX: 1" not in measured_block
         assert "if: failure()" in diagnostics_block
-        assert "LHCI_DIAGNOSTIC: 1" in diagnostics_block
+        assert "LHCI_DIAGNOSTIC_MATRIX: 1" in diagnostics_block
         assert "if: always()" in results_upload_block
         assert "${{ env.LHCI_TMPDIR }}/lighthouse-results" in results_upload_block
         assert "navigation-diagnostic.log" not in results_upload_block
-        assert "${{ env.LHCI_TMPDIR }}/navigation-diagnostic.log" in LIGHTHOUSE_WORKFLOW
+        assert "lighthouse-diagnostic-matrix.json" in matrix_upload_block
+        assert "lighthouse-diagnostic-matrix.log" in matrix_upload_block
 
     def test_package_json_declares_puppeteer_core(self):
         package_json = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
@@ -1206,6 +1212,266 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                   } finally {
                     console.warn = originalWarn;
                     Module._load = originalLoad;
+                  }
+                })().catch((error) => {
+                  console.error(error && error.stack ? error.stack : error);
+                  process.exit(1);
+                });
+                """
+            )
+            .replace("__SOURCE__", json.dumps(chunk))
+        )
+        run_node_script(script)
+
+    def test_diagnostic_matrix_mode_is_disabled_by_default_and_builds_four_cases(self):
+        chunk = extract_chunk("const DIAGNOSTIC_REDACTED_VALUE", "function describeStatus")
+        script = (
+            dedent(
+                """
+                const assert = require("assert");
+                const source = [
+                  'const { StringDecoder } = require("node:string_decoder");',
+                  'const { ensureSwClearedUrl } = require("./scripts/lighthouse-url.cjs");',
+                  __SOURCE__,
+                ].join("\\n");
+                const factory = new Function(source + "\\nreturn { isTruthyEnvFlag, isDiagnosticMatrixEnabled, buildDiagnosticMatrixCases };");
+                const api = factory();
+                const originalEnv = process.env.LHCI_DIAGNOSTIC_MATRIX;
+
+                try {
+                  delete process.env.LHCI_DIAGNOSTIC_MATRIX;
+                  assert.strictEqual(api.isTruthyEnvFlag(process.env.LHCI_DIAGNOSTIC_MATRIX), false);
+                  assert.strictEqual(api.isDiagnosticMatrixEnabled(), false);
+                  process.env.LHCI_DIAGNOSTIC_MATRIX = "1";
+                  assert.strictEqual(api.isDiagnosticMatrixEnabled(), true);
+
+                  const cases = api.buildDiagnosticMatrixCases("http://user:pass@example.test/path?foo=1&swcleared=1#frag");
+                  assert.deepStrictEqual(cases.map((item) => item.id), ["A", "B", "C", "D"]);
+                  assert.strictEqual(cases[0].url, "http://user:pass@example.test/path?foo=1#frag");
+                  assert.strictEqual(cases[1].url, "http://user:pass@example.test/path?foo=1&swcleared=1#frag");
+                  assert.strictEqual(cases[2].url, "http://user:pass@example.test/kiosk");
+                  assert.strictEqual(cases[3].url, "http://user:pass@example.test/kiosk?swcleared=1");
+                } finally {
+                  if (originalEnv === undefined) {
+                    delete process.env.LHCI_DIAGNOSTIC_MATRIX;
+                  } else {
+                    process.env.LHCI_DIAGNOSTIC_MATRIX = originalEnv;
+                  }
+                }
+                """
+            )
+            .replace("__SOURCE__", json.dumps(chunk))
+        )
+        run_node_script(script)
+
+    def test_diagnostic_matrix_runs_all_cases_and_writes_artifacts_with_independent_profiles(self):
+        chunk = extract_chunk("const DIAGNOSTIC_REDACTED_VALUE", "function describeStatus")
+        script = (
+            dedent(
+                """
+                const assert = require("assert");
+                const fs = require("fs");
+                const os = require("os");
+                const path = require("path");
+                const Module = require("module");
+                const {EventEmitter} = require("events");
+                const source = [
+                  'const { StringDecoder } = require("node:string_decoder");',
+                  'const { ensureSwClearedUrl } = require("./scripts/lighthouse-url.cjs");',
+                  __SOURCE__,
+                ].join("\\n");
+                const factory = new Function(
+                  "require",
+                  "fs",
+                  "path",
+                  "Module",
+                  "EventEmitter",
+                  "process",
+                  "console",
+                  "setTimeout",
+                  source + "\\nreturn { runDiagnosticMatrix, buildDiagnosticMatrixCases };"
+                );
+                const api = factory(require, fs, path, Module, EventEmitter, process, console, setTimeout);
+
+                const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "lhci-matrix-"));
+                const launchCalls = [];
+                const lighthouseCalls = [];
+                const originalLoad = Module._load;
+                const originalSetTimeout = global.setTimeout;
+                const originalEnv = process.env.LHCI_DIAGNOSTIC_MATRIX;
+                process.env.LHCI_DIAGNOSTIC_MATRIX = "1";
+
+                const makeRequest = (url, failed = false) => ({
+                  url: () => url,
+                  method: () => "GET",
+                  resourceType: () => "document",
+                  isNavigationRequest: () => true,
+                  frame: () => ({url: () => "about:blank"}),
+                  redirectChain: () => [],
+                  failure: () => (failed ? {errorText: "net::ERR_ABORTED"} : {}),
+                });
+                const makeResponse = (url) => ({
+                  request: () => makeRequest(url),
+                  headers: () => ({
+                    "content-type": "text/html; charset=utf-8",
+                    "content-length": "12",
+                  }),
+                  status: () => 200,
+                  url: () => url,
+                  fromCache: () => false,
+                });
+                const makeBrowser = (launchOptions) => {
+                  const browser = new EventEmitter();
+                  const page = new EventEmitter();
+                  let currentUrl = "about:blank";
+                  page.url = () => currentUrl;
+                  page.mainFrame = () => ({url: () => currentUrl, name: () => ""});
+                  page.goto = async (url) => {
+                    currentUrl = url;
+                    page.emit("request", makeRequest(url, launchOptions.userDataDir.includes("/B/")));
+                    page.emit("domcontentloaded");
+                    if (launchOptions.userDataDir.includes("/B/")) {
+                      page.emit("requestfailed", makeRequest(url, true));
+                      throw new Error("net::ERR_ABORTED");
+                    }
+                    page.emit("response", makeResponse(url));
+                    page.emit("framenavigated", {url: () => url, name: () => ""});
+                    page.emit("console", {type: () => "warn", text: () => "Authorization: Bearer abc Cookie: session=abc"});
+                    page.emit("pageerror", new Error("pageerror token=abc"));
+                    page.emit("load");
+                    return makeResponse(url);
+                  };
+                  browser.process = () => ({pid: launchCalls.length + 4100});
+                  browser.wsEndpoint = () => `ws://127.0.0.1:${launchCalls.length + 6100}/devtools/browser/test`;
+                  browser.version = async () => "HeadlessChrome/143.0.0.0";
+                  browser.newPage = async () => page;
+                  browser.close = async () => {
+                    page.emit("close");
+                    browser.emit("disconnected");
+                  };
+                  return browser;
+                };
+                const mockLighthouse = async (url, flags, config) => {
+                  lighthouseCalls.push({url, flags, config});
+                  if (url.includes("/kiosk") && !url.includes("swcleared=1")) {
+                    return {
+                      lhr: {
+                        userAgent: "HeadlessChrome/143.0.0.0",
+                        requestedUrl: url,
+                        finalUrl: url,
+                        finalDisplayedUrl: url,
+                        runtimeError: {
+                          code: "FAILED_DOCUMENT_REQUEST",
+                          message: "net::ERR_ABORTED",
+                        },
+                      },
+                    };
+                  }
+                  return {
+                    lhr: {
+                      userAgent: "HeadlessChrome/143.0.0.0",
+                      requestedUrl: url,
+                      finalUrl: url,
+                      finalDisplayedUrl: url,
+                      runtimeError: null,
+                    },
+                  };
+                };
+
+                Module._load = function(request, parent, isMain) {
+                  if (request === "puppeteer-core") {
+                    return {
+                      launch: async (options) => {
+                        launchCalls.push({kind: "puppeteer", options});
+                        return makeBrowser(options);
+                      },
+                    };
+                  }
+                  if (request === "chrome-launcher") {
+                    return {
+                      launch: async (options) => {
+                        launchCalls.push({kind: "chrome-launcher", options});
+                        return {
+                          pid: launchCalls.length + 5100,
+                          port: 9330 + launchCalls.length,
+                          kill: async () => {
+                            launchCalls.push({kind: "kill", options});
+                          },
+                        };
+                      },
+                    };
+                  }
+                  if (request === "lighthouse") {
+                    return {
+                      default: mockLighthouse,
+                      defaultConfig: {},
+                    };
+                  }
+                  return originalLoad.apply(this, arguments);
+                };
+                global.setTimeout = (fn) => {
+                  fn();
+                  return 0;
+                };
+
+                (async () => {
+                  try {
+                    const matrix = await api.runDiagnosticMatrix({
+                      auditUrl: "http://user:pass@example.test/path?foo=1&swcleared=1#frag",
+                      tempDir,
+                      chromePath: "/fake/chrome",
+                    });
+
+                    assert.strictEqual(matrix.exitCode, 1);
+                    assert.strictEqual(matrix.cases.length, 4);
+                    assert.ok(matrix.auditUrl.includes("swcleared=1"));
+                    assert.ok(!matrix.auditUrl.includes("user:pass@"));
+                    assert.ok(matrix.cases[0].directNavigation.exitCode === 0);
+                    assert.ok(matrix.cases[1].directNavigation.exitCode === 1);
+                    assert.ok(matrix.cases[2].lighthouse.exitCode === 1);
+                    assert.ok(matrix.cases[3].lighthouse.exitCode === 0);
+
+                    const directProfiles = launchCalls
+                      .filter((entry) => entry.kind === "puppeteer")
+                      .filter((entry) => String(entry.options.userDataDir || "").includes("direct-profile"))
+                      .map((entry) => entry.options.userDataDir);
+                    const lighthouseProfiles = launchCalls
+                      .filter((entry) => entry.kind === "puppeteer")
+                      .filter((entry) => String(entry.options.userDataDir || "").includes("lighthouse-profile"))
+                      .map((entry) => entry.options.userDataDir);
+                    assert.strictEqual(directProfiles.length, 4);
+                    assert.strictEqual(lighthouseProfiles.length, 4);
+                    assert.strictEqual(new Set(directProfiles).size, 4);
+                    assert.strictEqual(new Set(lighthouseProfiles).size, 4);
+
+                    const jsonPath = path.join(tempDir, "lighthouse-diagnostic-matrix.json");
+                    const logPath = path.join(tempDir, "lighthouse-diagnostic-matrix.log");
+                    assert.ok(fs.existsSync(jsonPath));
+                    assert.ok(fs.existsSync(logPath));
+                    const jsonText = fs.readFileSync(jsonPath, "utf8");
+                    const logText = fs.readFileSync(logPath, "utf8");
+                    assert.ok(jsonText.includes('"id": "A"'));
+                    assert.ok(jsonText.includes('"id": "B"'));
+                    assert.ok(jsonText.includes('"id": "C"'));
+                    assert.ok(jsonText.includes('"id": "D"'));
+                    assert.ok(logText.includes("case-A-direct-request"));
+                    assert.ok(logText.includes("case-B-direct-requestfailed"));
+                    assert.ok(logText.includes("case-C-lighthouse-lighthouse-summary"));
+                    assert.ok(logText.includes("case-D-lighthouse-lighthouse-summary"));
+                    assert.ok(!jsonText.includes("user:pass@"));
+                    assert.ok(!jsonText.includes("token=abc"));
+                    assert.ok(!logText.includes("user:pass@"));
+                    assert.ok(!logText.includes("token=abc"));
+                    assert.ok(logText.includes("domcontentloaded"));
+                    assert.ok(logText.includes("load"));
+                  } finally {
+                    Module._load = originalLoad;
+                    global.setTimeout = originalSetTimeout;
+                    if (originalEnv === undefined) {
+                      delete process.env.LHCI_DIAGNOSTIC_MATRIX;
+                    } else {
+                      process.env.LHCI_DIAGNOSTIC_MATRIX = originalEnv;
+                    }
                   }
                 })().catch((error) => {
                   console.error(error && error.stack ? error.stack : error);
