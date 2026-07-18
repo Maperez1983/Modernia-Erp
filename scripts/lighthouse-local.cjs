@@ -5,7 +5,9 @@ const fs = require('fs');
 const net = require('net');
 const os = require('os');
 const path = require('path');
+const {StringDecoder} = require('node:string_decoder');
 const {spawn, spawnSync} = require('child_process');
+const {ensureSwClearedUrl} = require('./lighthouse-url.cjs');
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -45,18 +47,86 @@ function resolveChromePath() {
   return undefined;
 }
 
-function ensureSwClearedUrl(rawUrl, fallbackPort) {
-  const fallback = `http://127.0.0.1:${fallbackPort}/?swcleared=1`;
-  const candidate = String(rawUrl || '').trim() || fallback;
-  try {
-    const url = new URL(candidate, fallback);
-    if (!url.searchParams.has('swcleared')) {
-      url.searchParams.set('swcleared', '1');
-    }
-    return url.toString();
-  } catch {
-    return fallback;
+function resolveSchemaSqlPath(tempDir) {
+  const localSchemaPath = path.join(process.cwd(), 'schema.sql');
+  if (fs.existsSync(localSchemaPath)) {
+    return localSchemaPath;
   }
+
+  const findSchemaCommit = () => {
+    const revListResult = spawnSync('git', ['rev-list', '--all', '--', 'schema.sql'], {
+      cwd: process.cwd(),
+      env: process.env,
+      encoding: 'utf8',
+      timeout: 120000,
+      killSignal: 'SIGKILL',
+    });
+    if (revListResult.status !== 0) {
+      return null;
+    }
+    const commits = String(revListResult.stdout || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    for (const commit of commits) {
+      const showResult = spawnSync('git', ['show', `${commit}:schema.sql`], {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: 'utf8',
+        timeout: 120000,
+        killSignal: 'SIGKILL',
+      });
+      if (showResult.status === 0 && String(showResult.stdout || '').trim()) {
+        return {
+          commit,
+          content: String(showResult.stdout || ''),
+        };
+      }
+    }
+    return null;
+  };
+
+  let schemaSource = findSchemaCommit();
+  if (!schemaSource) {
+    const shallowProbe = spawnSync('git', ['rev-parse', '--is-shallow-repository'], {
+      cwd: process.cwd(),
+      env: process.env,
+      encoding: 'utf8',
+      timeout: 30000,
+      killSignal: 'SIGKILL',
+    });
+    const isShallow = shallowProbe.status === 0 && String(shallowProbe.stdout || '').trim() === 'true';
+    if (isShallow) {
+      const fetchAttempts = [
+        ['fetch', '--unshallow', '--tags', 'origin'],
+        ['fetch', '--deepen=2000', '--tags', 'origin'],
+      ];
+      for (const args of fetchAttempts) {
+        const fetchResult = spawnSync('git', args, {
+          cwd: process.cwd(),
+          env: process.env,
+          encoding: 'utf8',
+          timeout: 180000,
+          killSignal: 'SIGKILL',
+        });
+        if (fetchResult.status === 0) {
+          schemaSource = findSchemaCommit();
+          if (schemaSource) {
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if (!schemaSource) {
+    return null;
+  }
+
+  const schemaPath = path.join(tempDir, 'schema.sql');
+  fs.writeFileSync(schemaPath, schemaSource.content, 'utf8');
+  console.log(`[lighthouse] schema.sql recuperado desde git (${schemaSource.commit}).`);
+  return schemaPath;
 }
 
 function ensureFile(filePath) {
@@ -73,6 +143,39 @@ function runPythonCode(code, args, env) {
 }
 
 function bootstrapSqliteSchema(dbPath, env) {
+  const schemaSourcePath = resolveSchemaSqlPath(path.dirname(dbPath));
+  if (!schemaSourcePath) {
+    console.warn(
+      '[lighthouse] No se pudo recuperar schema.sql desde el árbol actual ni desde git; se continúa sin bootstrap SQLite temporal.'
+    );
+    return;
+  }
+
+  const applySchemaCode = `
+import sys
+from web.schema_support import apply_schema_file
+from web.server import open_sqlite_conn
+db_path = sys.argv[1]
+schema_path = sys.argv[2]
+conn = open_sqlite_conn(db_path, with_row_factory=True)
+try:
+    applied = apply_schema_file(conn, schema_path)
+    conn.commit()
+    print("applied" if applied else "missing")
+finally:
+    conn.close()
+`;
+  const applyResult = runPythonCode(applySchemaCode, [dbPath, schemaSourcePath], env);
+  if (applyResult.status !== 0) {
+    const applyOutput = `${String(applyResult.stdout || '')}\n${String(applyResult.stderr || '')}`.trim();
+    throw new Error(
+      [
+        'No se pudo aplicar el esquema real de SQLite para Lighthouse.',
+        applyOutput ? `Salida: ${applyOutput}` : 'Salida vacía.',
+      ].join('\n')
+    );
+  }
+
   const ensureCode = `
 import sys
 from web.server import ensure_tables
@@ -80,68 +183,17 @@ db_path = sys.argv[1]
 ensure_tables(db_path)
 print("ok")
 `;
-  const createTableCode = `
-import sqlite3
-import sys
-db_path = sys.argv[1]
-table_name = sys.argv[2]
-conn = sqlite3.connect(db_path)
-try:
-    conn.execute(
-        f'''
-        CREATE TABLE IF NOT EXISTS "{table_name}" (
-          id TEXT PRIMARY KEY,
-          nombre TEXT,
-          activo INTEGER,
-          created_at TEXT,
-          updated_at TEXT,
-          workspace_id TEXT,
-          empresa_id TEXT,
-          cliente_id TEXT,
-          servicio TEXT,
-          slug TEXT,
-          estado TEXT,
-          plan TEXT,
-          descripcion TEXT,
-          logo_url TEXT
-        )
-        '''
-    )
-    conn.commit()
-finally:
-    conn.close()
-print(table_name)
-`;
-  for (let attempt = 1; attempt <= 120; attempt += 1) {
-    const ensureResult = runPythonCode(ensureCode, [dbPath], env);
-    if (ensureResult.status === 0) {
-      console.log(`[lighthouse] SQLite bootstrap completado en ${attempt} intentos.`);
-      return;
-    }
+  const ensureResult = runPythonCode(ensureCode, [dbPath], env);
+  if (ensureResult.status !== 0) {
     const output = `${String(ensureResult.stdout || '')}\n${String(ensureResult.stderr || '')}`.trim();
-    const missingMatch = output.match(/no such table: (?:main\.)?([A-Za-z_][A-Za-z0-9_]*)/i);
-    if (!missingMatch) {
-      throw new Error(
-        [
-          'No se pudo preparar la SQLite temporal para Lighthouse.',
-          output ? `Salida: ${output}` : 'Salida vacía.',
-        ].join('\n')
-      );
-    }
-    const tableName = missingMatch[1];
-    const createResult = runPythonCode(createTableCode, [dbPath, tableName], env);
-    if (createResult.status !== 0) {
-      const createOutput = `${String(createResult.stdout || '')}\n${String(createResult.stderr || '')}`.trim();
-      throw new Error(
-        [
-          `No se pudo crear la tabla placeholder "${tableName}" para Lighthouse.`,
-          createOutput ? `Salida: ${createOutput}` : 'Salida vacía.',
-        ].join('\n')
-      );
-    }
-    console.log(`[lighthouse] SQLite bootstrap: creada tabla ${tableName}`);
+    throw new Error(
+      [
+        'No se pudo completar el bootstrap SQLite de Lighthouse con el esquema real.',
+        output ? `Salida: ${output}` : 'Salida vacía.',
+      ].join('\n')
+    );
   }
-  throw new Error('No se pudo completar el bootstrap SQLite de Lighthouse tras 120 intentos.');
+  console.log('[lighthouse] SQLite bootstrap completado con el esquema real.');
 }
 
 function tailText(text, maxLines = 80) {
@@ -150,6 +202,220 @@ function tailText(text, maxLines = 80) {
     .split('\n')
     .filter((line, index, arr) => !(index === arr.length - 1 && line === ''));
   return lines.slice(Math.max(0, lines.length - maxLines)).join('\n');
+}
+
+function createSanitizedConsoleLineWriter(writeFn) {
+  const decoder = new StringDecoder('utf8');
+  let buffer = '';
+  let closed = false;
+  let decoderFinished = false;
+
+  const emit = (line, newline = '') => {
+    try {
+      writeFn(`${sanitizeDiagnosticText(line)}${newline}`);
+    } catch {}
+  };
+
+  const drainBufferedLines = () => {
+    let newlineIndex = buffer.indexOf('\n');
+    while (newlineIndex !== -1) {
+      const hasCarriageReturn = newlineIndex > 0 && buffer.charCodeAt(newlineIndex - 1) === 13;
+      const line = buffer.slice(0, hasCarriageReturn ? newlineIndex - 1 : newlineIndex);
+      const newline = hasCarriageReturn ? '\r\n' : '\n';
+      emit(line, newline);
+      buffer = buffer.slice(newlineIndex + 1);
+      newlineIndex = buffer.indexOf('\n');
+    }
+  };
+
+  const appendDecodedText = (text) => {
+    if (!text) return;
+    buffer += text;
+    drainBufferedLines();
+  };
+
+  const decodeChunk = (chunk) => {
+    if (typeof chunk === 'string') {
+      return chunk;
+    }
+    if (Buffer.isBuffer(chunk) || ArrayBuffer.isView(chunk)) {
+      return decoder.write(chunk);
+    }
+    return String(chunk ?? '');
+  };
+
+  return {
+    write(chunk) {
+      if (closed) return;
+      appendDecodedText(decodeChunk(chunk));
+    },
+    flush() {
+      if (closed) return;
+      drainBufferedLines();
+    },
+    finish() {
+      if (closed) return;
+      if (!decoderFinished) {
+        appendDecodedText(decoder.end());
+        decoderFinished = true;
+      }
+      drainBufferedLines();
+      if (buffer) {
+        emit(buffer);
+        buffer = '';
+      }
+      closed = true;
+    },
+  };
+}
+
+function removeStreamListener(stream, eventName, handler) {
+  if (!stream) return;
+  if (typeof stream.off === 'function') {
+    stream.off(eventName, handler);
+    return;
+  }
+  if (typeof stream.removeListener === 'function') {
+    stream.removeListener(eventName, handler);
+  }
+}
+
+function attachSanitizedConsoleStream(stream, writeFn) {
+  const writer = createSanitizedConsoleLineWriter(writeFn);
+  let ended = false;
+  let settled = false;
+  let resolveDone;
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+
+  function onData(chunk) {
+    writer.write(chunk);
+  }
+
+  function cleanup() {
+    removeStreamListener(stream, 'data', onData);
+    removeStreamListener(stream, 'end', onEnd);
+    removeStreamListener(stream, 'close', onClose);
+  }
+
+  function settle(reason) {
+    if (settled) return reason;
+    settled = true;
+    writer.finish();
+    cleanup();
+    resolveDone(reason);
+    return reason;
+  }
+
+  function onEnd() {
+    ended = true;
+    settle('end');
+  }
+
+  function onClose() {
+    settle(ended ? 'close-after-end' : 'close');
+  }
+
+  if (stream && typeof stream.on === 'function') {
+    stream.on('data', onData);
+    stream.once('end', onEnd);
+    stream.once('close', onClose);
+  }
+
+  return {
+    done,
+    finish(reason = 'forced') {
+      return settle(reason);
+    },
+    flushPending() {
+      writer.flush();
+    },
+    isDone() {
+      return settled;
+    },
+    hasEnded() {
+      return ended;
+    },
+  };
+}
+
+function attachRawLogCapture(child, logStream) {
+  let logStreamClosed = false;
+  let stdoutCapturing = false;
+  let stderrCapturing = false;
+
+  function onStdoutLogData(chunk) {
+    if (!stdoutCapturing || logStreamClosed) return;
+    logStream.write(chunk);
+  }
+
+  function onStderrLogData(chunk) {
+    if (!stderrCapturing || logStreamClosed) return;
+    logStream.write(chunk);
+  }
+
+  function stopStdoutCapture() {
+    if (!stdoutCapturing) return;
+    stdoutCapturing = false;
+    removeStreamListener(child?.stdout, 'data', onStdoutLogData);
+    removeStreamListener(child?.stdout, 'end', stopStdoutCapture);
+    removeStreamListener(child?.stdout, 'close', stopStdoutCapture);
+  }
+
+  function stopStderrCapture() {
+    if (!stderrCapturing) return;
+    stderrCapturing = false;
+    removeStreamListener(child?.stderr, 'data', onStderrLogData);
+    removeStreamListener(child?.stderr, 'end', stopStderrCapture);
+    removeStreamListener(child?.stderr, 'close', stopStderrCapture);
+  }
+
+  if (child?.stdout && typeof child.stdout.on === 'function') {
+    stdoutCapturing = true;
+    child.stdout.on('data', onStdoutLogData);
+    child.stdout.once('end', stopStdoutCapture);
+    child.stdout.once('close', stopStdoutCapture);
+  }
+
+  if (child?.stderr && typeof child.stderr.on === 'function') {
+    stderrCapturing = true;
+    child.stderr.on('data', onStderrLogData);
+    child.stderr.once('end', stopStderrCapture);
+    child.stderr.once('close', stopStderrCapture);
+  }
+
+  const stop = () => {
+    stopStdoutCapture();
+    stopStderrCapture();
+  };
+
+  const closeLog = () => {
+    if (logStreamClosed) return Promise.resolve();
+    logStreamClosed = true;
+    stop();
+    return new Promise((resolve, reject) => {
+      try {
+        logStream.end(resolve);
+      } catch (error) {
+        reject(error);
+      }
+    });
+  };
+
+  return {
+    stop,
+    closeLog,
+    isClosed() {
+      return logStreamClosed;
+    },
+    isStdoutCapturing() {
+      return stdoutCapturing;
+    },
+    isStderrCapturing() {
+      return stderrCapturing;
+    },
+  };
 }
 
 function curlStatus(url, timeoutSeconds, options = {}) {
@@ -209,70 +475,250 @@ function curlStatus(url, timeoutSeconds, options = {}) {
   };
 }
 
-function parseHeaderBlocks(headersText) {
-  const normalized = String(headersText || '').replace(/\r\n/g, '\n').trim();
-  if (!normalized) return [];
-  const lines = normalized.split('\n');
-  const blocks = [];
-  let current = [];
-  for (const line of lines) {
-    if (!line) {
-      if (current.length) {
-        blocks.push(current);
-        current = [];
-      }
-      continue;
+function createNavigationDiagnosticRecorder(tempDir) {
+  const diagnosticPath = path.join(tempDir, 'navigation-diagnostic.log');
+  fs.mkdirSync(path.dirname(diagnosticPath), {recursive: true});
+  try {
+    fs.writeFileSync(diagnosticPath, '');
+  } catch {}
+
+  let seq = 0;
+  const startedAt = Date.now();
+
+  const record = (event, data = {}) => {
+    const sanitizedData = sanitizeDiagnosticValue(data);
+    const entry = {
+      seq: ++seq,
+      ts: new Date().toISOString(),
+      elapsedMs: Date.now() - startedAt,
+      event,
+      ...sanitizedData,
+    };
+    try {
+      fs.appendFileSync(diagnosticPath, `${JSON.stringify(entry)}\n`);
+    } catch (error) {
+      console.log(
+        `[lighthouse][diag] no se pudo escribir ${diagnosticPath}: ${error?.stack || error?.message || error}`
+      );
     }
-    if (/^HTTP\/\d(?:\.\d)?\s+\d+/.test(line)) {
-      if (current.length) {
-        blocks.push(current);
-      }
-      current = [line];
-      continue;
-    }
-    current.push(line);
+    return entry;
+  };
+
+  return {diagnosticPath, record};
+}
+
+const DIAGNOSTIC_REDACTED_VALUE = 'REDACTED';
+const DIAGNOSTIC_SENSITIVE_PARAM_NAMES = new Set([
+  'accesstoken',
+  'apikey',
+  'authtoken',
+  'auth',
+  'authorization',
+  'bearertoken',
+  'clientid',
+  'clientsecret',
+  'code',
+  'cookie',
+  'csrftoken',
+  'idtoken',
+  'jwt',
+  'jwttoken',
+  'oauthtoken',
+  'key',
+  'pass',
+  'passwd',
+  'password',
+  'privatekey',
+  'publickey',
+  'refreshtoken',
+  'secret',
+  'session',
+  'sessionid',
+  'sessiontoken',
+  'signedurl',
+  'sig',
+  'signature',
+  'state',
+  'token',
+  'xsrftoken',
+]);
+const DIAGNOSTIC_OMIT_KEYS = new Set(['body', 'bodypath', 'headers', 'headerspath', 'headerstext', 'responseblocks']);
+
+function normalizeDiagnosticParamName(name) {
+  return String(name || '')
+    .trim()
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function isSensitiveDiagnosticParamName(name) {
+  const collapsed = normalizeDiagnosticParamName(name).replace(/\s+/g, '');
+  if (!collapsed || collapsed === 'swcleared') {
+    return false;
   }
-  if (current.length) {
-    blocks.push(current);
-  }
-  return blocks.map((block) => {
-    const statusLine = block[0] || '';
-    const headers = [];
-    const headerMap = {};
-    for (const line of block.slice(1)) {
-      const idx = line.indexOf(':');
-      if (idx <= 0) continue;
-      const key = line.slice(0, idx).trim();
-      const value = line.slice(idx + 1).trim();
-      headers.push({key, value});
-      const lower = key.toLowerCase();
-      if (!Object.prototype.hasOwnProperty.call(headerMap, lower)) {
-        headerMap[lower] = value;
-      }
+  return DIAGNOSTIC_SENSITIVE_PARAM_NAMES.has(collapsed);
+}
+
+function redactSensitiveDiagnosticQueryParams(text) {
+  return String(text || '').replace(/(^|[^A-Za-z0-9._-])([A-Za-z0-9._-]+)=([^\s&#"'`<>]+)/g, (match, prefix, key, value) => {
+    if (!isSensitiveDiagnosticParamName(key)) {
+      return match;
     }
-    return {statusLine, headers, headerMap};
+    return `${prefix}${key}=${DIAGNOSTIC_REDACTED_VALUE}`;
   });
 }
 
-function printHeaderBlocks(url, blocks) {
-  if (!blocks.length) {
-    console.log(`[lighthouse][diag] ${url} response headers: none captured`);
-    return;
+function sanitizeDiagnosticText(value) {
+  let text = String(value || '');
+  if (!text) return '';
+  text = text.replace(/\b(authorization|proxy-authorization|cookie|set-cookie)\s*:\s*[^\r\n]+/gi, (match) => {
+    const idx = match.indexOf(':');
+    return `${match.slice(0, idx + 1)} ${DIAGNOSTIC_REDACTED_VALUE}`;
+  });
+  text = text.replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, `Bearer ${DIAGNOSTIC_REDACTED_VALUE}`);
+  text = text.replace(/https?:\/\/[^\s"'<>`]+/gi, (match) => sanitizeDiagnosticUrl(match));
+  text = redactSensitiveDiagnosticQueryParams(text);
+  return text;
+}
+
+function sanitizeDiagnosticUrl(rawUrl) {
+  const candidate = String(rawUrl || '').trim();
+  if (!candidate) return '';
+  try {
+    const url = new URL(candidate);
+    url.username = '';
+    url.password = '';
+    const searchKeys = Array.from(url.searchParams.keys());
+    for (const key of searchKeys) {
+      if (isSensitiveDiagnosticParamName(key)) {
+        url.searchParams.set(key, DIAGNOSTIC_REDACTED_VALUE);
+      }
+    }
+    const hash = String(url.hash || '').replace(/^#/, '');
+    if (hash && hash.includes('=')) {
+      const hashParams = new URLSearchParams(hash);
+      const hashKeys = Array.from(hashParams.keys());
+      for (const key of hashKeys) {
+        if (isSensitiveDiagnosticParamName(key)) {
+          hashParams.set(key, DIAGNOSTIC_REDACTED_VALUE);
+        }
+      }
+      const sanitizedHash = hashParams.toString();
+      url.hash = sanitizedHash ? `#${sanitizedHash}` : '';
+    }
+    return url.toString();
+  } catch {
+    return sanitizeDiagnosticText(candidate);
   }
-  blocks.forEach((block, index) => {
-    const label = index === blocks.length - 1 ? 'final' : `redirect-${index + 1}`;
-    console.log(`[lighthouse][diag] ${label} response: ${block.statusLine}`);
-    block.headers.forEach(({key, value}) => {
-      console.log(`[lighthouse][diag]   ${key}: ${value}`);
+}
+
+function sanitizeDiagnosticValue(value, key = '') {
+  if (value === null || value === undefined) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeDiagnosticValue(item, key));
+  }
+  if (typeof value === 'object') {
+    const out = {};
+    for (const [childKey, childValue] of Object.entries(value)) {
+      const childKeyLower = String(childKey || '').toLowerCase();
+      if (DIAGNOSTIC_OMIT_KEYS.has(childKeyLower)) {
+        continue;
+      }
+      out[childKey] = sanitizeDiagnosticValue(childValue, childKey);
+    }
+    return out;
+  }
+  if (typeof value === 'string') {
+    const lowerKey = String(key || '').toLowerCase();
+    if (
+      lowerKey.includes('url') ||
+      lowerKey === 'location' ||
+      lowerKey === 'targeturl' ||
+      lowerKey === 'redirecturl' ||
+      lowerKey === 'frameurl'
+    ) {
+      return sanitizeDiagnosticUrl(value);
+    }
+    return sanitizeDiagnosticText(value);
+  }
+  return value;
+}
+
+function describeRedirectChain(request) {
+  try {
+    return (request.redirectChain ? request.redirectChain() : []).map((redirectRequest) => {
+      const response = redirectRequest.response ? redirectRequest.response() : null;
+      const headers = response && response.headers ? response.headers() : {};
+      return {
+        url: redirectRequest.url(),
+        method: redirectRequest.method(),
+        resourceType: redirectRequest.resourceType(),
+        navigationRequest: Boolean(redirectRequest.isNavigationRequest && redirectRequest.isNavigationRequest()),
+        responseStatus: response ? response.status() : null,
+        responseUrl: response ? response.url() : '',
+        location: headers.location || headers.Location || '',
+      };
     });
-  });
+  } catch {
+    return [];
+  }
 }
 
-function runCurlDiagnostic(url, timeoutSeconds, tempDir) {
-  const diagnosticDir = path.join(tempDir, 'diagnostics');
-  fs.mkdirSync(diagnosticDir, {recursive: true});
-  const bodyPath = path.join(diagnosticDir, 'audit-body.html');
-  const headersPath = path.join(diagnosticDir, 'audit-headers.txt');
+function describeRequestEvent(request) {
+  let frameUrl = '';
+  try {
+    frameUrl = request.frame ? request.frame().url() : '';
+  } catch {}
+  return {
+    url: request.url(),
+    method: request.method(),
+    resourceType: request.resourceType(),
+    navigationRequest: Boolean(request.isNavigationRequest && request.isNavigationRequest()),
+    frameUrl,
+    redirectChain: describeRedirectChain(request),
+  };
+}
+
+function describeResponseEvent(response) {
+  const request = response.request();
+  const headers = response.headers ? response.headers() : {};
+  let frameUrl = '';
+  try {
+    frameUrl = request.frame ? request.frame().url() : '';
+  } catch {}
+  return {
+    url: response.url(),
+    status: response.status(),
+    resourceType: request.resourceType(),
+    navigationRequest: Boolean(request.isNavigationRequest && request.isNavigationRequest()),
+    fromCache: Boolean(response.fromCache && response.fromCache()),
+    contentType: headers['content-type'] || headers['Content-Type'] || '',
+    contentLength: headers['content-length'] || headers['Content-Length'] || '',
+    location: headers.location || headers.Location || '',
+    frameUrl,
+    redirectChain: describeRedirectChain(request),
+  };
+}
+
+function describeRequestFailureEvent(request) {
+  const failure = request.failure ? request.failure() || {} : {};
+  const event = describeRequestEvent(request);
+  return {
+    ...event,
+    errorText: failure.errorText || failure.error_text || 'requestfailed',
+  };
+}
+
+function runCurlDiagnostic(url, timeoutSeconds, recorder) {
+  recorder?.record('curl-start', {
+    method: 'GET',
+    url,
+    timeoutSeconds,
+  });
   const result = spawnSync(
     'curl',
     [
@@ -283,10 +729,8 @@ function runCurlDiagnostic(url, timeoutSeconds, tempDir) {
       '10',
       '--max-time',
       String(timeoutSeconds),
-      '--dump-header',
-      headersPath,
       '--output',
-      bodyPath,
+      '/dev/null',
       '--write-out',
       '%{http_code}\t%{url_effective}\t%{content_type}\t%{size_download}\t%{redirect_url}',
       url,
@@ -301,33 +745,36 @@ function runCurlDiagnostic(url, timeoutSeconds, tempDir) {
   const contentType = String(writeOutParts[2] || '').trim();
   const sizeDownload = Number(writeOutParts[3] || 0);
   const redirectUrl = String(writeOutParts[4] || '').trim();
-  const headersText = fs.existsSync(headersPath) ? fs.readFileSync(headersPath, 'utf8') : '';
-  const bodySize = fs.existsSync(bodyPath) ? fs.statSync(bodyPath).size : 0;
-  return {
-    url,
+  const summary = {
+    method: 'GET',
+    url: sanitizeDiagnosticUrl(url),
     code: Number.isFinite(code) ? code : 0,
-    effectiveUrl: effectiveUrl || url,
+    effectiveUrl: sanitizeDiagnosticUrl(effectiveUrl || url),
     contentType: contentType || '',
-    sizeDownload: Number.isFinite(sizeDownload) ? sizeDownload : bodySize,
-    redirectUrl: redirectUrl || '',
-    headersText,
-    bodyPath,
-    bodySize,
-    stderr: String(result.stderr || '').trim(),
+    contentLength: Number.isFinite(sizeDownload) ? sizeDownload : 0,
+    redirectUrl: sanitizeDiagnosticUrl(redirectUrl || ''),
+    stderr: sanitizeDiagnosticText(String(result.stderr || '').trim()),
     status: typeof result.status === 'number' ? result.status : null,
     signal: result.signal || null,
-    error: result.error ? result.error.message : '',
+    error: sanitizeDiagnosticText(result.error ? result.error.message : ''),
   };
+  recorder?.record('curl-summary', summary);
+  return summary;
 }
 
-async function runBrowserDiagnostic(url, chromePath, tempDir) {
+async function runBrowserDiagnostic(url, chromePath, tempDir, recorder) {
   let puppeteer = null;
   try {
     puppeteer = require('puppeteer-core');
   } catch (error) {
-    console.log(
-      `[lighthouse][diag] puppeteer-core no disponible, se omite la comprobacion del navegador: ${error?.message || error}`
+    const message = sanitizeDiagnosticText(error?.message || String(error || 'Unknown require error'));
+    console.warn(
+      `[lighthouse][diag] puppeteer-core no disponible, se omite la comprobacion del navegador: ${message}`
     );
+    recorder?.record('browser-warning', {
+      phase: 'require',
+      message,
+    });
     return null;
   }
   if (!chromePath) {
@@ -351,6 +798,11 @@ async function runBrowserDiagnostic(url, chromePath, tempDir) {
     '--disable-gpu',
   ];
 
+  recorder?.record('browser-start', {
+    url,
+    flags,
+  });
+
   let browser;
   try {
     browser = await puppeteer.launch({
@@ -360,95 +812,214 @@ async function runBrowserDiagnostic(url, chromePath, tempDir) {
     });
   } catch (error) {
     console.log(`[lighthouse][diag] puppeteer.launch error: ${error?.stack || error?.message || error}`);
+    recorder?.record('browser-error', {
+      phase: 'launch',
+      message: error?.message || String(error || 'Unknown error'),
+      stack: error?.stack || '',
+    });
     return null;
   }
 
   try {
     const page = await browser.newPage();
     const initialUrl = url;
-    page.on('requestfailed', (request) => {
-      const failure = request.failure() || {};
-      console.log(
-        `[lighthouse][diag] requestfailed ${request.resourceType()} ${request.method()} ${request.url()} ${failure.errorText || failure.error_text || 'requestfailed'}`
-      );
+    const sanitizedInitialUrl = sanitizeDiagnosticUrl(initialUrl);
+    let mainNavigationRequestEntry = null;
+    let mainNavigationResponseEntry = null;
+    let mainNavigationFailureEntry = null;
+    browser.on('targetchanged', (target) => {
+      const entry = sanitizeDiagnosticValue({
+        targetType: target.type(),
+        targetUrl: target.url(),
+      });
+      recorder?.record('targetchanged', entry);
     });
-    page.on('response', (response) => {
-      const request = response.request();
-      if (request.resourceType() === 'document' || response.status() >= 300) {
-        const headers = response.headers ? response.headers() : {};
-        const location = headers.location || headers.Location || '';
+    page.on('request', (request) => {
+      const entry = sanitizeDiagnosticValue(describeRequestEvent(request));
+      recorder?.record('request', entry);
+      if (entry.navigationRequest && entry.resourceType === 'document') {
+        mainNavigationRequestEntry = entry;
+      }
+      if (entry.navigationRequest && entry.resourceType === 'document') {
         console.log(
-          `[lighthouse][diag] response ${response.status()} ${request.resourceType()} ${request.method()} ${request.url()}${location ? ` location=${location}` : ''}`
+          `[lighthouse][diag] request ${entry.method} ${entry.resourceType} ${entry.url} nav=${entry.navigationRequest} frame=${entry.frameUrl || '-'}`
         );
       }
     });
-    page.on('pageerror', (error) => {
-      console.log(`[lighthouse][diag] pageerror ${error?.stack || error?.message || error}`);
+    page.on('response', (response) => {
+      const entry = sanitizeDiagnosticValue(describeResponseEvent(response));
+      recorder?.record('response', entry);
+      if (entry.navigationRequest && entry.resourceType === 'document') {
+        mainNavigationResponseEntry = entry;
+      }
+      if (entry.navigationRequest || entry.resourceType === 'document' || entry.status >= 300) {
+        console.log(
+          `[lighthouse][diag] response ${entry.status} ${entry.resourceType} ${entry.url}${entry.location ? ` location=${entry.location}` : ''}`
+        );
+      }
+    });
+    page.on('requestfailed', (request) => {
+      const entry = sanitizeDiagnosticValue(describeRequestFailureEvent(request));
+      recorder?.record('requestfailed', entry);
+      if (entry.navigationRequest && entry.resourceType === 'document') {
+        mainNavigationFailureEntry = entry;
+      }
+      console.log(
+        `[lighthouse][diag] requestfailed ${entry.resourceType} ${entry.method} ${entry.url} nav=${entry.navigationRequest} error=${entry.errorText}`
+      );
     });
     page.on('framenavigated', (frame) => {
-      if (frame === page.mainFrame()) {
-        console.log(`[lighthouse][diag] framenavigated ${frame.url()}`);
+      const isMainFrame = frame === page.mainFrame();
+      const entry = sanitizeDiagnosticValue({
+        url: frame.url(),
+        name: frame.name ? frame.name() : '',
+        isMainFrame,
+      });
+      recorder?.record('framenavigated', entry);
+      if (isMainFrame) {
+        console.log(`[lighthouse][diag] framenavigated ${sanitizeDiagnosticUrl(frame.url())}`);
       }
     });
     page.on('console', (message) => {
       const type = String(message.type() || '').trim();
       if (!type || type === 'debug' || type === 'log') return;
-      console.log(`[lighthouse][diag] console ${type} ${message.text()}`);
+      const entry = sanitizeDiagnosticValue({
+        type,
+        text: message.text(),
+      });
+      recorder?.record('console', entry);
+      console.log(`[lighthouse][diag] console ${entry.type} ${entry.text}`);
+    });
+    page.on('pageerror', (error) => {
+      const entry = sanitizeDiagnosticValue({
+        message: error?.message || String(error || 'Unknown pageerror'),
+        stack: error?.stack || '',
+      });
+      recorder?.record('pageerror', entry);
+      console.log(`[lighthouse][diag] pageerror ${entry.stack || entry.message}`);
     });
 
     let navigationResponse = null;
+    let navigationError = null;
     try {
       navigationResponse = await page.goto(url, {waitUntil: 'domcontentloaded', timeout: 30000});
       if (navigationResponse) {
         console.log(
-          `[lighthouse][diag] page.goto -> ${navigationResponse.status()} ${navigationResponse.url()}`
+          `[lighthouse][diag] page.goto -> ${navigationResponse.status()} ${sanitizeDiagnosticUrl(navigationResponse.url())}`
         );
+        recorder?.record('goto-response', {
+          status: navigationResponse.status(),
+          url: navigationResponse.url(),
+        });
       } else {
         console.log('[lighthouse][diag] page.goto -> sin respuesta');
+        recorder?.record('goto-response', {
+          status: null,
+          url: '',
+        });
       }
     } catch (error) {
-      console.log(`[lighthouse][diag] page.goto error: ${error?.stack || error?.message || error}`);
+      navigationError = error;
+      const entry = sanitizeDiagnosticValue({
+        message: error?.message || String(error || 'Unknown goto error'),
+        stack: error?.stack || '',
+      });
+      recorder?.record('goto-error', entry);
+      console.log(`[lighthouse][diag] page.goto error: ${entry.stack || entry.message}`);
     }
 
     await new Promise((resolve) => setTimeout(resolve, 4000));
     const finalUrl = page.url();
-    console.log(`[lighthouse][diag] final URL ${finalUrl}`);
-    if (finalUrl !== initialUrl && finalUrl.includes('swcleared=1') && !initialUrl.includes('swcleared=1')) {
+    const sanitizedFinalUrl = sanitizeDiagnosticUrl(finalUrl);
+    console.log(`[lighthouse][diag] final URL ${sanitizedFinalUrl}`);
+    const navRequestSummary = mainNavigationResponseEntry || (navigationResponse
+      ? {
+          status: navigationResponse.status(),
+          url: sanitizeDiagnosticUrl(navigationResponse.url()),
+          resourceType: 'document',
+          navigationRequest: true,
+          fromCache: Boolean(navigationResponse.fromCache && navigationResponse.fromCache()),
+          contentType: '',
+          contentLength: '',
+          location: '',
+          frameUrl: '',
+          redirectChain: [],
+        }
+      : null);
+    const summary = {
+      initialUrl: sanitizedInitialUrl,
+      finalUrl: sanitizedFinalUrl,
+      status: navRequestSummary ? navRequestSummary.status : null,
+      navigationResponseUrl: navRequestSummary ? navRequestSummary.url : '',
+      redirectChain: mainNavigationRequestEntry ? mainNavigationRequestEntry.redirectChain : [],
+      mainRequest: mainNavigationRequestEntry,
+      mainResponse: mainNavigationResponseEntry,
+      mainFailure: mainNavigationFailureEntry || null,
+      failureErrorText: sanitizeDiagnosticText(
+        mainNavigationFailureEntry?.errorText || navigationError?.message || ''
+      ),
+    };
+    recorder?.record('browser-summary', summary);
+    if (
+      sanitizedFinalUrl !== sanitizedInitialUrl &&
+      sanitizedFinalUrl.includes('swcleared=1') &&
+      !sanitizedInitialUrl.includes('swcleared=1')
+    ) {
       console.log(
         '[lighthouse][diag] auto-navigation detected: the shell rewrites / to add swcleared=1 in web/index.html:12124-12130'
       );
     }
-    return {initialUrl, finalUrl, navigationResponse: navigationResponse ? navigationResponse.url() : ''};
+    return {
+      initialUrl: sanitizedInitialUrl,
+      finalUrl: sanitizedFinalUrl,
+      navigationResponse: navigationResponse ? sanitizeDiagnosticUrl(navigationResponse.url()) : '',
+    };
   } catch (error) {
-    console.log(`[lighthouse][diag] browser diagnostic error: ${error?.stack || error?.message || error}`);
+    const entry = sanitizeDiagnosticValue({
+      phase: 'runtime',
+      message: error?.message || String(error || 'Unknown browser diagnostic error'),
+      stack: error?.stack || '',
+    });
+    recorder?.record('browser-error', entry);
+    console.log(`[lighthouse][diag] browser diagnostic error: ${entry.stack || entry.message}`);
     return null;
   } finally {
     if (browser) {
       try {
         await browser.close();
       } catch (error) {
-        console.log(`[lighthouse][diag] browser.close error: ${error?.stack || error?.message || error}`);
+        const entry = sanitizeDiagnosticValue({
+          phase: 'close',
+          message: error?.message || String(error || 'Unknown browser close error'),
+          stack: error?.stack || '',
+        });
+        recorder?.record('browser-error', entry);
+        console.log(`[lighthouse][diag] browser.close error: ${entry.stack || entry.message}`);
       }
     }
   }
 }
 
 async function runPreLhciDiagnostics({auditUrl, tempDir, chromePath}) {
-  console.log(`[lighthouse][diag] GET audit url: ${auditUrl}`);
-  const curlResult = runCurlDiagnostic(auditUrl, 15, tempDir);
-  const blocks = parseHeaderBlocks(curlResult.headersText);
-  const finalBlock = blocks.length ? blocks[blocks.length - 1] : null;
-  const contentType = finalBlock?.headerMap?.['content-type'] || curlResult.contentType || 'n/a';
-  const contentLength = finalBlock?.headerMap?.['content-length'] || curlResult.bodySize || curlResult.sizeDownload || 'n/a';
+  const recorder = createNavigationDiagnosticRecorder(tempDir);
+  recorder.record('diagnostic-start', {
+    auditUrl,
+  });
+  console.log(`[lighthouse][diag] navigation diagnostics written to ${recorder.diagnosticPath}`);
+  console.log(`[lighthouse][diag] GET audit url: ${sanitizeDiagnosticUrl(auditUrl)}`);
+  const curlResult = runCurlDiagnostic(auditUrl, 15, recorder);
   console.log(
-    `[lighthouse][diag] curl status=${curlResult.code || curlResult.status || 0} final=${curlResult.effectiveUrl} content-type=${contentType} content-length=${contentLength}`
+    `[lighthouse][diag] curl status=${curlResult.code || curlResult.status || 0} final=${curlResult.effectiveUrl} content-type=${curlResult.contentType || 'n/a'} content-length=${curlResult.contentLength ?? 'n/a'}`
   );
   if (curlResult.redirectUrl) {
     console.log(`[lighthouse][diag] redirect-url: ${curlResult.redirectUrl}`);
   }
-  printHeaderBlocks(auditUrl, blocks);
-  console.log(`[lighthouse][diag] body saved to ${curlResult.bodyPath}`);
-  await runBrowserDiagnostic(auditUrl, chromePath, tempDir);
+  await runBrowserDiagnostic(auditUrl, chromePath, tempDir, recorder);
+  recorder.record('diagnostic-complete', {
+    auditUrl,
+    curlStatus: curlResult.code,
+    finalUrl: curlResult.effectiveUrl,
+  });
 }
 
 function describeStatus(result) {
@@ -465,6 +1036,30 @@ function describeStatus(result) {
 
 function isHeadUnsupported(result) {
   return Boolean(result && (result.code === 405 || result.code === 501));
+}
+
+function isReachableHttpStatus(code) {
+  return Number.isInteger(code) && code >= 200 && code < 400;
+}
+
+function probeAuditUrlReachability(auditUrl, curlTimeoutSeconds) {
+  const headResult = curlStatus(auditUrl, curlTimeoutSeconds, {method: 'HEAD'});
+  if (isReachableHttpStatus(headResult.code)) {
+    return {
+      method: 'HEAD',
+      headResult,
+      result: headResult,
+      headUnsupported: false,
+      fallbackUsed: false,
+    };
+  }
+  return {
+    method: 'GET',
+    headResult,
+    result: curlStatus(auditUrl, curlTimeoutSeconds, {method: 'GET'}),
+    headUnsupported: isHeadUnsupported(headResult),
+    fallbackUsed: true,
+  };
 }
 
 function spawnServer({port, tempDir, dbPath, ocrDbPath, serverLogPath}) {
@@ -506,17 +1101,18 @@ function spawnServer({port, tempDir, dbPath, ocrDbPath, serverLogPath}) {
   );
 
   const logStream = fs.createWriteStream(serverLogPath, {flags: 'a'});
-  let logStreamClosed = false;
+  const rawLogCapture = attachRawLogCapture(child, logStream);
   child.stdout.setEncoding('utf8');
   child.stderr.setEncoding('utf8');
-  child.stdout.on('data', (chunk) => {
-    logStream.write(chunk);
-    process.stdout.write(chunk);
-  });
-  child.stderr.on('data', (chunk) => {
-    logStream.write(chunk);
-    process.stderr.write(chunk);
-  });
+  const writeStdout = process.stdout.write.bind(process.stdout);
+  const writeStderr = process.stderr.write.bind(process.stderr);
+  const stdoutConsole = attachSanitizedConsoleStream(child.stdout, writeStdout);
+  const stderrConsole = attachSanitizedConsoleStream(child.stderr, writeStderr);
+  const consoleClosed = Promise.all([stdoutConsole.done, stderrConsole.done]);
+  const forceConsoleClose = () => {
+    stdoutConsole.finish('forced');
+    stderrConsole.finish('forced');
+  };
 
   const started = new Promise((resolve, reject) => {
     child.once('spawn', () => {
@@ -535,53 +1131,81 @@ function spawnServer({port, tempDir, dbPath, ocrDbPath, serverLogPath}) {
     env,
     started,
     exited,
-    closeLog() {
-      if (logStreamClosed) return Promise.resolve();
-      logStreamClosed = true;
-      return new Promise((resolve) => {
-        logStream.end(resolve);
-      });
-    },
+    consoleClosed,
+    forceConsoleClose,
+    stopRawLogCapture: rawLogCapture.stop,
+    closeLog: rawLogCapture.closeLog,
   };
 }
 
 async function stopServer(server, opts = {}) {
   if (!server || !server.child) return;
   const child = server.child;
-  if (child.exitCode !== null || child.signalCode !== null) {
-    try {
-      await server.closeLog?.();
-    } catch {}
-    return;
-  }
+  const wait = typeof sleep === 'function'
+    ? sleep
+    : (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const graceMs = Math.max(500, Number(opts.graceMs || 5000) || 5000);
+  const consoleGraceMs = Math.max(500, Number(opts.consoleGraceMs || graceMs) || graceMs);
   const killSignal = opts.signal || 'SIGTERM';
-  try {
-    child.kill(killSignal);
-  } catch {}
-
-  const settled = await Promise.race([
-    server.exited.then(() => true),
-    sleep(graceMs).then(() => false),
-  ]);
-  if (!settled && child.exitCode === null && child.signalCode === null) {
+  if (child.exitCode === null && child.signalCode === null) {
     try {
-      child.kill('SIGKILL');
+      child.kill(killSignal);
     } catch {}
-    await Promise.race([server.exited.then(() => true), sleep(2000)]);
+
+    const settled = await Promise.race([
+      server.exited.then(() => true),
+      wait(graceMs).then(() => false),
+    ]);
+    if (!settled && child.exitCode === null && child.signalCode === null) {
+      try {
+        child.kill('SIGKILL');
+      } catch {}
+      await Promise.race([server.exited.then(() => true), wait(2000)]);
+    }
   }
 
+  try {
+    const consoleClosed = server.consoleClosed || Promise.resolve();
+    const consoleSettled = await Promise.race([
+      consoleClosed.then(() => true),
+      wait(consoleGraceMs).then(() => false),
+    ]);
+    if (!consoleSettled) {
+      try {
+        server.stopRawLogCapture?.();
+      } catch {}
+      try {
+        server.forceConsoleClose?.();
+      } catch {}
+      await Promise.race([
+        consoleClosed.then(() => true),
+        wait(2000).then(() => false),
+      ]);
+    }
+  } catch {}
+  try {
+    server.stopRawLogCapture?.();
+  } catch {}
   try {
     await server.closeLog?.();
   } catch {}
 }
 
-async function waitForServer({auditUrl, healthUrl, server, timeoutMs, curlTimeoutSeconds}) {
+async function waitForServer({
+  auditUrl,
+  healthUrl,
+  server,
+  timeoutMs,
+  curlTimeoutSeconds,
+  mode = 'local',
+}) {
   const startedAt = Date.now();
   let attempt = 0;
   let lastHealth = null;
   let lastAudit = null;
+  const isExternalMode = mode === 'external';
+  let auditProbeMethod = 'HEAD';
 
   while ((Date.now() - startedAt) < timeoutMs) {
     if (server?.child && (server.child.exitCode !== null || server.child.signalCode !== null)) {
@@ -589,37 +1213,70 @@ async function waitForServer({auditUrl, healthUrl, server, timeoutMs, curlTimeou
     }
 
     attempt += 1;
-    lastHealth = curlStatus(healthUrl, curlTimeoutSeconds, {captureBody: true});
     let auditDetail = 'pendiente';
-    const shouldProbeAudit = lastHealth.code === 200;
-    if (shouldProbeAudit) {
-      lastAudit = curlStatus(auditUrl, curlTimeoutSeconds, {method: 'HEAD'});
-      if (isHeadUnsupported(lastAudit)) {
-        auditDetail = 'HEAD no soportado';
+
+    if (isExternalMode) {
+      lastHealth = null;
+      const auditProbe = probeAuditUrlReachability(auditUrl, curlTimeoutSeconds);
+      auditProbeMethod = auditProbe.method;
+      lastAudit = auditProbe.result;
+      if (isReachableHttpStatus(auditProbe.headResult?.code)) {
+        auditDetail = `HEAD ${describeStatus(auditProbe.headResult)}`;
+      } else if (auditProbe.headUnsupported) {
+        auditDetail = `HEAD no soportado (${describeStatus(auditProbe.headResult)}), GET ${describeStatus(auditProbe.result)}`;
       } else {
-        auditDetail = describeStatus(lastAudit);
+        auditDetail = `HEAD ${describeStatus(auditProbe.headResult)}, GET ${describeStatus(auditProbe.result)}`;
       }
     } else {
-      lastAudit = null;
+      lastHealth = curlStatus(healthUrl, curlTimeoutSeconds, {captureBody: true});
+      const shouldProbeAudit = lastHealth.code === 200;
+      if (shouldProbeAudit) {
+        lastAudit = curlStatus(auditUrl, curlTimeoutSeconds, {method: 'HEAD'});
+        if (isHeadUnsupported(lastAudit)) {
+          auditDetail = 'HEAD no soportado';
+        } else {
+          auditDetail = describeStatus(lastAudit);
+        }
+      } else {
+        lastAudit = null;
+      }
     }
+
     const elapsedMs = Date.now() - startedAt;
     const remainingMs = Math.max(0, timeoutMs - elapsedMs);
     const elapsedLabel = Math.ceil(elapsedMs / 1000);
     const remainingLabel = Math.ceil(remainingMs / 1000);
     const healthDetail = lastHealth?.body ? ` (${lastHealth.body.slice(0, 120)})` : '';
-    console.log(
-      `[lighthouse] readiness attempt ${attempt}: health=${describeStatus(lastHealth)}${healthDetail} url=${auditDetail} elapsed=${elapsedLabel}s remaining=${remainingLabel}s`
-    );
 
-    if (lastHealth.code === 200 && lastAudit?.code === 200) {
-      return {attempt, elapsedMs, lastHealth, lastAudit};
-    }
-
-    if (lastHealth.code === 200 && isHeadUnsupported(lastAudit)) {
+    if (isExternalMode) {
       console.log(
-        '[lighthouse] La ruta auditada no soporta HEAD; se confiará en /api/health y Lighthouse hará la primera carga real.'
+        `[lighthouse] readiness attempt ${attempt} [external]: url=${auditDetail} elapsed=${elapsedLabel}s remaining=${remainingLabel}s`
       );
-      return {attempt, elapsedMs, lastHealth, lastAudit, auditHeadUnsupported: true};
+      if (isReachableHttpStatus(lastAudit?.code)) {
+        return {
+          attempt,
+          elapsedMs,
+          lastHealth,
+          lastAudit,
+          readinessMode: 'external',
+          auditProbeMethod,
+        };
+      }
+    } else {
+      console.log(
+        `[lighthouse] readiness attempt ${attempt} [local]: health=${describeStatus(lastHealth)}${healthDetail} url=${auditDetail} elapsed=${elapsedLabel}s remaining=${remainingLabel}s`
+      );
+
+      if (lastHealth.code === 200 && lastAudit?.code === 200) {
+        return {attempt, elapsedMs, lastHealth, lastAudit, readinessMode: 'local'};
+      }
+
+      if (lastHealth.code === 200 && isHeadUnsupported(lastAudit)) {
+        console.log(
+          '[lighthouse] La ruta auditada no soporta HEAD; se confiará en /api/health y Lighthouse hará la primera carga real.'
+        );
+        return {attempt, elapsedMs, lastHealth, lastAudit, readinessMode: 'local', auditHeadUnsupported: true};
+      }
     }
 
     if (server?.child && (server.child.exitCode !== null || server.child.signalCode !== null)) {
@@ -632,8 +1289,10 @@ async function waitForServer({auditUrl, healthUrl, server, timeoutMs, curlTimeou
 
   const failure = new Error(
     [
-      `La aplicación no devolvió HTTP 200 dentro de ${Math.round(timeoutMs / 1000)}s.`,
-      `Health check: ${describeStatus(lastHealth)}`,
+      isExternalMode
+        ? `El destino externo no respondió con un estado HTTP válido dentro de ${Math.round(timeoutMs / 1000)}s.`
+        : `La aplicación no devolvió HTTP 200 dentro de ${Math.round(timeoutMs / 1000)}s.`,
+      ...(isExternalMode ? [] : [`Health check: ${describeStatus(lastHealth)}`]),
       `URL auditada: ${describeStatus(lastAudit)}`,
     ].join('\n')
   );
@@ -642,27 +1301,93 @@ async function waitForServer({auditUrl, healthUrl, server, timeoutMs, curlTimeou
   throw failure;
 }
 
-function runCommand(command, args, env) {
+function runCommand(command, args, env, options = {}) {
+  const captureOutput = Boolean(options.captureOutput);
+  const buildCommandError = (code, signal) => {
+    const error = new Error(
+      `${command} ${args.join(' ')} terminó con código ${typeof code === 'number' ? code : 1}${signal ? ` (signal ${signal})` : ''}`
+    );
+    error.code = code;
+    error.signal = signal;
+    return error;
+  };
+
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: process.cwd(),
       env,
-      stdio: 'inherit',
+      stdio: captureOutput ? ['ignore', 'pipe', 'pipe'] : 'inherit',
     });
 
-    child.once('error', reject);
-    child.once('exit', (code, signal) => {
-      if (code === 0) {
-        resolve({code, signal});
-        return;
-      }
-      const error = new Error(
-        `${command} ${args.join(' ')} terminó con código ${typeof code === 'number' ? code : 1}${signal ? ` (signal ${signal})` : ''}`
-      );
-      error.code = code;
-      error.signal = signal;
+    if (!captureOutput) {
+      child.once('error', reject);
+      child.once('exit', (code, signal) => {
+        if (code === 0) {
+          resolve({code, signal});
+          return;
+        }
+        reject(buildCommandError(code, signal));
+      });
+      return;
+    }
+
+    const stdoutConsole = child.stdout
+      ? attachSanitizedConsoleStream(child.stdout, process.stdout.write.bind(process.stdout))
+      : null;
+    const stderrConsole = child.stderr
+      ? attachSanitizedConsoleStream(child.stderr, process.stderr.write.bind(process.stderr))
+      : null;
+    const consoleClosed = Promise.all([
+      stdoutConsole ? stdoutConsole.done : Promise.resolve(),
+      stderrConsole ? stderrConsole.done : Promise.resolve(),
+    ]);
+
+    let settled = false;
+
+    const cleanup = () => {
+      child.removeListener('error', onError);
+      child.removeListener('close', onClose);
+    };
+
+    const settleResolve = (value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+
+    const settleReject = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
       reject(error);
-    });
+    };
+
+    function onError(error) {
+      if (stdoutConsole) {
+        stdoutConsole.finish('error');
+      }
+      if (stderrConsole) {
+        stderrConsole.finish('error');
+      }
+      settleReject(error);
+    }
+
+    function onClose(code, signal) {
+      consoleClosed.then(
+        () => {
+          if (code === 0) {
+            settleResolve({code, signal});
+            return;
+          }
+          settleReject(buildCommandError(code, signal));
+        },
+        (error) => settleReject(error)
+      );
+    }
+
+    child.once('error', onError);
+    child.once('close', onClose);
   });
 }
 
@@ -686,9 +1411,12 @@ function runCommand(command, args, env) {
 
   const rawAuditUrl = process.env.LHCI_BASE_URL || `http://127.0.0.1:${port}/`;
   const auditUrl = ensureSwClearedUrl(rawAuditUrl, port);
-  const healthUrl = `http://127.0.0.1:${port}/api/health`;
   const chromePath = resolveChromePath();
   const diagnosticsEnabled = String(process.env.LHCI_DIAGNOSTIC || '').trim() === '1';
+  const localOrigin = new URL(`http://127.0.0.1:${port}/`).origin;
+  const auditOrigin = new URL(auditUrl).origin;
+  const useExternalBaseUrl = Boolean(String(process.env.LHCI_BASE_URL || '').trim()) && auditOrigin !== localOrigin;
+  const healthUrl = useExternalBaseUrl ? null : `http://127.0.0.1:${port}/api/health`;
   const sharedDbEnv = {
     ...process.env,
     PYTHONUNBUFFERED: '1',
@@ -705,7 +1433,11 @@ function runCommand(command, args, env) {
     DB_PATH: dbPath,
     OCR_DB_PATH: ocrDbPath,
   };
-  bootstrapSqliteSchema(dbPath, sharedDbEnv);
+  if (!useExternalBaseUrl) {
+    bootstrapSqliteSchema(dbPath, sharedDbEnv);
+  } else {
+    console.log('[lighthouse] LHCI_BASE_URL externo detectado; se omite el servidor local y el bootstrap SQLite temporal.');
+  }
   const baseEnv = {
     ...sharedDbEnv,
     LHCI_PORT: String(port),
@@ -716,20 +1448,24 @@ function runCommand(command, args, env) {
     LHCI_MANAGED_SERVER: '1',
     APP_HTTP_COMPRESSION: '1',
   };
+  const sanitizedRawAuditUrl = sanitizeDiagnosticUrl(rawAuditUrl);
+  const sanitizedAuditUrl = sanitizeDiagnosticUrl(auditUrl);
   console.log(`Lighthouse temp dir: ${tempDir}`);
   console.log(`Lighthouse server log: ${path.join(tempDir, 'lighthouse-server.log')}`);
-  if (String(rawAuditUrl).trim() !== String(auditUrl).trim()) {
-    console.log(`[lighthouse] audit URL normalized: ${rawAuditUrl} -> ${auditUrl}`);
+  if (String(sanitizedRawAuditUrl).trim() !== String(sanitizedAuditUrl).trim()) {
+    console.log(`[lighthouse] audit URL normalized: ${sanitizedRawAuditUrl} -> ${sanitizedAuditUrl}`);
   }
-  console.log(`Lighthouse base URL: ${auditUrl}`);
+  console.log(`Lighthouse base URL: ${sanitizedAuditUrl}`);
 
-  const server = spawnServer({
-    port,
-    tempDir,
-    dbPath,
-    ocrDbPath,
-    serverLogPath: path.join(tempDir, 'lighthouse-server.log'),
-  });
+  const server = useExternalBaseUrl
+    ? null
+    : spawnServer({
+        port,
+        tempDir,
+        dbPath,
+        ocrDbPath,
+        serverLogPath: path.join(tempDir, 'lighthouse-server.log'),
+      });
 
   let shuttingDown = false;
   const shutdown = async (exitCode, signal, error) => {
@@ -765,7 +1501,9 @@ function runCommand(command, args, env) {
   });
 
   try {
-    await server.started;
+    if (server) {
+      await server.started;
+    }
 
     const ready = await waitForServer({
       auditUrl,
@@ -773,10 +1511,13 @@ function runCommand(command, args, env) {
       server,
       timeoutMs: 300000,
       curlTimeoutSeconds: 5,
+      mode: useExternalBaseUrl ? 'external' : 'local',
     });
 
     console.log(
-      `[lighthouse] servidor listo tras ${Math.ceil(ready.elapsedMs / 1000)}s y ${ready.attempt} comprobaciones.`
+      useExternalBaseUrl
+        ? `[lighthouse] destino externo listo tras ${Math.ceil(ready.elapsedMs / 1000)}s y ${ready.attempt} comprobaciones.`
+        : `[lighthouse] servidor listo tras ${Math.ceil(ready.elapsedMs / 1000)}s y ${ready.attempt} comprobaciones.`
     );
 
     if (diagnosticsEnabled) {
@@ -785,7 +1526,7 @@ function runCommand(command, args, env) {
       console.log('[lighthouse] Pre-LHCI diagnostics completed.');
     }
 
-    await runCommand('npx', ['--no-install', 'lhci', 'autorun'], baseEnv);
+    await runCommand('npx', ['--no-install', 'lhci', 'autorun'], baseEnv, {captureOutput: true});
   } catch (error) {
     const tail = (() => {
       try {
@@ -796,8 +1537,9 @@ function runCommand(command, args, env) {
       }
     })();
     if (tail) {
+      const sanitizedTail = sanitizeDiagnosticText(tail);
       console.error('--- Server log tail ---');
-      console.error(tail);
+      console.error(sanitizedTail);
       console.error('--- End server log tail ---');
     }
 

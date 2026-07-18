@@ -3,6 +3,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const {ensureSwClearedUrl} = require('./scripts/lighthouse-url.cjs');
 
 function shellQuote(value) {
   return `'${String(value || '').replace(/'/g, `'\\''`)}'`;
@@ -21,18 +22,6 @@ function resolveChromePath() {
     }
   }
   return undefined;
-}
-
-function ensureSwClearedUrl(rawUrl, fallbackPort) {
-  const fallback = `http://127.0.0.1:${fallbackPort}/?swcleared=1`;
-  const candidate = String(rawUrl || '').trim() || fallback;
-  try {
-    const url = new URL(candidate, fallback);
-    url.searchParams.set('swcleared', '1');
-    return url.toString();
-  } catch {
-    return fallback;
-  }
 }
 
 const defaultPort = Number(process.env.LHCI_PORT || process.env.PORT || 41765);
