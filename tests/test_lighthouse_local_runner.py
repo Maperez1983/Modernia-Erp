@@ -94,14 +94,14 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
             1,
         )[0]
         diagnostics_block = LIGHTHOUSE_WORKFLOW.split("- name: Run Lighthouse diagnostic matrix", 1)[1].split(
-            "- name: Upload Lighthouse diagnostic matrix",
+            "- name: Upload Lighthouse diagnostics",
             1,
         )[0]
         results_upload_block = LIGHTHOUSE_WORKFLOW.split("- name: Upload Lighthouse artifacts", 1)[1].split(
             "- name: Run Lighthouse diagnostic matrix",
             1,
         )[0]
-        matrix_upload_block = LIGHTHOUSE_WORKFLOW.split("- name: Upload Lighthouse diagnostic matrix", 1)[1]
+        matrix_upload_block = LIGHTHOUSE_WORKFLOW.split("- name: Upload Lighthouse diagnostics", 1)[1]
 
         assert "LHCI_DIAGNOSTIC: 1" not in measured_block
         assert "LHCI_DIAGNOSTIC_MATRIX: 1" not in measured_block
@@ -110,8 +110,15 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
         assert "if: always()" in results_upload_block
         assert "${{ env.LHCI_TMPDIR }}/lighthouse-results" in results_upload_block
         assert "navigation-diagnostic.log" not in results_upload_block
+        assert "if: always() && steps.lighthouse-ci.outcome == 'failure'" in matrix_upload_block
         assert "lighthouse-diagnostic-matrix.json" in matrix_upload_block
         assert "lighthouse-diagnostic-matrix.log" in matrix_upload_block
+        assert "lighthouse-netlog-summary.json" in matrix_upload_block
+        assert "lighthouse-netlog-summary.log" in matrix_upload_block
+        assert "lighthouse-server.log" in matrix_upload_block
+        assert "lighthouse-server-observations.jsonl" in matrix_upload_block
+        assert "lighthouse-netlog-*.json" in matrix_upload_block
+        assert "chrome-stderr*.log" in matrix_upload_block
 
     def test_package_json_declares_puppeteer_core(self):
         package_json = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
@@ -1275,6 +1282,7 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                 const path = require("path");
                 const Module = require("module");
                 const {EventEmitter} = require("events");
+                let spawnSync = require("child_process").spawnSync;
                 const source = [
                   'const { StringDecoder } = require("node:string_decoder");',
                   'const { ensureSwClearedUrl } = require("./scripts/lighthouse-url.cjs");',
@@ -1298,6 +1306,7 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                 const lighthouseCalls = [];
                 const originalLoad = Module._load;
                 const originalSetTimeout = global.setTimeout;
+                const originalSpawnSync = spawnSync;
                 const originalEnv = process.env.LHCI_DIAGNOSTIC_MATRIX;
                 process.env.LHCI_DIAGNOSTIC_MATRIX = "1";
 
@@ -1409,6 +1418,24 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                   }
                   return originalLoad.apply(this, arguments);
                 };
+                spawnSync = (command, args) => {
+                  if (command === "curl") {
+                    const target = String(args[args.length - 1] || "");
+                    const noProxy = args.includes("--noproxy");
+                    const stderr = noProxy
+                      ? "* Connected to example.test (127.0.0.1) port 7777 (#0)"
+                      : "* Connected to proxy.example (127.0.0.1) port 8080 (#0)";
+                    const stdout = `\n200`;
+                    return {
+                      stdout,
+                      stderr,
+                      status: 0,
+                      signal: null,
+                      error: null,
+                    };
+                  }
+                  return originalSpawnSync(command, args);
+                };
                 global.setTimeout = (fn) => {
                   fn();
                   return 0;
@@ -1430,6 +1457,12 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                     assert.ok(matrix.cases[1].directNavigation.exitCode === 1);
                     assert.ok(matrix.cases[2].lighthouse.exitCode === 1);
                     assert.ok(matrix.cases[3].lighthouse.exitCode === 0);
+                    assert.ok(matrix.environment.platform);
+                    assert.ok(matrix.environment.arch);
+                    assert.ok(matrix.environment.nodeVersion);
+                    assert.strictEqual(matrix.probes.length, 4);
+                    assert.ok(matrix.netLogSummary.jsonPath.includes("lighthouse-netlog-summary.json"));
+                    assert.ok(matrix.netLogSummary.logPath.includes("lighthouse-netlog-summary.log"));
 
                     const directProfiles = launchCalls
                       .filter((entry) => entry.kind === "puppeteer")
@@ -1443,6 +1476,12 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                     assert.strictEqual(lighthouseProfiles.length, 4);
                     assert.strictEqual(new Set(directProfiles).size, 4);
                     assert.strictEqual(new Set(lighthouseProfiles).size, 4);
+                    const directLaunches = launchCalls.filter((entry) => entry.kind === "puppeteer" && String(entry.options.userDataDir || "").includes("direct-profile"));
+                    const lighthouseLaunches = launchCalls.filter((entry) => entry.kind === "puppeteer" && String(entry.options.userDataDir || "").includes("lighthouse-profile"));
+                    assert.ok(directLaunches.every((entry) => entry.options.args.some((arg) => String(arg).startsWith("--log-net-log="))));
+                    assert.ok(directLaunches.every((entry) => entry.options.args.includes("--net-log-capture-mode=Everything")));
+                    assert.ok(lighthouseLaunches.every((entry) => entry.options.args.some((arg) => String(arg).startsWith("--log-net-log="))));
+                    assert.ok(lighthouseLaunches.every((entry) => entry.options.args.includes("--net-log-capture-mode=Everything")));
 
                     const jsonPath = path.join(tempDir, "lighthouse-diagnostic-matrix.json");
                     const logPath = path.join(tempDir, "lighthouse-diagnostic-matrix.log");
@@ -1458,6 +1497,12 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                     assert.ok(logText.includes("case-B-direct-requestfailed"));
                     assert.ok(logText.includes("case-C-lighthouse-lighthouse-summary"));
                     assert.ok(logText.includes("case-D-lighthouse-lighthouse-summary"));
+                    assert.ok(logText.includes("case-A-direct-lighthouse-error") || logText.includes("case-A-direct-browser-start"));
+                    assert.ok(jsonText.includes('"environment"'));
+                    assert.ok(jsonText.includes('"probes"'));
+                    assert.ok(jsonText.includes('"serverObservations"'));
+                    assert.ok(jsonText.includes('"directNetLogPath"'));
+                    assert.ok(jsonText.includes('"lighthouseNetLogPath"'));
                     assert.ok(!jsonText.includes("user:pass@"));
                     assert.ok(!jsonText.includes("token=abc"));
                     assert.ok(!logText.includes("user:pass@"));
@@ -1467,6 +1512,7 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                   } finally {
                     Module._load = originalLoad;
                     global.setTimeout = originalSetTimeout;
+                    spawnSync = originalSpawnSync;
                     if (originalEnv === undefined) {
                       delete process.env.LHCI_DIAGNOSTIC_MATRIX;
                     } else {

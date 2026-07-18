@@ -55,6 +55,7 @@ jobs:
           echo "CHROME_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
 
       - name: Run Lighthouse CI
+        id: lighthouse-ci
         run: npm run lighthouse
 
       - name: Upload Lighthouse artifacts
@@ -71,12 +72,19 @@ jobs:
           LHCI_DIAGNOSTIC_MATRIX: 1
         run: npm run lighthouse
 
-      - name: Upload Lighthouse diagnostic matrix
-        if: failure()
+      - name: Upload Lighthouse diagnostics
+        if: always() && steps.lighthouse-ci.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
-          name: lighthouse-diagnostic-matrix
+          name: lighthouse-diagnostics
           path: |
             ${{ env.LHCI_TMPDIR }}/lighthouse-diagnostic-matrix.json
             ${{ env.LHCI_TMPDIR }}/lighthouse-diagnostic-matrix.log
+            ${{ env.LHCI_TMPDIR }}/lighthouse-netlog-summary.json
+            ${{ env.LHCI_TMPDIR }}/lighthouse-netlog-summary.log
+            ${{ env.LHCI_TMPDIR }}/lighthouse-server.log
+            ${{ env.LHCI_TMPDIR }}/lighthouse-server-observations.jsonl
+            ${{ env.LHCI_TMPDIR }}/lighthouse-diagnostic-matrix/**/lighthouse-netlog-*.json
+            ${{ env.LHCI_TMPDIR }}/lighthouse-diagnostic-matrix/**/chrome-stderr*.log
+            ${{ env.LHCI_TMPDIR }}/lighthouse-diagnostic-matrix/**/navigation-diagnostic.log
           if-no-files-found: error
