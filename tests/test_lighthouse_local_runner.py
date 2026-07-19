@@ -1,3 +1,5 @@
+import importlib.util
+import io
 import json
 import http.server
 import os
@@ -6,6 +8,7 @@ import subprocess
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from pathlib import Path
 from textwrap import dedent
 
@@ -1647,6 +1650,7 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                   assert.strictEqual(variants[1].stdioMode, "ignore");
                   assert.strictEqual(variants[2].stdioMode, "inherit");
                   assert.strictEqual(variants[3].launcherKind, "auxiliary");
+                  assert.strictEqual(variants[4].launcherTransport, "python");
                   assert.strictEqual(variants[4].closeInheritedPipeFds, true);
                   assert.strictEqual(variants[0].executablePath, "/tmp/current-chrome");
                   assert.strictEqual(variants[4].executablePath, "/tmp/current-chrome");
@@ -1668,6 +1672,330 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
             .replace("__SOURCE__", json.dumps(chunk))
         )
         run_node_script(script)
+
+    def test_fd_inheritance_launch_flags_include_headless_and_remote_debugging_port(self):
+        chunk = extract_chunk("function getDiagnosticChromeFlags()", "function isTruthyEnvFlag")
+        script = (
+            dedent(
+                """
+                const assert = require("assert");
+                const source = [
+                  __SOURCE__,
+                ].join("\\n");
+                const factory = new Function(
+                  source + "\\nreturn { getDiagnosticChromeFlags, buildChromeLaunchFlags };"
+                );
+                const api = factory();
+                const flags = api.buildChromeLaunchFlags(["--foo=bar", ""]);
+
+                assert.ok(Array.isArray(flags));
+                assert.ok(flags.includes("--no-sandbox"));
+                assert.ok(flags.includes("--headless=new"));
+                assert.ok(flags.includes("--remote-debugging-port=0"));
+                assert.ok(flags.includes("--foo=bar"));
+                assert.ok(!flags.includes(""));
+                assert.strictEqual(flags[flags.length - 1], "--foo=bar");
+                assert.deepStrictEqual(api.buildChromeLaunchFlags([]).slice(-2), [
+                  "--headless=new",
+                  "--remote-debugging-port=0",
+                ]);
+                """
+            )
+            .replace("__SOURCE__", json.dumps(chunk))
+        )
+        run_node_script(script)
+
+    def test_python_fd_inheritance_launcher_uses_close_fds_and_empty_pass_fds(self):
+        launcher_path = ROOT / "scripts" / "chrome_clean_launcher.py"
+        spec = importlib.util.spec_from_file_location("chrome_clean_launcher", launcher_path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        popen_calls = []
+        snapshots = iter(
+            [
+                {"pid": 111, "available": True, "count": 1, "entries": [{"fd": 142, "target": "pipe:[1]"}]},
+                {"pid": 111, "available": True, "count": 1, "entries": [{"fd": 145, "target": "pipe:[2]"}]},
+                {"pid": 4321, "available": True, "count": 2, "entries": [{"fd": 142, "target": "pipe:[3]"}, {"fd": 145, "target": "pipe:[4]"}]},
+                {"pid": 111, "available": True, "count": 1, "entries": [{"fd": 142, "target": "pipe:[1]"}]},
+                {"pid": 4321, "available": True, "count": 2, "entries": [{"fd": 142, "target": "pipe:[3]"}, {"fd": 145, "target": "pipe:[4]"}]},
+            ]
+        )
+
+        class FakeProc:
+            def __init__(self):
+                self.pid = 4321
+                self.stdout = io.StringIO("chrome stdout line\n")
+                self.stderr = io.StringIO("Authorization: Bearer abc\nChrome stderr line\n")
+                self._returncode = None
+
+            def poll(self):
+                return self._returncode
+
+            def wait(self, timeout=None):
+                self._returncode = 0
+                return 0
+
+            def terminate(self):
+                return None
+
+            def kill(self):
+                return None
+
+        fake_proc = FakeProc()
+
+        class FakeSubprocess:
+            DEVNULL = subprocess.DEVNULL
+            PIPE = subprocess.PIPE
+            TimeoutExpired = subprocess.TimeoutExpired
+
+            @staticmethod
+            def Popen(*args, **kwargs):
+                popen_calls.append({"args": args, "kwargs": kwargs})
+                return fake_proc
+
+        def capture_fd_listing(_pid):
+            return next(snapshots)
+
+        with mock.patch.object(
+            module,
+            "wait_for_devtools_active_port",
+            return_value={
+                "filePath": "/tmp/profile/DevToolsActivePort",
+                "port": 9222,
+                "wsPath": "/devtools/browser/test",
+                "wsEndpoint": "ws://127.0.0.1:9222/devtools/browser/test",
+            },
+        ):
+            state = module.launch_chrome_process(
+                {
+                    "chromePath": "/fake/chrome",
+                    "profileDir": "/tmp/profile",
+                    "launchFlags": ["--headless=new", "--remote-debugging-port=0"],
+                    "devtoolsTimeoutMs": 5000,
+                },
+                subprocess_module=FakeSubprocess,
+                capture_fd_listing_fn=capture_fd_listing,
+            )
+            complete = module.wait_for_chrome_exit(
+                state,
+                timeout_ms=5000,
+                capture_fd_listing_fn=capture_fd_listing,
+            )
+
+        assert len(popen_calls) == 1
+        call = popen_calls[0]["kwargs"]
+        assert call["close_fds"] is True
+        assert call["pass_fds"] == ()
+        assert call["stdin"] is subprocess.DEVNULL
+        assert call["stdout"] is subprocess.PIPE
+        assert call["stderr"] is subprocess.PIPE
+        assert call["text"] is True
+        assert state["launch_info"]["browserWSEndpoint"] == "ws://127.0.0.1:9222/devtools/browser/test"
+        assert state["launch_info"]["chromePid"] == 4321
+        assert state["launch_info"]["chromeFdsBeforeLaunch"]["entries"][0]["fd"] == 142
+        assert state["launch_info"]["chromeFdsBeforeLaunch"]["entries"][1]["fd"] == 145
+        assert complete["chromeExitCode"] == 0
+        assert complete["chromeExitSignal"] is None
+        assert "Chrome stderr line" in complete["chromeStderrText"]
+
+    def test_python_fd_inheritance_launcher_waits_for_devtools_http_ready(self):
+        launcher_path = ROOT / "scripts" / "chrome_clean_launcher.py"
+        spec = importlib.util.spec_from_file_location("chrome_clean_launcher", launcher_path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        class FakeProc:
+            def poll(self):
+                return None
+
+        http_attempts = {"count": 0}
+        ws_attempts = {"count": 0}
+
+        def fake_urlopen(url, timeout=1):
+            http_attempts["count"] += 1
+
+            class FakeResponse:
+                status = 200
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, exc_type, exc, tb):
+                    return False
+
+            if http_attempts["count"] < 3:
+                raise module.urllib_error.URLError("connection refused")
+            assert url == "http://127.0.0.1:9222/json/version"
+            assert timeout == 1
+            return FakeResponse()
+
+        class FakeSocket:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def sendall(self, data):
+                self.sent = data
+
+            def settimeout(self, timeout):
+                self.timeout = timeout
+
+            def recv(self, size):
+                return b"HTTP/1.1 101 Switching Protocols\r\nSec-WebSocket-Accept: test\r\n\r\n"
+
+        def fake_create_connection(address, timeout=1):
+            ws_attempts["count"] += 1
+            if ws_attempts["count"] < 3:
+                raise OSError("connection refused")
+            assert address == ("127.0.0.1", 9222)
+            assert timeout == 1
+            return FakeSocket()
+
+        with mock.patch.object(module, "read_devtools_active_port", return_value={
+            "filePath": "/tmp/profile/DevToolsActivePort",
+            "port": 9222,
+            "wsPath": "/devtools/browser/test",
+            "wsEndpoint": "ws://127.0.0.1:9222/devtools/browser/test",
+        }), mock.patch.object(module.urllib_request, "urlopen", side_effect=fake_urlopen), mock.patch.object(
+            module.socket,
+            "create_connection",
+            side_effect=fake_create_connection,
+        ), mock.patch.object(
+            module.time, "sleep", return_value=None
+        ), mock.patch.object(
+            module.time,
+            "monotonic",
+            side_effect=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5],
+        ):
+            devtools = module.wait_for_devtools_active_port("/tmp/profile", FakeProc(), timeout_ms=1000)
+
+        assert devtools["port"] == 9222
+        assert http_attempts["count"] >= 3
+        assert ws_attempts["count"] >= 2
+
+    def test_python_fd_inheritance_launcher_emits_launch_info_before_close_command(self):
+        launcher_path = ROOT / "scripts" / "chrome_clean_launcher.py"
+        spec = importlib.util.spec_from_file_location("chrome_clean_launcher", launcher_path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        stdout_stream = io.StringIO()
+        stdin_stream = io.StringIO('{"command":"close"}\n')
+
+        class DummyThread:
+            def join(self, timeout=None):
+                return None
+
+        class FakeProc:
+            def __init__(self):
+                self.pid = 4321
+                self._returncode = None
+                self.terminated = False
+
+            def poll(self):
+                return self._returncode
+
+            def wait(self, timeout=None):
+                self._returncode = 0
+                return 0
+
+            def terminate(self):
+                self.terminated = True
+                assert 'launch_info' in stdout_stream.getvalue()
+
+            def kill(self):
+                self._returncode = -9
+
+        fake_proc = FakeProc()
+        launch_calls = []
+        complete_calls = []
+
+        def fake_launch_chrome_process(config, subprocess_module=None, capture_fd_listing_fn=None):
+            launch_calls.append(config)
+            return {
+                "proc": fake_proc,
+                "stdout_chunks": [],
+                "stderr_chunks": [],
+                "stdout_thread": DummyThread(),
+                "stderr_thread": DummyThread(),
+                "launch_info": {
+                    "phase": "launch",
+                    "pythonPid": 111,
+                    "chromePid": fake_proc.pid,
+                    "chromePath": "/fake/chrome",
+                    "browserWSEndpoint": "ws://127.0.0.1:9222/devtools/browser/test",
+                    "devtoolsPort": 9222,
+                    "devtoolsPath": "/devtools/browser/test",
+                    "profileDir": "/tmp/profile",
+                    "devtoolsActivePort": {
+                        "filePath": "/tmp/profile/DevToolsActivePort",
+                        "port": 9222,
+                        "wsPath": "/devtools/browser/test",
+                        "wsEndpoint": "ws://127.0.0.1:9222/devtools/browser/test",
+                    },
+                    "chromeFdsBeforeLaunch": {"available": True, "entries": []},
+                },
+                "python_pid": 111,
+                "chrome_pid": fake_proc.pid,
+                "python_fds_before": {"available": True, "entries": []},
+                "python_fds_after": {"available": True, "entries": []},
+                "chrome_fds_before": {"available": True, "entries": []},
+                "config": config,
+            }
+
+        def fake_wait_for_chrome_exit(state, timeout_ms=None, grace_ms=5000, capture_fd_listing_fn=None):
+            complete_calls.append(
+                {
+                    "terminated": fake_proc.terminated,
+                    "stdout": stdout_stream.getvalue(),
+                }
+            )
+            return {
+                "phase": "complete",
+                "pythonPid": state["python_pid"],
+                "chromePid": fake_proc.pid,
+                "chromeExitCode": 0,
+                "chromeExitSignal": None,
+                "chromeTimedOut": False,
+                "pythonFdsAfterExit": {"available": True, "entries": []},
+                "chromeFdsAfterExit": {"available": True, "entries": []},
+                "chromeStdoutText": "",
+                "chromeStderrText": "",
+            }
+
+        with mock.patch.object(module, "launch_chrome_process", side_effect=fake_launch_chrome_process), mock.patch.object(
+            module, "wait_for_chrome_exit", side_effect=fake_wait_for_chrome_exit
+        ):
+            launch_info, complete_info = module.run_launcher(
+                {
+                    "completionTimeoutMs": 1000,
+                    "completionGraceMs": 1000,
+                },
+                stdin_stream=stdin_stream,
+                stdout_stream=stdout_stream,
+                started_at=0.0,
+            )
+
+        emitted_lines = [json.loads(line) for line in stdout_stream.getvalue().splitlines() if line.strip()]
+        assert emitted_lines[0]["phase"] == "launch_info"
+        assert emitted_lines[1]["phase"] == "complete_info"
+        assert emitted_lines[0]["chromePid"] == 4321
+        assert emitted_lines[0]["browserWSEndpoint"] == "ws://127.0.0.1:9222/devtools/browser/test"
+        assert emitted_lines[0]["devtoolsPort"] == 9222
+        assert emitted_lines[0]["devtoolsPath"] == "/devtools/browser/test"
+        assert emitted_lines[0]["profileDir"] == "/tmp/profile"
+        assert launch_info["phase"] == "launch_info"
+        assert complete_info["phase"] == "complete_info"
+        assert fake_proc.terminated is True
+        assert launch_calls
+        assert complete_calls and complete_calls[0]["terminated"] is True
+        assert 'launch_info' in complete_calls[0]["stdout"]
 
     def test_chrome_clean_launcher_closes_only_inherited_pipe_fds(self):
         script = dedent(
@@ -1867,6 +2195,190 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
               process.exit(1);
             });
             """
+        )
+        run_node_script(script)
+
+    def test_fd_inheritance_python_launcher_sends_close_after_connect(self):
+        chunk = extract_chunk("function sleep(ms)", "function describeStatus(")
+        script = (
+            dedent(
+                """
+                const assert = require("assert");
+                const {EventEmitter} = require("events");
+                const source = [
+                  'const { StringDecoder } = require("node:string_decoder");',
+                  'const { captureProcFdListing: captureChromeCleanFdListing } = require("./scripts/chrome-clean-launcher.cjs");',
+                  __SOURCE__,
+                ].join("\\n");
+                const factory = new Function(
+                  "require",
+                  "fs",
+                  "path",
+                  "os",
+                  "spawn",
+                  "spawnSync",
+                  "process",
+                  "console",
+                  "setTimeout",
+                  "clearTimeout",
+                  "clearInterval",
+                  "JSON",
+                  "Object",
+                  "Array",
+                  "String",
+                  "Number",
+                  "Boolean",
+                  source + "\\nreturn { runChromeFdInheritanceCaseViaPythonLauncher };"
+                );
+                const api = factory(
+                  require,
+                  require("fs"),
+                  require("path"),
+                  require("os"),
+                  () => {},
+                  require("child_process").spawnSync,
+                  process,
+                  console,
+                  setTimeout,
+                  clearTimeout,
+                  clearInterval,
+                  JSON,
+                  Object,
+                  Array,
+                  String,
+                  Number,
+                  Boolean
+                );
+                let connectCalled = false;
+                let closeCommandSeen = false;
+                let helperClosed = false;
+                const spawnCalls = [];
+                const stdoutLines = [];
+                const stderrLines = [];
+
+                const helperProcess = new EventEmitter();
+                helperProcess.pid = 54321;
+                helperProcess.exitCode = null;
+                helperProcess.signalCode = null;
+                helperProcess.stdout = new EventEmitter();
+                helperProcess.stdout.on = helperProcess.stdout.addListener.bind(helperProcess.stdout);
+                helperProcess.stdout.once = helperProcess.stdout.once.bind(helperProcess.stdout);
+                helperProcess.stderr = new EventEmitter();
+                helperProcess.stderr.on = helperProcess.stderr.addListener.bind(helperProcess.stderr);
+                helperProcess.stderr.once = helperProcess.stderr.once.bind(helperProcess.stderr);
+                helperProcess.stdin = {
+                  write(chunk) {
+                    const text = String(chunk);
+                    stdoutLines.push(text);
+                    if (text.includes('\"command\":\"close\"')) {
+                      closeCommandSeen = true;
+                      setImmediate(() => {
+                        helperProcess.stdout.emit('data', JSON.stringify({
+                          phase: 'complete_info',
+                          pythonPid: 101,
+                          chromePid: 54321,
+                          chromeExitCode: 0,
+                          chromeExitSignal: null,
+                          chromeTimedOut: false,
+                          chromeStdoutText: '',
+                          chromeStderrText: '',
+                        }) + '\\n');
+                        helperProcess.emit('close', 0, null);
+                        helperClosed = true;
+                      });
+                    }
+                    return true;
+                  },
+                  end() {},
+                  destroyed: false,
+                };
+
+                setImmediate(() => {
+                  helperProcess.stdout.emit('data', JSON.stringify({
+                    phase: 'launch_info',
+                    pythonPid: 101,
+                    chromePid: 54321,
+                    browserWSEndpoint: 'ws://127.0.0.1:9222/devtools/browser/test',
+                    devtoolsPort: 9222,
+                    devtoolsPath: '/devtools/browser/test',
+                    profileDir: '/tmp/profile',
+                  }) + '\\n');
+                });
+
+                const browser = {
+                  version: async () => 'Chrome/143.0.7499.4',
+                  newPage: async () => ({
+                    on() {},
+                    goto: async () => {
+                      return {
+                        status: () => 200,
+                        url: () => 'http://127.0.0.1:12345/?swcleared=1',
+                      };
+                    },
+                  }),
+                  close: async () => {
+                    assert.strictEqual(closeCommandSeen, false, 'close command must be sent after browser.close completes');
+                  },
+                };
+
+                const spawn = (chromePath, args, options) => {
+                  spawnCalls.push({chromePath, args, options});
+                  return helperProcess;
+                };
+
+                (async () => {
+                  const result = await api.runChromeFdInheritanceCaseViaPythonLauncher(
+                    {
+                      variantId: 'F5',
+                      label: 'auxiliary-scrubbed',
+                      launcherKind: 'auxiliary',
+                      launcherTransport: 'python',
+                      stdioMode: 'pipe',
+                      closeInheritedPipeFds: true,
+                      auditUrl: 'http://127.0.0.1:12345/?swcleared=1',
+                      chromePath: '/fake/chrome',
+                      tempDir: '/tmp/fd-test',
+                      caseDir: '/tmp/fd-test/case',
+                      profileDir: '/tmp/fd-test/case/profile',
+                      launchFlags: ['--headless=new', '--remote-debugging-port=0'],
+                      navigationTimeoutMs: 3000,
+                      devtoolsTimeoutMs: 3000,
+                      closeTimeoutMs: 3000,
+                    },
+                    {
+                      spawn,
+                      puppeteer: {
+                        connect: async ({browserWSEndpoint}) => {
+                          connectCalled = true;
+                          assert.ok(browserWSEndpoint.includes('ws://127.0.0.1:9222/devtools/browser/test'));
+                          assert.strictEqual(closeCommandSeen, false, 'connect must happen before close command');
+                          return browser;
+                        },
+                      },
+                      process: {
+                        pid: 999,
+                        env: process.env,
+                        cwd: () => process.cwd(),
+                        stderr: {write: (text) => stderrLines.push(String(text))},
+                        stdout: {write: () => {}},
+                      },
+                    }
+                  );
+
+                  assert.strictEqual(connectCalled, true);
+                  assert.strictEqual(closeCommandSeen, true);
+                  assert.strictEqual(helperClosed, true);
+                  assert.strictEqual(spawnCalls.length, 1);
+                  assert.deepStrictEqual(spawnCalls[0].options.stdio, ['pipe', 'pipe', 'pipe']);
+                  assert.strictEqual(result.exitCode, 0);
+                  assert.strictEqual(result.helperProcess.status, 0);
+                })().catch((error) => {
+                  console.error(error && error.stack ? error.stack : error);
+                  process.exit(1);
+                });
+                """
+            )
+            .replace("__SOURCE__", json.dumps(chunk))
         )
         run_node_script(script)
 

@@ -352,6 +352,51 @@ function attachSanitizedConsoleStream(stream, writeFn) {
   };
 }
 
+function createBufferedLineCollector(onLine) {
+  const decoder = new StringDecoder('utf8');
+  let buffer = '';
+  let closed = false;
+
+  const emit = (line) => {
+    try {
+      onLine(line);
+    } catch {}
+  };
+
+  const drain = () => {
+    let newlineIndex = buffer.indexOf('\n');
+    while (newlineIndex !== -1) {
+      const line = buffer.slice(0, newlineIndex).replace(/\r$/, '');
+      emit(line);
+      buffer = buffer.slice(newlineIndex + 1);
+      newlineIndex = buffer.indexOf('\n');
+    }
+  };
+
+  return {
+    write(chunk) {
+      if (closed) return;
+      const text = typeof chunk === 'string' ? chunk : decoder.write(chunk);
+      if (!text) return;
+      buffer += text;
+      drain();
+    },
+    finish() {
+      if (closed) return;
+      const tail = decoder.end();
+      if (tail) {
+        buffer += tail;
+      }
+      drain();
+      if (buffer) {
+        emit(buffer);
+        buffer = '';
+      }
+      closed = true;
+    },
+  };
+}
+
 function attachRawLogCapture(child, logStream) {
   let logStreamClosed = false;
   let stdoutCapturing = false;
@@ -1634,6 +1679,18 @@ function getDiagnosticChromeFlags() {
   ];
 }
 
+function buildChromeLaunchFlags(extraFlags = []) {
+  const resolvedExtraFlags = Array.isArray(extraFlags)
+    ? extraFlags.map((flag) => String(flag)).filter((flag) => flag.trim())
+    : [];
+  return [
+    ...getDiagnosticChromeFlags(),
+    '--headless=new',
+    '--remote-debugging-port=0',
+    ...resolvedExtraFlags,
+  ];
+}
+
 function isTruthyEnvFlag(value) {
   return String(value || '').trim() === '1';
 }
@@ -1720,6 +1777,7 @@ function buildFdInheritanceMatrixVariants(chromePath) {
       id: 'F5',
       label: 'auxiliary-scrubbed',
       launcherKind: 'auxiliary',
+      launcherTransport: 'python',
       stdioMode: 'pipe',
       closeInheritedPipeFds: true,
       executablePath: resolvePath(chromePath),
@@ -1821,10 +1879,551 @@ function extractFdInheritanceCaseLog(logText, variantId) {
   return text.slice(startIndex, endIndex + endMarker.length);
 }
 
+async function runChromeFdInheritanceCaseViaPythonLauncher(config, deps = {}) {
+  const spawnImpl = deps.spawn || spawn;
+  const puppeteerImpl = deps.puppeteer || require('puppeteer-core');
+  const fsImpl = deps.fs || fs;
+  const processImpl = deps.process || process;
+  const pythonExecutable = sanitizeDiagnosticText(
+    String(
+      deps.pythonExecutable ||
+        process.env.LHCI_FD_INHERITANCE_PYTHON ||
+        process.env.PYTHON ||
+        'python'
+    ).trim() || 'python'
+  );
+  const wrapperScriptPath = path.join(process.cwd(), 'scripts', 'chrome_clean_launcher.py');
+  const variant = {
+    id: config.variantId || config.id || 'F?',
+    label: config.label || config.variantLabel || '',
+    stdioMode: config.stdioMode || 'pipe',
+    launcherKind: config.launcherKind || 'auxiliary',
+    launcherTransport: config.launcherTransport || 'python',
+    closeInheritedPipeFds: Boolean(config.closeInheritedPipeFds),
+  };
+  const auditUrl = sanitizeDiagnosticUrl(config.auditUrl || '');
+  const chromePath = sanitizeDiagnosticText(config.chromePath || '');
+  const tempDir = path.resolve(config.tempDir || fsImpl.mkdtempSync(path.join(os.tmpdir(), 'lhci-fd-')));
+  const caseDir = path.resolve(config.caseDir || path.join(tempDir, 'fd-inheritance-matrix', variant.id));
+  fsImpl.mkdirSync(caseDir, {recursive: true});
+  const profileDir = path.resolve(config.profileDir || path.join(caseDir, 'profile'));
+  fsImpl.mkdirSync(profileDir, {recursive: true});
+  const extraFlags = Array.isArray(config.extraFlags) ? config.extraFlags : [];
+  const launchFlags = Array.isArray(config.launchFlags) && config.launchFlags.length
+    ? config.launchFlags.map((flag) => String(flag))
+    : buildChromeLaunchFlags(extraFlags);
+
+  const helperProcess = spawnImpl(
+    pythonExecutable,
+    [
+      wrapperScriptPath,
+      `--config-json=${JSON.stringify({
+        ...config,
+        variantId: variant.id,
+        label: variant.label,
+        stdioMode: variant.stdioMode,
+        launcherKind: variant.launcherKind,
+        launcherTransport: variant.launcherTransport,
+        closeInheritedPipeFds: false,
+        auditUrl,
+        chromePath,
+        tempDir,
+        caseDir,
+        profileDir,
+        launchFlags,
+        completionTimeoutMs:
+          Number(
+            config.wrapperTimeoutMs ||
+              Number(config.navigationTimeoutMs || 30000) + Number(config.closeTimeoutMs || 10000) + 15000
+          ),
+        completionGraceMs: Number(config.wrapperGraceMs || 5000),
+      })}`,
+    ],
+    {
+      cwd: processImpl.cwd(),
+      env: processImpl.env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: false,
+    }
+  );
+
+  if (!helperProcess || typeof helperProcess.pid !== 'number') {
+    throw new Error('No se pudo lanzar el helper Python para la matriz de herencia de FDs.');
+  }
+
+  const helperStdoutLines = [];
+  const helperStderrLines = [];
+  let helperLaunchRecord = null;
+  let helperCompleteRecord = null;
+  let helperError = null;
+  let helperTerminationScheduled = false;
+  let helperCloseCommandSent = false;
+
+  const scheduleHelperTermination = (reason, graceMs = 5000) => {
+    if (helperTerminationScheduled) {
+      return;
+    }
+    helperTerminationScheduled = true;
+    console.log(`[lighthouse][fd-matrix] ${variant.id} helper timeout: ${reason}; sending SIGTERM.`);
+    try {
+      helperProcess.kill('SIGTERM');
+    } catch {}
+    const killTimer = setTimeout(() => {
+      if (helperProcess.exitCode === null && helperProcess.signalCode === null) {
+        console.log(`[lighthouse][fd-matrix] ${variant.id} helper timeout: escalating to SIGKILL.`);
+        try {
+          helperProcess.kill('SIGKILL');
+        } catch {}
+      }
+    }, graceMs);
+    if (killTimer && typeof killTimer.unref === 'function') {
+      killTimer.unref();
+    }
+  };
+
+  const stdoutCollector = createBufferedLineCollector((line) => {
+    if (!line) return;
+    helperStdoutLines.push(line);
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && (parsed.phase === 'launch_info' || parsed.phase === 'launch') && !helperLaunchRecord) {
+        helperLaunchRecord = parsed;
+      } else if (parsed && (parsed.phase === 'complete_info' || parsed.phase === 'complete')) {
+        helperCompleteRecord = parsed;
+      } else if (parsed && parsed.phase === 'error' && !helperError) {
+        helperError = new Error(parsed.message || 'Python launcher error');
+      }
+    } catch {}
+  });
+  const stderrWriter = createSanitizedConsoleLineWriter((line) => {
+    helperStderrLines.push(line);
+    if (processImpl.stderr && typeof processImpl.stderr.write === 'function') {
+      processImpl.stderr.write(line);
+    }
+  });
+
+  if (helperProcess.stdout && typeof helperProcess.stdout.on === 'function') {
+    helperProcess.stdout.on('data', (chunk) => stdoutCollector.write(chunk));
+    helperProcess.stdout.once('end', () => stdoutCollector.finish());
+    helperProcess.stdout.once('close', () => stdoutCollector.finish());
+  }
+  if (helperProcess.stderr && typeof helperProcess.stderr.on === 'function') {
+    helperProcess.stderr.on('data', (chunk) => stderrWriter.write(chunk));
+    helperProcess.stderr.once('end', () => stderrWriter.finish());
+    helperProcess.stderr.once('close', () => stderrWriter.finish());
+  }
+
+  const helperClosePromise = new Promise((resolve, reject) => {
+    helperProcess.once('close', (status, signal) => {
+      resolve({status, signal});
+    });
+    helperProcess.once('error', (error) => {
+      helperError = error;
+      reject(error);
+    });
+  });
+
+  const helperLaunchPromise = new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const timeoutMs = Number(config.devtoolsTimeoutMs || 30000) + 60000;
+    const timer = setInterval(() => {
+      if (helperLaunchRecord) {
+        clearInterval(timer);
+        resolve(helperLaunchRecord);
+        return;
+      }
+      if (helperError) {
+        clearInterval(timer);
+        reject(helperError);
+        return;
+      }
+      if (Date.now() - startedAt > timeoutMs) {
+        clearInterval(timer);
+        scheduleHelperTermination('launch timeout');
+        reject(
+          new Error(
+            `El helper Python no publicó DevToolsActivePort dentro de ${Math.round(timeoutMs / 1000)}s.`
+          )
+        );
+      }
+    }, 100);
+  });
+
+  const helperCompletePromise = new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const timeoutMs = Number(config.closeTimeoutMs || 10000) + 60000;
+    const timer = setInterval(() => {
+      if (helperCompleteRecord) {
+        clearInterval(timer);
+        resolve(helperCompleteRecord);
+        return;
+      }
+      if (helperError) {
+        clearInterval(timer);
+        reject(helperError);
+        return;
+      }
+      if (Date.now() - startedAt > timeoutMs) {
+        clearInterval(timer);
+        scheduleHelperTermination('completion timeout');
+        reject(
+          new Error(`El helper Python no publicó el resultado completo dentro de ${Math.round(timeoutMs / 1000)}s.`)
+        );
+      }
+    }, 100);
+  });
+
+  const launchRecord = await helperLaunchPromise;
+  if (!launchRecord || !launchRecord.browserWSEndpoint || !launchRecord.chromePid) {
+    throw new Error('El helper Python no devolvió un endpoint DevTools o PID válidos.');
+  }
+
+  const navigationEvents = [];
+
+  let navigationResponse = null;
+  let gotoError = null;
+  let browserClosed = false;
+  let browser = null;
+  let browserVersion = '';
+  let browserConnectError = null;
+  let page = null;
+  let processTableBeforeClose = null;
+  let processTableAfterClose = null;
+  let networkServicePid = null;
+  let networkServiceFds = null;
+  let chromeFdsBeforeClose = null;
+  let chromeFdsAfterClose = null;
+
+  try {
+    const connectTimeoutMs = Number(config.devtoolsTimeoutMs || 30000) + 15000;
+    const connectStartedAt = Date.now();
+    let connectAttemptError = null;
+    while (!browser && Date.now() - connectStartedAt < connectTimeoutMs) {
+      try {
+        browser = await puppeteerImpl.connect({
+          browserWSEndpoint: launchRecord.browserWSEndpoint,
+        });
+      } catch (error) {
+        connectAttemptError = error;
+        await sleep(250);
+      }
+    }
+    if (!browser) {
+      browserConnectError = connectAttemptError || new Error('No se pudo conectar al navegador.');
+      navigationEvents.push(
+        sanitizeDiagnosticValue({
+          event: 'browser-connect-error',
+          message: browserConnectError?.message || String(browserConnectError || 'Unknown browser connect error'),
+        })
+      );
+    } else {
+      browserVersion = sanitizeDiagnosticText(await browser.version());
+      page = await browser.newPage();
+      page.on('request', (request) => {
+        navigationEvents.push(
+          sanitizeDiagnosticValue({
+            event: 'request',
+            url: request.url(),
+            method: request.method(),
+            resourceType: request.resourceType(),
+            navigationRequest: request.isNavigationRequest(),
+          })
+        );
+      });
+      page.on('response', (response) => {
+        navigationEvents.push(
+          sanitizeDiagnosticValue({
+            event: 'response',
+            url: response.url(),
+            status: response.status(),
+            fromCache: response.fromCache(),
+          })
+        );
+      });
+      page.on('requestfailed', (request) => {
+        const failure = request.failure ? request.failure() : null;
+        navigationEvents.push(
+          sanitizeDiagnosticValue({
+            event: 'requestfailed',
+            url: request.url(),
+            method: request.method(),
+            resourceType: request.resourceType(),
+            errorText: failure?.errorText || '',
+          })
+        );
+      });
+      page.on('framenavigated', (frame) => {
+        navigationEvents.push(
+          sanitizeDiagnosticValue({
+            event: 'framenavigated',
+            url: frame.url(),
+          })
+        );
+      });
+      page.on('load', () => {
+        navigationEvents.push({event: 'load'});
+      });
+      page.on('domcontentloaded', () => {
+        navigationEvents.push({event: 'domcontentloaded'});
+      });
+      page.on('pageerror', (error) => {
+        navigationEvents.push(
+          sanitizeDiagnosticValue({
+            event: 'pageerror',
+            message: error?.message || String(error || 'Unknown pageerror'),
+          })
+        );
+      });
+      page.on('console', (message) => {
+        navigationEvents.push(
+          sanitizeDiagnosticValue({
+            event: 'console',
+            type: message.type(),
+            text: message.text(),
+          })
+        );
+      });
+    }
+
+    try {
+      if (page) {
+        navigationResponse = await page.goto(auditUrl, {
+          waitUntil: 'load',
+          timeout: Number(config.navigationTimeoutMs || 30000),
+        });
+      } else if (browserConnectError) {
+        gotoError = browserConnectError;
+      }
+    } catch (error) {
+      gotoError = error;
+    }
+
+    processTableBeforeClose = captureProcessTable();
+    networkServicePid = findNetworkServicePid(processTableBeforeClose.rows, launchRecord.chromePid);
+    networkServiceFds = captureChromeCleanFdListing(networkServicePid, fsImpl, processImpl);
+    chromeFdsBeforeClose = captureChromeCleanFdListing(launchRecord.chromePid, fsImpl, processImpl);
+
+    if (browser) {
+      try {
+        await browser.close();
+        browserClosed = true;
+      } catch (error) {
+        navigationEvents.push(
+          sanitizeDiagnosticValue({
+            event: 'browser-close-error',
+            message: error?.message || String(error || 'Unknown browser close error'),
+          })
+        );
+      }
+    } else {
+      navigationEvents.push({event: 'browser-close-skipped', reason: 'browser-not-connected'});
+    }
+
+    if (!helperCloseCommandSent && helperProcess.stdin && typeof helperProcess.stdin.write === 'function') {
+      helperCloseCommandSent = true;
+      try {
+        helperProcess.stdin.write(`${JSON.stringify({command: 'close'})}\n`);
+        if (typeof helperProcess.stdin.end === 'function') {
+          helperProcess.stdin.end();
+        }
+      } catch (error) {
+        navigationEvents.push(
+          sanitizeDiagnosticValue({
+            event: 'helper-close-command-error',
+            message: error?.message || String(error || 'Unknown helper close command error'),
+          })
+        );
+      }
+    }
+
+    let helperCloseInfo = {status: null, signal: null};
+    try {
+      helperCloseInfo = await helperClosePromise;
+    } catch (error) {
+      helperError = helperError || error;
+    }
+    let helperCompleteInfo = null;
+    try {
+      helperCompleteInfo = await helperCompletePromise;
+    } catch (error) {
+      helperError = helperError || error;
+    }
+    const helperCompleteSnapshot = helperCompleteInfo || {
+      chromeExitCode: null,
+      chromeExitSignal: null,
+      chromeTimedOut: true,
+      chromeStdoutText: '',
+      chromeStderrText: '',
+    };
+    processTableAfterClose = captureProcessTable();
+    if (!networkServicePid) {
+      networkServicePid = findNetworkServicePid(processTableAfterClose.rows, launchRecord.chromePid);
+    }
+    if (networkServicePid) {
+      networkServiceFds = captureChromeCleanFdListing(networkServicePid, fsImpl, processImpl);
+    }
+    chromeFdsAfterClose = captureChromeCleanFdListing(launchRecord.chromePid, fsImpl, processImpl);
+
+    const requestEvent = navigationEvents.find((entry) => entry.event === 'request');
+    const responseEvent = navigationEvents.find((entry) => entry.event === 'response');
+    const failedEvent = navigationEvents.find((entry) => entry.event === 'requestfailed');
+    const frameNavigated = navigationEvents.find((entry) => entry.event === 'framenavigated');
+    const loadEvent = navigationEvents.find((entry) => entry.event === 'load');
+    const domContentLoadedEvent = navigationEvents.find((entry) => entry.event === 'domcontentloaded');
+
+    const chromeStdoutText = sanitizeDiagnosticText(helperCompleteSnapshot.chromeStdoutText || '');
+    const chromeStderrText = sanitizeDiagnosticText(helperCompleteSnapshot.chromeStderrText || '');
+    const requestFailedErrorText = failedEvent ? String(failedEvent.errorText || '') : '';
+    const navigationStatus = responseEvent ? Number(responseEvent.status || 0) : null;
+    const summary = {
+      variantId: variant.id,
+      label: variant.label,
+      launcherKind: variant.launcherKind,
+      launcherTransport: variant.launcherTransport,
+      stdioMode: variant.stdioMode,
+      closeInheritedPipeFds: variant.closeInheritedPipeFds,
+      auditUrl,
+      chromePath,
+      helperPid: launchRecord.pythonPid || helperProcess.pid,
+      chromePid: launchRecord.chromePid,
+      browserVersion,
+      browserWSEndpoint: launchRecord.browserWSEndpoint,
+      navigationTimeoutMs: Number(config.navigationTimeoutMs || 30000),
+      closeTimeoutMs: Number(config.closeTimeoutMs || 10000),
+      devtoolsTimeoutMs: Number(config.devtoolsTimeoutMs || 30000),
+      launchFlags,
+      navigation: {
+        requestedUrl: sanitizeDiagnosticUrl(auditUrl),
+        finalUrl: sanitizeDiagnosticUrl(navigationResponse?.url() || auditUrl),
+        status: navigationStatus,
+        requestFailedErrorText: sanitizeDiagnosticText(requestFailedErrorText),
+        gotoError: gotoError
+          ? {
+              name: gotoError?.name || 'Error',
+              message: sanitizeDiagnosticText(gotoError?.message || String(gotoError || 'Unknown goto error')),
+            }
+          : null,
+        events: navigationEvents,
+        requestEvent,
+        responseEvent,
+        requestfailedEvent: failedEvent || null,
+        frameNavigatedEvent: frameNavigated || null,
+        domContentLoadedEvent: domContentLoadedEvent || null,
+        loadEvent: loadEvent || null,
+        browserClosed,
+        exitInfo: {
+          code: helperCompleteSnapshot.chromeExitCode,
+          signal: helperCompleteSnapshot.chromeExitSignal || null,
+          timeout: Boolean(helperCompleteSnapshot.chromeTimedOut),
+        },
+      },
+      helperFdsBefore: launchRecord.pythonFdsBefore,
+      helperFdsAfter: launchRecord.pythonFdsAfterLaunch,
+      chromeFdsBeforeClose,
+      chromeFdsAfterClose,
+      networkServicePid,
+      networkServiceFds,
+      processTableBeforeClose,
+      processTableAfterClose,
+      chromeStdoutText,
+      chromeStderrText,
+      fd142InHelper:
+        hasFdTarget(launchRecord.pythonFdsBefore, 142, /pipe:/i) ||
+        hasFdTarget(launchRecord.pythonFdsAfterLaunch, 142, /pipe:/i),
+      fd145InHelper:
+        hasFdTarget(launchRecord.pythonFdsBefore, 145, /pipe:/i) ||
+        hasFdTarget(launchRecord.pythonFdsAfterLaunch, 145, /pipe:/i),
+      fd142InChrome:
+        hasFdTarget(chromeFdsBeforeClose, 142, /pipe:/i) || hasFdTarget(chromeFdsAfterClose, 142, /pipe:/i),
+      fd145InChrome:
+        hasFdTarget(chromeFdsBeforeClose, 145, /pipe:/i) || hasFdTarget(chromeFdsAfterClose, 145, /pipe:/i),
+      fd142InNetworkService: hasFdTarget(networkServiceFds, 142, /pipe:/i),
+      fd145InNetworkService: hasFdTarget(networkServiceFds, 145, /pipe:/i),
+      helperProcess: {
+        status: helperCloseInfo.status,
+        signal: helperCloseInfo.signal || null,
+        stdoutText: sanitizeDiagnosticText(helperStdoutLines.join('\n')),
+        stderrText: sanitizeDiagnosticText(helperStderrLines.join('')),
+      },
+      chromeCloseTimedOut: Boolean(helperCompleteSnapshot.chromeTimedOut),
+    };
+
+    summary.httpStatus = navigationStatus;
+    summary.errAborted =
+      /ERR_ABORTED/i.test(requestFailedErrorText) ||
+      /ERR_ABORTED/i.test(String(gotoError?.message || '')) ||
+      /ERR_ABORTED/i.test(chromeStderrText);
+    summary.fdViolation = /FD ownership violation/i.test(chromeStderrText);
+    summary.networkServiceRestart = /Network service crashed or was terminated/i.test(chromeStderrText);
+    if (browserConnectError) {
+      summary.browserConnectError = {
+        name: browserConnectError?.name || 'Error',
+        message: sanitizeDiagnosticText(
+          browserConnectError?.message || String(browserConnectError || 'Unknown browser connect error')
+        ),
+      };
+    }
+    summary.exitCode =
+      summary.errAborted ||
+      summary.fdViolation ||
+      Boolean(browserConnectError) ||
+      Boolean(gotoError) ||
+      !navigationResponse ||
+      Boolean(helperCompleteSnapshot.chromeTimedOut) ||
+      Boolean(helperCloseInfo.status && helperCloseInfo.status !== 0) ||
+      Boolean(helperCloseInfo.signal)
+        ? 1
+        : 0;
+    summary.signal = helperCompleteSnapshot.chromeExitSignal || null;
+    summary.chromeExitCode = typeof helperCompleteSnapshot.chromeExitCode === 'number' ? helperCompleteSnapshot.chromeExitCode : null;
+    summary.chromeExitSignal = helperCompleteSnapshot.chromeExitSignal || null;
+    summary.navigation.loadSeen = Boolean(loadEvent);
+    summary.navigation.domContentLoadedSeen = Boolean(domContentLoadedEvent);
+    summary.navigation.responseSeen = Boolean(responseEvent);
+    summary.navigation.requestFailedSeen = Boolean(failedEvent);
+    summary.navigation.frameNavigatedSeen = Boolean(frameNavigated);
+    summary.navigation.stdoutText = chromeStdoutText;
+    summary.navigation.stderrText = chromeStderrText;
+    summary.navigation.networkServicePid = networkServicePid;
+    summary.navigation.chromePid = launchRecord.chromePid;
+    summary.navigation.helperPid = launchRecord.pythonPid || helperProcess.pid;
+    summary.navigation.launcherKind = variant.launcherKind;
+    summary.navigation.stdioMode = variant.stdioMode;
+    summary.navigation.closeInheritedPipeFds = variant.closeInheritedPipeFds;
+    summary.navigation.closeActions = [];
+    summary.navigation.helperFdsBefore = launchRecord.pythonFdsBefore;
+    summary.navigation.helperFdsAfter = launchRecord.pythonFdsAfterLaunch;
+    summary.navigation.chromeFdsBeforeClose = chromeFdsBeforeClose;
+    summary.navigation.chromeFdsAfterClose = chromeFdsAfterClose;
+    summary.navigation.networkServiceFds = networkServiceFds;
+    summary.navigation.processTableBeforeClose = processTableBeforeClose;
+    summary.navigation.processTableAfterClose = processTableAfterClose;
+    summary.navigation.browserVersion = browserVersion;
+    summary.navigation.browserWSEndpoint = launchRecord.browserWSEndpoint;
+    summary.navigation.chromeStdoutText = chromeStdoutText;
+    summary.navigation.chromeStderrText = chromeStderrText;
+    summary.navigation.fd142InHelper = summary.fd142InHelper;
+    summary.navigation.fd145InHelper = summary.fd145InHelper;
+    summary.navigation.fd142InChrome = summary.fd142InChrome;
+    summary.navigation.fd145InChrome = summary.fd145InChrome;
+    summary.navigation.fd142InNetworkService = summary.fd142InNetworkService;
+    summary.navigation.fd145InNetworkService = summary.fd145InNetworkService;
+
+    return sanitizeDiagnosticValue(summary);
+  } finally {
+    if (browser && !browserClosed) {
+      try {
+        await browser.close();
+      } catch {}
+    }
+  }
+}
+
 async function runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath}) {
   const logPath = path.join(tempDir, 'fd-inheritance-matrix.log');
   const jsonPath = path.join(tempDir, 'fd-inheritance-matrix.json');
   const helperScriptPath = path.join(process.cwd(), 'scripts', 'chrome-clean-launcher.cjs');
+  const pythonHelperScriptPath = path.join(process.cwd(), 'scripts', 'chrome_clean_launcher.py');
   const variants = buildFdInheritanceMatrixVariants(chromePath);
   const matrix = {
     generatedAt: new Date().toISOString(),
@@ -1861,7 +2460,8 @@ async function runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath})
   console.log('[lighthouse] FD inheritance diagnostic enabled.');
   console.log(`[lighthouse][diag] FD matrix log: ${logPath}`);
   console.log(`[lighthouse][diag] FD matrix json: ${jsonPath}`);
-  console.log(`[lighthouse][diag] Chrome helper: ${helperScriptPath}`);
+  console.log(`[lighthouse][diag] Chrome helper (node): ${helperScriptPath}`);
+  console.log(`[lighthouse][diag] Chrome helper (python): ${pythonHelperScriptPath}`);
   writeSummary();
 
   for (const variant of variants) {
@@ -1880,6 +2480,7 @@ async function runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath})
       tempDir,
       caseDir: artifacts.caseDir,
       profileDir: path.join(artifacts.caseDir, 'profile'),
+      launchFlags: buildChromeLaunchFlags(),
       navigationTimeoutMs: 30000,
       devtoolsTimeoutMs: 30000,
       closeTimeoutMs: 10000,
@@ -1895,7 +2496,13 @@ async function runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath})
     let helperSignal = null;
     let caseResult = null;
 
-    if (variant.launcherKind === 'auxiliary') {
+    if (variant.launcherTransport === 'python') {
+      caseResult = await runChromeFdInheritanceCaseViaPythonLauncher(caseConfig);
+      helperStdout = String(caseResult?.helperProcess?.stdoutText || '');
+      helperStderr = String(caseResult?.helperProcess?.stderrText || '');
+      helperStatus = Number(caseResult?.helperProcess?.status || 0);
+      helperSignal = caseResult?.helperProcess?.signal || null;
+    } else if (variant.launcherKind === 'auxiliary') {
       const helperArgs = ['--config-json=' + JSON.stringify(caseConfig)];
       const helperResult = spawnSync(process.execPath, [helperScriptPath, ...helperArgs], {
         cwd: process.cwd(),
@@ -2062,6 +2669,20 @@ function captureProcFdListing(pid) {
     snapshot.error = sanitizeDiagnosticText(error?.message || String(error || 'Unknown fd listing error'));
   }
   return snapshot;
+}
+
+function hasFdTarget(snapshot, fdNumber, matcher) {
+  if (!snapshot || !Array.isArray(snapshot.entries)) {
+    return false;
+  }
+  const entry = snapshot.entries.find((item) => Number(item.fd) === Number(fdNumber));
+  if (!entry) {
+    return false;
+  }
+  if (!matcher) {
+    return true;
+  }
+  return matcher.test(String(entry.target || ''));
 }
 
 function parseProcessTableRows(stdout) {
