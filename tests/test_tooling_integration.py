@@ -150,7 +150,7 @@ class ToolingPostgresSmokeTests(unittest.TestCase):
 
         image = os.environ.get("TESTCONTAINERS_POSTGRES_IMAGE") or "postgres:16-alpine"
         with PostgresContainer(image) as postgres:
-            postgres_url = postgres.get_connection_url()
+            postgres_url = postgres.get_connection_url(driver=None)
             with mock.patch.dict(
                 os.environ,
                 {
