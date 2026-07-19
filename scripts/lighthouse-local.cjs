@@ -1912,33 +1912,37 @@ async function runChromeFdInheritanceCaseViaPythonLauncher(config, deps = {}) {
   const launchFlags = Array.isArray(config.launchFlags) && config.launchFlags.length
     ? config.launchFlags.map((flag) => String(flag))
     : buildChromeLaunchFlags(extraFlags);
+  const scrubInheritedFds = Boolean(config.scrubInheritedFds);
+  const helperConfig = {
+    ...config,
+    variantId: variant.id,
+    label: variant.label,
+    stdioMode: variant.stdioMode,
+    launcherKind: variant.launcherKind,
+    launcherTransport: variant.launcherTransport,
+    closeInheritedPipeFds: false,
+    scrubInheritedFds,
+    auditUrl,
+    chromePath,
+    tempDir,
+    caseDir,
+    profileDir,
+    launchFlags,
+    completionTimeoutMs:
+      Number(
+        config.wrapperTimeoutMs ||
+          Number(config.navigationTimeoutMs || 30000) + Number(config.closeTimeoutMs || 10000) + 15000
+      ),
+    completionGraceMs: Number(config.wrapperGraceMs || 5000),
+  };
+  const helperArgs = [wrapperScriptPath, `--config-json=${JSON.stringify(helperConfig)}`];
+  if (scrubInheritedFds) {
+    helperArgs.push('--scrub-inherited-fds');
+  }
 
   const helperProcess = spawnImpl(
     pythonExecutable,
-    [
-      wrapperScriptPath,
-      `--config-json=${JSON.stringify({
-        ...config,
-        variantId: variant.id,
-        label: variant.label,
-        stdioMode: variant.stdioMode,
-        launcherKind: variant.launcherKind,
-        launcherTransport: variant.launcherTransport,
-        closeInheritedPipeFds: false,
-        auditUrl,
-        chromePath,
-        tempDir,
-        caseDir,
-        profileDir,
-        launchFlags,
-        completionTimeoutMs:
-          Number(
-            config.wrapperTimeoutMs ||
-              Number(config.navigationTimeoutMs || 30000) + Number(config.closeTimeoutMs || 10000) + 15000
-          ),
-        completionGraceMs: Number(config.wrapperGraceMs || 5000),
-      })}`,
-    ],
+    helperArgs,
     {
       cwd: processImpl.cwd(),
       env: processImpl.env,
@@ -2292,6 +2296,7 @@ async function runChromeFdInheritanceCaseViaPythonLauncher(config, deps = {}) {
       closeTimeoutMs: Number(config.closeTimeoutMs || 10000),
       devtoolsTimeoutMs: Number(config.devtoolsTimeoutMs || 30000),
       launchFlags,
+      scrubInheritedFds,
       navigation: {
         requestedUrl: sanitizeDiagnosticUrl(auditUrl),
         finalUrl: sanitizeDiagnosticUrl(navigationResponse?.url() || auditUrl),
@@ -2318,7 +2323,10 @@ async function runChromeFdInheritanceCaseViaPythonLauncher(config, deps = {}) {
         },
       },
       helperFdsBefore: launchRecord.pythonFdsBefore,
+      helperFdsBeforeScrub: launchRecord.pythonFdsBeforeScrub,
+      helperFdsAfterScrub: launchRecord.pythonFdsAfterScrub,
       helperFdsAfter: launchRecord.pythonFdsAfterLaunch,
+      chromeFdsAfterLaunch: launchRecord.chromeFdsAfterLaunch,
       chromeFdsBeforeClose,
       chromeFdsAfterClose,
       networkServicePid,
@@ -2390,9 +2398,13 @@ async function runChromeFdInheritanceCaseViaPythonLauncher(config, deps = {}) {
     summary.navigation.launcherKind = variant.launcherKind;
     summary.navigation.stdioMode = variant.stdioMode;
     summary.navigation.closeInheritedPipeFds = variant.closeInheritedPipeFds;
+    summary.navigation.scrubInheritedFds = scrubInheritedFds;
     summary.navigation.closeActions = [];
     summary.navigation.helperFdsBefore = launchRecord.pythonFdsBefore;
+    summary.navigation.helperFdsBeforeScrub = launchRecord.pythonFdsBeforeScrub;
+    summary.navigation.helperFdsAfterScrub = launchRecord.pythonFdsAfterScrub;
     summary.navigation.helperFdsAfter = launchRecord.pythonFdsAfterLaunch;
+    summary.navigation.chromeFdsAfterLaunch = launchRecord.chromeFdsAfterLaunch;
     summary.navigation.chromeFdsBeforeClose = chromeFdsBeforeClose;
     summary.navigation.chromeFdsAfterClose = chromeFdsAfterClose;
     summary.navigation.networkServiceFds = networkServiceFds;
@@ -2436,6 +2448,7 @@ async function runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath})
       launcherKind: variant.launcherKind,
       stdioMode: variant.stdioMode,
       closeInheritedPipeFds: variant.closeInheritedPipeFds,
+      scrubInheritedFds: variant.id === 'F5' && isTruthyEnvFlag(process.env.LHCI_FD_INHERITANCE_SCRUB),
       executablePath: variant.executablePath,
     })),
     cases: [],
@@ -2475,6 +2488,8 @@ async function runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath})
       launcherKind: variant.launcherKind,
       stdioMode: variant.stdioMode,
       closeInheritedPipeFds: variant.closeInheritedPipeFds,
+      scrubInheritedFds:
+        variant.id === 'F5' && isTruthyEnvFlag(process.env.LHCI_FD_INHERITANCE_SCRUB),
       auditUrl,
       chromePath: variant.executablePath,
       tempDir,
@@ -2487,7 +2502,7 @@ async function runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath})
     };
 
     console.log(
-      `[lighthouse][fd-matrix] ${variant.id} start launcher=${variant.launcherKind} stdio=${variant.stdioMode} scrub=${variant.closeInheritedPipeFds ? '1' : '0'}`
+      `[lighthouse][fd-matrix] ${variant.id} start launcher=${variant.launcherKind} stdio=${variant.stdioMode} scrub=${caseConfig.scrubInheritedFds ? '1' : '0'}`
     );
     const parentFdsBefore = captureChromeCleanFdListing(process.pid);
     let helperStdout = '';

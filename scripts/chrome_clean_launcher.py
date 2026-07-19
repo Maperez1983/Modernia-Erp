@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import errno
 import json
 import os
 import queue
@@ -94,7 +95,28 @@ def capture_proc_fd_listing(pid: int) -> Dict[str, Any]:
                 target = os.readlink(fd_path)
             except OSError as exc:  # pragma: no cover - defensive
                 target = f"ERROR: {exc}"
-            entries.append({"fd": int(fd_name), "target": target})
+            fd_info_path = Path("/proc") / str(pid) / "fdinfo" / fd_name
+            fd_info = {
+                "inode": None,
+                "flags": "",
+                "raw": "",
+                "error": "",
+            }
+            try:
+                fd_info_text = fd_info_path.read_text(encoding="utf-8")
+                fd_info["raw"] = fd_info_text
+                for line in fd_info_text.splitlines():
+                    stripped = line.strip()
+                    if stripped.startswith("flags:"):
+                        fd_info["flags"] = stripped.split(":", 1)[1].strip()
+                    elif stripped.startswith("ino:"):
+                        try:
+                            fd_info["inode"] = int(stripped.split(":", 1)[1].strip())
+                        except ValueError:
+                            fd_info["inode"] = None
+            except OSError as exc:
+                fd_info["error"] = str(exc)
+            entries.append({"fd": int(fd_name), "target": target, "fdinfo": fd_info})
         snapshot["available"] = True
         snapshot["count"] = len(entries)
         snapshot["entries"] = entries
@@ -137,6 +159,60 @@ def terminate_process_gracefully(proc: subprocess.Popen, grace_ms: int = 5000) -
         proc.wait(timeout=max(0.001, grace_ms / 1000))
     except Exception:
         pass
+
+
+def scrub_inherited_fd_descriptors(
+    allow_list: Optional[List[int]] = None,
+    *,
+    capture_fd_listing_fn=capture_proc_fd_listing,
+    process_impl=os,
+) -> Dict[str, Any]:
+    allowed = {int(fd) for fd in (allow_list or [0, 1, 2])}
+    before = capture_fd_listing_fn(os.getpid())
+    closed: List[Dict[str, Any]] = []
+    if not before.get("available"):
+        return {"before": before, "after": before, "closed": closed}
+
+    for entry in before.get("entries", []):
+        fd = int(entry.get("fd") or -1)
+        if fd < 3 or fd in allowed:
+            continue
+        try:
+            process_impl.close(fd)
+            closed.append(
+                {
+                    "fd": fd,
+                    "target": entry.get("target", ""),
+                    "fdinfo": entry.get("fdinfo", {}),
+                    "closed": True,
+                    "reason": "inherited descriptor scrubbed before Chrome launch",
+                }
+            )
+        except OSError as exc:
+            if exc.errno == errno.EBADF:
+                closed.append(
+                    {
+                        "fd": fd,
+                        "target": entry.get("target", ""),
+                        "fdinfo": entry.get("fdinfo", {}),
+                        "closed": False,
+                        "ignored": True,
+                        "reason": "fd already closed before scrub",
+                    }
+                )
+                continue
+            closed.append(
+                {
+                    "fd": fd,
+                    "target": entry.get("target", ""),
+                    "fdinfo": entry.get("fdinfo", {}),
+                    "closed": False,
+                    "error": str(exc),
+                    "reason": "failed to close inherited descriptor before Chrome launch",
+                }
+            )
+    after = capture_fd_listing_fn(os.getpid())
+    return {"before": before, "after": after, "closed": closed}
 
 
 def _start_stream_drain(stream, chunks: List[str]) -> threading.Thread:
@@ -224,6 +300,13 @@ def launch_chrome_process(
 ) -> Dict[str, Any]:
     python_pid = os.getpid()
     python_fds_before = capture_fd_listing_fn(python_pid)
+    scrub_inherited_fds = bool(config.get("scrubInheritedFds"))
+    scrubbed_fds = (
+        scrub_inherited_fd_descriptors(capture_fd_listing_fn=capture_fd_listing_fn)
+        if scrub_inherited_fds
+        else {"before": python_fds_before, "after": python_fds_before, "closed": []}
+    )
+    python_fds_after_scrub = scrubbed_fds["after"]
     chrome_args = build_chrome_args(config)
     proc = subprocess_module.Popen(
         chrome_args,
@@ -253,6 +336,8 @@ def launch_chrome_process(
         "phase": "launch",
         "pythonPid": python_pid,
         "pythonFdsBefore": python_fds_before,
+        "pythonFdsBeforeScrub": python_fds_before,
+        "pythonFdsAfterScrub": python_fds_after_scrub,
         "pythonFdsAfterLaunch": python_fds_after,
         "chromePid": proc.pid,
         "chromePath": _to_text(config.get("chromePath")),
@@ -262,9 +347,12 @@ def launch_chrome_process(
         "profileDir": _to_text(config.get("profileDir")),
         "devtoolsActivePort": devtools,
         "chromeFdsBeforeLaunch": chrome_fds_before,
+        "chromeFdsAfterLaunch": chrome_fds_before,
         "launchFlags": [str(flag) for flag in config.get("launchFlags", []) if str(flag).strip()],
         "close_fds": True,
         "pass_fds": [],
+        "scrubInheritedFds": scrub_inherited_fds,
+        "scrubbedFds": scrubbed_fds["closed"],
     }
 
     return {
@@ -277,6 +365,8 @@ def launch_chrome_process(
         "python_pid": python_pid,
         "chrome_pid": proc.pid,
         "python_fds_before": python_fds_before,
+        "python_fds_before_scrub": python_fds_before,
+        "python_fds_after_scrub": python_fds_after_scrub,
         "python_fds_after": python_fds_after,
         "chrome_fds_before": chrome_fds_before,
         "config": config,
@@ -433,6 +523,7 @@ def _load_config(argv: List[str]) -> Dict[str, Any]:
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("--config-json", dest="config_json")
     parser.add_argument("--config-file", dest="config_file")
+    parser.add_argument("--scrub-inherited-fds", dest="scrub_inherited_fds", action="store_true")
     args, _ = parser.parse_known_args(argv)
 
     config_text = ""
@@ -446,7 +537,10 @@ def _load_config(argv: List[str]) -> Dict[str, Any]:
     if not config_text:
         raise RuntimeError("Falta la configuración JSON para chrome_clean_launcher.py")
 
-    return json.loads(config_text)
+    config = json.loads(config_text)
+    if args.scrub_inherited_fds:
+        config["scrubInheritedFds"] = True
+    return config
 
 
 def main(argv: Optional[List[str]] = None) -> int:

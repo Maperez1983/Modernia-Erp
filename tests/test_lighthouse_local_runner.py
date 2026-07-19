@@ -143,6 +143,7 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
         assert "fd-inheritance-diagnostic" in LIGHTHOUSE_WORKFLOW
         fd_job_block = LIGHTHOUSE_WORKFLOW.split("fd-inheritance-diagnostic:", 1)[1]
         assert 'LHCI_FD_INHERITANCE_DIAGNOSTIC: "1"' in fd_job_block
+        assert 'LHCI_FD_INHERITANCE_SCRUB: "1"' in fd_job_block
         assert "continue-on-error: true" in fd_job_block
         assert "Run FD inheritance diagnostics" in fd_job_block
         assert 'set -o pipefail' in fd_job_block
@@ -1800,6 +1801,71 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
         assert complete["chromeExitSignal"] is None
         assert "Chrome stderr line" in complete["chromeStderrText"]
 
+    def test_python_fd_inheritance_scrub_closes_extra_descriptors_and_preserves_stdio(self):
+        launcher_path = ROOT / "scripts" / "chrome_clean_launcher.py"
+        spec = importlib.util.spec_from_file_location("chrome_clean_launcher", launcher_path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        closed = []
+        snapshots = iter(
+            [
+                {
+                    "pid": 111,
+                    "available": True,
+                    "count": 6,
+                    "entries": [
+                        {"fd": 0, "target": "pipe:[0]", "fdinfo": {"inode": 0, "flags": "00", "raw": "", "error": ""}},
+                        {"fd": 1, "target": "pipe:[1]", "fdinfo": {"inode": 1, "flags": "01", "raw": "", "error": ""}},
+                        {"fd": 2, "target": "pipe:[2]", "fdinfo": {"inode": 2, "flags": "02", "raw": "", "error": ""}},
+                        {"fd": 3, "target": "pipe:[3]", "fdinfo": {"inode": 3, "flags": "03", "raw": "", "error": ""}},
+                        {"fd": 7, "target": "pipe:[7]", "fdinfo": {"inode": 7, "flags": "07", "raw": "", "error": ""}},
+                        {"fd": 9, "target": "pipe:[9]", "fdinfo": {"inode": 9, "flags": "09", "raw": "", "error": ""}},
+                    ],
+                },
+                {
+                    "pid": 111,
+                    "available": True,
+                    "count": 3,
+                    "entries": [
+                        {"fd": 0, "target": "pipe:[0]", "fdinfo": {"inode": 0, "flags": "00", "raw": "", "error": ""}},
+                        {"fd": 1, "target": "pipe:[1]", "fdinfo": {"inode": 1, "flags": "01", "raw": "", "error": ""}},
+                        {"fd": 2, "target": "pipe:[2]", "fdinfo": {"inode": 2, "flags": "02", "raw": "", "error": ""}},
+                    ],
+                },
+                {
+                    "pid": 111,
+                    "available": True,
+                    "count": 3,
+                    "entries": [
+                        {"fd": 0, "target": "pipe:[0]", "fdinfo": {"inode": 0, "flags": "00", "raw": "", "error": ""}},
+                        {"fd": 1, "target": "pipe:[1]", "fdinfo": {"inode": 1, "flags": "01", "raw": "", "error": ""}},
+                        {"fd": 2, "target": "pipe:[2]", "fdinfo": {"inode": 2, "flags": "02", "raw": "", "error": ""}},
+                    ],
+                },
+            ]
+        )
+
+        class FakeOs:
+            @staticmethod
+            def close(fd):
+                closed.append(fd)
+                if fd == 9:
+                    raise OSError(9, "Bad file descriptor")
+
+        result = module.scrub_inherited_fd_descriptors(
+            allow_list=[0, 1, 2],
+            capture_fd_listing_fn=lambda pid: next(snapshots),
+            process_impl=FakeOs(),
+        )
+
+        assert closed == [3, 7, 9]
+        assert [entry["fd"] for entry in result["before"]["entries"]] == [0, 1, 2, 3, 7, 9]
+        assert [entry["fd"] for entry in result["after"]["entries"]] == [0, 1, 2]
+        assert [entry["fd"] for entry in result["closed"] if entry.get("closed")] == [3, 7]
+        assert any(entry["fd"] == 9 and entry.get("ignored") for entry in result["closed"])
+
     def test_python_fd_inheritance_launcher_waits_for_devtools_http_ready(self):
         launcher_path = ROOT / "scripts" / "chrome_clean_launcher.py"
         spec = importlib.util.spec_from_file_location("chrome_clean_launcher", launcher_path)
@@ -2335,6 +2401,7 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                       launcherTransport: 'python',
                       stdioMode: 'pipe',
                       closeInheritedPipeFds: true,
+                      scrubInheritedFds: true,
                       auditUrl: 'http://127.0.0.1:12345/?swcleared=1',
                       chromePath: '/fake/chrome',
                       tempDir: '/tmp/fd-test',
@@ -2369,6 +2436,7 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                   assert.strictEqual(closeCommandSeen, true);
                   assert.strictEqual(helperClosed, true);
                   assert.strictEqual(spawnCalls.length, 1);
+                  assert.ok(spawnCalls[0].args.includes('--scrub-inherited-fds'));
                   assert.deepStrictEqual(spawnCalls[0].options.stdio, ['pipe', 'pipe', 'pipe']);
                   assert.strictEqual(result.exitCode, 0);
                   assert.strictEqual(result.helperProcess.status, 0);
