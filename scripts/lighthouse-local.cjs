@@ -2518,7 +2518,8 @@ async function runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath})
       stdioMode: variant.stdioMode,
       closeInheritedPipeFds: variant.closeInheritedPipeFds,
       scrubInheritedFds:
-        ['F5', 'F6', 'F7'].includes(variant.id) && isTruthyEnvFlag(process.env.LHCI_FD_INHERITANCE_SCRUB),
+        ['F5', 'F6', 'F7', 'F8'].includes(variant.id) &&
+        isTruthyEnvFlag(process.env.LHCI_FD_INHERITANCE_SCRUB),
       sandboxMode: variant.sandboxMode || (variant.includeNoSandbox === false ? 'sandbox-enabled' : 'no-sandbox'),
       extraFlags: Array.isArray(variant.extraFlags) ? variant.extraFlags : [],
       includeNoSandbox: variant.includeNoSandbox !== false,
@@ -2562,7 +2563,8 @@ async function runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath})
       stdioMode: variant.stdioMode,
       closeInheritedPipeFds: variant.closeInheritedPipeFds,
       scrubInheritedFds:
-        ['F5', 'F6', 'F7'].includes(variant.id) && isTruthyEnvFlag(process.env.LHCI_FD_INHERITANCE_SCRUB),
+        ['F5', 'F6', 'F7', 'F8'].includes(variant.id) &&
+        isTruthyEnvFlag(process.env.LHCI_FD_INHERITANCE_SCRUB),
       sandboxMode: variant.sandboxMode || (variant.includeNoSandbox === false ? 'sandbox-enabled' : 'no-sandbox'),
       extraFlags: Array.isArray(variant.extraFlags) ? variant.extraFlags : [],
       includeNoSandbox: variant.includeNoSandbox !== false,
