@@ -99,3 +99,80 @@ jobs:
           name: bandit-report
           path: bandit-report.json
           if-no-files-found: error
+
+  tooling:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.11"
+
+      - name: Install runtime dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Install development dependencies
+        run: |
+          if [ -f requirements-dev.txt ]; then
+            python -m pip install -r requirements-dev.txt
+          fi
+
+      - name: Run tooling smoke tests
+        run: npm run test:tooling
+
+      - name: Start app for Locust
+        run: |
+          python -m web.server \
+            --host 127.0.0.1 \
+            --port 8000 \
+            --db "$RUNNER_TEMP/tooling.sqlite" \
+            --ocr-db "$RUNNER_TEMP/tooling-ocr.sqlite" \
+            > "$RUNNER_TEMP/tooling-server.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/tooling-server.pid"
+
+      - name: Wait for app
+        run: |
+          python - <<'PY'
+          import sys
+          import time
+          import urllib.request
+
+          deadline = time.time() + 120
+          url = "http://127.0.0.1:8000/api/health"
+          last_error = None
+          while time.time() < deadline:
+              try:
+                  with urllib.request.urlopen(url, timeout=5) as response:
+                      if response.status == 200:
+                          print("tooling app ready")
+                          sys.exit(0)
+              except Exception as exc:
+                  last_error = exc
+              time.sleep(1)
+          raise SystemExit(f"tooling app not ready: {last_error}")
+          PY
+
+      - name: Run Locust smoke test
+        env:
+          LOCUST_HOST: http://127.0.0.1:8000
+        run: npm run loadtest:locust
+
+      - name: Stop app
+        if: always()
+        run: |
+          if [ -f "$RUNNER_TEMP/tooling-server.pid" ]; then
+            kill "$(cat "$RUNNER_TEMP/tooling-server.pid")" || true
+          fi

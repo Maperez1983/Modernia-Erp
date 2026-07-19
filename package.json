@@ -9,6 +9,8 @@
     "lint:js:fix": "eslint --fix web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js",
     "test:js": "vitest run",
     "test:js:watch": "vitest",
+    "test:tooling": "python -m pytest -n auto tests/test_tooling_integration.py",
+    "loadtest:locust": "locust -f loadtests/locustfile.py --headless --users 1 --spawn-rate 1 --run-time 10s",
     "security:secrets": "python -m detect_secrets audit .secrets.baseline",
     "security:semgrep": "mkdir -p .semgrep && SSL_CERT_FILE=$(python -c 'import certifi; print(certifi.where())') REQUESTS_CA_BUNDLE=$(python -c 'import certifi; print(certifi.where())') SEMGREP_LOG_FILE=.semgrep/semgrep.log SEMGREP_SETTINGS_FILE=.semgrep/settings.yml SEMGREP_VERSION_CACHE_PATH=.semgrep/version-cache python -c \"from semgrep.main import main; raise SystemExit(main())\" scan --config .semgrep.yml --error --metrics=off -j 1",
     "lighthouse": "node scripts/lighthouse-local.cjs",
