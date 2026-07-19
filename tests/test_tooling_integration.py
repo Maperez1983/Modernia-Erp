@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import shutil
@@ -17,6 +18,8 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExportResult
 
 from web import public_links
 from web import server
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _label_strategy():
@@ -189,6 +192,19 @@ class ToolingLocustTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(proc.returncode, 0, msg=proc.stderr)
+
+
+class ToolingPlaywrightAccessibilityConfigTests(unittest.TestCase):
+    def test_package_json_declares_axe_core_for_playwright_accessibility(self):
+        package_json = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+        self.assertIn("axe-core", package_json["devDependencies"])
+        self.assertEqual(package_json["devDependencies"]["axe-core"], "^4.12.1")
+
+    def test_playwright_workflow_installs_node_and_npm_dependencies(self):
+        workflow = (ROOT / ".github" / "workflows" / "playwright.yml").read_text(encoding="utf-8")
+        self.assertIn("Set up Node", workflow)
+        self.assertIn("npm ci", workflow)
+        self.assertIn("RUN_PLAYWRIGHT_E2E=1 python -m pytest tests/e2e -v", workflow)
 
 
 class ToolingTelemetryTests(unittest.TestCase):

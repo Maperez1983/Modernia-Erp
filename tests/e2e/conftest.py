@@ -13,6 +13,7 @@ import time
 import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -127,6 +128,68 @@ def _bool_env(name: str, default: bool = False) -> bool:
     if not raw:
         return default
     return raw in {"1", "true", "yes", "si", "sí", "on"}
+
+
+@lru_cache(maxsize=1)
+def _axe_core_source() -> str:
+    axe_path = ROOT / "node_modules" / "axe-core" / "axe.min.js"
+    if not axe_path.exists():
+        raise RuntimeError("axe-core no está instalado. Ejecuta `npm ci` antes de Playwright E2E.")
+    return axe_path.read_text(encoding="utf-8")
+
+
+def _run_axe_audit(page: Page, *, label: str, tags: tuple[str, ...] = ("wcag2a", "wcag2aa")) -> dict[str, Any]:
+    result = page.evaluate(
+        """
+        async ({ tags }) => {
+          if (typeof window.axe === "undefined") {
+            throw new Error("axe-core no está cargado en la página.");
+          }
+          const audit = await window.axe.run(document, {
+            runOnly: { type: "tag", values: tags },
+            resultTypes: ["violations"],
+          });
+          return {
+            url: window.location.href,
+            title: document.title || "",
+            violations: audit.violations.map((violation) => ({
+              id: violation.id,
+              impact: violation.impact || "",
+              help: violation.help || "",
+              description: violation.description || "",
+              tags: violation.tags || [],
+              nodes: violation.nodes.map((node) => ({
+                target: node.target || [],
+                html: node.html || "",
+                failureSummary: node.failureSummary || "",
+              })),
+            })),
+          };
+        }
+        """,
+        {"tags": list(tags)},
+    )
+    failing = [violation for violation in result["violations"] if violation["impact"] in {"critical", "serious"}]
+    report = {
+        "label": label,
+        "page_url": _strip_query(str(result.get("url") or "")),
+        "page_title": str(result.get("title") or ""),
+        "tags": list(tags),
+        "violations": result["violations"],
+        "failing_violations": failing,
+    }
+    report_path = RESULTS_DIR / f"axe-{_sanitize_filename(label)}.json"
+    _write_json(report_path, report)
+    if failing:
+        summary_lines = [
+            f"- {item['id']} ({item['impact']}): {item['help']}"
+            for item in failing[:5]
+        ] or ["- sin detalle"]
+        raise AssertionError(
+            "Accessibility violations detected in "
+            f"{label}:\n" + "\n".join(summary_lines)
+        )
+    return report
 
 
 def _utc_now() -> datetime:
@@ -1135,6 +1198,7 @@ def tracked_page(browser: Browser, e2e_app: E2EApp, request: pytest.FixtureReque
     context.set_default_timeout(15000)
     context.set_default_navigation_timeout(30000)
     context.tracing.start(screenshots=True, snapshots=True, sources=True)
+    context.add_init_script(_axe_core_source())
 
     issues = BrowserIssues()
     context.on("page", lambda page: page.on("console", issues.on_console))
@@ -1244,6 +1308,14 @@ def tracked_page(browser: Browser, e2e_app: E2EApp, request: pytest.FixtureReque
         )
     if failed and issues.has_failures() and not failed_call and not failed_setup and not failed_teardown:
         raise AssertionError(issues.summary() or "Browser issues detected.")
+
+
+@pytest.fixture
+def axe_audit():
+    def _axe_audit(page: Page, *, label: str, tags: tuple[str, ...] = ("wcag2a", "wcag2aa")) -> dict[str, Any]:
+        return _run_axe_audit(page, label=label, tags=tags)
+
+    return _axe_audit
 
 
 @pytest.fixture
