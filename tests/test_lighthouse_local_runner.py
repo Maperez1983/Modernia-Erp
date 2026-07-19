@@ -136,6 +136,23 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
         assert "lighthouse-server-observations.jsonl" in upload_block
         assert "if-no-files-found: error" in upload_block
 
+    def test_fd_inheritance_workflow_adds_linux_diagnostic_job_and_artifacts(self):
+        assert "fd-inheritance-diagnostic" in LIGHTHOUSE_WORKFLOW
+        fd_job_block = LIGHTHOUSE_WORKFLOW.split("fd-inheritance-diagnostic:", 1)[1]
+        assert 'LHCI_FD_INHERITANCE_DIAGNOSTIC: "1"' in fd_job_block
+        assert "continue-on-error: true" in fd_job_block
+        assert "Run FD inheritance diagnostics" in fd_job_block
+        assert 'set -o pipefail' in fd_job_block
+        assert 'tee "$LHCI_TMPDIR/fd-inheritance-matrix.log"' in fd_job_block
+        assert "if: always()" in fd_job_block
+        upload_block = fd_job_block.split("- name: Upload FD inheritance diagnostics", 1)[1]
+        assert "fd-inheritance-matrix.json" in upload_block
+        assert "fd-inheritance-matrix.log" in upload_block
+        assert "fd-inheritance-matrix" in upload_block
+        assert "lighthouse-server.log" in upload_block
+        assert "lighthouse-server-observations.jsonl" in upload_block
+        assert "if-no-files-found: error" in upload_block
+
     def test_package_json_declares_puppeteer_core(self):
         package_json = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
         assert "puppeteer-core" in package_json["devDependencies"]
@@ -1597,6 +1614,259 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                 """
             )
             .replace("__SOURCE__", json.dumps(chunk))
+        )
+        run_node_script(script)
+
+    def test_fd_inheritance_mode_is_disabled_by_default_and_builds_five_variants(self):
+        chunk = extract_chunk("function isTruthyEnvFlag", "function buildBrowserMatrixVariants")
+        script = (
+            dedent(
+                """
+                const assert = require("assert");
+                const source = [
+                  'const { StringDecoder } = require("node:string_decoder");',
+                  'const { ensureSwClearedUrl } = require("./scripts/lighthouse-url.cjs");',
+                  'const sanitizeDiagnosticText = (value) => String(value || "").trim();',
+                  __SOURCE__,
+                ].join("\\n");
+                const factory = new Function(
+                  source + "\\nreturn { isFdInheritanceDiagnosticEnabled, buildFdInheritanceMatrixVariants, buildFdInheritanceMatrixArtifacts };"
+                );
+                const api = factory();
+                const originalEnv = process.env.LHCI_FD_INHERITANCE_DIAGNOSTIC;
+
+                try {
+                  delete process.env.LHCI_FD_INHERITANCE_DIAGNOSTIC;
+                  assert.strictEqual(api.isFdInheritanceDiagnosticEnabled(), false);
+                  process.env.LHCI_FD_INHERITANCE_DIAGNOSTIC = "1";
+                  assert.strictEqual(api.isFdInheritanceDiagnosticEnabled(), true);
+
+                  const variants = api.buildFdInheritanceMatrixVariants("/tmp/current-chrome");
+                  assert.deepStrictEqual(variants.map((variant) => variant.id), ["F1", "F2", "F3", "F4", "F5"]);
+                  assert.strictEqual(variants[0].launcherKind, "direct");
+                  assert.strictEqual(variants[1].stdioMode, "ignore");
+                  assert.strictEqual(variants[2].stdioMode, "inherit");
+                  assert.strictEqual(variants[3].launcherKind, "auxiliary");
+                  assert.strictEqual(variants[4].closeInheritedPipeFds, true);
+                  assert.strictEqual(variants[0].executablePath, "/tmp/current-chrome");
+                  assert.strictEqual(variants[4].executablePath, "/tmp/current-chrome");
+
+                  const artifacts = api.buildFdInheritanceMatrixArtifacts("/tmp/fd-temp", "F5");
+                  assert.ok(artifacts.caseDir.endsWith("/fd-inheritance-matrix/F5"));
+                  assert.ok(artifacts.resultPath.endsWith("/fd-inheritance-matrix/F5/result.json"));
+                  assert.ok(artifacts.parentFdsBeforePath.endsWith("/fd-inheritance-matrix/F5/parent-fds-before.json"));
+                  assert.ok(artifacts.launcherStderrPath.endsWith("/fd-inheritance-matrix/F5/launcher-stderr.log"));
+                } finally {
+                  if (originalEnv === undefined) {
+                    delete process.env.LHCI_FD_INHERITANCE_DIAGNOSTIC;
+                  } else {
+                    process.env.LHCI_FD_INHERITANCE_DIAGNOSTIC = originalEnv;
+                  }
+                }
+                """
+            )
+            .replace("__SOURCE__", json.dumps(chunk))
+        )
+        run_node_script(script)
+
+    def test_chrome_clean_launcher_closes_only_inherited_pipe_fds(self):
+        script = dedent(
+            """
+            const assert = require("assert");
+            const fs = require("fs");
+            const path = require("path");
+            const launcher = require("./scripts/chrome-clean-launcher.cjs");
+
+            const original = {
+              existsSync: fs.existsSync,
+              readdirSync: fs.readdirSync,
+              readlinkSync: fs.readlinkSync,
+              closeSync: fs.closeSync,
+            };
+            const closeCalls = [];
+
+            try {
+              fs.existsSync = (target) => (target === "/proc" ? true : original.existsSync(target));
+              fs.readdirSync = (dir) => (dir.endsWith("/fd") ? ["0", "1", "2", "142", "145", "300"] : original.readdirSync(dir));
+              fs.readlinkSync = (filePath) => {
+                const fdName = path.basename(filePath);
+                if (fdName === "142" || fdName === "145") {
+                  return "pipe:[123]";
+                }
+                if (fdName === "300") {
+                  return "eventpoll:[456]";
+                }
+                return "pipe:[0]";
+              };
+              fs.closeSync = (fd) => {
+                closeCalls.push(fd);
+              };
+
+              const result = launcher.closeInheritedPipeDescriptors({
+                fsImpl: fs,
+                processImpl: {
+                  pid: 999,
+                  platform: "linux",
+                },
+              });
+              assert.deepStrictEqual(closeCalls, [142, 145]);
+              assert.strictEqual(result.closed.length, 2);
+              assert.ok(result.closed.every((entry) => entry.reason === "inherited pipe from parent"));
+              assert.ok(result.before.available);
+              assert.ok(result.after.available);
+            } finally {
+              fs.existsSync = original.existsSync;
+              fs.readdirSync = original.readdirSync;
+              fs.readlinkSync = original.readlinkSync;
+              fs.closeSync = original.closeSync;
+            }
+            """
+        )
+        run_node_script(script)
+
+    def test_chrome_clean_launcher_runs_navigation_with_shell_false_and_sanitizes_stderr(self):
+        script = dedent(
+            """
+            const assert = require("assert");
+            const fs = require("fs");
+            const os = require("os");
+            const path = require("path");
+            const {EventEmitter} = require("events");
+            const launcher = require("./scripts/chrome-clean-launcher.cjs");
+
+            (async () => {
+              const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "lhci-fd-launcher-"));
+              const caseDir = path.join(tempDir, "case");
+              const profileDir = path.join(caseDir, "profile");
+              fs.mkdirSync(caseDir, {recursive: true});
+              fs.mkdirSync(profileDir, {recursive: true});
+
+              const spawnCalls = [];
+              let chromeChild = null;
+              const page = new EventEmitter();
+              page.url = () => "about:blank";
+              page.mainFrame = () => ({url: () => "about:blank", name: () => ""});
+              page.goto = async (url) => {
+                page.emit("request", {
+                  url: () => url,
+                  method: () => "GET",
+                  resourceType: () => "document",
+                  isNavigationRequest: () => true,
+                  failure: () => null,
+                });
+                page.emit("response", {
+                  url: () => url,
+                  status: () => 200,
+                  fromCache: () => false,
+                });
+                page.emit("framenavigated", {url: () => url});
+                page.emit("domcontentloaded");
+                page.emit("console", {type: () => "warn", text: () => "console token=abc"});
+                page.emit("pageerror", new Error("pageerror oauth_token=abc"));
+                page.emit("load");
+                return {
+                  status: () => 200,
+                  url: () => url,
+                };
+              };
+
+              const browser = {
+                version: async () => "Chrome/143.0.7499.4",
+                newPage: async () => page,
+                close: async () => {
+                  chromeChild.emit("exit", 0, null);
+                  chromeChild.emit("close", 0, null);
+                },
+              };
+
+              const spawn = (chromePath, args, options) => {
+                spawnCalls.push({chromePath, args, options});
+                chromeChild = new EventEmitter();
+                chromeChild.pid = 4321;
+                chromeChild.exitCode = null;
+                chromeChild.signalCode = null;
+                chromeChild.stdout = new EventEmitter();
+                chromeChild.stdout.setEncoding = () => {};
+                chromeChild.stderr = new EventEmitter();
+                chromeChild.stderr.setEncoding = () => {};
+                setImmediate(() => {
+                  fs.writeFileSync(
+                    path.join(profileDir, "DevToolsActivePort"),
+                    "9222\\n/devtools/browser/test\\n",
+                    "utf8"
+                  );
+                  chromeChild.stderr.emit(
+                    "data",
+                    "Authorization: Bearer abc\\n"
+                  );
+                  chromeChild.stderr.emit("data", "Bearer abc\\n");
+                  chromeChild.stderr.emit("data", "Cookie: session=abc\\n");
+                  chromeChild.stderr.emit(
+                    "data",
+                    "https://user:pass@example.test/path?oauth_token=abc\\n"
+                  );
+                });
+                return chromeChild;
+              };
+
+              const result = await launcher.runChromeFdInheritanceCase(
+                {
+                  variantId: "F1",
+                  label: "main-pipes",
+                  launcherKind: "direct",
+                  stdioMode: "pipe",
+                  closeInheritedPipeFds: false,
+                  auditUrl: "http://127.0.0.1:12345/path?foo=1&swcleared=1",
+                  chromePath: "/fake/chrome",
+                  tempDir,
+                  caseDir,
+                  profileDir,
+                  extraFlags: ["--foo=bar"],
+                  navigationTimeoutMs: 3000,
+                  devtoolsTimeoutMs: 3000,
+                  closeTimeoutMs: 3000,
+                },
+                {
+                  spawn,
+                  puppeteer: {
+                    connect: async ({browserWSEndpoint}) => {
+                      assert.ok(browserWSEndpoint.includes("ws://127.0.0.1:9222/devtools/browser/test"));
+                      return browser;
+                    },
+                  },
+                  process: {
+                    pid: 999,
+                    env: process.env,
+                    cwd: () => process.cwd(),
+                    stderr: {write: () => {}},
+                    stdout: {write: () => {}},
+                  },
+                }
+              );
+
+              assert.strictEqual(spawnCalls.length, 1);
+              assert.strictEqual(spawnCalls[0].options.shell, false);
+              assert.deepStrictEqual(spawnCalls[0].options.stdio, ["ignore", "pipe", "pipe"]);
+              assert.ok(spawnCalls[0].args.includes("--remote-debugging-port=0"));
+              assert.ok(spawnCalls[0].args.some((arg) => String(arg).includes(`--user-data-dir=${profileDir}`)));
+              assert.strictEqual(result.exitCode, 0);
+              assert.ok(result.navigation.responseSeen);
+              assert.ok(result.navigation.loadSeen);
+              assert.ok(result.navigation.frameNavigatedSeen);
+              assert.ok(result.navigation.events.some((entry) => entry.event === "pageerror" && !String(entry.message || "").includes("oauth_token=abc")));
+              assert.ok(!result.chromeStderrText.includes("user:pass@"));
+              assert.ok(!result.chromeStderrText.includes("oauth_token=abc"));
+              assert.ok(!result.chromeStderrText.includes("Authorization: Bearer abc"));
+              assert.ok(result.chromeStderrText.includes("Authorization: REDACTED"));
+              assert.ok(result.chromeStderrText.includes("Bearer REDACTED"));
+              assert.ok(result.chromeStderrText.includes("Cookie: REDACTED"));
+              assert.ok(result.chromeStderrText.includes("https://example.test/path?oauth_token=REDACTED"));
+              assert.strictEqual(result.navigation.helperPid, 999);
+            })().catch((error) => {
+              console.error(error && error.stack ? error.stack : error);
+              process.exit(1);
+            });
+            """
         )
         run_node_script(script)
 

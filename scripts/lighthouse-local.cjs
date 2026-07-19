@@ -8,6 +8,10 @@ const path = require('path');
 const {StringDecoder} = require('node:string_decoder');
 const {spawn, spawnSync} = require('child_process');
 const {ensureSwClearedUrl} = require('./lighthouse-url.cjs');
+const {
+  captureProcFdListing: captureChromeCleanFdListing,
+  runChromeFdInheritanceCase,
+} = require('./chrome-clean-launcher.cjs');
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -1642,6 +1646,10 @@ function isBrowserMatrixDiagnosticEnabled() {
   return isTruthyEnvFlag(process.env.LHCI_BROWSER_MATRIX_DIAGNOSTIC);
 }
 
+function isFdInheritanceDiagnosticEnabled() {
+  return isTruthyEnvFlag(process.env.LHCI_FD_INHERITANCE_DIAGNOSTIC);
+}
+
 function buildDiagnosticMatrixCases(auditUrl) {
   const rootUrl = new URL(auditUrl);
   rootUrl.searchParams.delete('swcleared');
@@ -1671,6 +1679,65 @@ function buildDiagnosticMatrixCases(auditUrl) {
       url: ensureSwClearedUrl(probeUrl.toString(), 0),
     },
   ];
+}
+
+function buildFdInheritanceMatrixVariants(chromePath) {
+  const resolvePath = (value) => sanitizeDiagnosticText(String(value || '').trim());
+  return [
+    {
+      id: 'F1',
+      label: 'main-pipes',
+      launcherKind: 'direct',
+      stdioMode: 'pipe',
+      closeInheritedPipeFds: false,
+      executablePath: resolvePath(chromePath),
+    },
+    {
+      id: 'F2',
+      label: 'main-ignore',
+      launcherKind: 'direct',
+      stdioMode: 'ignore',
+      closeInheritedPipeFds: false,
+      executablePath: resolvePath(chromePath),
+    },
+    {
+      id: 'F3',
+      label: 'main-inherit',
+      launcherKind: 'direct',
+      stdioMode: 'inherit',
+      closeInheritedPipeFds: false,
+      executablePath: resolvePath(chromePath),
+    },
+    {
+      id: 'F4',
+      label: 'auxiliary-clean',
+      launcherKind: 'auxiliary',
+      stdioMode: 'pipe',
+      closeInheritedPipeFds: false,
+      executablePath: resolvePath(chromePath),
+    },
+    {
+      id: 'F5',
+      label: 'auxiliary-scrubbed',
+      launcherKind: 'auxiliary',
+      stdioMode: 'pipe',
+      closeInheritedPipeFds: true,
+      executablePath: resolvePath(chromePath),
+    },
+  ];
+}
+
+function buildFdInheritanceMatrixArtifacts(tempDir, variantId) {
+  const caseDir = path.join(tempDir, 'fd-inheritance-matrix', variantId);
+  return {
+    caseDir,
+    resultPath: path.join(caseDir, 'result.json'),
+    parentFdsBeforePath: path.join(caseDir, 'parent-fds-before.json'),
+    parentFdsAfterPath: path.join(caseDir, 'parent-fds-after.json'),
+    launcherStderrPath: path.join(caseDir, 'launcher-stderr.log'),
+    launcherStdoutPath: path.join(caseDir, 'launcher-stdout.log'),
+    launcherResultPath: path.join(caseDir, 'launcher-result.json'),
+  };
 }
 
 function buildBrowserMatrixVariants(chromePath, env = process.env) {
@@ -1734,6 +1801,208 @@ function buildBrowserMatrixArtifacts(tempDir, variantId) {
     lighthouseSnapshotPath: path.join(caseDir, 'lighthouse-snapshot.json'),
     straceSummaryPath: path.join(caseDir, 'strace-summary.json'),
   };
+}
+
+function extractFdInheritanceCaseLog(logText, variantId) {
+  const text = String(logText || '');
+  if (!text) {
+    return '';
+  }
+  const startMarker = `[lighthouse][fd-matrix] ${variantId} start`;
+  const endMarker = `[lighthouse][fd-matrix] ${variantId} complete`;
+  const startIndex = text.indexOf(startMarker);
+  if (startIndex === -1) {
+    return text;
+  }
+  const endIndex = text.indexOf(endMarker, startIndex);
+  if (endIndex === -1) {
+    return text.slice(startIndex);
+  }
+  return text.slice(startIndex, endIndex + endMarker.length);
+}
+
+async function runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath}) {
+  const logPath = path.join(tempDir, 'fd-inheritance-matrix.log');
+  const jsonPath = path.join(tempDir, 'fd-inheritance-matrix.json');
+  const helperScriptPath = path.join(process.cwd(), 'scripts', 'chrome-clean-launcher.cjs');
+  const variants = buildFdInheritanceMatrixVariants(chromePath);
+  const matrix = {
+    generatedAt: new Date().toISOString(),
+    auditUrl: sanitizeDiagnosticUrl(auditUrl),
+    chromePath: sanitizeDiagnosticText(chromePath || ''),
+    environment: collectDiagnosticEnvironmentSummary(),
+    variants: variants.map((variant) => ({
+      id: variant.id,
+      label: variant.label,
+      launcherKind: variant.launcherKind,
+      stdioMode: variant.stdioMode,
+      closeInheritedPipeFds: variant.closeInheritedPipeFds,
+      executablePath: variant.executablePath,
+    })),
+    cases: [],
+    exitCode: 0,
+    logPath,
+    jsonPath,
+  };
+
+  const writeSummary = () => {
+    try {
+      fs.writeFileSync(jsonPath, `${JSON.stringify(matrix, null, 2)}\n`);
+    } catch (error) {
+      console.log(
+        `[lighthouse][diag] no se pudo escribir ${jsonPath}: ${error?.stack || error?.message || error}`
+      );
+    }
+  };
+
+  try {
+    fs.writeFileSync(logPath, '', 'utf8');
+  } catch {}
+  console.log('[lighthouse] FD inheritance diagnostic enabled.');
+  console.log(`[lighthouse][diag] FD matrix log: ${logPath}`);
+  console.log(`[lighthouse][diag] FD matrix json: ${jsonPath}`);
+  console.log(`[lighthouse][diag] Chrome helper: ${helperScriptPath}`);
+  writeSummary();
+
+  for (const variant of variants) {
+    const artifacts = buildFdInheritanceMatrixArtifacts(tempDir, variant.id);
+    fs.mkdirSync(artifacts.caseDir, {recursive: true});
+    fs.mkdirSync(path.dirname(artifacts.launcherResultPath), {recursive: true});
+
+    const caseConfig = {
+      variantId: variant.id,
+      label: variant.label,
+      launcherKind: variant.launcherKind,
+      stdioMode: variant.stdioMode,
+      closeInheritedPipeFds: variant.closeInheritedPipeFds,
+      auditUrl,
+      chromePath: variant.executablePath,
+      tempDir,
+      caseDir: artifacts.caseDir,
+      profileDir: path.join(artifacts.caseDir, 'profile'),
+      navigationTimeoutMs: 30000,
+      devtoolsTimeoutMs: 30000,
+      closeTimeoutMs: 10000,
+    };
+
+    console.log(
+      `[lighthouse][fd-matrix] ${variant.id} start launcher=${variant.launcherKind} stdio=${variant.stdioMode} scrub=${variant.closeInheritedPipeFds ? '1' : '0'}`
+    );
+    const parentFdsBefore = captureChromeCleanFdListing(process.pid);
+    let helperStdout = '';
+    let helperStderr = '';
+    let helperStatus = 0;
+    let helperSignal = null;
+    let caseResult = null;
+
+    if (variant.launcherKind === 'auxiliary') {
+      const helperArgs = ['--config-json=' + JSON.stringify(caseConfig)];
+      const helperResult = spawnSync(process.execPath, [helperScriptPath, ...helperArgs], {
+        cwd: process.cwd(),
+        env: process.env,
+        encoding: 'utf8',
+        timeout: 600000,
+        killSignal: 'SIGKILL',
+        maxBuffer: 20 * 1024 * 1024,
+      });
+      helperStdout = String(helperResult.stdout || '');
+      helperStderr = String(helperResult.stderr || '');
+      helperStatus = helperResult.status;
+      helperSignal = helperResult.signal;
+      try {
+        caseResult = helperStdout ? JSON.parse(helperStdout) : null;
+      } catch (error) {
+        caseResult = {
+          variantId: variant.id,
+          error: sanitizeDiagnosticText(error?.message || String(error || 'No se pudo parsear JSON del auxiliar.')),
+          rawStdout: sanitizeDiagnosticText(helperStdout),
+        };
+      }
+    } else {
+      caseResult = await runChromeFdInheritanceCase(caseConfig);
+    }
+
+    const parentFdsAfter = captureChromeCleanFdListing(process.pid);
+    if (variant.stdioMode === 'inherit') {
+      await sleep(100);
+    }
+    const sanitizedCaseResult = sanitizeDiagnosticValue(caseResult || {});
+    const inheritedConsoleLogText =
+      variant.stdioMode === 'inherit' ? readDiagnosticFileText(logPath) : '';
+    if (inheritedConsoleLogText) {
+      const extractedLogText = extractFdInheritanceCaseLog(inheritedConsoleLogText, variant.id);
+      helperStderr = helperStderr ? `${helperStderr}\n${extractedLogText}` : extractedLogText;
+      sanitizedCaseResult.chromeStderrText = sanitizeDiagnosticText(
+        `${sanitizedCaseResult.chromeStderrText || ''}\n${extractedLogText}`.trim()
+      );
+      sanitizedCaseResult.navigation = sanitizedCaseResult.navigation || {};
+      sanitizedCaseResult.navigation.stderrText = sanitizeDiagnosticText(
+        `${sanitizedCaseResult.navigation.stderrText || ''}\n${extractedLogText}`.trim()
+      );
+    }
+    sanitizedCaseResult.parentFdsBefore = sanitizeDiagnosticValue(parentFdsBefore);
+    sanitizedCaseResult.parentFdsAfter = sanitizeDiagnosticValue(parentFdsAfter);
+    sanitizedCaseResult.helperProcess = {
+      status: helperStatus,
+      signal: helperSignal || null,
+      stdoutText: sanitizeDiagnosticText(helperStdout),
+      stderrText: sanitizeDiagnosticText(helperStderr),
+    };
+    sanitizedCaseResult.launcher = {
+      kind: variant.launcherKind,
+      stdioMode: variant.stdioMode,
+      closeInheritedPipeFds: variant.closeInheritedPipeFds,
+    };
+    sanitizedCaseResult.variantId = variant.id;
+    sanitizedCaseResult.label = variant.label;
+    sanitizedCaseResult.auditUrl = sanitizeDiagnosticUrl(auditUrl);
+    sanitizedCaseResult.chromePath = sanitizeDiagnosticText(variant.executablePath);
+    sanitizedCaseResult.fd142InParent = Boolean(
+      parentFdsBefore.entries?.some((entry) => Number(entry.fd) === 142 && /pipe:/i.test(String(entry.target || ''))) ||
+        parentFdsAfter.entries?.some((entry) => Number(entry.fd) === 142 && /pipe:/i.test(String(entry.target || '')))
+    );
+    sanitizedCaseResult.fd145InParent = Boolean(
+      parentFdsBefore.entries?.some((entry) => Number(entry.fd) === 145 && /pipe:/i.test(String(entry.target || ''))) ||
+        parentFdsAfter.entries?.some((entry) => Number(entry.fd) === 145 && /pipe:/i.test(String(entry.target || '')))
+    );
+
+    const caseJsonPath = path.join(artifacts.caseDir, 'case.json');
+    const launcherResultPath = artifacts.launcherResultPath;
+    try {
+      fs.writeFileSync(caseJsonPath, `${JSON.stringify(sanitizedCaseResult, null, 2)}\n`);
+      fs.writeFileSync(launcherResultPath, `${JSON.stringify(sanitizedCaseResult, null, 2)}\n`);
+      fs.writeFileSync(artifacts.parentFdsBeforePath, `${JSON.stringify(parentFdsBefore, null, 2)}\n`);
+      fs.writeFileSync(artifacts.parentFdsAfterPath, `${JSON.stringify(parentFdsAfter, null, 2)}\n`);
+      if (helperStdout) {
+        fs.writeFileSync(artifacts.launcherStdoutPath, sanitizeDiagnosticText(helperStdout));
+      }
+      if (helperStderr) {
+        fs.writeFileSync(artifacts.launcherStderrPath, sanitizeDiagnosticText(helperStderr));
+      }
+    } catch (error) {
+      console.log(
+        `[lighthouse][fd-matrix] ${variant.id} no se pudieron escribir artifacts: ${error?.stack || error?.message || error}`
+      );
+    }
+
+    matrix.cases.push(sanitizedCaseResult);
+    if (
+      sanitizedCaseResult.exitCode !== 0 ||
+      helperStatus !== 0 ||
+      helperSignal ||
+      sanitizedCaseResult.helperProcess?.status !== 0
+    ) {
+      matrix.exitCode = 1;
+    }
+    console.log(
+      `[lighthouse][fd-matrix] ${variant.id} complete exit=${sanitizedCaseResult.exitCode ?? 0} helper=${helperStatus ?? 0}${helperSignal ? ` signal=${helperSignal}` : ''}`
+    );
+    writeSummary();
+  }
+
+  console.log(`[lighthouse] FD inheritance diagnostic completed with exit code ${matrix.exitCode}.`);
+  writeSummary();
+  return matrix;
 }
 
 function runDiagnosticCommand(command, args, env = process.env) {
@@ -3536,6 +3805,7 @@ function runCommand(command, args, env, options = {}) {
   const chromePath = resolveChromePath();
   const diagnosticsEnabled = String(process.env.LHCI_DIAGNOSTIC || '').trim() === '1';
   const matrixEnabled = isDiagnosticMatrixEnabled();
+  const fdInheritanceMatrixEnabled = isFdInheritanceDiagnosticEnabled();
   const browserMatrixEnabled = isBrowserMatrixDiagnosticEnabled();
   const localOrigin = new URL(`http://127.0.0.1:${port}/`).origin;
   const auditOrigin = new URL(auditUrl).origin;
@@ -3645,6 +3915,16 @@ function runCommand(command, args, env, options = {}) {
         ? `[lighthouse] destino externo listo tras ${Math.ceil(ready.elapsedMs / 1000)}s y ${ready.attempt} comprobaciones.`
         : `[lighthouse] servidor listo tras ${Math.ceil(ready.elapsedMs / 1000)}s y ${ready.attempt} comprobaciones.`
     );
+
+    if (fdInheritanceMatrixEnabled) {
+      console.log('[lighthouse] FD inheritance matrix diagnostic enabled.');
+      const matrix = await runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath});
+      console.log(`[lighthouse] FD inheritance matrix completed with exit code ${matrix.exitCode}.`);
+      if (matrix.exitCode !== 0) {
+        throw new Error(`FD inheritance matrix diagnostic failed with exit code ${matrix.exitCode}`);
+      }
+      return;
+    }
 
     if (browserMatrixEnabled) {
       console.log('[lighthouse] Browser matrix diagnostic enabled.');
