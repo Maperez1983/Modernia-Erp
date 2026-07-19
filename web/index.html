@@ -11831,7 +11831,91 @@
                 sync("");
               })();
             </script>
-			    <script src="app-auth.js?v=16"></script>
+            <script>
+              (function () {
+                if (window.__CRMClientDiagnosticsBootstrap__) return;
+                window.__CRMClientDiagnosticsBootstrap__ = true;
+
+                const CLIENT_ERROR_ENDPOINT = "/api/client_error";
+                const scrubTelemetryText = (value) => {
+                  const raw = String(value || "");
+                  return raw
+                    .replace(/postgres(?:ql)?:\/\/[^\s]+/gi, "postgresql://<redacted>")
+                    .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, "Bearer <redacted>")
+                    .replace(/([a-z][a-z0-9+.-]*:\/\/)([^/\s@]+)@/gi, "$1<redacted>@")
+                    .replace(/([?&](?:token|access_token|session_token|oauth_token|api_key|password|passwd|secret|signature|sig|code|state|session|auth|authorization)=)([^&\s]+)/gi, "$1<redacted>")
+                    .replace(/\s+/g, " ")
+                    .trim()
+                    .slice(0, 2000);
+                };
+                const reportClientError = (kind, payload = {}) => {
+                  try {
+                    const body = JSON.stringify({
+                      kind: String(kind || "Error"),
+                      source: String(payload.source || "window"),
+                      page_path: String(window.location.pathname || ""),
+                      message: scrubTelemetryText(payload.message || ""),
+                      stack: scrubTelemetryText(payload.stack || ""),
+                      filename: scrubTelemetryText(payload.filename || ""),
+                      line: Number(payload.line || 0) || 0,
+                      column: Number(payload.column || 0) || 0,
+                    });
+                    const blob = new Blob([body], { type: "application/json" });
+                    if (navigator.sendBeacon && navigator.sendBeacon(CLIENT_ERROR_ENDPOINT, blob)) {
+                      return true;
+                    }
+                    fetch(CLIENT_ERROR_ENDPOINT, {
+                      method: "POST",
+                      credentials: "same-origin",
+                      headers: { "Content-Type": "application/json" },
+                      body,
+                      keepalive: true,
+                    }).catch(() => {});
+                  } catch {}
+                  return false;
+                };
+                window.CRMAppDiagnostics = window.CRMAppDiagnostics || {};
+                window.CRMAppDiagnostics.reportClientError = reportClientError;
+                window.addEventListener("error", (event) => {
+                  try {
+                    if (event?.target && event.target !== window) {
+                      return;
+                    }
+                    const err = event?.error;
+                    reportClientError("window.error", {
+                      source: "window",
+                      message: err?.message || event?.message || "Error desconocido",
+                      stack: err?.stack || "",
+                      filename: event?.filename || "",
+                      line: event?.lineno || 0,
+                      column: event?.colno || 0,
+                    });
+                  } catch {}
+                });
+                window.addEventListener("unhandledrejection", (event) => {
+                  try {
+                    const reason = event?.reason;
+                    const reasonText = String(reason?.message || reason || "");
+                    const isAuthError =
+                      (reason && Number(reason.status || 0) === 401)
+                      || (reason && reason.isAuthError === true)
+                      || /no autenticad/i.test(reasonText);
+                    const isPermissionError =
+                      (reason && Number(reason.status || 0) === 403)
+                      || /sin permisos para este servicio/i.test(reasonText);
+                    if (isAuthError || isPermissionError) {
+                      return;
+                    }
+                    reportClientError("window.unhandledrejection", {
+                      source: "window",
+                      message: reason?.message || reasonText || "Promise rechazada",
+                      stack: reason?.stack || "",
+                    });
+                  } catch {}
+                });
+              })();
+            </script>
+            <script src="app-auth.js?v=16"></script>
         <script>
           (function () {
             if (window.__APP_SHELL_BOOTSTRAP__) return;

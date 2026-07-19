@@ -52529,6 +52529,25 @@ def _sanitize_telemetry_path(path):
     return text.split("?", 1)[0].split("#", 1)[0]
 
 
+def _sanitize_telemetry_text(text, limit=220):
+    try:
+        msg = str(text or "")
+        msg = re.sub(r"postgres(?:ql)?://[^\s]+", "postgresql://<redacted>", msg, flags=re.IGNORECASE)
+        msg = re.sub(r"Bearer\s+[A-Za-z0-9._\-]+", "Bearer <redacted>", msg, flags=re.IGNORECASE)
+        msg = re.sub(r"(?i)([a-z][a-z0-9+.-]*://)([^/\s@]+)@", r"\1<redacted>@", msg)
+        msg = re.sub(
+            r"(?i)([?&](?:token|access_token|session_token|oauth_token|api_key|password|passwd|secret|signature|sig|code|state|session|auth|authorization)=)([^&\s]+)",
+            r"\1<redacted>",
+            msg,
+        )
+        msg = msg.replace("\n", " ").strip()
+        if limit is None:
+            return msg
+        return msg[: max(0, int(limit))]
+    except Exception:
+        return ""
+
+
 class Handler(BaseHTTPRequestHandler):
     db_path = DB_DEFAULT
     ocr_db_path = OCR_DB_DEFAULT
@@ -52574,17 +52593,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             p = _sanitize_telemetry_path(path)[:500]
             name = str(type(exc).__name__ or "Error")[:80]
-            msg = str(exc or "")
-            # Redacta DSNs/token-ish strings por seguridad (best-effort).
-            msg = re.sub(r"postgres(?:ql)?://[^\s]+", "postgresql://<redacted>", msg, flags=re.IGNORECASE)
-            msg = re.sub(r"Bearer\s+[A-Za-z0-9._\-]+", "Bearer <redacted>", msg, flags=re.IGNORECASE)
-            msg = re.sub(r"(?i)([a-z][a-z0-9+.-]*://)([^/\s@]+)@", r"\1<redacted>@", msg)
-            msg = re.sub(
-                r"(?i)([?&](?:token|access_token|session_token|oauth_token|api_key|password|passwd|secret|signature|sig|code|state|session|auth|authorization)=)([^&\s]+)",
-                r"\1<redacted>",
-                msg,
-            )
-            msg = msg.replace("\n", " ").strip()
+            msg = _sanitize_telemetry_text(exc, limit=220)
             item = {
                 "at": datetime.now(timezone.utc).isoformat(),
                 "path": p,
@@ -52601,19 +52610,46 @@ class Handler(BaseHTTPRequestHandler):
             return
 
     @staticmethod
+    def _record_client_error(payload):
+        try:
+            page_path = _sanitize_telemetry_path(payload.get("page_path") or payload.get("page") or payload.get("path") or "")[:500]
+            source = str(payload.get("source") or "client").strip()[:80]
+            kind = str(payload.get("kind") or "Error").strip()[:80]
+            filename = _sanitize_telemetry_path(payload.get("filename") or "")[:200]
+            try:
+                line = int(str(payload.get("line") or "0").strip() or 0)
+            except Exception:
+                line = 0
+            try:
+                column = int(str(payload.get("column") or "0").strip() or 0)
+            except Exception:
+                column = 0
+            message = _sanitize_telemetry_text(payload.get("message") or "", limit=220)
+            stack = _sanitize_telemetry_text(payload.get("stack") or "", limit=500)
+            item = {
+                "at": datetime.now(timezone.utc).isoformat(),
+                "path": page_path,
+                "type": kind,
+                "message": message,
+                "source": source,
+                "filename": filename,
+                "line": line,
+                "column": column,
+                "stack": stack,
+            }
+            with Handler._api_err_lock:
+                Handler._api_err_ring.append(item)
+                if len(Handler._api_err_ring) > 30:
+                    Handler._api_err_ring = Handler._api_err_ring[-30:]
+            _report_client_error_to_sentry(item)
+        except Exception:
+            return
+
+    @staticmethod
     def _safe_exc_detail(exc):
         try:
             name = str(type(exc).__name__ or "Error")[:80]
-            msg = str(exc or "")
-            msg = re.sub(r"postgres(?:ql)?://[^\s]+", "postgresql://<redacted>", msg, flags=re.IGNORECASE)
-            msg = re.sub(r"Bearer\s+[A-Za-z0-9._\-]+", "Bearer <redacted>", msg, flags=re.IGNORECASE)
-            msg = re.sub(r"(?i)([a-z][a-z0-9+.-]*://)([^/\s@]+)@", r"\1<redacted>@", msg)
-            msg = re.sub(
-                r"(?i)([?&](?:token|access_token|session_token|oauth_token|api_key|password|passwd|secret|signature|sig|code|state|session|auth|authorization)=)([^&\s]+)",
-                r"\1<redacted>",
-                msg,
-            )
-            msg = msg.replace("\n", " ").strip()
+            msg = _sanitize_telemetry_text(exc, limit=220)
             detail = f"{name}: {msg}" if msg else name
             return detail[:220]
         except Exception:
@@ -53950,6 +53986,44 @@ class Handler(BaseHTTPRequestHandler):
     def _do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
+        if parsed.path == "/api/client_error":
+            host = str(self.headers.get("Host") or "").strip()
+            origin = str(self.headers.get("Origin") or "").strip()
+            referer = str(self.headers.get("Referer") or "").strip()
+            same_origin = False
+            for candidate in (origin, referer):
+                if not candidate or not host:
+                    continue
+                try:
+                    parsed_candidate = urllib.parse.urlsplit(candidate)
+                except Exception:
+                    continue
+                if parsed_candidate.netloc and parsed_candidate.netloc == host:
+                    same_origin = True
+                    break
+            if not same_origin:
+                json_response(self, {"error": "Origen no permitido"}, status=403)
+                return
+            try:
+                content_length = int(self.headers.get("Content-Length") or "0")
+            except Exception:
+                content_length = 0
+            if content_length <= 0:
+                json_response(self, {"error": "Payload requerido"}, status=400)
+                return
+            try:
+                raw_payload = self.rfile.read(min(content_length, 32768))
+            except Exception:
+                raw_payload = b""
+            try:
+                payload = json.loads(raw_payload.decode("utf-8", "replace") or "{}")
+            except Exception:
+                payload = {}
+            if not isinstance(payload, dict):
+                payload = {}
+            Handler._record_client_error(payload)
+            json_response(self, {"ok": True})
+            return
         if parsed.path not in (
             "/api/movimientos",
             "/api/hipotecas",
@@ -91941,6 +92015,44 @@ def _report_api_error_to_sentry(item):
         return
 
 
+def _report_client_error_to_sentry(item):
+    sentry_sdk = _SENTRY_SDK
+    if sentry_sdk is None:
+        return
+    try:
+        page = _sanitize_telemetry_path(item.get("page_path") or item.get("page") or item.get("path") or "")
+        source = str(item.get("source") or "client").strip()[:80]
+        kind = str(item.get("kind") or "Error").strip()[:80]
+        filename = _sanitize_telemetry_path(item.get("filename") or "")[:200]
+        line = str(item.get("line") or "").strip()[:20]
+        column = str(item.get("column") or "").strip()[:20]
+        message = _sanitize_telemetry_text(item.get("message") or "", limit=220)
+        stack = _sanitize_telemetry_text(item.get("stack") or "", limit=500)
+        parts = []
+        if page:
+            parts.append(f"Client error at {page}")
+        else:
+            parts.append("Client error")
+        if source:
+            parts.append(source)
+        if kind:
+            parts.append(kind)
+        if filename:
+            location = filename
+            if line:
+                location = f"{location}:{line}"
+                if column:
+                    location = f"{location}:{column}"
+            parts.append(location)
+        if message:
+            parts.append(message)
+        if stack:
+            parts.append(stack)
+        sentry_sdk.capture_message(" | ".join(parts)[:500], level="error")
+    except Exception:
+        return
+
+
 def configure_sentry():
     """
     Enable Sentry only when explicitly configured.
@@ -91957,9 +92069,17 @@ def configure_sentry():
         return False
     environment = str(os.environ.get("SENTRY_ENVIRONMENT") or "production").strip() or "production"
     try:
+        release = str(
+            os.environ.get("SENTRY_RELEASE")
+            or os.environ.get("RENDER_GIT_COMMIT")
+            or os.environ.get("GIT_COMMIT")
+            or os.environ.get("COMMIT_SHA")
+            or ""
+        ).strip()
         sentry_sdk.init(
             dsn=sentry_dsn,
             environment=environment,
+            release=release or None,
             send_default_pii=False,
             include_local_variables=False,
             max_request_body_size="never",

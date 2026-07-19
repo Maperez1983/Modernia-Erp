@@ -115,7 +115,11 @@ class ServerF821RegressionTests(unittest.TestCase):
         )
         with mock.patch.dict(
             os.environ,
-            {"SENTRY_DSN": "https://public@example.invalid/1", "SENTRY_ENVIRONMENT": "tests"},
+            {
+                "SENTRY_DSN": "https://public@example.invalid/1",
+                "SENTRY_ENVIRONMENT": "tests",
+                "COMMIT_SHA": "deadbeefcafebabe",
+            },
             clear=True,
         ):
             with mock.patch.dict(server_module.sys.modules, {"sentry_sdk": fake_sentry}):
@@ -128,12 +132,47 @@ class ServerF821RegressionTests(unittest.TestCase):
                     )
 
         fake_sentry.init.assert_called_once()
+        self.assertEqual(fake_sentry.init.call_args.kwargs["release"], "deadbeefcafebabe")
         fake_sentry.capture_message.assert_called_once()
         message = fake_sentry.capture_message.call_args.args[0]
         self.assertIn("/api/demo", message)
         self.assertNotIn("token=abc", message)
         self.assertNotIn("user:pass@", message)
         self.assertNotIn("Bearer abc", message)
+
+    def test_report_client_error_records_sanitized_browser_errors_in_sentry(self):
+        fake_sentry = SimpleNamespace(
+            init=mock.Mock(return_value=None),
+            capture_message=mock.Mock(),
+        )
+        with mock.patch.dict(
+            os.environ,
+            {"SENTRY_DSN": "https://public@example.invalid/1", "SENTRY_ENVIRONMENT": "tests"},
+            clear=True,
+        ):
+            with mock.patch.dict(server_module.sys.modules, {"sentry_sdk": fake_sentry}):
+                with mock.patch.object(server_module, "_SENTRY_SDK", None):
+                    self.assertTrue(configure_sentry())
+                    server_module.Handler._record_client_error(
+                        {
+                            "page_path": "/app?token=abc",
+                            "source": "window",
+                            "kind": "window.error",
+                            "message": "Bearer abc from https://user:pass@example.test/path?secret=1",
+                            "stack": "Error: https://user:pass@example.test/path?oauth_token=abc",
+                            "filename": "https://user:pass@example.test/script.js",
+                            "line": 12,
+                            "column": 34,
+                        }
+                    )
+
+        fake_sentry.capture_message.assert_called_once()
+        message = fake_sentry.capture_message.call_args.args[0]
+        self.assertIn("Client error at /app", message)
+        self.assertNotIn("token=abc", message)
+        self.assertNotIn("user:pass@", message)
+        self.assertNotIn("Bearer abc", message)
+        self.assertNotIn("oauth_token=abc", message)
 
     def test_ensure_and_close_actions_for_related(self):
         action_id = ensure_action_for_related(

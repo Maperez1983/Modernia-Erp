@@ -207,6 +207,22 @@ class ToolingPlaywrightAccessibilityConfigTests(unittest.TestCase):
         self.assertIn("RUN_PLAYWRIGHT_E2E=1 python -m pytest tests/e2e -v", workflow)
 
 
+class ToolingSentryConfigTests(unittest.TestCase):
+    def test_requirements_declares_sentry_sdk_for_server_reporting(self):
+        requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+        self.assertIn("sentry-sdk", requirements)
+
+    def test_index_bootstrap_defines_client_error_reporting_before_auth_bundle(self):
+        index_html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
+        bootstrap_marker = "window.__CRMClientDiagnosticsBootstrap__"
+        endpoint_marker = 'CLIENT_ERROR_ENDPOINT = "/api/client_error"'
+        auth_bundle_marker = "app-auth.js?v=16"
+        self.assertIn(bootstrap_marker, index_html)
+        self.assertIn(endpoint_marker, index_html)
+        self.assertIn(auth_bundle_marker, index_html)
+        self.assertLess(index_html.index(bootstrap_marker), index_html.index(auth_bundle_marker))
+
+
 class ToolingTelemetryTests(unittest.TestCase):
     def test_opentelemetry_sdk_exports_a_span(self):
         class _MemoryExporter:
