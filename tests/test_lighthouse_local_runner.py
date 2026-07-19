@@ -1621,7 +1621,7 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
         )
         run_node_script(script)
 
-    def test_fd_inheritance_mode_is_disabled_by_default_and_builds_five_variants(self):
+    def test_fd_inheritance_mode_is_disabled_by_default_and_builds_seven_variants(self):
         chunk = extract_chunk("function isTruthyEnvFlag", "function buildBrowserMatrixVariants")
         script = (
             dedent(
@@ -1646,15 +1646,23 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                   assert.strictEqual(api.isFdInheritanceDiagnosticEnabled(), true);
 
                   const variants = api.buildFdInheritanceMatrixVariants("/tmp/current-chrome");
-                  assert.deepStrictEqual(variants.map((variant) => variant.id), ["F1", "F2", "F3", "F4", "F5"]);
+                  assert.deepStrictEqual(variants.map((variant) => variant.id), ["F1", "F2", "F3", "F4", "F5", "F6", "F7"]);
                   assert.strictEqual(variants[0].launcherKind, "direct");
                   assert.strictEqual(variants[1].stdioMode, "ignore");
                   assert.strictEqual(variants[2].stdioMode, "inherit");
                   assert.strictEqual(variants[3].launcherKind, "auxiliary");
                   assert.strictEqual(variants[4].launcherTransport, "python");
                   assert.strictEqual(variants[4].closeInheritedPipeFds, true);
+                  assert.strictEqual(variants[5].launcherTransport, "python");
+                  assert.ok(variants[5].extraFlags.includes("--enable-features=NetworkService,NetworkServiceInProcess"));
+                  assert.strictEqual(variants[5].sandboxMode, "no-sandbox");
+                  assert.strictEqual(variants[6].launcherTransport, "python");
+                  assert.strictEqual(variants[6].includeNoSandbox, false);
+                  assert.strictEqual(variants[6].sandboxMode, "sandbox-enabled");
                   assert.strictEqual(variants[0].executablePath, "/tmp/current-chrome");
                   assert.strictEqual(variants[4].executablePath, "/tmp/current-chrome");
+                  assert.strictEqual(variants[5].executablePath, "/tmp/current-chrome");
+                  assert.strictEqual(variants[6].executablePath, "/tmp/current-chrome");
 
                   const artifacts = api.buildFdInheritanceMatrixArtifacts("/tmp/fd-temp", "F5");
                   assert.ok(artifacts.caseDir.endsWith("/fd-inheritance-matrix/F5"));
@@ -1668,6 +1676,33 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                     process.env.LHCI_FD_INHERITANCE_DIAGNOSTIC = originalEnv;
                   }
                 }
+                """
+            )
+            .replace("__SOURCE__", json.dumps(chunk))
+        )
+        run_node_script(script)
+
+    def test_fd_inheritance_launch_flags_can_disable_no_sandbox_for_sandbox_experiment(self):
+        chunk = extract_chunk("function getDiagnosticChromeFlags()", "function isTruthyEnvFlag")
+        script = (
+            dedent(
+                """
+                const assert = require("assert");
+                const source = [
+                  __SOURCE__,
+                ].join("\\n");
+                const factory = new Function(
+                  source + "\\nreturn { getDiagnosticChromeFlags, buildChromeLaunchFlags };"
+                );
+                const api = factory();
+                const flags = api.buildChromeLaunchFlags(["--foo=bar"], {includeNoSandbox: false});
+
+                assert.ok(Array.isArray(flags));
+                assert.ok(!flags.includes("--no-sandbox"));
+                assert.ok(flags.includes("--headless=new"));
+                assert.ok(flags.includes("--remote-debugging-port=0"));
+                assert.ok(flags.includes("--foo=bar"));
+                assert.strictEqual(flags[flags.length - 1], "--foo=bar");
                 """
             )
             .replace("__SOURCE__", json.dumps(chunk))
