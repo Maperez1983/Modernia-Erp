@@ -5,7 +5,23 @@ import urllib.parse
 
 
 def _normalize_url(value):
-    return str(value or "").strip().rstrip("/")
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    parts = urllib.parse.urlsplit(text)
+    if not parts.scheme and not parts.netloc:
+        return text.rstrip("/")
+    hostname = parts.hostname or ""
+    if not hostname:
+        return text.rstrip("/")
+    if ":" in hostname and not hostname.startswith("["):
+        hostname = f"[{hostname}]"
+    if parts.port:
+        netloc = f"{hostname}:{parts.port}"
+    else:
+        netloc = hostname
+    normalized = urllib.parse.urlunsplit((parts.scheme, netloc, parts.path or "", "", ""))
+    return normalized.rstrip("/")
 
 
 def configured_app_base_url():

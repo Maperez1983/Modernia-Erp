@@ -12,6 +12,7 @@ import sqlite3
 import unittest
 
 from web import server
+from unittest import mock
 
 
 class PrivilegeEscalationRegressionTests(unittest.TestCase):
@@ -31,6 +32,14 @@ class PrivilegeEscalationRegressionTests(unittest.TestCase):
               servicio TEXT,
               activo INTEGER NOT NULL DEFAULT 1
             );
+            CREATE TABLE workspace_miembros (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              usuario_id TEXT NOT NULL,
+              rol TEXT NOT NULL DEFAULT 'Miembro',
+              created_at TEXT,
+              updated_at TEXT
+            );
             """
         )
         self.conn.executemany(
@@ -47,6 +56,12 @@ class PrivilegeEscalationRegressionTests(unittest.TestCase):
             """
             INSERT INTO usuarios (id, rol, servicio, activo)
             VALUES ('u-1', 'Miembro', 'Gestoría', 1)
+            """
+        )
+        self.conn.execute(
+            """
+            INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
+            VALUES ('wm-1', 'ws-1', 'u-1', 'Auditor', datetime('now'), datetime('now'))
             """
         )
         self.conn.commit()
@@ -118,3 +133,17 @@ class PrivilegeEscalationRegressionTests(unittest.TestCase):
                 "de una sesión no privilegiada."
             ),
         )
+
+    def test_workspace_member_unknown_role_is_not_writable(self):
+        self.assertFalse(server.workspace_member_can_write("Auditor"))
+
+    def test_enforce_workspace_membership_rejects_unknown_role_for_write(self):
+        with mock.patch.object(server, "WORKSPACE_MEMBERSHIP_ENFORCE", True):
+            ok, err = server.enforce_workspace_membership(
+                self.conn,
+                {"user_id": "u-1", "rol": "Miembro", "servicio": "Gestoría"},
+                "ws-1",
+                write=True,
+            )
+        self.assertFalse(ok)
+        self.assertEqual(err, "No autorizado")

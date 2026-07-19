@@ -74,6 +74,31 @@ class AuthPublicSecurityCoverageTests(unittest.TestCase):
         with mock.patch.dict(public_links.os.environ, {}, clear=True):
             self.assertEqual(public_links.external_base_url(), "http://localhost:8000")
 
+        with mock.patch.dict(
+            public_links.os.environ,
+            {
+                "APP_BASE_URL": "https://user:pass@crm.example.com/base/?token=abc#frag",
+            },
+            clear=True,
+        ):
+            self.assertEqual(public_links.configured_app_base_url(), "https://crm.example.com/base")
+            self.assertEqual(public_links.resolve_public_link_base_url(""), "https://crm.example.com/base")
+            self.assertEqual(public_links.external_base_url(), "https://crm.example.com/base")
+            self.assertEqual(
+                public_links.build_public_fragment_url(
+                    "activar_token",
+                    "a b/c",
+                    base_url="https://user:pass@crm.example.com/base/?token=abc#frag",
+                    path="kiosk",
+                ),
+                "https://crm.example.com/base/kiosk#activar_token=a%20b/c",
+            )
+
+        self.assertEqual(
+            public_links.resolve_public_link_base_url(" https://user:pass@override.example.com/kiosk/?token=abc#frag "),
+            "https://override.example.com/kiosk",
+        )
+
         self.assertEqual(
             public_links.build_public_fragment_url("activar_token", "a b/c", base_url="https://crm.example.com/", path="kiosk"),
             "https://crm.example.com/kiosk#activar_token=a%20b/c",

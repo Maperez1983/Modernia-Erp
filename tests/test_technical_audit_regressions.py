@@ -16,6 +16,58 @@ from web import server
 
 
 class TechnicalAuditRegressionTests(unittest.TestCase):
+    def _make_workspace_scope_conn(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE workspace_companies (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              legacy_empresa_id TEXT,
+              nombre TEXT,
+              activo INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE workspace_empresas (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              empresa_id TEXT NOT NULL
+            );
+            CREATE TABLE workspace_miembros (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              usuario_id TEXT NOT NULL,
+              rol TEXT NOT NULL DEFAULT 'Miembro'
+            );
+            CREATE TABLE usuarios (
+              id TEXT PRIMARY KEY,
+              rol TEXT,
+              servicio TEXT,
+              activo INTEGER NOT NULL DEFAULT 1
+            );
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO workspace_companies (id, workspace_id, legacy_empresa_id, nombre, activo)
+            VALUES ('wc-1', 'ws-1', 'emp-1', 'Empresa Uno', 1)
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol)
+            VALUES ('wm-1', 'ws-1', 'u-1', 'Miembro')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO usuarios (id, rol, servicio, activo)
+            VALUES ('u-1', 'Miembro', 'Gestoría', 1)
+            """
+        )
+        conn.commit()
+        return conn
+
     def test_resolve_external_ocr_config_prefers_explicit_env_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -229,6 +281,113 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
         count = conn.execute("SELECT COUNT(*) AS total FROM workspace_empresas").fetchone()["total"]
         self.assertEqual(count, 0)
         conn.close()
+
+    def test_resolve_workspace_scope_empresa_ids_does_not_broaden_scope_with_mismatched_empresa_id(self):
+        conn = self._make_workspace_scope_conn()
+        try:
+            ids = server.resolve_workspace_scope_empresa_ids(conn, "ws-1", empresa_id="emp-2")
+            self.assertEqual(ids, ["emp-1"])
+        finally:
+            conn.close()
+
+    def test_resolve_empresa_id_for_request_rejects_workspace_company_mismatch(self):
+        conn = self._make_workspace_scope_conn()
+        try:
+            with mock.patch.object(server, "WORKSPACE_MEMBERSHIP_ENFORCE", True):
+                eid, wc_id, err = server.resolve_empresa_id_for_request(
+                    conn,
+                    {"user_id": "u-1", "rol": "Miembro", "servicio": "Gestoría"},
+                    workspace_id="ws-1",
+                    empresa_id="emp-2",
+                    workspace_company_id="wc-1",
+                    write=False,
+                )
+            self.assertEqual((eid, wc_id, err), ("", "wc-1", "workspace_company_id no coincide con empresa_id"))
+        finally:
+            conn.close()
+
+    def test_resolve_empresa_id_for_request_resolves_matching_workspace_company(self):
+        conn = self._make_workspace_scope_conn()
+        try:
+            with mock.patch.object(server, "WORKSPACE_MEMBERSHIP_ENFORCE", True):
+                eid, wc_id, err = server.resolve_empresa_id_for_request(
+                    conn,
+                    {"user_id": "u-1", "rol": "Miembro", "servicio": "Gestoría"},
+                    workspace_id="ws-1",
+                    empresa_id="",
+                    workspace_company_id="wc-1",
+                    write=False,
+                )
+            self.assertEqual((eid, wc_id, err), ("emp-1", "wc-1", ""))
+        finally:
+            conn.close()
+
+    def test_resolve_request_legacy_empresa_id_normalizes_workspace_company_sources(self):
+        conn = self._make_workspace_scope_conn()
+        try:
+            self.assertEqual(
+                server.resolve_request_legacy_empresa_id(
+                    conn,
+                    workspace_id="ws-1",
+                    empresa_id="",
+                    workspace_company_id="wc-1",
+                ),
+                "emp-1",
+            )
+            self.assertEqual(
+                server.resolve_request_legacy_empresa_id(
+                    conn,
+                    workspace_id="",
+                    empresa_id="wc-1",
+                    workspace_company_id="",
+                ),
+                "emp-1",
+            )
+            self.assertEqual(
+                server.resolve_request_legacy_empresa_id(
+                    conn,
+                    workspace_id="ws-1",
+                    empresa_id="emp-2",
+                    workspace_company_id="wc-1",
+                ),
+                "emp-2",
+            )
+            self.assertEqual(
+                server.resolve_request_legacy_empresa_id(
+                    conn,
+                    workspace_id="",
+                    empresa_id="emp-2",
+                    workspace_company_id="",
+                ),
+                "emp-2",
+            )
+        finally:
+            conn.close()
+
+    def test_resolve_payload_legacy_empresa_id_normalizes_workspace_payload(self):
+        conn = self._make_workspace_scope_conn()
+        try:
+            session = {"user_id": "u-1", "rol": "Miembro", "servicio": "Gestoría"}
+            self.assertEqual(
+                server.resolve_payload_legacy_empresa_id(
+                    conn,
+                    session,
+                    {"workspace_id": "ws-1", "workspace_company_id": "wc-1"},
+                    write=True,
+                ),
+                ("emp-1", ""),
+            )
+            self.assertEqual(
+                server.resolve_payload_legacy_empresa_id(
+                    conn,
+                    session,
+                    {"workspace_id": "ws-1", "workspace_company_id": "wc-1", "empresa_id": "emp-2"},
+                    write=True,
+                ),
+                ("", ""),
+            )
+        finally:
+            conn.close()
 
     def test_external_base_url_ignores_host_headers(self):
         handler = SimpleNamespace(

@@ -38615,10 +38615,10 @@ def resolve_workspace_scope_empresa_ids(conn, workspace_id, *, empresa_id=""):
         _rollback_best_effort(conn)
         ids = []
     eid = str(empresa_id or "").strip()
-    if eid and eid not in ids:
-        ids.append(eid)
     if ids:
         return ids
+    if eid:
+        return [eid]
     try:
         platform_eid = str(get_platform_empresa_id(conn) or "").strip()
     except Exception:
@@ -41841,7 +41841,7 @@ def _normalize_workspace_member_role(value):
 
 def workspace_member_can_write(role):
     role_norm = _normalize_workspace_member_role(role)
-    return role_norm not in {"Lectura"}
+    return role_norm in {"Owner", "Admin", "Miembro"}
 
 
 def fetch_workspace_member(conn, workspace_id, user_id):
@@ -42354,6 +42354,70 @@ def resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspa
     return legacy_id
 
 
+def resolve_request_legacy_empresa_id(conn, *, workspace_id="", empresa_id="", workspace_company_id=""):
+    """
+    Normaliza el id legacy de empresa para handlers que aceptan `workspace_company_id`.
+
+    Mantiene la semántica existente:
+    - `workspace_id` + `workspace_company_id` -> resuelve `legacy_empresa_id` cuando falta `empresa_id`.
+    - `empresa_id` suelto -> si realmente apunta a `workspace_companies.id`, lo traduce a legacy.
+    - cualquier otra combinación -> devuelve `empresa_id` tal cual.
+    """
+    ws_id = str(workspace_id or "").strip()
+    eid = str(empresa_id or "").strip()
+    wc_id = str(workspace_company_id or "").strip()
+    if ws_id and wc_id and not eid:
+        return resolve_legacy_empresa_id_from_workspace_company(conn, ws_id, wc_id) or ""
+    if eid and not ws_id and not wc_id:
+        try:
+            ensure_workspace_core_tables(conn)
+            row = conn.execute(
+                """
+                SELECT legacy_empresa_id
+                FROM workspace_companies
+                WHERE id = ?
+                LIMIT 1
+                """,
+                (eid,),
+            ).fetchone()
+            legacy = str(row_value(row, "legacy_empresa_id") or row_value(row, 0) or "").strip() if row else ""
+            if legacy:
+                return legacy
+        except Exception:
+            _rollback_best_effort(conn)
+    return eid
+
+
+def resolve_payload_legacy_empresa_id(conn, session, payload, *, write=False):
+    """
+    Resuelve `empresa_id` legacy a partir de un payload que trae `workspace_id` y
+    `workspace_company_id`.
+
+    Devuelve (empresa_id_legacy, error_str). No infiere ni cae a platform; solo
+    traduce la referencia v2 cuando ambas claves están presentes.
+    """
+    if not isinstance(payload, dict):
+        return "", ""
+    if str(payload.get("empresa_id") or "").strip():
+        return "", ""
+    ws_id = str(payload.get("workspace_id") or "").strip()
+    wc_id = str(payload.get("workspace_company_id") or "").strip()
+    if not ws_id or not wc_id:
+        return "", ""
+    try:
+        eid_res, _wc, err = resolve_empresa_id_for_request(
+            conn,
+            session,
+            workspace_id=ws_id,
+            empresa_id="",
+            workspace_company_id=wc_id,
+            write=write,
+        )
+    except Exception:
+        return "", "No autorizado"
+    return str(eid_res or "").strip(), str(err or "").strip()
+
+
 def resolve_empresa_id_for_request(conn, session, *, workspace_id="", empresa_id="", workspace_company_id="", write=False):
     """
     Resolución unificada:
@@ -42368,8 +42432,13 @@ def resolve_empresa_id_for_request(conn, session, *, workspace_id="", empresa_id
         ok, err = enforce_workspace_membership(conn, session, ws_id, write=write)
         if not ok:
             return "", wc_id, err or "No autorizado"
-    if not eid and ws_id and wc_id:
-        eid = resolve_legacy_empresa_id_from_workspace_company(conn, ws_id, wc_id) or ""
+    if ws_id and wc_id:
+        resolved_eid = resolve_legacy_empresa_id_from_workspace_company(conn, ws_id, wc_id) or ""
+        if not resolved_eid:
+            return "", wc_id, "workspace_company_id no válido para workspace_id"
+        if eid and eid != resolved_eid:
+            return "", wc_id, "workspace_company_id no coincide con empresa_id"
+        eid = resolved_eid
     return eid, wc_id, ""
 
 def workspace_persona_id_for_user(conn, workspace_id, user_id):
@@ -54438,23 +54507,13 @@ class Handler(BaseHTTPRequestHandler):
                     # Compat v2: si viene workspace_id + workspace_company_id, resolvemos empresa_id legacy
                     # antes de aplicar heurísticas por nombre/servicio.
                     try:
-                        ws_id_payload = str(payload.get("workspace_id") or "").strip()
-                        wc_id_payload = str(payload.get("workspace_company_id") or "").strip()
-                        if ws_id_payload and wc_id_payload:
-                            session_tmp = getattr(self, "auth_session", None) or self._current_session()
-                            eid_res, _wc, err2 = resolve_empresa_id_for_request(
-                                conn,
-                                session_tmp,
-                                workspace_id=ws_id_payload,
-                                empresa_id="",
-                                workspace_company_id=wc_id_payload,
-                                write=True,
-                            )
-                            if err2:
-                                json_response(self, {"error": err2 or "No autorizado"}, status=403)
-                                return
-                            if eid_res:
-                                payload["empresa_id"] = eid_res
+                        session_tmp = getattr(self, "auth_session", None) or self._current_session()
+                        eid_res, err2 = resolve_payload_legacy_empresa_id(conn, session_tmp, payload, write=True)
+                        if err2:
+                            json_response(self, {"error": err2 or "No autorizado"}, status=403)
+                            return
+                        if eid_res:
+                            payload["empresa_id"] = eid_res
                     except Exception:
                         pass
                     inferred = infer_empresa_id_for_payload(conn, payload)
@@ -54988,14 +55047,7 @@ class Handler(BaseHTTPRequestHandler):
                 eid = str(payload.get("empresa_id") or "").strip()
                 if not eid and ws_id:
                     try:
-                        eid_res, _wc, err2 = resolve_empresa_id_for_request(
-                            conn,
-                            session_tmp,
-                            workspace_id=ws_id,
-                            empresa_id="",
-                            workspace_company_id=wc_id,
-                            write=True,
-                        )
+                        eid_res, err2 = resolve_payload_legacy_empresa_id(conn, session_tmp, payload, write=True)
                     except Exception:
                         eid_res, err2 = "", ""
                     if err2:
@@ -74884,25 +74936,15 @@ class Handler(BaseHTTPRequestHandler):
             # Usamos `empresa_id` si viene (o lo resolvemos desde workspace_id/workspace_company_id).
             empresa_id = str(payload.get("empresa_id") or "").strip()
             if not empresa_id:
-                ws_id = str(payload.get("workspace_id") or "").strip()
-                wc_id = str(payload.get("workspace_company_id") or "").strip()
-                if ws_id:
-                    try:
-                        eid_res, _wc, err2 = resolve_empresa_id_for_request(
-                            conn,
-                            session,
-                            workspace_id=ws_id,
-                            empresa_id="",
-                            workspace_company_id=wc_id,
-                            write=True,
-                        )
-                    except Exception:
-                        eid_res, err2 = "", ""
-                    if err2:
-                        json_response(self, {"error": err2 or "No autorizado"}, status=403)
-                        return
-                    if eid_res:
-                        empresa_id = eid_res
+                try:
+                    eid_res, err2 = resolve_payload_legacy_empresa_id(conn, session, payload, write=True)
+                except Exception:
+                    eid_res, err2 = "", ""
+                if err2:
+                    json_response(self, {"error": err2 or "No autorizado"}, status=403)
+                    return
+                if eid_res:
+                    empresa_id = eid_res
             if not empresa_id:
                 platform_eid = get_platform_empresa_id(conn)
                 if platform_eid:
@@ -79814,7 +79856,12 @@ class Handler(BaseHTTPRequestHandler):
             elif empresa_id:
                 empresa_ids = [empresa_id]
             elif workspace_company_id:
-                resolved_empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id)
+                resolved_empresa_id = resolve_request_legacy_empresa_id(
+                    conn,
+                    workspace_id=workspace_id,
+                    empresa_id="",
+                    workspace_company_id=workspace_company_id,
+                )
                 empresa_ids = [resolved_empresa_id] if resolved_empresa_id else []
             else:
                 empresa_ids = []
@@ -79856,7 +79903,12 @@ class Handler(BaseHTTPRequestHandler):
             elif empresa_id:
                 empresa_ids = [empresa_id]
             elif workspace_company_id:
-                resolved_empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id)
+                resolved_empresa_id = resolve_request_legacy_empresa_id(
+                    conn,
+                    workspace_id=workspace_id,
+                    empresa_id="",
+                    workspace_company_id=workspace_company_id,
+                )
                 empresa_ids = [resolved_empresa_id] if resolved_empresa_id else []
             else:
                 empresa_ids = []
@@ -79900,8 +79952,12 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
             workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
             workspace_company_id = str(params.get("workspace_company_id", [""])[0] or "").strip()
-            if workspace_company_id and workspace_id and not empresa_id:
-                empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id)
+            empresa_id = resolve_request_legacy_empresa_id(
+                conn,
+                workspace_id=workspace_id,
+                empresa_id=empresa_id,
+                workspace_company_id=workspace_company_id,
+            )
             empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
@@ -84231,8 +84287,12 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = params.get("empresa_id", [""])[0]
             workspace_id = params.get("workspace_id", [""])[0]
             workspace_company_id = params.get("workspace_company_id", [""])[0]
-            if workspace_company_id and workspace_id and not str(empresa_id or "").strip():
-                empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id)
+            empresa_id = resolve_request_legacy_empresa_id(
+                conn,
+                workspace_id=workspace_id,
+                empresa_id=empresa_id,
+                workspace_company_id=workspace_company_id,
+            )
             usuario = (params.get("usuario", [""])[0] if params else "").strip()
             limit_raw = params.get("limit", [""])[0]
             empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
@@ -91654,26 +91714,12 @@ class Handler(BaseHTTPRequestHandler):
             workspace_company_id = (params.get("workspace_company_id", [""])[0] or "").strip()
             # Compat tenant/v2: a veces el front envía `empresa_id` con el id v2 de `workspace_companies`.
             # Para no romper listados legacy (tabla, dashboard, etc.), resolvemos al `legacy_empresa_id`.
-            if workspace_company_id and workspace_id and not empresa_id:
-                empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, workspace_company_id)
-            if empresa_id and not workspace_id and not workspace_company_id:
-                try:
-                    ensure_workspace_core_tables(conn)
-                    row = conn.execute(
-                        """
-                        SELECT legacy_empresa_id
-                        FROM workspace_companies
-                        WHERE id = ?
-                        LIMIT 1
-                        """,
-                        (empresa_id,),
-                    ).fetchone()
-                    legacy = str(row_value(row, "legacy_empresa_id") or row_value(row, 0) or "").strip() if row else ""
-                    if legacy:
-                        empresa_id = legacy
-                except Exception:
-                    _rollback_best_effort(conn)
-                    pass
+            empresa_id = resolve_request_legacy_empresa_id(
+                conn,
+                workspace_id=workspace_id,
+                empresa_id=empresa_id,
+                workspace_company_id=workspace_company_id,
+            )
             q = params.get("q", [""])[0].strip()
             uploaded_only = (params.get("uploaded_only", ["1"])[0] or "1").strip() in ("1", "true", "yes")
             year_filter = params.get("year", [""])[0].strip()
