@@ -34,6 +34,13 @@ repos:
         language: system
         files: ^web/(app|app-auth|app-routing|app_shared|ui-foundation|sw)\.js$
 
+      - id: npm-audit
+        name: npm audit (package manifests)
+        entry: npm run security:npm-audit
+        language: system
+        files: ^(package\.json|package-lock\.json)$
+        pass_filenames: false
+
       - id: ruff
         name: ruff check (staged Python files)
         entry: python -m ruff check --force-exclude

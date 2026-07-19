@@ -25,6 +25,9 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
+      - name: Run npm audit
+        run: npm run security:npm-audit
+
       - name: Run ESLint
         run: npm run lint:js
 
