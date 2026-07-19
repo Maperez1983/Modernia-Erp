@@ -35,6 +35,19 @@ for directory in (SCREENSHOTS_DIR, TRACES_DIR, VIDEOS_DIR, REPORT_DIR, RESULTS_D
     directory.mkdir(parents=True, exist_ok=True)
 
 
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    if _bool_env("RUN_PLAYWRIGHT_E2E", False):
+        return
+    skip_marker = pytest.mark.skip(reason="Playwright E2E desactivado (exporta RUN_PLAYWRIGHT_E2E=1 para ejecutarlo).")
+    for item in items:
+        try:
+            parts = Path(str(item.fspath)).parts
+        except Exception:
+            continue
+        if "tests" in parts and "e2e" in parts:
+            item.add_marker(skip_marker)
+
+
 _SERVER_PORT_RE = re.compile(r"E2E_PORT:(\d+)")
 _BROWSER_PORT_RE = re.compile(r"DevTools listening on ws://127\.0\.0\.1:(\d+)/")
 
