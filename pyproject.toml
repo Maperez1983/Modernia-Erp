@@ -35,6 +35,9 @@ directory = "htmlcov"
 [tool.coverage.xml]
 output = "coverage.xml"
 
+[tool.pytest.ini_options]
+timeout = 300
+
 [tool.mypy]
 python_version = "3.11"
 warn_unused_configs = true

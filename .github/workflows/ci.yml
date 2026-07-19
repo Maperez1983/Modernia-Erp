@@ -28,6 +28,9 @@ jobs:
       - name: Run ESLint
         run: npm run lint:js
 
+      - name: Run JavaScript tests
+        run: npm run test:js
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -44,6 +47,25 @@ jobs:
 
       - name: Run pre-commit
         run: python -m pre_commit run --all-files --show-diff-on-failure
+
+      - name: Run Semgrep
+        continue-on-error: true
+        run: |
+          mkdir -p .semgrep
+          SSL_CERT_FILE="$(python -c 'import certifi; print(certifi.where())')" \
+          REQUESTS_CA_BUNDLE="$(python -c 'import certifi; print(certifi.where())')" \
+          SEMGREP_LOG_FILE=.semgrep/semgrep.log \
+          SEMGREP_SETTINGS_FILE=.semgrep/settings.yml \
+          SEMGREP_VERSION_CACHE_PATH=.semgrep/version-cache \
+          python -c "from semgrep.main import main; raise SystemExit(main())" scan --config .semgrep.yml --error --metrics=off -j 1 --json --output semgrep-report.json .
+
+      - name: Upload Semgrep report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep-report
+          path: semgrep-report.json
+          if-no-files-found: ignore
 
       - name: Run pip-audit
         run: python -m pip_audit -r requirements.txt -f json -o pip-audit-report.json

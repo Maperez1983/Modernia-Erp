@@ -1,6 +1,17 @@
 -r requirements.txt
 
 playwright==1.57.0
+detect-secrets
+freezegun
+hypothesis
+locust
+opentelemetry-sdk
+pip-tools
+pytest-timeout
+pytest-xdist
+respx
+semgrep
+testcontainers
 ruff
 bandit
 pip-audit

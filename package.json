@@ -7,6 +7,10 @@
     "lint:js": "eslint web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js",
     "lint:js:quiet": "eslint --quiet web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js",
     "lint:js:fix": "eslint --fix web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js",
+    "test:js": "vitest run",
+    "test:js:watch": "vitest",
+    "security:secrets": "python -m detect_secrets audit .secrets.baseline",
+    "security:semgrep": "mkdir -p .semgrep && SSL_CERT_FILE=$(python -c 'import certifi; print(certifi.where())') REQUESTS_CA_BUNDLE=$(python -c 'import certifi; print(certifi.where())') SEMGREP_LOG_FILE=.semgrep/semgrep.log SEMGREP_SETTINGS_FILE=.semgrep/settings.yml SEMGREP_VERSION_CACHE_PATH=.semgrep/version-cache python -c \"from semgrep.main import main; raise SystemExit(main())\" scan --config .semgrep.yml --error --metrics=off -j 1",
     "lighthouse": "node scripts/lighthouse-local.cjs",
     "lighthouse:collect": "lhci collect",
     "lighthouse:assert": "lhci assert",
@@ -16,6 +20,8 @@
     "@lhci/cli": "^0.14.0",
     "eslint": "^10.7.0",
     "globals": "^17.7.0",
-    "puppeteer-core": "^22.15.0"
+    "jsdom": "^26.1.0",
+    "puppeteer-core": "^22.15.0",
+    "vitest": "^3.2.0"
   }
 }

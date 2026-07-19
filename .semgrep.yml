@@ -1,0 +1,21 @@
+rules:
+  - id: python-subprocess-shell-true
+    languages:
+      - python
+    message: Avoid shell=True in subprocess calls.
+    severity: ERROR
+    pattern: subprocess.$FUNC(..., shell=True, ...)
+
+  - id: javascript-eval
+    languages:
+      - javascript
+    message: Avoid eval() in frontend code.
+    severity: WARNING
+    pattern: eval($X)
+
+  - id: javascript-new-function
+    languages:
+      - javascript
+    message: Avoid the Function constructor in frontend code.
+    severity: WARNING
+    pattern: new Function(...)
