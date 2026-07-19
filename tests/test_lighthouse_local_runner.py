@@ -144,6 +144,8 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
         fd_job_block = LIGHTHOUSE_WORKFLOW.split("fd-inheritance-diagnostic:", 1)[1]
         assert 'LHCI_FD_INHERITANCE_DIAGNOSTIC: "1"' in fd_job_block
         assert 'LHCI_FD_INHERITANCE_SCRUB: "1"' in fd_job_block
+        assert "Resolve Chrome stable path for FD diagnostics" in fd_job_block
+        assert "LHCI_FD_INHERITANCE_STABLE_CHROME_PATH" in fd_job_block
         assert "continue-on-error: true" in fd_job_block
         assert "Run FD inheritance diagnostics" in fd_job_block
         assert 'set -o pipefail' in fd_job_block
@@ -1638,9 +1640,17 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                 );
                 const api = factory();
                 const originalEnv = process.env.LHCI_FD_INHERITANCE_DIAGNOSTIC;
+                const originalStablePath = process.env.LHCI_FD_INHERITANCE_STABLE_CHROME_PATH;
+                const originalGoogleChromePath = process.env.GOOGLE_CHROME_PATH;
+                const originalGoogleChromeStablePath = process.env.GOOGLE_CHROME_STABLE_PATH;
+                const originalChromeStablePath = process.env.CHROME_STABLE_PATH;
 
                 try {
                   delete process.env.LHCI_FD_INHERITANCE_DIAGNOSTIC;
+                  delete process.env.LHCI_FD_INHERITANCE_STABLE_CHROME_PATH;
+                  delete process.env.GOOGLE_CHROME_PATH;
+                  delete process.env.GOOGLE_CHROME_STABLE_PATH;
+                  delete process.env.CHROME_STABLE_PATH;
                   assert.strictEqual(api.isFdInheritanceDiagnosticEnabled(), false);
                   process.env.LHCI_FD_INHERITANCE_DIAGNOSTIC = "1";
                   assert.strictEqual(api.isFdInheritanceDiagnosticEnabled(), true);
@@ -1675,7 +1685,63 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                   } else {
                     process.env.LHCI_FD_INHERITANCE_DIAGNOSTIC = originalEnv;
                   }
+                  if (originalStablePath === undefined) {
+                    delete process.env.LHCI_FD_INHERITANCE_STABLE_CHROME_PATH;
+                  } else {
+                    process.env.LHCI_FD_INHERITANCE_STABLE_CHROME_PATH = originalStablePath;
+                  }
+                  if (originalGoogleChromePath === undefined) {
+                    delete process.env.GOOGLE_CHROME_PATH;
+                  } else {
+                    process.env.GOOGLE_CHROME_PATH = originalGoogleChromePath;
+                  }
+                  if (originalGoogleChromeStablePath === undefined) {
+                    delete process.env.GOOGLE_CHROME_STABLE_PATH;
+                  } else {
+                    process.env.GOOGLE_CHROME_STABLE_PATH = originalGoogleChromeStablePath;
+                  }
+                  if (originalChromeStablePath === undefined) {
+                    delete process.env.CHROME_STABLE_PATH;
+                  } else {
+                    process.env.CHROME_STABLE_PATH = originalChromeStablePath;
+                  }
                 }
+                """
+            )
+            .replace("__SOURCE__", json.dumps(chunk))
+        )
+        run_node_script(script)
+
+    def test_fd_inheritance_mode_adds_google_chrome_stable_variant_when_available(self):
+        chunk = extract_chunk("function isTruthyEnvFlag", "function buildBrowserMatrixVariants")
+        script = (
+            dedent(
+                """
+                const assert = require("assert");
+                const source = [
+                  'const { StringDecoder } = require("node:string_decoder");',
+                  'const { ensureSwClearedUrl } = require("./scripts/lighthouse-url.cjs");',
+                  'const sanitizeDiagnosticText = (value) => String(value || "").trim();',
+                  __SOURCE__,
+                ].join("\\n");
+                const factory = new Function(
+                  source + "\\nreturn { buildFdInheritanceMatrixVariants };"
+                );
+                const api = factory();
+                const variants = api.buildFdInheritanceMatrixVariants("/tmp/current-chrome", {
+                  LHCI_FD_INHERITANCE_STABLE_CHROME_PATH: "/tmp/google-chrome-stable",
+                });
+
+                assert.deepStrictEqual(
+                  variants.map((variant) => variant.id),
+                  ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8"]
+                );
+                assert.strictEqual(variants[7].label, "auxiliary-scrubbed-google-chrome-stable");
+                assert.strictEqual(variants[7].executablePath, "/tmp/google-chrome-stable");
+                assert.strictEqual(variants[7].launcherTransport, "python");
+                assert.strictEqual(variants[7].scrubInheritedFds, true);
+                assert.strictEqual(variants[7].includeNoSandbox, true);
+                assert.strictEqual(variants[7].sandboxMode, "no-sandbox");
                 """
             )
             .replace("__SOURCE__", json.dumps(chunk))

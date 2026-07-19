@@ -133,6 +133,16 @@ jobs:
           )
           echo "CHROME_PATH=$CHROME_PATH" >> "$GITHUB_ENV"
 
+      - name: Resolve Chrome stable path for FD diagnostics
+        run: |
+          CHROME_STABLE_PATH=$(command -v google-chrome || command -v google-chrome-stable || true)
+          if [ -z "$CHROME_STABLE_PATH" ]; then
+            echo "::error::No se encontró Google Chrome estable en el runner para la comparación F5."
+            exit 1
+          fi
+          echo "LHCI_FD_INHERITANCE_STABLE_CHROME_PATH=$CHROME_STABLE_PATH" >> "$GITHUB_ENV"
+          "$CHROME_STABLE_PATH" --version || true
+
       - name: Run FD inheritance diagnostics
         shell: bash
         run: |

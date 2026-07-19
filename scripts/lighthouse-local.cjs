@@ -1739,8 +1739,17 @@ function buildDiagnosticMatrixCases(auditUrl) {
   ];
 }
 
-function buildFdInheritanceMatrixVariants(chromePath) {
+function buildFdInheritanceMatrixVariants(chromePath, env = process.env) {
   const resolvePath = (value) => sanitizeDiagnosticText(String(value || '').trim());
+  const currentChromePath = resolvePath(chromePath);
+  const stableChromePath = resolvePath(
+    env.LHCI_FD_INHERITANCE_STABLE_CHROME_PATH ||
+      env.GOOGLE_CHROME_PATH ||
+      env.GOOGLE_CHROME_STABLE_PATH ||
+      env.CHROME_STABLE_PATH
+  );
+  const stableChromeVariantEnabled = Boolean(stableChromePath && stableChromePath !== currentChromePath);
+
   return [
     {
       id: 'F1',
@@ -1748,7 +1757,7 @@ function buildFdInheritanceMatrixVariants(chromePath) {
       launcherKind: 'direct',
       stdioMode: 'pipe',
       closeInheritedPipeFds: false,
-      executablePath: resolvePath(chromePath),
+      executablePath: currentChromePath,
     },
     {
       id: 'F2',
@@ -1756,7 +1765,7 @@ function buildFdInheritanceMatrixVariants(chromePath) {
       launcherKind: 'direct',
       stdioMode: 'ignore',
       closeInheritedPipeFds: false,
-      executablePath: resolvePath(chromePath),
+      executablePath: currentChromePath,
     },
     {
       id: 'F3',
@@ -1764,7 +1773,7 @@ function buildFdInheritanceMatrixVariants(chromePath) {
       launcherKind: 'direct',
       stdioMode: 'inherit',
       closeInheritedPipeFds: false,
-      executablePath: resolvePath(chromePath),
+      executablePath: currentChromePath,
     },
     {
       id: 'F4',
@@ -1772,7 +1781,7 @@ function buildFdInheritanceMatrixVariants(chromePath) {
       launcherKind: 'auxiliary',
       stdioMode: 'pipe',
       closeInheritedPipeFds: false,
-      executablePath: resolvePath(chromePath),
+      executablePath: currentChromePath,
     },
     {
       id: 'F5',
@@ -1785,7 +1794,7 @@ function buildFdInheritanceMatrixVariants(chromePath) {
       sandboxMode: 'no-sandbox',
       extraFlags: [],
       includeNoSandbox: true,
-      executablePath: resolvePath(chromePath),
+      executablePath: currentChromePath,
     },
     {
       id: 'F6',
@@ -1798,7 +1807,7 @@ function buildFdInheritanceMatrixVariants(chromePath) {
       sandboxMode: 'no-sandbox',
       extraFlags: ['--enable-features=NetworkService,NetworkServiceInProcess'],
       includeNoSandbox: true,
-      executablePath: resolvePath(chromePath),
+      executablePath: currentChromePath,
     },
     {
       id: 'F7',
@@ -1813,6 +1822,23 @@ function buildFdInheritanceMatrixVariants(chromePath) {
       extraFlags: [],
       includeNoSandbox: false,
     },
+    ...(stableChromeVariantEnabled
+      ? [
+          {
+            id: 'F8',
+            label: 'auxiliary-scrubbed-google-chrome-stable',
+            launcherKind: 'auxiliary',
+            launcherTransport: 'python',
+            stdioMode: 'pipe',
+            closeInheritedPipeFds: true,
+            scrubInheritedFds: true,
+            sandboxMode: 'no-sandbox',
+            extraFlags: [],
+            includeNoSandbox: true,
+            executablePath: stableChromePath,
+          },
+        ]
+      : []),
   ];
 }
 
@@ -2478,7 +2504,7 @@ async function runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath})
   const jsonPath = path.join(tempDir, 'fd-inheritance-matrix.json');
   const helperScriptPath = path.join(process.cwd(), 'scripts', 'chrome-clean-launcher.cjs');
   const pythonHelperScriptPath = path.join(process.cwd(), 'scripts', 'chrome_clean_launcher.py');
-  const variants = buildFdInheritanceMatrixVariants(chromePath);
+  const variants = buildFdInheritanceMatrixVariants(chromePath, process.env);
   const matrix = {
     generatedAt: new Date().toISOString(),
     auditUrl: sanitizeDiagnosticUrl(auditUrl),
