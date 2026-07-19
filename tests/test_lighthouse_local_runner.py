@@ -1734,14 +1734,19 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
 
                 assert.deepStrictEqual(
                   variants.map((variant) => variant.id),
-                  ["F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8"]
+                  ["F1", "F2", "F3", "F4", "F5", "F6", "F8", "F7"]
                 );
-                assert.strictEqual(variants[7].label, "auxiliary-scrubbed-google-chrome-stable");
-                assert.strictEqual(variants[7].executablePath, "/tmp/google-chrome-stable");
+                assert.strictEqual(variants[6].launcherTransport, "python");
+                assert.strictEqual(variants[6].label, "auxiliary-scrubbed-google-chrome-stable");
+                assert.strictEqual(variants[6].executablePath, "/tmp/google-chrome-stable");
+                assert.strictEqual(variants[6].scrubInheritedFds, true);
+                assert.strictEqual(variants[6].includeNoSandbox, true);
+                assert.strictEqual(variants[6].sandboxMode, "no-sandbox");
                 assert.strictEqual(variants[7].launcherTransport, "python");
+                assert.strictEqual(variants[7].label, "auxiliary-scrubbed-sandbox-enabled");
                 assert.strictEqual(variants[7].scrubInheritedFds, true);
-                assert.strictEqual(variants[7].includeNoSandbox, true);
-                assert.strictEqual(variants[7].sandboxMode, "no-sandbox");
+                assert.strictEqual(variants[7].includeNoSandbox, false);
+                assert.strictEqual(variants[7].sandboxMode, "sandbox-enabled");
                 """
             )
             .replace("__SOURCE__", json.dumps(chunk))

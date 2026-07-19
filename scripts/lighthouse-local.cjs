@@ -1809,19 +1809,6 @@ function buildFdInheritanceMatrixVariants(chromePath, env = process.env) {
       includeNoSandbox: true,
       executablePath: currentChromePath,
     },
-    {
-      id: 'F7',
-      label: 'auxiliary-scrubbed-sandbox-enabled',
-      launcherKind: 'auxiliary',
-      launcherTransport: 'python',
-      stdioMode: 'pipe',
-      closeInheritedPipeFds: true,
-      executablePath: resolvePath(chromePath),
-      scrubInheritedFds: true,
-      sandboxMode: 'sandbox-enabled',
-      extraFlags: [],
-      includeNoSandbox: false,
-    },
     ...(stableChromeVariantEnabled
       ? [
           {
@@ -1839,6 +1826,19 @@ function buildFdInheritanceMatrixVariants(chromePath, env = process.env) {
           },
         ]
       : []),
+    {
+      id: 'F7',
+      label: 'auxiliary-scrubbed-sandbox-enabled',
+      launcherKind: 'auxiliary',
+      launcherTransport: 'python',
+      stdioMode: 'pipe',
+      closeInheritedPipeFds: true,
+      executablePath: resolvePath(chromePath),
+      scrubInheritedFds: true,
+      sandboxMode: 'sandbox-enabled',
+      extraFlags: [],
+      includeNoSandbox: false,
+    },
   ];
 }
 
