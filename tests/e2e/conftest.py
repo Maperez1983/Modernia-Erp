@@ -350,6 +350,9 @@ class E2EData:
     workspace_name: str = "Workspace Playwright E2E"
     company_id: str = "emp-e2e-playwright"
     company_name: str = "Empresa Playwright E2E"
+    secondary_company_id: str = "emp-e2e-playwright-b"
+    secondary_company_name: str = "Empresa Playwright E2E B"
+    secondary_workspace_company_id: str = "workspace-company-e2e-b"
 
 
 @dataclass
@@ -443,6 +446,20 @@ class E2EApp:
                     "activo": 1,
                     "nif": "B12345678",
                     "direccion": "Calle Playwright 1",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+            _insert_row(
+                conn,
+                "empresas",
+                {
+                    "id": self.data.secondary_company_id,
+                    "nombre": self.data.secondary_company_name,
+                    "razon_social": self.data.secondary_company_name,
+                    "activo": 1,
+                    "nif": "B87654321",
+                    "direccion": "Calle Playwright 2",
                     "created_at": now,
                     "updated_at": now,
                 },
@@ -544,6 +561,18 @@ class E2EApp:
             )
             _insert_row(
                 conn,
+                "workspace_empresas",
+                {
+                    "id": "workspace-company-link-e2e-b",
+                    "workspace_id": self.data.workspace_id,
+                    "empresa_id": self.data.secondary_company_id,
+                    "rol": "operativa",
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+            _insert_row(
+                conn,
                 "workspace_companies",
                 {
                     "id": "workspace-company-e2e",
@@ -552,6 +581,24 @@ class E2EApp:
                     "nombre": self.data.company_name,
                     "nif": "B12345678",
                     "direccion": "Calle Playwright 1",
+                    "logo_url": "",
+                    "primary_color": "#0B1D33",
+                    "accent_color": "#F2C14E",
+                    "activo": 1,
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+            _insert_row(
+                conn,
+                "workspace_companies",
+                {
+                    "id": "workspace-company-e2e-b",
+                    "workspace_id": self.data.workspace_id,
+                    "legacy_empresa_id": self.data.secondary_company_id,
+                    "nombre": self.data.secondary_company_name,
+                    "nif": "B87654321",
+                    "direccion": "Calle Playwright 2",
                     "logo_url": "",
                     "primary_color": "#0B1D33",
                     "accent_color": "#F2C14E",

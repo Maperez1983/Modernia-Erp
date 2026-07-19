@@ -52507,6 +52507,28 @@ def schedule_seguros_contabilidad_sync(db_path, empresa_id):
     return {"scheduled": True, **state}
 
 
+_SENTRY_SDK = None
+
+
+def _sanitize_telemetry_path(path):
+    text = str(path or "").strip()
+    if not text:
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(text)
+    except Exception:
+        return text.split("?", 1)[0].split("#", 1)[0]
+    if parsed.scheme or parsed.netloc:
+        hostname = parsed.hostname or ""
+        if ":" in hostname and not hostname.startswith("["):
+            hostname = f"[{hostname}]"
+        netloc = hostname
+        if parsed.port:
+            netloc = f"{hostname}:{parsed.port}"
+        return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path or "", "", ""))
+    return text.split("?", 1)[0].split("#", 1)[0]
+
+
 class Handler(BaseHTTPRequestHandler):
     db_path = DB_DEFAULT
     ocr_db_path = OCR_DB_DEFAULT
@@ -52550,12 +52572,18 @@ class Handler(BaseHTTPRequestHandler):
     @staticmethod
     def _record_api_error(path, exc):
         try:
-            p = str(path or "")[:500]
+            p = _sanitize_telemetry_path(path)[:500]
             name = str(type(exc).__name__ or "Error")[:80]
             msg = str(exc or "")
             # Redacta DSNs/token-ish strings por seguridad (best-effort).
-            msg = re.sub(r"postgres(?:ql)?://[^\\s]+", "postgresql://<redacted>", msg, flags=re.IGNORECASE)
-            msg = re.sub(r"Bearer\\s+[A-Za-z0-9._\\-]+", "Bearer <redacted>", msg, flags=re.IGNORECASE)
+            msg = re.sub(r"postgres(?:ql)?://[^\s]+", "postgresql://<redacted>", msg, flags=re.IGNORECASE)
+            msg = re.sub(r"Bearer\s+[A-Za-z0-9._\-]+", "Bearer <redacted>", msg, flags=re.IGNORECASE)
+            msg = re.sub(r"(?i)([a-z][a-z0-9+.-]*://)([^/\s@]+)@", r"\1<redacted>@", msg)
+            msg = re.sub(
+                r"(?i)([?&](?:token|access_token|session_token|oauth_token|api_key|password|passwd|secret|signature|sig|code|state|session|auth|authorization)=)([^&\s]+)",
+                r"\1<redacted>",
+                msg,
+            )
             msg = msg.replace("\n", " ").strip()
             item = {
                 "at": datetime.now(timezone.utc).isoformat(),
@@ -52568,6 +52596,7 @@ class Handler(BaseHTTPRequestHandler):
                 # Mantén un buffer pequeño para no crecer en memoria.
                 if len(Handler._api_err_ring) > 30:
                     Handler._api_err_ring = Handler._api_err_ring[-30:]
+            _report_api_error_to_sentry(item)
         except Exception:
             return
 
@@ -52576,8 +52605,14 @@ class Handler(BaseHTTPRequestHandler):
         try:
             name = str(type(exc).__name__ or "Error")[:80]
             msg = str(exc or "")
-            msg = re.sub(r"postgres(?:ql)?://[^\\s]+", "postgresql://<redacted>", msg, flags=re.IGNORECASE)
-            msg = re.sub(r"Bearer\\s+[A-Za-z0-9._\\-]+", "Bearer <redacted>", msg, flags=re.IGNORECASE)
+            msg = re.sub(r"postgres(?:ql)?://[^\s]+", "postgresql://<redacted>", msg, flags=re.IGNORECASE)
+            msg = re.sub(r"Bearer\s+[A-Za-z0-9._\-]+", "Bearer <redacted>", msg, flags=re.IGNORECASE)
+            msg = re.sub(r"(?i)([a-z][a-z0-9+.-]*://)([^/\s@]+)@", r"\1<redacted>@", msg)
+            msg = re.sub(
+                r"(?i)([?&](?:token|access_token|session_token|oauth_token|api_key|password|passwd|secret|signature|sig|code|state|session|auth|authorization)=)([^&\s]+)",
+                r"\1<redacted>",
+                msg,
+            )
             msg = msg.replace("\n", " ").strip()
             detail = f"{name}: {msg}" if msg else name
             return detail[:220]
@@ -91890,12 +91925,29 @@ class Handler(BaseHTTPRequestHandler):
         json_response(self, {"error": "Endpoint no valido"}, status=404)
 
 
+def _report_api_error_to_sentry(item):
+    sentry_sdk = _SENTRY_SDK
+    if sentry_sdk is None:
+        return
+    try:
+        path = _sanitize_telemetry_path(item.get("path") or "")
+        err_type = str(item.get("type") or "Error")[:80]
+        message = str(item.get("message") or "").strip()
+        sentry_sdk.capture_message(
+            f"API error at {path}: {err_type}: {message}".strip(),
+            level="error",
+        )
+    except Exception:
+        return
+
+
 def configure_sentry():
     """
     Enable Sentry only when explicitly configured.
 
     Keep this lazy so importing the server module remains side-effect free.
     """
+    global _SENTRY_SDK
     sentry_dsn = str(os.environ.get("SENTRY_DSN") or "").strip()
     if not sentry_dsn:
         return False
@@ -91913,7 +91965,9 @@ def configure_sentry():
             max_request_body_size="never",
         )
     except Exception:
+        _SENTRY_SDK = None
         return False
+    _SENTRY_SDK = sentry_sdk
     return True
 
 

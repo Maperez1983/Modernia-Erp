@@ -2,8 +2,10 @@ import os
 import sqlite3
 import unittest
 from datetime import timezone
+from types import SimpleNamespace
 from unittest import mock
 
+import web.server as server_module
 from web.server import (
     _parse_iso_dt_utc,
     close_actions_for_related,
@@ -105,6 +107,33 @@ class ServerF821RegressionTests(unittest.TestCase):
     def test_configure_sentry_without_dsn_is_noop(self):
         with mock.patch.dict(os.environ, {}, clear=True):
             self.assertFalse(configure_sentry())
+
+    def test_configure_sentry_records_sanitized_api_errors_in_sentry(self):
+        fake_sentry = SimpleNamespace(
+            init=mock.Mock(return_value=None),
+            capture_message=mock.Mock(),
+        )
+        with mock.patch.dict(
+            os.environ,
+            {"SENTRY_DSN": "https://public@example.invalid/1", "SENTRY_ENVIRONMENT": "tests"},
+            clear=True,
+        ):
+            with mock.patch.dict(server_module.sys.modules, {"sentry_sdk": fake_sentry}):
+                with mock.patch.object(server_module, "_SENTRY_SDK", None):
+                    self.assertTrue(configure_sentry())
+                    self.assertIs(server_module._SENTRY_SDK, fake_sentry)
+                    server_module.Handler._record_api_error(
+                        "/api/demo?token=abc&workspace_id=ws-1",
+                        RuntimeError("Bearer abc from https://user:pass@example.test/path?secret=1"),
+                    )
+
+        fake_sentry.init.assert_called_once()
+        fake_sentry.capture_message.assert_called_once()
+        message = fake_sentry.capture_message.call_args.args[0]
+        self.assertIn("/api/demo", message)
+        self.assertNotIn("token=abc", message)
+        self.assertNotIn("user:pass@", message)
+        self.assertNotIn("Bearer abc", message)
 
     def test_ensure_and_close_actions_for_related(self):
         action_id = ensure_action_for_related(
