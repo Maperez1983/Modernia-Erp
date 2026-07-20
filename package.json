@@ -24,7 +24,7 @@
     "axe-core": "^4.12.1",
     "eslint": "^10.7.0",
     "globals": "^17.7.0",
-    "jsdom": "^26.1.0",
+    "jsdom": "^29.1.1",
     "puppeteer-core": "^22.15.0",
     "vitest": "^3.2.0"
   }
