@@ -474,10 +474,14 @@ class HipotecasDeleteTests(unittest.TestCase):
             detail = wb["Operaciones firmadas"]
             summary = wb["Resumen declarativo"]
 
+            self.assertIn("Hipotecas firmadas", summary["A1"].value)
             self.assertEqual(detail["A2"].value, "2025")
             self.assertEqual(detail["C2"].value, "Cliente Uno")
             self.assertEqual(summary["B2"].value, "2025")
             self.assertEqual(summary["B3"].value, 1)
+            self.assertGreaterEqual(len(getattr(summary, "_images", [])), 1)
+            self.assertFalse(summary.sheet_view.showGridLines)
+            self.assertFalse(detail.sheet_view.showGridLines)
         finally:
             export_conn.close()
 

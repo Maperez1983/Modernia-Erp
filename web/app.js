@@ -42575,19 +42575,106 @@ const formatHipotecaListadoMoney = (value) => {
   return formatEurosCompact(num);
 };
 
-const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}) => {
+const getHipotecaPrintBrandContext = ({ filters = {}, title = "" } = {}) => {
+  const company = resolveCrmFinEmpresa() || {};
+  const companyName = String(company.nombre || state.currentWorkspaceCompanyName || "Verifika²").trim() || "Verifika²";
+  const rawLogoUrl = String(company.logo_url || "").trim();
+  const logoUrl =
+    buildPhotoSrc(rawLogoUrl) ||
+    createWordmarkLogoDataUri(companyName, {
+      width: 260,
+      height: 78,
+      bg: "#f8fafc",
+      bg2: "#eef4ff",
+      text: "#123024",
+      accent: "#c8a24a",
+    });
+  const chips = [];
+  const year = String(filters.year || "").trim();
+  const estado = String(filters.estado || "").trim();
+  const query = String(filters.query || "").trim();
+  if (year) chips.push(`Año ${year}`);
+  if (estado) chips.push(`Estado ${estado}`);
+  if (query) chips.push(`Búsqueda "${query}"`);
+  return {
+    companyName,
+    logoUrl,
+    eyebrow: "Presentación premium",
+    title: String(title || "Listado").trim() || "Listado",
+    subtitle: chips.length ? chips.join(" · ") : "Listado completo",
+  };
+};
+
+const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}, brandContext = {}) => {
   const items = Array.isArray(rows) ? rows : [];
   const labels = buildHipotecaBdtFilterLabels(filters);
   const summary = labels.length ? labels.join(" · ") : "Listado completo";
   const total = items.length;
+  const brand = {
+    ...getHipotecaPrintBrandContext({ filters, title: brandContext.title || "Listado de hipotecas" }),
+    ...brandContext,
+  };
+  const totalHipoteca = items.reduce(
+    (acc, row) => acc + (toNumber(getHipotecaFieldValue(row, columns, ["importe_hipoteca", "hipoteca"])) || 0),
+    0
+  );
+  const totalComision = items.reduce(
+    (acc, row) => acc + (toNumber(getHipotecaFieldValue(row, columns, ["comision_cobrada", "comision", "honorarios"])) || 0),
+    0
+  );
+  const totalPrecio = items.reduce(
+    (acc, row) => acc + (toNumber(getHipotecaFieldValue(row, columns, ["precio", "valor_compra"])) || 0),
+    0
+  );
   if (!total) {
     return `
       <style>
-        .hipoteca-print-meta{margin:0 0 12px;padding:12px 14px;border:1px solid #dbe3ed;border-radius:14px;background:#f8fafc;color:#0f172a;font-size:12px;font-weight:600;}
-        .hipoteca-print-empty{padding:18px 0;color:#64748b;font-size:13px;}
+        .hipoteca-print-shell{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:linear-gradient(180deg,#f8fafc 0%,#eef4ff 100%);padding:24px;color:#102131;}
+        .hipoteca-print-card{background:#fff;border:1px solid #dbe3ed;border-radius:24px;box-shadow:0 20px 42px rgba(15,23,42,.08);overflow:hidden;}
+        .hipoteca-print-hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;padding:24px 28px;background:linear-gradient(135deg,#0f172a 0%,#1d4f63 58%,#c8a24a 100%);color:#fff;}
+        .hipoteca-print-brand{display:flex;gap:16px;align-items:center;min-width:0;}
+        .hipoteca-print-brand-logo{width:220px;max-width:34vw;max-height:70px;object-fit:contain;filter:drop-shadow(0 8px 20px rgba(0,0,0,.18));}
+        .hipoteca-print-eyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:10px;font-weight:700;opacity:.82;margin-bottom:4px;}
+        .hipoteca-print-brand h1{margin:0;font-size:28px;line-height:1.05;font-weight:800;}
+        .hipoteca-print-brand p{margin:8px 0 0;font-size:13px;line-height:1.45;opacity:.92;max-width:54ch;}
+        .hipoteca-print-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;min-width:min(100%, 560px);}
+        .hipoteca-print-stat{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);border-radius:18px;padding:12px 14px;backdrop-filter:blur(8px);}
+        .hipoteca-print-stat span{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.12em;opacity:.82;margin-bottom:8px;}
+        .hipoteca-print-stat strong{display:block;font-size:20px;line-height:1.1;}
+        .hipoteca-print-summary{padding:14px 28px 4px;color:#475569;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
+        .hipoteca-print-empty-wrap{padding:0 28px 28px;}
+        .hipoteca-print-empty{padding:24px;border:1px dashed #cbd5e1;border-radius:18px;color:#64748b;font-size:13px;background:#f8fafc;}
+        @media print{
+          body{background:#fff;}
+          .hipoteca-print-shell{padding:0;background:#fff;}
+          .hipoteca-print-card{box-shadow:none;border:0;border-radius:0;}
+          .hipoteca-print-hero{break-inside:avoid;}
+        }
       </style>
-      <div class="hipoteca-print-meta">${escapeHtml(summary)} · 0 registros</div>
-      <p class="hipoteca-print-empty">Sin datos para imprimir.</p>
+      <div class="hipoteca-print-shell">
+        <div class="hipoteca-print-card">
+          <div class="hipoteca-print-hero">
+            <div class="hipoteca-print-brand">
+              <img class="hipoteca-print-brand-logo" src="${escapeHtml(brand.logoUrl)}" alt="${escapeHtml(brand.companyName)}" />
+              <div>
+                <div class="hipoteca-print-eyebrow">${escapeHtml(brand.eyebrow)}</div>
+                <h1>${escapeHtml(brand.companyName)}</h1>
+                <p>${escapeHtml(brand.title)} · ${escapeHtml(brand.subtitle)}</p>
+              </div>
+            </div>
+            <div class="hipoteca-print-stats">
+              <div class="hipoteca-print-stat"><span>Operaciones</span><strong>0</strong></div>
+              <div class="hipoteca-print-stat"><span>Compra total</span><strong>0,00 €</strong></div>
+              <div class="hipoteca-print-stat"><span>Hipoteca total</span><strong>0,00 €</strong></div>
+              <div class="hipoteca-print-stat"><span>Comisión cobrada</span><strong>0,00 €</strong></div>
+            </div>
+          </div>
+          <div class="hipoteca-print-summary">${escapeHtml(summary)}</div>
+          <div class="hipoteca-print-empty-wrap">
+            <p class="hipoteca-print-empty">Sin datos para imprimir.</p>
+          </div>
+        </div>
+      </div>
     `;
   }
 
@@ -42608,35 +42695,72 @@ const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}) =>
 
   return `
     <style>
-      .hipoteca-print-meta{display:flex;justify-content:space-between;gap:12px;align-items:center;margin:0 0 12px;padding:12px 14px;border:1px solid #dbe3ed;border-radius:14px;background:linear-gradient(135deg,#f8fafc,#eef4ff);color:#0f172a;font-size:12px;font-weight:600;}
-      .hipoteca-print-meta strong{font-size:13px;}
-      .hipoteca-print-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;}
-      .hipoteca-print-table thead th{background:#0f172a;color:#fff;font-size:10px;line-height:1.1;letter-spacing:.08em;text-transform:uppercase;}
+      .hipoteca-print-shell{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:linear-gradient(180deg,#f8fafc 0%,#eef4ff 100%);padding:24px;color:#102131;}
+      .hipoteca-print-card{background:#fff;border:1px solid #dbe3ed;border-radius:24px;box-shadow:0 20px 42px rgba(15,23,42,.08);overflow:hidden;}
+      .hipoteca-print-hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;padding:24px 28px;background:linear-gradient(135deg,#0f172a 0%,#1d4f63 58%,#c8a24a 100%);color:#fff;}
+      .hipoteca-print-brand{display:flex;gap:16px;align-items:center;min-width:0;}
+      .hipoteca-print-brand-logo{width:220px;max-width:34vw;max-height:70px;object-fit:contain;filter:drop-shadow(0 8px 20px rgba(0,0,0,.18));}
+      .hipoteca-print-eyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:10px;font-weight:700;opacity:.82;margin-bottom:4px;}
+      .hipoteca-print-brand h1{margin:0;font-size:28px;line-height:1.05;font-weight:800;}
+      .hipoteca-print-brand p{margin:8px 0 0;font-size:13px;line-height:1.45;opacity:.92;max-width:58ch;}
+      .hipoteca-print-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;min-width:min(100%, 560px);}
+      .hipoteca-print-stat{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);border-radius:18px;padding:12px 14px;backdrop-filter:blur(8px);}
+      .hipoteca-print-stat span{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.12em;opacity:.82;margin-bottom:8px;}
+      .hipoteca-print-stat strong{display:block;font-size:20px;line-height:1.1;}
+      .hipoteca-print-summary{padding:14px 28px 4px;color:#475569;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
+      .hipoteca-print-table-wrap{padding:0 18px 18px 18px;}
+      .hipoteca-print-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;border:1px solid #dbe3ed;border-radius:18px;overflow:hidden;}
+      .hipoteca-print-table thead th{background:#123024;color:#fff;font-size:10px;line-height:1.1;letter-spacing:.08em;text-transform:uppercase;}
       .hipoteca-print-table th:first-child{border-top-left-radius:12px;}
       .hipoteca-print-table th:last-child{border-top-right-radius:12px;}
-      .hipoteca-print-table th, .hipoteca-print-table td{padding:8px 9px;border-bottom:1px solid #dbe3ed;vertical-align:top;word-break:break-word;}
+      .hipoteca-print-table th, .hipoteca-print-table td{padding:9px 10px;border-bottom:1px solid #dbe3ed;vertical-align:top;word-break:break-word;}
       .hipoteca-print-table tbody tr:nth-child(even) td{background:#f8fafc;}
       .hipoteca-print-table tbody tr:hover td{background:#eef4ff;}
       .hipoteca-print-table td:nth-child(1){white-space:nowrap;}
       .hipoteca-print-table td:nth-child(4), .hipoteca-print-table td:nth-child(5){text-align:right;white-space:nowrap;}
+      @media print{
+        body{background:#fff;}
+        .hipoteca-print-shell{padding:0;background:#fff;}
+        .hipoteca-print-card{box-shadow:none;border:0;border-radius:0;}
+        .hipoteca-print-hero{break-inside:avoid;}
+      }
     </style>
-    <div class="hipoteca-print-meta">
-      <span>${escapeHtml(summary)}</span>
-      <strong>${total} registros</strong>
+    <div class="hipoteca-print-shell">
+      <div class="hipoteca-print-card">
+        <div class="hipoteca-print-hero">
+          <div class="hipoteca-print-brand">
+            <img class="hipoteca-print-brand-logo" src="${escapeHtml(brand.logoUrl)}" alt="${escapeHtml(brand.companyName)}" />
+            <div>
+              <div class="hipoteca-print-eyebrow">${escapeHtml(brand.eyebrow)}</div>
+              <h1>${escapeHtml(brand.companyName)}</h1>
+              <p>${escapeHtml(brand.title)} · ${escapeHtml(brand.subtitle)}</p>
+            </div>
+          </div>
+          <div class="hipoteca-print-stats">
+            <div class="hipoteca-print-stat"><span>Operaciones</span><strong>${total}</strong></div>
+            <div class="hipoteca-print-stat"><span>Compra total</span><strong>${formatHipotecaListadoMoney(totalPrecio)}</strong></div>
+            <div class="hipoteca-print-stat"><span>Hipoteca total</span><strong>${formatHipotecaListadoMoney(totalHipoteca)}</strong></div>
+            <div class="hipoteca-print-stat"><span>Comisión cobrada</span><strong>${formatHipotecaListadoMoney(totalComision)}</strong></div>
+          </div>
+        </div>
+        <div class="hipoteca-print-summary">${escapeHtml(summary)}</div>
+        <div class="hipoteca-print-table-wrap">
+          <table class="hipoteca-print-table">
+            <colgroup>
+              <col style="width: 14%;" />
+              <col style="width: 35%;" />
+              <col style="width: 20%;" />
+              <col style="width: 16%;" />
+              <col style="width: 15%;" />
+            </colgroup>
+            <thead>
+              <tr>${HIPOTECA_BDT_PRINT_COLUMNS.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr>
+            </thead>
+            <tbody>${rowsHtml}</tbody>
+          </table>
+        </div>
+      </div>
     </div>
-    <table class="hipoteca-print-table">
-      <colgroup>
-        <col style="width: 14%;" />
-        <col style="width: 35%;" />
-        <col style="width: 20%;" />
-        <col style="width: 16%;" />
-        <col style="width: 15%;" />
-      </colgroup>
-      <thead>
-        <tr>${HIPOTECA_BDT_PRINT_COLUMNS.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr>
-      </thead>
-      <tbody>${rowsHtml}</tbody>
-    </table>
   `;
 };
 
@@ -42657,7 +42781,9 @@ const openHipotecaBdtListadoPrint = async () => {
     { limit: Infinity }
   );
   const filteredRows = Array.isArray(result.filtered) ? result.filtered : [];
-  const html = buildHipotecaListadoPrintHtml(filteredRows, columns, result.filters || filters);
+  const html = buildHipotecaListadoPrintHtml(filteredRows, columns, result.filters || filters, {
+    title: "Listado de hipotecas",
+  });
   openCrmPrintWindow({ title: "Listado de hipotecas", html });
 };
 
@@ -42679,7 +42805,9 @@ const openHipotecaFirmadasListadoPrint = async (selectedYear = "2026") => {
     { limit: Infinity }
   );
   const filteredRows = Array.isArray(result.filtered) ? result.filtered.filter((row) => isHipotecaSignedForExport(row, columns)) : [];
-  const html = buildHipotecaListadoPrintHtml(filteredRows, columns, result.filters || { ...filters, year, estado: "Firmada" });
+  const html = buildHipotecaListadoPrintHtml(filteredRows, columns, result.filters || { ...filters, year, estado: "Firmada" }, {
+    title: `Listado de hipotecas firmadas ${year || ""}`.trim() || "Listado de hipotecas firmadas",
+  });
   openCrmPrintWindow({ title: `Listado de hipotecas firmadas ${year || ""}`.trim(), html });
 };
 

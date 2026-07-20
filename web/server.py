@@ -5700,13 +5700,62 @@ def build_hipotecas_export_pdf(conn, rows, mode="listado", selected_year=None, s
     return build_hipotecas_bdt_listado_pdf(conn, rows, filters=filters)
 
 
-def build_hipotecas_firmadas_excel_workbook(items, selected_year=None):
+def build_hipotecas_firmadas_excel_workbook(items, selected_year=None, brand_name=None, brand_logo_url=None):
     wb = Workbook()
     summary = wb.active
     summary.title = "Resumen declarativo"
 
+    try:
+        from openpyxl.drawing.image import Image as OpenpyxlImage
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    except Exception:
+        OpenpyxlImage = None
+        Alignment = Border = Font = PatternFill = Side = None
+
+    def _resolve_excel_logo_path(raw_logo_url=None):
+        raw = str(raw_logo_url or "").strip()
+        candidates = []
+        if raw.startswith("/assets/"):
+            candidates.append(ASSETS / raw.replace("/assets/", "", 1))
+        elif raw.startswith("assets/"):
+            candidates.append(ASSETS / raw)
+        elif raw:
+            candidate = Path(raw)
+            if candidate.exists():
+                candidates.append(candidate)
+        candidates.append(ASSETS / "verifika2" / "verifika2_wordmark_check_green.png")
+        candidates.append(ASSETS / "verifika2" / "verifika2_wordmark_check_green_transparent.png")
+        for candidate in candidates:
+            if candidate and candidate.exists():
+                return candidate
+        return None
+
     year_label = str(selected_year or "").strip() or "Histórico"
-    summary["A1"] = "Declarativo anual · Hipotecas firmadas"
+    brand_label = str(brand_name or "").strip() or "Verifika²"
+    logo_path = _resolve_excel_logo_path(brand_logo_url)
+
+    summary.sheet_view.showGridLines = False
+    summary.freeze_panes = "A10"
+    summary.row_dimensions[1].height = 28
+    summary.row_dimensions[2].height = 22
+    summary.row_dimensions[3].height = 22
+    summary.row_dimensions[4].height = 22
+    summary.row_dimensions[5].height = 22
+    summary.row_dimensions[6].height = 22
+    summary.row_dimensions[7].height = 22
+    summary.row_dimensions[8].height = 22
+    summary.merge_cells("A1:G1")
+    summary["A1"] = f"{brand_label} · Declarativo anual · Hipotecas firmadas"
+
+    if OpenpyxlImage is not None and logo_path is not None:
+        try:
+            logo_img = OpenpyxlImage(str(logo_path))
+            logo_img.width = 228
+            logo_img.height = 62
+            summary.add_image(logo_img, "I1")
+        except Exception:
+            pass
+
     summary["A2"] = "Ejercicio"
     summary["B2"] = year_label
     summary["A3"] = "Operaciones"
@@ -5804,16 +5853,60 @@ def build_hipotecas_firmadas_excel_workbook(items, selected_year=None):
             font.color = "FFFFFF"
             fill = shallow_copy(cell.fill)
             fill.fill_type = "solid"
-            fill.fgColor = "103F91"
+            fill.fgColor = "123024"
             alignment = shallow_copy(cell.alignment)
             alignment.horizontal = "center"
             cell.font = font
             cell.fill = fill
             cell.alignment = alignment
 
-    style_header_row(summary, 1)
     style_header_row(summary, 10)
     style_header_row(detail, 1)
+    summary["A1"].font = Font(color="FFFFFF", bold=True, size=16) if Font else summary["A1"].font
+    summary["A1"].fill = PatternFill("solid", fgColor="123024") if PatternFill else summary["A1"].fill
+    summary["A1"].alignment = Alignment(horizontal="left", vertical="center") if Alignment else summary["A1"].alignment
+    summary["A1"].border = Border(bottom=Side(style="thin", color="C8A24A")) if Border and Side else summary["A1"].border
+
+    if Border and Side and PatternFill and Font and Alignment:
+        soft_fill = PatternFill("solid", fgColor="F8FAFC")
+        accent_fill = PatternFill("solid", fgColor="EEF4FF")
+        box_border = Border(
+            left=Side(style="thin", color="D8E1EA"),
+            right=Side(style="thin", color="D8E1EA"),
+            top=Side(style="thin", color="D8E1EA"),
+            bottom=Side(style="thin", color="D8E1EA"),
+        )
+        label_font = Font(color="102131", bold=True, size=11)
+        value_font = Font(color="123024", bold=True, size=11)
+        for row_idx in range(2, 9):
+            label_cell = summary.cell(row=row_idx, column=1)
+            value_cell = summary.cell(row=row_idx, column=2)
+            label_cell.border = box_border
+            value_cell.border = box_border
+            label_cell.fill = soft_fill
+            value_cell.fill = accent_fill
+            label_cell.font = label_font
+            value_cell.font = value_font
+            label_cell.alignment = Alignment(horizontal="left", vertical="center")
+            value_cell.alignment = Alignment(horizontal="right", vertical="center")
+        for row_idx in range(11, max(month_row, 12)):
+            for col_idx in range(1, 5):
+                cell = summary.cell(row=row_idx, column=col_idx)
+                cell.border = box_border
+                if row_idx % 2 == 0:
+                    cell.fill = soft_fill
+        for row_idx in range(11, max(bank_row, 12)):
+            for col_idx in range(6, 10):
+                cell = summary.cell(row=row_idx, column=col_idx)
+                cell.border = box_border
+                if row_idx % 2 == 0:
+                    cell.fill = soft_fill
+        for row_idx in range(2, detail.max_row + 1):
+            for col_idx in range(1, detail.max_column + 1):
+                cell = detail.cell(row=row_idx, column=col_idx)
+                cell.border = box_border
+                if row_idx % 2 == 0:
+                    cell.fill = soft_fill
 
     for cell in ("B4", "B5", "B6", "B7", "B8"):
         summary[cell].number_format = '#,##0.00 "€"'
@@ -5860,9 +5953,11 @@ def build_hipotecas_firmadas_excel_workbook(items, selected_year=None):
     }
     for col, width in widths.items():
         detail.column_dimensions[col].width = width
-    for col, width in {"A": 22, "B": 14, "C": 12, "D": 18, "F": 24, "G": 12, "H": 18, "I": 12}.items():
+    for col, width in {"A": 22, "B": 14, "C": 18, "D": 18, "F": 24, "G": 12, "H": 18, "I": 12, "J": 18}.items():
         summary.column_dimensions[col].width = width
-    summary.freeze_panes = "A10"
+
+    for sheet in (summary, detail):
+        sheet.sheet_view.showGridLines = False
     detail.freeze_panes = "A2"
     detail.auto_filter.ref = f"A1:X{max(detail.max_row, 1)}"
     return wb
@@ -88704,7 +88799,22 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "openpyxl no disponible en servidor"}, status=500)
                 return
             items = collect_hipotecas_firmadas_export_rows(conn, empresa_id, selected_year)
-            wb = build_hipotecas_firmadas_excel_workbook(items, selected_year)
+            company_row = None
+            try:
+                company_row = conn.execute(
+                    "SELECT nombre, logo_url FROM empresas WHERE id = ? LIMIT 1",
+                    (empresa_id,),
+                ).fetchone()
+            except Exception:
+                company_row = None
+            company_name = str(row_value(company_row, "nombre") or "").strip() if company_row else ""
+            company_logo_url = str(row_value(company_row, "logo_url") or "").strip() if company_row else ""
+            wb = build_hipotecas_firmadas_excel_workbook(
+                items,
+                selected_year,
+                brand_name=company_name,
+                brand_logo_url=company_logo_url,
+            )
             output = BytesIO()
             wb.save(output)
             content = output.getvalue()
