@@ -818,9 +818,15 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
               empresa_id TEXT,
               nif TEXT,
               telefono TEXT,
+              movil TEXT,
+              otro_telefono TEXT,
               email TEXT,
               direccion TEXT,
               domicilio TEXT,
+              codigo_postal TEXT,
+              poblacion TEXT,
+              provincia TEXT,
+              fecha_nacimiento TEXT,
               estado TEXT,
               created_at TEXT,
               updated_at TEXT
@@ -830,8 +836,9 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
         conn.execute(
             """
             INSERT INTO clientes (
-              id, nombre, empresa_id, nif, telefono, email, direccion, domicilio, estado, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              id, nombre, empresa_id, nif, telefono, movil, otro_telefono, email, direccion, domicilio,
+              codigo_postal, poblacion, provincia, fecha_nacimiento, estado, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 "c1",
@@ -842,6 +849,39 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
                 "",
                 "",
                 "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "Activo",
+                "2026-07-20",
+                "2026-07-20",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO clientes (
+              id, nombre, empresa_id, nif, telefono, movil, otro_telefono, email, direccion, domicilio,
+              codigo_postal, poblacion, provincia, fecha_nacimiento, estado, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "c2",
+                "Prestataria JSON",
+                "e1",
+                "12345678A",
+                "611222333",
+                "611222333",
+                "",
+                "prestataria@example.com",
+                "Avenida JSON 9",
+                "Avenida JSON 9",
+                "28001",
+                "Madrid",
+                "Madrid",
+                "1980-01-01",
                 "Activo",
                 "2026-07-20",
                 "2026-07-20",
@@ -885,6 +925,45 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
         self.assertEqual(item["cliente_telefono"], "699888777")
         self.assertEqual(item["cliente_email"], "json@example.com")
 
+        prestataria_only_json = json.dumps(
+            {
+                "prestataria": {
+                    "p1": {
+                        "nombre": "Prestataria JSON",
+                        "nif": "12345678A",
+                        "telefono": "611222333",
+                        "email": "prestataria@example.com",
+                        "domicilio": "Avenida JSON 9",
+                    }
+                },
+            },
+            ensure_ascii=False,
+        )
+        conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
+              oficina, cliente_id, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan,
+              comision_modernia, inmobiliaria_compra, asesor, estado, anio, cliente_inmueble_json, created_at, updated_at
+            ) VALUES (
+              'h2', 'e1', 'Prestataria JSON', 'BBVA', 200000, 150000, 75, 50000, 2100,
+              'Modernia Norte', '', '2026-04-01', 'Sí', 'Compra', '2026-05-10', 500, 400, 1200,
+              'Inmo Dos', 'Asesor Dos', 'Firmada', 2026, ?, '2026-07-20', '2026-07-20'
+            )
+            """,
+            (prestataria_only_json,),
+        )
+        row2 = conn.execute("SELECT * FROM hipotecas WHERE id = 'h2'").fetchone()
+        item2 = build_hipoteca_export_row(conn, row2)
+
+        self.assertEqual(item2["cliente"], "Prestataria JSON")
+        self.assertEqual(item2["cliente_nif"], "12345678A")
+        self.assertEqual(item2["cliente_direccion"], "Avenida JSON 9")
+        self.assertEqual(item2["cliente_telefono"], "611222333")
+        self.assertEqual(item2["cliente_email"], "prestataria@example.com")
+        self.assertEqual(item2["cliente_fields"]["movil"], "611222333")
+        self.assertEqual(item2["cliente_fields"]["codigo_postal"], "28001")
+
         if OPENPYXL_AVAILABLE:
             wb = build_hipotecas_listado_excel_workbook([item], "2026")
             detail = wb["Operaciones listado"]
@@ -893,6 +972,16 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
             self.assertEqual(detail["E2"].value, "699888777")
             self.assertEqual(detail["F2"].value, "json@example.com")
             self.assertEqual(detail["G2"].value, "Calle JSON 7")
+            wb2 = build_hipotecas_listado_excel_workbook([item2], "2026")
+            detail2 = wb2["Operaciones listado"]
+            self.assertEqual(detail2["C2"].value, "Prestataria JSON")
+            self.assertEqual(detail2["D2"].value, "12345678A")
+            self.assertEqual(detail2["E2"].value, "611222333")
+            self.assertEqual(detail2["F2"].value, "prestataria@example.com")
+            self.assertEqual(detail2["G2"].value, "Avenida JSON 9")
+            headers2 = {cell.value: idx + 1 for idx, cell in enumerate(detail2[1]) if cell.value}
+            self.assertEqual(detail2.cell(row=2, column=headers2["Cliente · Móvil"]).value, "611222333")
+            self.assertEqual(detail2.cell(row=2, column=headers2["Cliente · Código postal"]).value, "28001")
 
 
 if __name__ == "__main__":

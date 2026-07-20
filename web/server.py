@@ -5608,14 +5608,19 @@ def _hipoteca_export_json_text(primary, cliente_inmueble, *nested_paths, default
     return default
 
 
-def _build_hipoteca_cliente_fields(conn, cliente_id):
+def _build_hipoteca_cliente_fields(conn, cliente_id, cliente_nombre=""):
     cliente_id = str(cliente_id or "").strip()
-    if not cliente_id:
-        return {}
     cliente_row = conn.execute(
         "SELECT * FROM clientes WHERE id = ? LIMIT 1",
         (cliente_id,),
-    ).fetchone()
+    ).fetchone() if cliente_id else None
+    if not cliente_row:
+        cliente_nombre = str(cliente_nombre or "").strip()
+        if cliente_nombre:
+            cliente_row = conn.execute(
+                "SELECT * FROM clientes WHERE UPPER(COALESCE(nombre, '')) = UPPER(?) ORDER BY created_at DESC LIMIT 1",
+                (cliente_nombre,),
+            ).fetchone()
     if not cliente_row:
         return {}
     cliente_fields = {}
@@ -5627,27 +5632,101 @@ def _build_hipoteca_cliente_fields(conn, cliente_id):
 def build_hipoteca_export_row(conn, row):
     cliente_inmueble = _safe_json_object(row_value(row, "cliente_inmueble_json", "") or "{}")
     cliente_id = str(row_value(row, "cliente_id", "") or "").strip()
-    cliente = _hipoteca_export_json_text(row_value(row, "cliente", ""), cliente_inmueble, "comprador.c1.nombre")
-    cliente_nif = _hipoteca_export_json_text("", cliente_inmueble, "comprador.c1.nif")
-    cliente_direccion = _hipoteca_export_json_text("", cliente_inmueble, "inmueble.direccion", "comprador.c1.domicilio", "comprador.c1.direccion")
-    cliente_telefono = _hipoteca_export_json_text("", cliente_inmueble, "comprador.c1.telefono")
-    cliente_email = _hipoteca_export_json_text("", cliente_inmueble, "comprador.c1.email")
+    cliente = _hipoteca_export_json_text(
+        row_value(row, "cliente", ""),
+        cliente_inmueble,
+        "prestataria.p1.nombre",
+        "prestataria.p2.nombre",
+        "comprador.c1.nombre",
+        "comprador.c2.nombre",
+    )
+    cliente_nif = _hipoteca_export_json_text(
+        "",
+        cliente_inmueble,
+        "prestataria.p1.nif",
+        "prestataria.p2.nif",
+        "comprador.c1.nif",
+        "comprador.c2.nif",
+    )
+    cliente_direccion = _hipoteca_export_json_text(
+        "",
+        cliente_inmueble,
+        "inmueble.direccion",
+        "prestataria.p1.domicilio",
+        "prestataria.p2.domicilio",
+        "comprador.c1.domicilio",
+        "comprador.c1.direccion",
+        "comprador.c2.domicilio",
+        "comprador.c2.direccion",
+    )
+    cliente_telefono = _hipoteca_export_json_text(
+        "",
+        cliente_inmueble,
+        "prestataria.p1.telefono",
+        "prestataria.p2.telefono",
+        "comprador.c1.telefono",
+        "comprador.c2.telefono",
+    )
+    cliente_email = _hipoteca_export_json_text(
+        "",
+        cliente_inmueble,
+        "prestataria.p1.email",
+        "prestataria.p2.email",
+        "comprador.c1.email",
+        "comprador.c2.email",
+    )
     cliente_fields = {}
     if cliente_id:
-        cliente_fields = _build_hipoteca_cliente_fields(conn, cliente_id)
+        cliente_fields = _build_hipoteca_cliente_fields(conn, cliente_id, cliente)
+    elif cliente:
+        cliente_fields = _build_hipoteca_cliente_fields(conn, "", cliente)
+    if cliente_fields:
         cliente_row = cliente_fields if cliente_fields else None
         if cliente_row:
-            cliente = _hipoteca_export_json_text(cliente_row.get("nombre"), cliente_inmueble, "comprador.c1.nombre", default=cliente)
-            cliente_nif = _hipoteca_export_json_text(cliente_row.get("nif"), cliente_inmueble, "comprador.c1.nif")
+            cliente = _hipoteca_export_json_text(
+                cliente_row.get("nombre"),
+                cliente_inmueble,
+                "prestataria.p1.nombre",
+                "prestataria.p2.nombre",
+                "comprador.c1.nombre",
+                "comprador.c2.nombre",
+                default=cliente,
+            )
+            cliente_nif = _hipoteca_export_json_text(
+                cliente_row.get("nif"),
+                cliente_inmueble,
+                "prestataria.p1.nif",
+                "prestataria.p2.nif",
+                "comprador.c1.nif",
+                "comprador.c2.nif",
+            )
             cliente_direccion = _hipoteca_export_json_text(
                 cliente_row.get("direccion") or cliente_row.get("domicilio"),
                 cliente_inmueble,
                 "inmueble.direccion",
+                "prestataria.p1.domicilio",
+                "prestataria.p2.domicilio",
                 "comprador.c1.domicilio",
                 "comprador.c1.direccion",
+                "comprador.c2.domicilio",
+                "comprador.c2.direccion",
             )
-            cliente_telefono = _hipoteca_export_json_text(cliente_row.get("telefono"), cliente_inmueble, "comprador.c1.telefono")
-            cliente_email = _hipoteca_export_json_text(cliente_row.get("email"), cliente_inmueble, "comprador.c1.email")
+            cliente_telefono = _hipoteca_export_json_text(
+                cliente_row.get("telefono"),
+                cliente_inmueble,
+                "prestataria.p1.telefono",
+                "prestataria.p2.telefono",
+                "comprador.c1.telefono",
+                "comprador.c2.telefono",
+            )
+            cliente_email = _hipoteca_export_json_text(
+                cliente_row.get("email"),
+                cliente_inmueble,
+                "prestataria.p1.email",
+                "prestataria.p2.email",
+                "comprador.c1.email",
+                "comprador.c2.email",
+            )
     return {
         "id": str(row["id"] or "").strip(),
         "cliente": cliente,
