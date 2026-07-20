@@ -42841,21 +42841,13 @@ const openHipotecaBdtListadoPrint = async (popup = null) => {
     { year: filters.year, estado: filters.estado, order: filters.order },
     { limit: Infinity }
   );
-  const filteredRows = Array.isArray(result.filtered) ? result.filtered : [];
-  const html = buildHipotecaListadoPrintHtml(filteredRows, columns, result.filters || filters, {
-    title: "Listado de hipotecas",
-  });
-  if (popup && !popup.closed && typeof writeCrmPrintWindow === "function") {
-    const written = writeCrmPrintWindow(popup, { title: "Listado de hipotecas", html });
-    if (written) {
-      try {
-        popup.focus();
-      } catch (e) {}
-      return true;
-    }
+  if (popup && !popup.closed) {
+    try {
+      popup.close();
+    } catch (e) {}
   }
-  openCrmPrintWindow({ title: "Listado de hipotecas", html });
-  return false;
+  await downloadHipotecaBdtPdf("listado");
+  return true;
 };
 
 const renderHipotecaBdtFromCache = () => {
@@ -44969,6 +44961,7 @@ const downloadHipotecaBdtPdf = async (mode = "listado", popup = null) => {
     {
       filenameFallback: modeKey === "fichas" ? "fichas_hipotecas.pdf" : "hipotecas_listado.pdf",
       targetWindow: popup,
+      downloadInsteadOfOpen: true,
     }
   );
 };
@@ -72264,7 +72257,11 @@ const syncGestoriaModelosDownloadButton = () => {
 };
 
 const downloadPdfFromApi = async (endpoint, payload, options = {}) => {
-  const { filenameFallback = "informe.pdf", targetWindow = null } = options || {};
+  const {
+    filenameFallback = "informe.pdf",
+    targetWindow = null,
+    downloadInsteadOfOpen = false,
+  } = options || {};
   const res = await fetch(endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -72284,6 +72281,10 @@ const downloadPdfFromApi = async (endpoint, payload, options = {}) => {
   const match = disposition.match(/filename=\"([^\"]+)\"/i);
   const filename = match && match[1] ? match[1] : filenameFallback;
   const blob = await res.blob();
+  if (downloadInsteadOfOpen) {
+    downloadBlobFile(filename, blob);
+    return;
+  }
   if (targetWindow && typeof targetWindow === "object") {
     try {
       if (!targetWindow.closed) {
@@ -90680,24 +90681,14 @@ if (hipotecaBdtListOrder) {
 
 if (hipotecaBdtPrintListado) {
   hipotecaBdtPrintListado.addEventListener("click", async () => {
-    let popup = null;
-    let popupPrinted = false;
     const originalText = hipotecaBdtPrintListado.textContent;
     hipotecaBdtPrintListado.disabled = true;
     hipotecaBdtPrintListado.textContent = "Imprimiendo...";
     try {
-      try {
-        popup = window.open("about:blank", "_blank", "noopener");
-      } catch (e) {}
-      popupPrinted = Boolean(await openHipotecaBdtListadoPrint(popup));
+      await openHipotecaBdtListadoPrint();
     } catch (error) {
       alert(`No se pudo imprimir el listado. ${String(error?.message || error || "").trim() || "Revisa los filtros e inténtalo de nuevo."}`);
     } finally {
-      try {
-        if (!popupPrinted && popup && !popup.closed && popup.location && popup.location.href === "about:blank") {
-          popup.close();
-        }
-      } catch (e) {}
       hipotecaBdtPrintListado.disabled = false;
       hipotecaBdtPrintListado.textContent = originalText;
     }
@@ -90722,23 +90713,14 @@ if (hipotecaBdtExcelListado) {
 
 if (hipotecaBdtPrintFichas) {
   hipotecaBdtPrintFichas.addEventListener("click", async () => {
-    let popup = null;
     const originalText = hipotecaBdtPrintFichas.textContent;
     hipotecaBdtPrintFichas.disabled = true;
     hipotecaBdtPrintFichas.textContent = "Generando...";
     try {
-      popup = window.open("", "_blank", "noopener");
-    } catch (e) {}
-    try {
-      await downloadHipotecaBdtPdf("fichas", popup);
+      await downloadHipotecaBdtPdf("fichas");
     } catch (error) {
       alert(`No se pudieron generar las fichas PDF. ${String(error?.message || error || "").trim() || "Revisa los filtros e inténtalo de nuevo."}`);
     } finally {
-      try {
-        if (popup && !popup.closed && popup.location && popup.location.href === "about:blank") {
-          popup.close();
-        }
-      } catch (e) {}
       hipotecaBdtPrintFichas.disabled = false;
       hipotecaBdtPrintFichas.textContent = originalText;
     }

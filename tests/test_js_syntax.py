@@ -40,6 +40,9 @@ class JavaScriptSyntaxTests(unittest.TestCase):
         self.assertIn('hipoteca-print-summary', app_js)
         self.assertIn('const downloadHipotecaBdtExcel = async () => {', app_js)
         self.assertIn('/api/hipotecas_listado_excel', app_js)
+        self.assertIn('downloadInsteadOfOpen: true', app_js)
+        self.assertIn('await openHipotecaBdtListadoPrint();', app_js)
+        self.assertIn('await downloadHipotecaBdtPdf("fichas");', app_js)
         self.assertNotIn('openHipotecaFirmadasListadoPrint', app_js)
         self.assertNotIn('downloadHipotecasFirmadasExcel', app_js)
         open_blob_snippet = app_js[
@@ -61,6 +64,12 @@ class JavaScriptSyntaxTests(unittest.TestCase):
         self.assertIn('Fichas de hipotecas', index_html)
         self.assertNotIn('hipotecaBdtPrintFirmadas2026', index_html)
         self.assertNotIn('hipotecaBdtExcelFirmadas2026', index_html)
+        hipoteca_print_handler_snippet = app_js[
+            app_js.index('if (hipotecaBdtPrintListado) {')
+            : app_js.index('if (hipotecaDashboardRefresh) {')
+        ]
+        self.assertNotIn('window.open("about:blank", "_blank", "noopener")', hipoteca_print_handler_snippet)
+        self.assertNotIn('window.open("", "_blank", "noopener")', hipoteca_print_handler_snippet)
         hipoteca_ficha_snippet = app_js[
             app_js.index("const resetHipotecaFichaFormState =")
             : app_js.index("const saveHipotecaFicha = async")

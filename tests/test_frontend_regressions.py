@@ -471,7 +471,7 @@ class HipotecaBdtCardMetricsTests(unittest.TestCase):
         )
 
 
-class HipotecaBdtListadoPrintPopupTests(unittest.TestCase):
+class HipotecaBdtListadoPdfDownloadTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.segment = extract_segment(
@@ -484,35 +484,20 @@ class HipotecaBdtListadoPrintPopupTests(unittest.TestCase):
         script = make_factory_script(self.segment, [], self.return_names, prelude, body)
         run_node_script(script)
 
-    def test_print_listado_uses_preopened_popup_when_available(self):
+    def test_print_listado_downloads_pdf_without_popup(self):
         self._run(
             body=dedent(
                 """
                 const { openHipotecaBdtListadoPrint } = api;
-                const popup = {
-                  closed: false,
-                  location: { href: "about:blank" },
-                  focus() {
-                    this.focused = true;
-                  },
-                  close() {
-                    this.closed = true;
-                  },
-                };
-                const result = await openHipotecaBdtListadoPrint(popup);
+                const result = await openHipotecaBdtListadoPrint();
                 assert.strictEqual(result, true);
-                assert.strictEqual(writeCalls.length, 1);
-                assert.strictEqual(writeCalls[0].popup, popup);
-                assert.strictEqual(writeCalls[0].payload.title, "Listado de hipotecas");
-                assert.strictEqual(writeCalls[0].payload.html, "<div>PDF de prueba</div>");
-                assert.strictEqual(popup.focused, true);
-                assert.strictEqual(popup.closed, false);
+                assert.deepStrictEqual(downloadCalls, ["listado"]);
                 assert.strictEqual(openFallbackCalls.length, 0);
                 """
             ),
             prelude=dedent(
                 """
-                const writeCalls = [];
+                const downloadCalls = [];
                 const openFallbackCalls = [];
                 const state = globalThis.state = {
                   hipotecaBdtCache: {
@@ -542,9 +527,8 @@ class HipotecaBdtListadoPrintPopupTests(unittest.TestCase):
                     filters,
                   };
                 };
-                globalThis.buildHipotecaListadoPrintHtml = () => "<div>PDF de prueba</div>";
-                globalThis.writeCrmPrintWindow = (popup, payload) => {
-                  writeCalls.push({ popup, payload });
+                globalThis.downloadHipotecaBdtPdf = async (mode) => {
+                  downloadCalls.push(mode);
                   return true;
                 };
                 globalThis.openCrmPrintWindow = (...args) => {
