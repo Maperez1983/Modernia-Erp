@@ -336,6 +336,141 @@ class HipotecaFichaResetTests(unittest.TestCase):
         )
 
 
+class HipotecaBdtCardMetricsTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const getHipotecaFieldValue =",
+            "const renderHipotecaBdtTable =",
+        )
+        cls.return_names = ["renderHipotecaBdtCards"]
+
+    def _run(self, body: str, prelude: str = "") -> None:
+        script = make_factory_script(self.segment, [], self.return_names, prelude, body)
+        run_node_script(script)
+
+    def test_cards_show_signature_date_and_elapsed_days(self):
+        self._run(
+            body=dedent(
+                """
+                const { renderHipotecaBdtCards } = api;
+                const columns = [
+                  "id",
+                  "cliente",
+                  "banco",
+                  "oficina",
+                  "importe_hipoteca",
+                  "comision",
+                  "fecha_encargo",
+                  "fecha_firma",
+                  "hipoteca_detalle_json",
+                ];
+                const rows = [[
+                  "h1",
+                  "Cliente Demo",
+                  "Banco Demo",
+                  "Oficina Centro",
+                  150000,
+                  1800,
+                  "2026-06-15",
+                  "2026-06-20",
+                  "{}",
+                ]];
+                renderHipotecaBdtCards({ columns, rows });
+                const text = flattenText(hipotecaBdtTable);
+                assert.ok(text.includes("Fecha firma"));
+                assert.ok(text.includes("20/06/2026"));
+                assert.ok(text.includes("Días encargo→firma"));
+                assert.ok(text.includes("5 días"));
+                """
+            ),
+            prelude=dedent(
+                """
+                class FakeNode {
+                  constructor(tag = "div") {
+                    this.tagName = String(tag || "div").toUpperCase();
+                    this.children = [];
+                    this.dataset = {};
+                    this.style = {};
+                    this.className = "";
+                    this.textContent = "";
+                    this.innerHTML = "";
+                    this.attributes = {};
+                    this.classList = {
+                      add() {},
+                      remove() {},
+                      toggle() {},
+                    };
+                  }
+                  get childElementCount() {
+                    return this.children.length;
+                  }
+                  appendChild(child) {
+                    this.children.push(child);
+                    return child;
+                  }
+                  addEventListener() {}
+                  setAttribute(name, value) {
+                    this.attributes[name] = String(value);
+                  }
+                  replaceWith(node) {
+                    this.replacedWith = node;
+                  }
+                  querySelector() {
+                    return null;
+                  }
+                  querySelectorAll() {
+                    return [];
+                  }
+                  closest() {
+                    return null;
+                  }
+                }
+                const flattenText = (node) => {
+                  const pieces = [];
+                  const walk = (current) => {
+                    if (current === null || current === undefined) return;
+                    if (typeof current === "string") {
+                      const text = String(current).trim();
+                      if (text) pieces.push(text);
+                      return;
+                    }
+                    const text = String(current.textContent || "").trim();
+                    if (text) pieces.push(text);
+                    if (Array.isArray(current.children)) current.children.forEach(walk);
+                  };
+                  walk(node);
+                  return pieces.join(" ");
+                };
+                const document = {
+                  createElement: (tag) => new FakeNode(tag),
+                };
+                const hipotecaBdtTable = new FakeNode("div");
+                const resolveHipotecaBankBrand = () => ({
+                  logo: "",
+                  displayName: "Banco Demo",
+                  short: "BD",
+                  color: "#123024",
+                });
+                const openHipotecaFicha = () => {};
+                const deleteHipoteca = async () => ({ ok: true });
+                const loadHipotecaBdt = () => {};
+                const loadFinCrm = () => {};
+                const loadHipotecaDashboard = () => {};
+                const loadHomeHipotecaStats = async () => ({ ok: true });
+                const renderCompanyCards = () => {};
+                const safeParseJsonObject = () => ({});
+                const getNestedValue = () => "";
+                const normalizePrestatariaSource = () => "none";
+                const normalizeSimple = (value) => String(value || "").trim().toLowerCase();
+                const toNumber = (value) => Number(value);
+                const formatEurosCompact = (value) => `${Number(value || 0).toFixed(2)} €`;
+                const formatPercent = (value) => `${Number(value || 0).toFixed(2)} %`;
+                """
+            ),
+        )
+
+
 class InmuebleDetailRefreshTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

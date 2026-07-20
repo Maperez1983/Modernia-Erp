@@ -289,3 +289,11 @@ return {{
         self.assertIn('Fichas de hipotecas', index_html)
         self.assertNotIn('hipotecaBdtPrintFirmadas2026', index_html)
         self.assertNotIn('hipotecaBdtExcelFirmadas2026', index_html)
+
+    def test_hipoteca_cards_include_signature_date_and_elapsed_days(self):
+        root = Path(__file__).resolve().parents[1]
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("formatHipotecaEncargoToFirmaDays", app_js)
+        self.assertIn('["Fecha firma", formatHipotecaListadoDate(getValue(row, "fecha_firma"))]', app_js)
+        self.assertIn('["Días encargo→firma", formatHipotecaEncargoToFirmaDays(row, columns)]', app_js)

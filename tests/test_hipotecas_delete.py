@@ -5,6 +5,7 @@ from web.server import (
     OPENPYXL_AVAILABLE,
     build_hipotecas_firmadas_excel_workbook,
     build_hipotecas_listado_excel_workbook,
+    build_hipoteca_dashboard_entity_rows,
     build_hipoteca_export_row,
     build_hipoteca_fixed_cost_entries,
     build_hipoteca_accounting_entries,
@@ -657,6 +658,35 @@ class HipotecasDeleteTests(unittest.TestCase):
         self.assertEqual(summary["tasaciones_total"], 1)
         self.assertEqual(summary["rentas_total"], 1)
         self.assertEqual(summary["abiertos_total"], 3)
+
+
+class HipotecaDashboardEntityRowsTests(unittest.TestCase):
+    def test_preserves_total_for_year_only_entity_outside_top_total_slice(self):
+        total_rows = [
+            {"label": "Banco Santander", "total": 9},
+            {"label": "Caja Rural de Granada", "total": 8},
+            {"label": "Cajamar", "total": 7},
+            {"label": "ING", "total": 6},
+            {"label": "UCI", "total": 5},
+            {"label": "Banco Sabadell", "total": 4},
+            {"label": "Unicaja Banco", "total": 3},
+            {"label": "Bankinter", "total": 2},
+            {"label": "Entidad Nueva", "total": 1},
+        ]
+        year_rows = [
+            {"label": "Entidad Nueva", "total": 1},
+            {"label": "Banco Santander", "total": 8},
+        ]
+
+        payload = build_hipoteca_dashboard_entity_rows(total_rows, year_rows)
+
+        labels = [row["label"] for row in payload["series_entidades"]]
+        self.assertEqual(len(labels), 8)
+        self.assertNotIn("Entidad Nueva", labels)
+        self.assertIn("Entidad Nueva", payload["entity_total_map"])
+        self.assertEqual(payload["entity_total_map"]["Entidad Nueva"]["total"], 1)
+        self.assertEqual(payload["entity_total_map"]["Banco Santander"]["total"], 9)
+        self.assertEqual(payload["entity_year_rows"][0]["label"], "Banco Santander")
 
 
 if __name__ == "__main__":

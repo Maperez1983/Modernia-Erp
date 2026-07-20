@@ -42090,6 +42090,20 @@ const getHipotecaFirmaTimestamp = (row, columns) => {
   return parseDateToTimestamp(raw);
 };
 
+const formatHipotecaEncargoToFirmaDays = (row, columns) => {
+  const fechaEncargo = getHipotecaFieldValue(row, columns, [
+    "fecha_encargo",
+    "fecha_encargo_cliente",
+    "fecha_encargo_banco",
+  ]);
+  const fechaFirma = getHipotecaFieldValue(row, columns, ["fecha_firma", "fecha"]);
+  const encargoTs = parseDateToTimestamp(fechaEncargo);
+  const firmaTs = parseDateToTimestamp(fechaFirma);
+  if (!encargoTs || !firmaTs) return "";
+  const diffDays = Math.max(0, Math.round((firmaTs - encargoTs) / 86400000));
+  return `${diffDays} días`;
+};
+
 const buildHipotecaBdtSearchHaystack = (row, columns) => {
   const cliente = getHipotecaDisplayName(row, columns) || "";
   const banco = getHipotecaFieldValue(row, columns, ["banco", "entidad", "entidad_financiera"]);
@@ -45679,6 +45693,8 @@ const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
     const metricRows = [
       ["Precio hipoteca", formatMoneyMaybe(importeHipoteca)],
       ["Precio compra", formatMoneyMaybe(precio)],
+      ["Fecha firma", formatHipotecaListadoDate(getValue(row, "fecha_firma"))],
+      ["Días encargo→firma", formatHipotecaEncargoToFirmaDays(row, columns)],
       ["Plazo", formatYears(plazo)],
       ["Interés", formatInterest(interes)],
       ["Cuota", formatMoneyMaybe(cuota)],

@@ -5395,6 +5395,67 @@ def compute_hipotecas_commission_by_bank(conn, empresa_id, year=None):
     return {str(row["label"] or "").strip(): round(parse_money_value(row["total"]), 2) for row in rows}
 
 
+def build_hipoteca_dashboard_entity_rows(entity_total_rows, entity_year_rows):
+    def normalize_bank_label(value: object) -> str:
+        raw = str(value or "").strip()
+        norm = normalize_lookup_text(raw)
+        if not norm:
+            return raw
+        rules = (
+            ("sabadell", "Banco Sabadell"),
+            ("santander", "Banco Santander"),
+            ("bbva", "BBVA"),
+            ("caixabank", "CaixaBank"),
+            ("bankinter", "Bankinter"),
+            ("unicaja", "Unicaja Banco"),
+            ("abanca", "Abanca"),
+            ("ibercaja", "Ibercaja Banco"),
+            ("kutxabank", "Kutxabank"),
+            ("cajamar", "Cajamar Caja Rural"),
+            ("openbank", "Openbank"),
+            ("ing", "ING"),
+            ("myinvestor", "MyInvestor"),
+            ("caja rural de granada", "Caja Rural de Granada"),
+            ("laboral kutxa", "Laboral Kutxa"),
+            ("deutsche bank", "Deutsche Bank España"),
+        )
+        for needle, canonical in rules:
+            if needle and needle in norm:
+                return canonical
+        return raw
+
+    def merge_bank_rows(rows):
+        merged = {}
+        aliases = {}
+        for r in rows or []:
+            if not isinstance(r, dict):
+                continue
+            raw_label = str(r.get("label") or "").strip()
+            canonical = normalize_bank_label(raw_label)
+            bucket = merged.get(canonical)
+            if not bucket:
+                bucket = {"label": canonical, "total": 0}
+                merged[canonical] = bucket
+            try:
+                bucket["total"] += int(r.get("total") or 0)
+            except Exception:
+                bucket["total"] += 0
+            aliases.setdefault(canonical, set()).add(raw_label)
+        out = sorted(list(merged.values()), key=lambda x: int(x.get("total") or 0), reverse=True)
+        return out, aliases
+
+    entity_total_merged, entity_total_aliases = merge_bank_rows([dict(r) for r in (entity_total_rows or [])])
+    entity_year_merged, entity_year_aliases = merge_bank_rows([dict(r) for r in (entity_year_rows or [])])
+    entity_total_map = {str(row["label"]): dict(row) for row in entity_total_merged}
+    return {
+        "series_entidades": entity_total_merged[:8],
+        "entity_total_map": entity_total_map,
+        "entity_year_rows": entity_year_merged[:12],
+        "entity_total_aliases": entity_total_aliases,
+        "entity_year_aliases": entity_year_aliases,
+    }
+
+
 def resolve_hipoteca_contabilidad_link(conn, hipoteca_id):
     hipoteca_id = str(hipoteca_id or "").strip()
     if not hipoteca_id:
@@ -88474,57 +88535,12 @@ class Handler(BaseHTTPRequestHandler):
                 (empresa_id, selected_year),
             ).fetchall()
 
-            def normalize_bank_label(value: object) -> str:
-                raw = str(value or "").strip()
-                norm = normalize_lookup_text(raw)
-                if not norm:
-                    return raw
-                rules = (
-                    ("sabadell", "Banco Sabadell"),
-                    ("santander", "Banco Santander"),
-                    ("bbva", "BBVA"),
-                    ("caixabank", "CaixaBank"),
-                    ("bankinter", "Bankinter"),
-                    ("unicaja", "Unicaja Banco"),
-                    ("abanca", "Abanca"),
-                    ("ibercaja", "Ibercaja Banco"),
-                    ("kutxabank", "Kutxabank"),
-                    ("cajamar", "Cajamar Caja Rural"),
-                    ("openbank", "Openbank"),
-                    ("ing", "ING"),
-                    ("myinvestor", "MyInvestor"),
-                    ("caja rural de granada", "Caja Rural de Granada"),
-                    ("laboral kutxa", "Laboral Kutxa"),
-                    ("deutsche bank", "Deutsche Bank España"),
-                )
-                for needle, canonical in rules:
-                    if needle and needle in norm:
-                        return canonical
-                return raw
-
-            def merge_bank_rows(rows):
-                merged = {}
-                aliases = {}
-                for r in rows or []:
-                    raw_label = str(r.get("label") or "").strip()
-                    canonical = normalize_bank_label(raw_label)
-                    bucket = merged.get(canonical)
-                    if not bucket:
-                        bucket = {"label": canonical, "total": 0}
-                        merged[canonical] = bucket
-                    try:
-                        bucket["total"] += int(r.get("total") or 0)
-                    except Exception:
-                        bucket["total"] += 0
-                    aliases.setdefault(canonical, set()).add(raw_label)
-                out = sorted(list(merged.values()), key=lambda x: int(x.get("total") or 0), reverse=True)
-                return out, aliases
-
-            entity_total_merged, entity_total_aliases = merge_bank_rows([dict(r) for r in entity_total_rows])
-            entity_year_merged, entity_year_aliases = merge_bank_rows([dict(r) for r in entity_year_rows])
-
-            entity_total_rows = entity_total_merged[:8]
-            entity_total_map = {str(row["label"]): dict(row) for row in entity_total_rows}
+            entity_data = build_hipoteca_dashboard_entity_rows(entity_total_rows, entity_year_rows)
+            entity_total_rows = entity_data["series_entidades"]
+            entity_total_map = entity_data["entity_total_map"]
+            entity_year_merged = entity_data["entity_year_rows"]
+            entity_total_aliases = entity_data["entity_total_aliases"]
+            entity_year_aliases = entity_data["entity_year_aliases"]
             commission_by_bank_year = compute_hipotecas_commission_by_bank(conn, empresa_id, selected_year)
             entities = []
             for row in entity_year_merged[:12]:
