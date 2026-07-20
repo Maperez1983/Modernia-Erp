@@ -5395,6 +5395,28 @@ def compute_hipotecas_commission_by_bank(conn, empresa_id, year=None):
     return {str(row["label"] or "").strip(): round(parse_money_value(row["total"]), 2) for row in rows}
 
 
+def collect_hipoteca_dashboard_entity_total_rows(conn, empresa_id):
+    signed_closed_expr = (
+        "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')"
+        " AND fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
+    )
+    return conn.execute(
+        """
+        SELECT banco AS label, COUNT(*) AS total
+        FROM hipotecas
+        WHERE empresa_id = ?
+          AND banco IS NOT NULL
+          AND TRIM(banco) != ''
+          AND """
+        + signed_closed_expr
+        + """
+        GROUP BY banco
+        ORDER BY COUNT(*) DESC
+        """,
+        (empresa_id,),
+    ).fetchall()
+
+
 def build_hipoteca_dashboard_entity_rows(entity_total_rows, entity_year_rows):
     def normalize_bank_label(value: object) -> str:
         raw = str(value or "").strip()
@@ -5573,6 +5595,19 @@ def _clean_hipoteca_export_value(value):
     return value
 
 
+def _hipoteca_export_json_text(primary, cliente_inmueble, *nested_paths, default=""):
+    raw = str(primary or "").strip()
+    if raw:
+        return raw
+    cliente_inmueble = cliente_inmueble if isinstance(cliente_inmueble, dict) else {}
+    for nested_path in nested_paths:
+        nested_value = _get_nested(cliente_inmueble, nested_path, default)
+        nested_text = str(nested_value or "").strip()
+        if nested_text:
+            return nested_text
+    return default
+
+
 def _build_hipoteca_cliente_fields(conn, cliente_id):
     cliente_id = str(cliente_id or "").strip()
     if not cliente_id:
@@ -5590,22 +5625,29 @@ def _build_hipoteca_cliente_fields(conn, cliente_id):
 
 
 def build_hipoteca_export_row(conn, row):
-    cliente_id = str(row["cliente_id"] or "").strip()
-    cliente = str(row["cliente"] or "").strip()
-    cliente_nif = ""
-    cliente_direccion = ""
-    cliente_telefono = ""
-    cliente_email = ""
+    cliente_inmueble = _safe_json_object(row_value(row, "cliente_inmueble_json", "") or "{}")
+    cliente_id = str(row_value(row, "cliente_id", "") or "").strip()
+    cliente = _hipoteca_export_json_text(row_value(row, "cliente", ""), cliente_inmueble, "comprador.c1.nombre")
+    cliente_nif = _hipoteca_export_json_text("", cliente_inmueble, "comprador.c1.nif")
+    cliente_direccion = _hipoteca_export_json_text("", cliente_inmueble, "inmueble.direccion", "comprador.c1.domicilio", "comprador.c1.direccion")
+    cliente_telefono = _hipoteca_export_json_text("", cliente_inmueble, "comprador.c1.telefono")
+    cliente_email = _hipoteca_export_json_text("", cliente_inmueble, "comprador.c1.email")
     cliente_fields = {}
     if cliente_id:
         cliente_fields = _build_hipoteca_cliente_fields(conn, cliente_id)
         cliente_row = cliente_fields if cliente_fields else None
         if cliente_row:
-            cliente = str(cliente_row.get("nombre") or "").strip() or cliente
-            cliente_nif = str(cliente_row.get("nif") or "").strip()
-            cliente_direccion = str(cliente_row.get("direccion") or "").strip()
-            cliente_telefono = str(cliente_row.get("telefono") or "").strip()
-            cliente_email = str(cliente_row.get("email") or "").strip()
+            cliente = _hipoteca_export_json_text(cliente_row.get("nombre"), cliente_inmueble, "comprador.c1.nombre", default=cliente)
+            cliente_nif = _hipoteca_export_json_text(cliente_row.get("nif"), cliente_inmueble, "comprador.c1.nif")
+            cliente_direccion = _hipoteca_export_json_text(
+                cliente_row.get("direccion") or cliente_row.get("domicilio"),
+                cliente_inmueble,
+                "inmueble.direccion",
+                "comprador.c1.domicilio",
+                "comprador.c1.direccion",
+            )
+            cliente_telefono = _hipoteca_export_json_text(cliente_row.get("telefono"), cliente_inmueble, "comprador.c1.telefono")
+            cliente_email = _hipoteca_export_json_text(cliente_row.get("email"), cliente_inmueble, "comprador.c1.email")
     return {
         "id": str(row["id"] or "").strip(),
         "cliente": cliente,
@@ -88498,22 +88540,7 @@ class Handler(BaseHTTPRequestHandler):
                 (empresa_id,),
             ).fetchall()
 
-            entity_total_rows = conn.execute(
-                """
-                SELECT banco AS label, COUNT(*) AS total
-                FROM hipotecas
-                WHERE empresa_id = ?
-                  AND banco IS NOT NULL
-                  AND TRIM(banco) != ''
-                  AND """
-                + signed_closed_expr
-                + """
-                GROUP BY banco
-                ORDER BY COUNT(*) DESC
-                LIMIT 8
-                """,
-                (empresa_id,),
-            ).fetchall()
+            entity_total_rows = collect_hipoteca_dashboard_entity_total_rows(conn, empresa_id)
 
             entity_year_rows = conn.execute(
                 """
@@ -89076,7 +89103,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/hipotecas_firmadas_pdf":
             empresa_id = str(payload.get("empresa_id") or "").strip()
-            selected_year = str(payload.get("year") or "2025").strip() or "2025"
+            selected_year = str(payload.get("year") or "").strip()
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return

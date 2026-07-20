@@ -35,6 +35,7 @@ class JavaScriptSyntaxTests(unittest.TestCase):
         self.assertNotIn('window.open(url, "_blank", "noopener,noreferrer")', app_shared_js)
         self.assertIn('const getHipotecaPrintBrandContext = ({ filters = {}, title = "" } = {}) => {', app_js)
         self.assertIn('const openCrmPrintWindow = ({ title = "Impresión", html = "" } = {}) => {', app_js)
+        self.assertIn('const openHipotecaBdtListadoPrint = async (popup = null) => {', app_js)
         self.assertIn('hipoteca-print-brand-logo', app_js)
         self.assertIn('hipoteca-print-summary', app_js)
         self.assertIn('const downloadHipotecaBdtExcel = async () => {', app_js)

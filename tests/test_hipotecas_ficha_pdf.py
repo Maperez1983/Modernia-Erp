@@ -710,6 +710,98 @@ class HipotecasFichaPdfTests(unittest.TestCase):
             reader = server.PdfReader(BytesIO(pdf_bytes))
             self.assertGreaterEqual(len(reader.pages), 1)
 
+
+    def test_hipotecas_firmadas_pdf_without_year_uses_all_signed_rows(self):
+        row = self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone()
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
+              oficina, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan, comision_modernia,
+              inmobiliaria_compra, asesor, estado, anio, cliente_inmueble_json, hipoteca_detalle_json, liquidacion_json,
+              created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            """,
+            (
+                "h2",
+                "e1",
+                "Luis López",
+                "c1",
+                "BBVA",
+                220000,
+                175000,
+                79.54,
+                45000,
+                2800,
+                "Modernia Norte",
+                "2025-03-10",
+                "Sí",
+                "Compra",
+                "2025-04-19",
+                550,
+                550,
+                1600,
+                "Inmo Norte",
+                "María",
+                "Firmada",
+                2025,
+                row["cliente_inmueble_json"],
+                row["hipoteca_detalle_json"],
+                row["liquidacion_json"],
+                "2026-06-19",
+                "2026-06-19",
+            ),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
+              oficina, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan, comision_modernia,
+              inmobiliaria_compra, asesor, estado, anio, cliente_inmueble_json, hipoteca_detalle_json, liquidacion_json,
+              created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            """,
+            (
+                "h3",
+                "e1",
+                "No Firmada",
+                "c1",
+                "Sabadell",
+                210000,
+                165000,
+                78.57,
+                45000,
+                2600,
+                "Modernia Este",
+                "2025-02-01",
+                "Sí",
+                "Compra",
+                "2025-02-18",
+                500,
+                500,
+                1500,
+                "Inmo Este",
+                "María",
+                "Estudio",
+                2025,
+                row["cliente_inmueble_json"],
+                row["hipoteca_detalle_json"],
+                row["liquidacion_json"],
+                "2026-06-19",
+                "2026-06-19",
+            ),
+        )
+        self.conn.commit()
+
+        rows_all = server.collect_hipotecas_firmadas_rows(self.conn, "e1", "")
+        self.assertEqual([row["id"] for row in rows_all], ["h1", "h2"])
+        self.assertEqual(server.build_hipotecas_firmadas_pdf_filename(None, count=len(rows_all)), "hipotecas_firmadas_2.pdf")
+        self.assertEqual(server.build_hipotecas_firmadas_pdf_filename("", count=len(rows_all)), "hipotecas_firmadas_2.pdf")
+
     def test_hipotecas_listado_pdf_generates_compact_list_download(self):
         row = self.conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone()
         self.conn.execute(

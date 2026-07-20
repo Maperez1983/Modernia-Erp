@@ -42018,7 +42018,54 @@ const getHipotecaFieldValue = (row, columns, candidates = []) => {
   return "";
 };
 
+const getHipotecaClienteInmuebleDisplayName = (rawJson) => {
+  const text = String(rawJson || "").trim();
+  if (!text) return "";
+  let obj;
+  try {
+    obj = JSON.parse(text);
+  } catch {
+    return "";
+  }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return "";
+
+  const getNested = (path) => {
+    const parts = String(path || "").split(".").map((part) => part.trim()).filter(Boolean);
+    let cursor = obj;
+    for (const key of parts) {
+      if (!cursor || typeof cursor !== "object") return undefined;
+      cursor = cursor[key];
+    }
+    return cursor;
+  };
+
+  const normalizeSource = (value) => {
+    const raw = String(value || "").trim().toLowerCase();
+    if (!raw) return "";
+    if (raw === "c1" || raw === "cliente1" || raw === "1") return "c1";
+    if (raw === "c2" || raw === "cliente2" || raw === "2") return "c2";
+    if (raw === "none" || raw === "ninguno" || raw === "no aplica") return "none";
+    if (raw === "manual") return "manual";
+    return raw;
+  };
+
+  const p1Nombre = String(getNested("prestataria.p1.nombre") || "").trim();
+  const p2Source = normalizeSource(getNested("prestataria.p2.source"));
+  const p2Nombre =
+    p2Source && p2Source !== "none" ? String(getNested("prestataria.p2.nombre") || "").trim() : "";
+  const titulares = [p1Nombre, p2Nombre].map((value) => String(value || "").trim()).filter(Boolean);
+  if (titulares.length) return titulares.join(" + ");
+  const c1 = String(getNested("comprador.c1.nombre") || "").trim();
+  const c2 = String(getNested("comprador.c2.nombre") || "").trim();
+  const fallback = [c1, c2].filter(Boolean);
+  return fallback.length ? fallback.join(" + ") : "";
+};
+
 const getHipotecaDisplayName = (row, columns) => {
+  const clienteJson = getHipotecaClienteInmuebleDisplayName(
+    getHipotecaFieldValue(row, columns, ["cliente_inmueble_json"])
+  );
+  if (clienteJson) return clienteJson;
   const cliente = getHipotecaFieldValue(row, columns, [
     "cliente",
     "tomador",
@@ -42739,7 +42786,7 @@ const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}, br
   `;
 };
 
-const openHipotecaBdtListadoPrint = async () => {
+const openHipotecaBdtListadoPrint = async (popup = null) => {
   let cached = state.hipotecaBdtCache?.data || null;
   if (!cached || !Array.isArray(cached.columns) || !Array.isArray(cached.rows)) {
     await loadHipotecaBdt(true);
@@ -42759,7 +42806,17 @@ const openHipotecaBdtListadoPrint = async () => {
   const html = buildHipotecaListadoPrintHtml(filteredRows, columns, result.filters || filters, {
     title: "Listado de hipotecas",
   });
+  if (popup && !popup.closed && typeof writeCrmPrintWindow === "function") {
+    const written = writeCrmPrintWindow(popup, { title: "Listado de hipotecas", html });
+    if (written) {
+      try {
+        popup.focus();
+      } catch (e) {}
+      return true;
+    }
+  }
   openCrmPrintWindow({ title: "Listado de hipotecas", html });
+  return false;
 };
 
 const renderHipotecaBdtFromCache = () => {
@@ -45563,19 +45620,8 @@ const renderHipotecaBdtCards = ({ columns = [], rows = [] } = {}) => {
   };
 
   const buildTitularesLabel = (row) => {
-    const clienteInmueble = safeParseJsonObject(getValue(row, "cliente_inmueble_json"));
-    const p1Nombre = String(getNestedValue(clienteInmueble, "prestataria.p1.nombre") || "").trim();
-    const p2Source = normalizePrestatariaSource(getNestedValue(clienteInmueble, "prestataria.p2.source"));
-    const p2Nombre =
-      p2Source && p2Source !== "none"
-        ? String(getNestedValue(clienteInmueble, "prestataria.p2.nombre") || "").trim()
-        : "";
-    const titulares = [p1Nombre, p2Nombre].map((v) => String(v || "").trim()).filter(Boolean);
-    if (titulares.length) return titulares.join(" + ");
-    const c1 = String(getNestedValue(clienteInmueble, "comprador.c1.nombre") || "").trim();
-    const c2 = String(getNestedValue(clienteInmueble, "comprador.c2.nombre") || "").trim();
-    const fallback = [c1, c2].filter(Boolean);
-    if (fallback.length) return fallback.join(" + ");
+    const clienteInmuebleLabel = getHipotecaClienteInmuebleDisplayName(getValue(row, "cliente_inmueble_json"));
+    if (clienteInmuebleLabel) return clienteInmuebleLabel;
     return getHipotecaDisplayName(row, columns) || String(getValue(row, "cliente") || "").trim() || "Sin titulares";
   };
 
@@ -90504,14 +90550,24 @@ if (hipotecaBdtListOrder) {
 
 if (hipotecaBdtPrintListado) {
   hipotecaBdtPrintListado.addEventListener("click", async () => {
+    let popup = null;
+    let popupPrinted = false;
     const originalText = hipotecaBdtPrintListado.textContent;
     hipotecaBdtPrintListado.disabled = true;
     hipotecaBdtPrintListado.textContent = "Imprimiendo...";
     try {
-      await openHipotecaBdtListadoPrint();
+      try {
+        popup = window.open("about:blank", "_blank", "noopener");
+      } catch (e) {}
+      popupPrinted = Boolean(await openHipotecaBdtListadoPrint(popup));
     } catch (error) {
       alert(`No se pudo imprimir el listado. ${String(error?.message || error || "").trim() || "Revisa los filtros e inténtalo de nuevo."}`);
     } finally {
+      try {
+        if (!popupPrinted && popup && !popup.closed && popup.location && popup.location.href === "about:blank") {
+          popup.close();
+        }
+      } catch (e) {}
       hipotecaBdtPrintListado.disabled = false;
       hipotecaBdtPrintListado.textContent = originalText;
     }

@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import unittest
 
@@ -6,6 +7,7 @@ from web.server import (
     build_hipotecas_firmadas_excel_workbook,
     build_hipotecas_listado_excel_workbook,
     build_hipoteca_dashboard_entity_rows,
+    collect_hipoteca_dashboard_entity_total_rows,
     build_hipoteca_export_row,
     build_hipoteca_fixed_cost_entries,
     build_hipoteca_accounting_entries,
@@ -687,6 +689,210 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
         self.assertEqual(payload["entity_total_map"]["Entidad Nueva"]["total"], 1)
         self.assertEqual(payload["entity_total_map"]["Banco Santander"]["total"], 9)
         self.assertEqual(payload["entity_year_rows"][0]["label"], "Banco Santander")
+
+    def test_collect_hipoteca_dashboard_entity_total_rows_does_not_truncate_history(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              porcentaje REAL,
+              entrada REAL,
+              comision REAL,
+              oficina TEXT,
+              cliente_id TEXT,
+              fecha_encargo TEXT,
+              encargo TEXT,
+              tipo_hipoteca TEXT,
+              fecha_firma TEXT,
+              cesion REAL,
+              comision_juan REAL,
+              comision_modernia REAL,
+              inmobiliaria_compra TEXT,
+              asesor TEXT,
+              estado TEXT,
+              anio INTEGER,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            """
+        )
+        banks = [
+            "Banco Santander",
+            "Caja Rural de Granada",
+            "Cajamar",
+            "ING",
+            "UCI",
+            "Banco Sabadell",
+            "Unicaja Banco",
+            "Bankinter",
+            "Entidad Nueva",
+        ]
+        for idx, bank in enumerate(banks, start=1):
+            conn.execute(
+                """
+                INSERT INTO hipotecas (
+                  id, empresa_id, cliente, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
+                  oficina, cliente_id, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion,
+                  comision_juan, comision_modernia, inmobiliaria_compra, asesor, estado, anio, created_at, updated_at
+                ) VALUES (
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                """,
+                (
+                    f"h{idx}",
+                    "e1",
+                    f"Cliente {idx}",
+                    bank,
+                    250000 + idx,
+                    200000 + idx,
+                    80,
+                    50000,
+                    3000,
+                    "Oficina Central",
+                    f"c{idx}",
+                    "2026-06-10",
+                    "Sí",
+                    "Compra",
+                    "2026-06-20",
+                    600,
+                    600,
+                    1800,
+                    "Inmo Sur",
+                    "María",
+                    "Firmada",
+                    2026,
+                    "2026-06-20",
+                    "2026-06-20",
+                ),
+            )
+
+        rows = collect_hipoteca_dashboard_entity_total_rows(conn, "e1")
+
+        labels = [row["label"] for row in rows]
+        self.assertEqual(len(labels), len(banks))
+        self.assertIn("Entidad Nueva", labels)
+        self.assertEqual(sum(int(row["total"]) for row in rows), len(banks))
+
+    def test_build_hipoteca_export_row_uses_cliente_inmueble_json_fallbacks(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              porcentaje REAL,
+              entrada REAL,
+              comision REAL,
+              oficina TEXT,
+              cliente_id TEXT,
+              fecha_encargo TEXT,
+              encargo TEXT,
+              tipo_hipoteca TEXT,
+              fecha_firma TEXT,
+              cesion REAL,
+              comision_juan REAL,
+              comision_modernia REAL,
+              inmobiliaria_compra TEXT,
+              asesor TEXT,
+              estado TEXT,
+              anio INTEGER,
+              cliente_inmueble_json TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              nombre TEXT,
+              empresa_id TEXT,
+              nif TEXT,
+              telefono TEXT,
+              email TEXT,
+              direccion TEXT,
+              domicilio TEXT,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO clientes (
+              id, nombre, empresa_id, nif, telefono, email, direccion, domicilio, estado, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "c1",
+                "",
+                "e1",
+                "",
+                "",
+                "",
+                "",
+                "",
+                "Activo",
+                "2026-07-20",
+                "2026-07-20",
+            ),
+        )
+        cliente_inmueble_json = json.dumps(
+            {
+                "inmueble": {"direccion": "Calle JSON 7"},
+                "comprador": {
+                    "c1": {
+                        "nombre": "Cliente JSON",
+                        "nif": "87654321Z",
+                        "telefono": "699888777",
+                        "email": "json@example.com",
+                        "domicilio": "Calle JSON 7",
+                    }
+                },
+            },
+            ensure_ascii=False,
+        )
+        conn.execute(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
+              oficina, cliente_id, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan,
+              comision_modernia, inmobiliaria_compra, asesor, estado, anio, cliente_inmueble_json, created_at, updated_at
+            ) VALUES (
+              'h1', 'e1', '', 'Santander', 180000, 140000, 77.78, 40000, 2500,
+              'Modernia Centro', 'c1', '2026-03-01', 'Sí', 'Compra', '2026-04-10', 625, 500, 1375,
+              'Inmo Uno', 'Asesor Uno', 'Firmada', 2026, ?, '2026-07-20', '2026-07-20'
+            )
+            """,
+            (cliente_inmueble_json,),
+        )
+        row = conn.execute("SELECT * FROM hipotecas WHERE id = 'h1'").fetchone()
+        item = build_hipoteca_export_row(conn, row)
+
+        self.assertEqual(item["cliente"], "Cliente JSON")
+        self.assertEqual(item["cliente_nif"], "87654321Z")
+        self.assertEqual(item["cliente_direccion"], "Calle JSON 7")
+        self.assertEqual(item["cliente_telefono"], "699888777")
+        self.assertEqual(item["cliente_email"], "json@example.com")
+
+        if OPENPYXL_AVAILABLE:
+            wb = build_hipotecas_listado_excel_workbook([item], "2026")
+            detail = wb["Operaciones listado"]
+            self.assertEqual(detail["C2"].value, "Cliente JSON")
+            self.assertEqual(detail["D2"].value, "87654321Z")
+            self.assertEqual(detail["E2"].value, "699888777")
+            self.assertEqual(detail["F2"].value, "json@example.com")
+            self.assertEqual(detail["G2"].value, "Calle JSON 7")
 
 
 if __name__ == "__main__":
