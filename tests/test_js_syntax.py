@@ -15,7 +15,7 @@ class JavaScriptSyntaxTests(unittest.TestCase):
 
         self.assertIn("window.__APP_SHELL_BOOTSTRAP__", index_html)
         self.assertIn("app-auth.js?v=16", index_html)
-        self.assertIn("app.js?v=790", index_html)
+        self.assertIn("app.js?v=791", index_html)
         self.assertNotIn('<script src="app.js?v=790"', index_html)
         self.assertNotIn('<script src="ui-foundation.js?v=5"', index_html)
         self.assertNotIn('<script src="app-routing.js?v=13"', index_html)
