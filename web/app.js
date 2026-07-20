@@ -44698,6 +44698,24 @@ const setupHipotecaPrestamoCuotasAuto = (panel) => {
   panel._hipotecaPrestamoAutoSync();
 };
 
+const resetHipotecaFichaFormState = (panel) => {
+  if (!panel) return;
+  const form = panel.querySelector("#hipotecaFichaForm");
+  if (!form) return;
+  form.querySelectorAll("input, select, textarea").forEach((el) => {
+    if (!el) return;
+    const tag = String(el.tagName || "").toUpperCase();
+    if (tag === "INPUT") {
+      const type = String(el.type || "").toLowerCase();
+      if (type === "checkbox" || type === "radio") {
+        el.checked = false;
+        return;
+      }
+    }
+    el.value = "";
+  });
+};
+
 const fetchHipotecaRowById = async (recordId) => {
   const id = String(recordId || "").trim();
   if (!id) return null;
@@ -45082,16 +45100,7 @@ const openHipotecaFichaDraft = ({ clienteNombre = "" } = {}) => {
   if (meta) meta.textContent = nombre ? `${nombre} · Nueva hipoteca` : "Nueva hipoteca";
   setHipotecaFichaTab("cliente");
 
-  // Reset columnas base.
-  HIPOTECA_FICHA_COLUMN_FIELDS.forEach((field) => {
-    const control = panel.querySelector(`[name="${field}"]`);
-    if (!control || control.disabled) return;
-    if (control.tagName === "SELECT") {
-      control.value = "";
-    } else {
-      control.value = "";
-    }
-  });
+  resetHipotecaFichaFormState(panel);
   const today = new Date().toISOString().slice(0, 10);
   const clienteInput = panel.querySelector('[name="cliente"]');
   if (clienteInput) clienteInput.value = nombre;
@@ -45161,20 +45170,7 @@ const openHipotecaFicha = async (recordId, prefetched = null) => {
   if (!panel) return;
   // Importante: evitar que queden valores “arrastrados” de la ficha anterior si el siguiente
   // registro trae campos vacíos o aún no tiene JSON. Reseteamos el formulario antes de rellenar.
-  try {
-    panel.querySelectorAll("#hipotecaFichaForm input, #hipotecaFichaForm select, #hipotecaFichaForm textarea").forEach((el) => {
-      if (!el || el.disabled) return;
-      const tag = String(el.tagName || "").toUpperCase();
-      if (tag === "INPUT") {
-        const t = String(el.type || "").toLowerCase();
-        if (t === "checkbox" || t === "radio") {
-          el.checked = false;
-          return;
-        }
-      }
-      el.value = "";
-    });
-  } catch (e) {}
+  resetHipotecaFichaFormState(panel);
   panel.dataset.recordId = target;
   const meta = panel.querySelector("#hipotecaFichaMeta");
   if (meta) meta.textContent = "Cargando ficha...";

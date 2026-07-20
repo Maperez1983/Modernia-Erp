@@ -296,6 +296,46 @@ class FrontendInmoScopeTests(unittest.TestCase):
         )
 
 
+class HipotecaFichaResetTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const resetHipotecaFichaFormState =",
+            "const fetchHipotecaRowById = async",
+        )
+        cls.return_names = ["resetHipotecaFichaFormState"]
+
+    def _run(self, body: str) -> None:
+        script = make_factory_script(self.segment, [], self.return_names, "", body)
+        run_node_script(script)
+
+    def test_reset_clears_disabled_controls(self):
+        self._run(
+            dedent(
+                """
+                const controls = [
+                  { tagName: "INPUT", type: "text", value: "cliente viejo", disabled: true },
+                  { tagName: "INPUT", type: "checkbox", checked: true, value: "on", disabled: true },
+                  { tagName: "SELECT", value: "old-option", disabled: true },
+                  { tagName: "TEXTAREA", value: "observaciones antiguas", disabled: true },
+                ];
+                const form = {
+                  querySelectorAll: () => controls,
+                };
+                const panel = {
+                  querySelector: (selector) => (selector === "#hipotecaFichaForm" ? form : null),
+                };
+                const { resetHipotecaFichaFormState } = api;
+                resetHipotecaFichaFormState(panel);
+                assert.strictEqual(controls[0].value, "");
+                assert.strictEqual(controls[1].checked, false);
+                assert.strictEqual(controls[2].value, "");
+                assert.strictEqual(controls[3].value, "");
+                """
+            ),
+        )
+
+
 class InmuebleDetailRefreshTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

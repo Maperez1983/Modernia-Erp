@@ -60,6 +60,12 @@ class JavaScriptSyntaxTests(unittest.TestCase):
         self.assertIn('Fichas de hipotecas', index_html)
         self.assertNotIn('hipotecaBdtPrintFirmadas2026', index_html)
         self.assertNotIn('hipotecaBdtExcelFirmadas2026', index_html)
+        hipoteca_ficha_snippet = app_js[
+            app_js.index("const resetHipotecaFichaFormState =")
+            : app_js.index("const saveHipotecaFicha = async")
+        ]
+        self.assertIn('resetHipotecaFichaFormState(panel);', hipoteca_ficha_snippet)
+        self.assertNotIn('if (!control || control.disabled) return;', hipoteca_ficha_snippet)
 
     def test_app_js_boot_falls_back_without_shared_module_and_prefers_shared_helpers(self):
         node = shutil.which("node")

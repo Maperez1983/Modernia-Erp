@@ -5,6 +5,7 @@ from web.server import (
     OPENPYXL_AVAILABLE,
     build_hipotecas_firmadas_excel_workbook,
     build_hipotecas_listado_excel_workbook,
+    build_hipoteca_export_row,
     build_hipoteca_fixed_cost_entries,
     build_hipoteca_accounting_entries,
     collect_gestoria_renta_card_items,
@@ -425,18 +426,42 @@ class HipotecasDeleteTests(unittest.TestCase):
             CREATE TABLE clientes (
               id TEXT PRIMARY KEY,
               nombre TEXT,
+              empresa_id TEXT,
+              tipo_persona TEXT,
               nif TEXT,
               direccion TEXT,
               telefono TEXT,
+              movil TEXT,
+              otro_telefono TEXT,
               email TEXT,
+              codigo_postal TEXT,
+              poblacion TEXT,
+              provincia TEXT,
+              fecha_nacimiento TEXT,
+              estado TEXT,
               created_at TEXT
             );
-            INSERT INTO clientes (id, nombre, nif, direccion, telefono, email, created_at)
-            VALUES ('c1', 'Cliente Uno', '11111111H', 'Calle Uno', '600000001', 'uno@test.local', '2026-03-25');
-            INSERT INTO clientes (id, nombre, nif, direccion, telefono, email, created_at)
-            VALUES ('c2', 'Cliente Dos', '22222222J', 'Calle Dos', '600000002', 'dos@test.local', '2026-03-25');
-            INSERT INTO clientes (id, nombre, nif, direccion, telefono, email, created_at)
-            VALUES ('c3', 'Cliente Tres', '33333333P', 'Calle Tres', '600000003', 'tres@test.local', '2026-03-25');
+            INSERT INTO clientes (
+              id, nombre, empresa_id, tipo_persona, nif, direccion, telefono, movil, otro_telefono, email,
+              codigo_postal, poblacion, provincia, fecha_nacimiento, estado, created_at
+            ) VALUES (
+              'c1', 'Cliente Uno', 'e1', 'Física', '11111111H', 'Calle Uno', '600000001', '611000001', '622000001',
+              'uno@test.local', '29001', 'Málaga', 'Málaga', '1985-01-15', 'Activo', '2026-03-25'
+            );
+            INSERT INTO clientes (
+              id, nombre, empresa_id, tipo_persona, nif, direccion, telefono, movil, otro_telefono, email,
+              codigo_postal, poblacion, provincia, fecha_nacimiento, estado, created_at
+            ) VALUES (
+              'c2', 'Cliente Dos', 'e1', 'Jurídica', '22222222J', 'Calle Dos', '600000002', '611000002', '622000002',
+              'dos@test.local', '28001', 'Madrid', 'Madrid', '1982-06-20', 'Activo', '2026-03-25'
+            );
+            INSERT INTO clientes (
+              id, nombre, empresa_id, tipo_persona, nif, direccion, telefono, movil, otro_telefono, email,
+              codigo_postal, poblacion, provincia, fecha_nacimiento, estado, created_at
+            ) VALUES (
+              'c3', 'Cliente Tres', 'e1', 'Física', '33333333P', 'Calle Tres', '600000003', '611000003', '622000003',
+              'tres@test.local', '41001', 'Sevilla', 'Sevilla', '1990-09-05', 'Activo', '2026-03-25'
+            );
             INSERT INTO hipotecas (
               id, empresa_id, cliente, cliente_id, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
               oficina, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion, comision_juan, comision_modernia,
@@ -479,6 +504,8 @@ class HipotecasDeleteTests(unittest.TestCase):
             self.assertIn("Hipotecas firmadas", summary["A1"].value)
             self.assertEqual(detail["A2"].value, "2025")
             self.assertEqual(detail["C2"].value, "Cliente Uno")
+            self.assertEqual(rows_2025[0]["cliente_fields"]["movil"], "611000001")
+            self.assertEqual(rows_2025[0]["cliente_fields"]["codigo_postal"], "29001")
             self.assertEqual(summary["B2"].value, "2025")
             self.assertEqual(summary["B3"].value, 1)
             self.assertGreaterEqual(len(getattr(summary, "_images", [])), 1)
@@ -487,17 +514,30 @@ class HipotecasDeleteTests(unittest.TestCase):
 
             listado_rows = collect_hipotecas_export_rows(export_conn, "e1", selected_year="2025")
             self.assertEqual([row["id"] for row in listado_rows], ["h2", "h1"])
-            listado_items = [dict(row) for row in listado_rows]
+            listado_items = [build_hipoteca_export_row(export_conn, row) for row in listado_rows]
             for item in listado_items:
                 item["anio_declarativo"] = str(item.get("anio") or "").strip()
             listado_wb = build_hipotecas_listado_excel_workbook(listado_items, "2025")
             listado_summary = listado_wb["Resumen listado"]
             listado_detail = listado_wb["Operaciones listado"]
+            listado_headers = {cell.value: idx + 1 for idx, cell in enumerate(listado_detail[1]) if cell.value}
 
             self.assertIn("Listado anual", listado_summary["A1"].value)
             self.assertEqual(listado_detail["A2"].value, "2025")
             self.assertEqual(listado_detail["C2"].value, "Cliente Dos")
             self.assertEqual(listado_detail["C3"].value, "Cliente Uno")
+            self.assertIn("Cliente · Tipo persona", listado_headers)
+            self.assertIn("Cliente · Móvil", listado_headers)
+            self.assertIn("Cliente · Código postal", listado_headers)
+            self.assertIn("Cliente · Fecha nacimiento", listado_headers)
+            self.assertEqual(listado_detail.cell(row=2, column=listado_headers["Cliente · Tipo persona"]).value, "Jurídica")
+            self.assertEqual(listado_detail.cell(row=2, column=listado_headers["Cliente · Móvil"]).value, "611000002")
+            self.assertEqual(listado_detail.cell(row=3, column=listado_headers["Cliente · Código postal"]).value, "29001")
+            self.assertEqual(
+                listado_detail.cell(row=3, column=listado_headers["Cliente · Fecha nacimiento"]).value.isoformat(),
+                "1985-01-15",
+            )
+            self.assertGreater(listado_detail.max_column, 24)
             self.assertEqual(listado_summary["B2"].value, "2025")
             self.assertEqual(listado_summary["B3"].value, 2)
             self.assertGreaterEqual(len(getattr(listado_summary, "_images", [])), 1)

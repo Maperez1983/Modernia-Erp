@@ -5458,6 +5458,76 @@ def hipoteca_export_filename_part(value):
     return normalized or "hipoteca"
 
 
+HIPOTECA_CLIENT_EXPORT_SKIP_FIELDS = {
+    "id",
+    "nombre",
+    "nif",
+    "telefono",
+    "email",
+    "direccion",
+}
+
+HIPOTECA_CLIENT_EXPORT_LABELS = {
+    "empresa_id": "Empresa ID",
+    "tipo_persona": "Tipo persona",
+    "movil": "Móvil",
+    "otro_telefono": "Otro teléfono",
+    "codigo_postal": "Código postal",
+    "poblacion": "Población",
+    "provincia": "Provincia",
+    "pais": "País",
+    "fecha_nacimiento": "Fecha nacimiento",
+    "estado": "Estado cliente",
+    "estado_civil": "Estado civil",
+    "profesion": "Profesión",
+    "cargo": "Cargo",
+    "empresa": "Empresa",
+    "observaciones": "Observaciones",
+    "notas": "Notas",
+    "notas_comerciales": "Notas comerciales",
+    "procedencia_canal": "Procedencia canal",
+    "procedencia_detalle": "Procedencia detalle",
+    "procedencia_user_id": "Procedencia usuario ID",
+    "workspace_id": "Workspace ID",
+    "created_at": "Creado",
+    "updated_at": "Actualizado",
+}
+
+
+def _hipoteca_cliente_export_label(field_name):
+    raw = str(field_name or "").strip()
+    if not raw:
+        return "Cliente"
+    label = HIPOTECA_CLIENT_EXPORT_LABELS.get(raw)
+    if label:
+        return f"Cliente · {label}"
+    return f"Cliente · {raw.replace('_', ' ').strip().title()}"
+
+
+def _clean_hipoteca_export_value(value):
+    if isinstance(value, str):
+        return value.strip()
+    if value is None:
+        return ""
+    return value
+
+
+def _build_hipoteca_cliente_fields(conn, cliente_id):
+    cliente_id = str(cliente_id or "").strip()
+    if not cliente_id:
+        return {}
+    cliente_row = conn.execute(
+        "SELECT * FROM clientes WHERE id = ? LIMIT 1",
+        (cliente_id,),
+    ).fetchone()
+    if not cliente_row:
+        return {}
+    cliente_fields = {}
+    for key in cliente_row.keys():
+        cliente_fields[key] = _clean_hipoteca_export_value(cliente_row[key])
+    return cliente_fields
+
+
 def build_hipoteca_export_row(conn, row):
     cliente_id = str(row["cliente_id"] or "").strip()
     cliente = str(row["cliente"] or "").strip()
@@ -5465,22 +5535,16 @@ def build_hipoteca_export_row(conn, row):
     cliente_direccion = ""
     cliente_telefono = ""
     cliente_email = ""
+    cliente_fields = {}
     if cliente_id:
-        cliente_row = conn.execute(
-            """
-            SELECT nombre, nif, direccion, telefono, email
-            FROM clientes
-            WHERE id = ?
-            LIMIT 1
-            """,
-            (cliente_id,),
-        ).fetchone()
+        cliente_fields = _build_hipoteca_cliente_fields(conn, cliente_id)
+        cliente_row = cliente_fields if cliente_fields else None
         if cliente_row:
-            cliente = str(cliente_row["nombre"] or "").strip() or cliente
-            cliente_nif = str(cliente_row["nif"] or "").strip()
-            cliente_direccion = str(cliente_row["direccion"] or "").strip()
-            cliente_telefono = str(cliente_row["telefono"] or "").strip()
-            cliente_email = str(cliente_row["email"] or "").strip()
+            cliente = str(cliente_row.get("nombre") or "").strip() or cliente
+            cliente_nif = str(cliente_row.get("nif") or "").strip()
+            cliente_direccion = str(cliente_row.get("direccion") or "").strip()
+            cliente_telefono = str(cliente_row.get("telefono") or "").strip()
+            cliente_email = str(cliente_row.get("email") or "").strip()
     return {
         "id": str(row["id"] or "").strip(),
         "cliente": cliente,
@@ -5489,6 +5553,7 @@ def build_hipoteca_export_row(conn, row):
         "cliente_direccion": cliente_direccion,
         "cliente_telefono": cliente_telefono,
         "cliente_email": cliente_email,
+        "cliente_fields": cliente_fields,
         "fecha_encargo": str(row["fecha_encargo"] or "").strip(),
         "fecha_firma": str(row["fecha_firma"] or "").strip(),
         "tipo_hipoteca": str(row["tipo_hipoteca"] or "").strip(),
@@ -5708,9 +5773,11 @@ def build_hipotecas_firmadas_excel_workbook(items, selected_year=None, brand_nam
     try:
         from openpyxl.drawing.image import Image as OpenpyxlImage
         from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+        from openpyxl.utils import get_column_letter
     except Exception:
         OpenpyxlImage = None
         Alignment = Border = Font = PatternFill = Side = None
+        get_column_letter = None
 
     def _resolve_excel_logo_path(raw_logo_url=None):
         raw = str(raw_logo_url or "").strip()
@@ -5816,7 +5883,7 @@ def build_hipotecas_firmadas_excel_workbook(items, selected_year=None, brand_nam
         bank_row += 1
 
     detail = wb.create_sheet("Operaciones firmadas")
-    detail_headers = [
+    base_detail_headers = [
         ("Año declarativo", "anio_declarativo"),
         ("Fecha firma", "fecha_firma"),
         ("Cliente", "cliente"),
@@ -5842,9 +5909,44 @@ def build_hipotecas_firmadas_excel_workbook(items, selected_year=None, brand_nam
         ("Estado", "estado"),
         ("ID operación", "id"),
     ]
+    client_field_names = []
+    seen_client_fields = set()
+    for item in items or []:
+        client_fields = item.get("cliente_fields") if isinstance(item, dict) else None
+        if not isinstance(client_fields, dict):
+            continue
+        for field_name in client_fields.keys():
+            raw_field = str(field_name or "").strip()
+            if not raw_field or raw_field in HIPOTECA_CLIENT_EXPORT_SKIP_FIELDS:
+                continue
+            if raw_field in seen_client_fields:
+                continue
+            seen_client_fields.add(raw_field)
+            client_field_names.append(raw_field)
+
+    detail_headers = base_detail_headers + [
+        (_hipoteca_cliente_export_label(field_name), ("cliente_fields", field_name))
+        for field_name in client_field_names
+    ]
+
+    def _detail_value(item, source_key):
+        if isinstance(source_key, tuple) and len(source_key) == 2 and source_key[0] == "cliente_fields":
+            client_fields = item.get("cliente_fields") if isinstance(item, dict) else None
+            if isinstance(client_fields, dict):
+                return client_fields.get(source_key[1], "")
+            return ""
+        if isinstance(item, dict):
+            return item.get(source_key, "")
+        return ""
+
+    def _detail_source_name(source_key):
+        if isinstance(source_key, tuple) and len(source_key) == 2:
+            return str(source_key[1] or "")
+        return str(source_key or "")
+
     detail.append([header for header, _ in detail_headers])
     for item in items:
-        detail.append([item.get(key, "") for _, key in detail_headers])
+        detail.append([_detail_value(item, source_key) for _, source_key in detail_headers])
 
     def style_header_row(sheet, row_idx):
         for cell in sheet[row_idx]:
@@ -5917,14 +6019,35 @@ def build_hipotecas_firmadas_excel_workbook(items, selected_year=None, brand_nam
         summary.cell(row=row_idx, column=8).number_format = '#,##0.00 "€"'
         summary.cell(row=row_idx, column=9).number_format = '#,##0.00 "€"'
 
+    money_source_names = {
+        "importe_hipoteca",
+        "precio",
+        "porcentaje",
+        "entrada",
+        "honorarios",
+        "cesion",
+        "comision_juan",
+        "comision_modernia",
+    }
+    date_source_names = {
+        "fecha_firma",
+        "fecha_encargo",
+        "fecha_nacimiento",
+        "created_at",
+        "updated_at",
+    }
     for row_idx in range(2, detail.max_row + 1):
-        for col_idx in (10, 11, 12, 13, 14, 15, 16, 17):
-            detail.cell(row=row_idx, column=col_idx).number_format = '#,##0.00'
-        for col_idx in (2, 21):
-            parsed = parse_iso_date(detail.cell(row=row_idx, column=col_idx).value)
-            if parsed:
-                detail.cell(row=row_idx, column=col_idx, value=parsed)
-                detail.cell(row=row_idx, column=col_idx).number_format = "DD/MM/YYYY"
+        for col_idx, (_, source_key) in enumerate(detail_headers, start=1):
+            cell = detail.cell(row=row_idx, column=col_idx)
+            source_name = _detail_source_name(source_key)
+            if source_name in money_source_names:
+                cell.number_format = '#,##0.00'
+                continue
+            if source_name in date_source_names or "fecha" in source_name.lower() or source_name.endswith("_at"):
+                parsed = parse_iso_date(cell.value)
+                if parsed:
+                    cell.value = parsed
+                    cell.number_format = "DD/MM/YYYY"
     widths = {
         "A": 16,
         "B": 14,
@@ -5953,13 +6076,18 @@ def build_hipotecas_firmadas_excel_workbook(items, selected_year=None, brand_nam
     }
     for col, width in widths.items():
         detail.column_dimensions[col].width = width
+    if get_column_letter is not None and len(detail_headers) > len(base_detail_headers):
+        for idx, (label, _) in enumerate(detail_headers[len(base_detail_headers):], start=len(base_detail_headers) + 1):
+            col_letter = get_column_letter(idx)
+            detail.column_dimensions[col_letter].width = max(16, min(34, len(str(label)) + 2))
     for col, width in {"A": 22, "B": 14, "C": 18, "D": 18, "F": 24, "G": 12, "H": 18, "I": 12, "J": 18}.items():
         summary.column_dimensions[col].width = width
 
     for sheet in (summary, detail):
         sheet.sheet_view.showGridLines = False
     detail.freeze_panes = "A2"
-    detail.auto_filter.ref = f"A1:X{max(detail.max_row, 1)}"
+    last_col = get_column_letter(detail.max_column) if get_column_letter is not None else "X"
+    detail.auto_filter.ref = f"A1:{last_col}{max(detail.max_row, 1)}"
     return wb
 
 
