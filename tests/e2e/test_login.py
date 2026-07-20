@@ -28,14 +28,14 @@ def test_login_success(page, e2e_app):
     assert "app-routing.js?v=13" in scripts
     assert "app_shared.js?v=1" in scripts
     assert "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" in scripts
-    assert "app.js?v=791" in scripts
+    assert "app.js?v=793" in scripts
 
     resources = page.evaluate(
         """
         () => Array.from(performance.getEntriesByType('resource')).map((entry) => entry.name)
         """
     )
-    assert any("app.js?v=791" in name for name in resources)
+    assert any("app.js?v=793" in name for name in resources)
     assert any("ui-foundation.js?v=5" in name for name in resources)
     assert any("app-routing.js?v=13" in name for name in resources)
     assert any("app_shared.js?v=1" in name for name in resources)

@@ -5963,6 +5963,33 @@ def build_hipotecas_firmadas_excel_workbook(items, selected_year=None, brand_nam
     return wb
 
 
+def build_hipotecas_listado_excel_workbook(items, selected_year=None, brand_name=None, brand_logo_url=None):
+    normalized_items = []
+    for item in items or []:
+        normalized_item = dict(item or {})
+        normalized_item["anio_declarativo"] = str(
+            normalized_item.get("anio_declarativo")
+            or normalized_item.get("anio")
+            or ""
+        ).strip()
+        normalized_items.append(normalized_item)
+    wb = build_hipotecas_firmadas_excel_workbook(
+        normalized_items,
+        selected_year,
+        brand_name=brand_name,
+        brand_logo_url=brand_logo_url,
+    )
+    if wb.sheetnames:
+        summary = wb[wb.sheetnames[0]]
+        summary.title = "Resumen listado"
+        summary["A1"] = f"{str(brand_name or '').strip() or 'Verifika²'} · Listado anual · Hipotecas"
+    if len(wb.sheetnames) > 1:
+        detail = wb[wb.sheetnames[1]]
+        detail.title = "Operaciones listado"
+        detail["A1"] = "Año"
+    return wb
+
+
 _safe_json_object = runtime_security_utils._safe_json_object
 
 
@@ -56706,6 +56733,78 @@ class Handler(BaseHTTPRequestHandler):
                 return
             filename = build_hipotecas_bdt_listado_pdf_filename(filters, count=len(ordered_rows))
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
+            return
+
+        if parsed.path == "/api/hipotecas_listado_excel":
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            raw_ids = payload.get("ids") if isinstance(payload, dict) else None
+            filters = payload.get("filters") if isinstance(payload, dict) and isinstance(payload.get("filters"), dict) else {}
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            if not OPENPYXL_AVAILABLE:
+                json_response(self, {"error": "openpyxl no disponible en servidor"}, status=500)
+                return
+            if isinstance(raw_ids, str):
+                ids = [item.strip() for item in raw_ids.split(",") if item.strip()]
+            elif isinstance(raw_ids, (list, tuple)):
+                ids = [str(item).strip() for item in raw_ids if str(item).strip()]
+            else:
+                ids = []
+            ids = list(dict.fromkeys(ids))
+            if not ids:
+                json_response(self, {"error": "ids requeridos"}, status=400)
+                return
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM hipotecas
+                WHERE empresa_id = ?
+                ORDER BY COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), updated_at, created_at) DESC
+                """,
+                (empresa_id,),
+            ).fetchall()
+            by_id = {str(row["id"] or "").strip(): row for row in rows if str(row["id"] or "").strip()}
+            ordered_rows = [by_id[record_id] for record_id in ids if record_id in by_id]
+            if not ordered_rows:
+                json_response(self, {"error": "No se encontraron hipotecas para los ids indicados"}, status=404)
+                return
+            try:
+                items = [build_hipoteca_export_row(conn, row) for row in ordered_rows]
+                year_for_filename = str(payload.get("year") or filters.get("year") or "").strip()
+                company_row = None
+                try:
+                    company_row = conn.execute(
+                        "SELECT nombre, logo_url FROM empresas WHERE id = ? LIMIT 1",
+                        (empresa_id,),
+                    ).fetchone()
+                except Exception:
+                    company_row = None
+                company_name = str(row_value(company_row, "nombre") or "").strip() if company_row else ""
+                company_logo_url = str(row_value(company_row, "logo_url") or "").strip() if company_row else ""
+                wb = build_hipotecas_listado_excel_workbook(
+                    items,
+                    year_for_filename,
+                    brand_name=company_name,
+                    brand_logo_url=company_logo_url,
+                )
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo generar el Excel", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
+            output = BytesIO()
+            wb.save(output)
+            content = output.getvalue()
+            year_suffix = year_for_filename if re.fullmatch(r"\d{4}", year_for_filename) else "historico"
+            filename = f'hipotecas_listado_{year_suffix}_{datetime.now().strftime("%Y%m%d_%H%M")}.xlsx'
+            self.send_response(200)
+            self.send_header(
+                "Content-Type",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+            self.end_headers()
+            self.wfile.write(content)
             return
 
         if parsed.path == "/api/hipotecas_export_pdf":

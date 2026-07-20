@@ -25,7 +25,7 @@ def test_initial_load(page, e2e_app):
         () => Array.from(performance.getEntriesByType('resource')).map((entry) => entry.name)
         """
     )
-    assert not any("app.js?v=791" in name for name in resources)
+    assert not any("app.js?v=793" in name for name in resources)
     assert not any("ui-foundation.js?v=5" in name for name in resources)
     assert not any("app-routing.js?v=13" in name for name in resources)
     assert not any("app_shared.js?v=1" in name for name in resources)

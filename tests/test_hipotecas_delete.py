@@ -4,10 +4,12 @@ import unittest
 from web.server import (
     OPENPYXL_AVAILABLE,
     build_hipotecas_firmadas_excel_workbook,
+    build_hipotecas_listado_excel_workbook,
     build_hipoteca_fixed_cost_entries,
     build_hipoteca_accounting_entries,
     collect_gestoria_renta_card_items,
     compute_gestoria_dashboard_segmentacion_trabajos,
+    collect_hipotecas_export_rows,
     collect_hipotecas_firmadas_export_rows,
     delete_gestoria_contabilidad_record,
     delete_hipoteca_record,
@@ -482,6 +484,25 @@ class HipotecasDeleteTests(unittest.TestCase):
             self.assertGreaterEqual(len(getattr(summary, "_images", [])), 1)
             self.assertFalse(summary.sheet_view.showGridLines)
             self.assertFalse(detail.sheet_view.showGridLines)
+
+            listado_rows = collect_hipotecas_export_rows(export_conn, "e1", selected_year="2025")
+            self.assertEqual([row["id"] for row in listado_rows], ["h2", "h1"])
+            listado_items = [dict(row) for row in listado_rows]
+            for item in listado_items:
+                item["anio_declarativo"] = str(item.get("anio") or "").strip()
+            listado_wb = build_hipotecas_listado_excel_workbook(listado_items, "2025")
+            listado_summary = listado_wb["Resumen listado"]
+            listado_detail = listado_wb["Operaciones listado"]
+
+            self.assertIn("Listado anual", listado_summary["A1"].value)
+            self.assertEqual(listado_detail["A2"].value, "2025")
+            self.assertEqual(listado_detail["C2"].value, "Cliente Dos")
+            self.assertEqual(listado_detail["C3"].value, "Cliente Uno")
+            self.assertEqual(listado_summary["B2"].value, "2025")
+            self.assertEqual(listado_summary["B3"].value, 2)
+            self.assertGreaterEqual(len(getattr(listado_summary, "_images", [])), 1)
+            self.assertFalse(listado_summary.sheet_view.showGridLines)
+            self.assertFalse(listado_detail.sheet_view.showGridLines)
         finally:
             export_conn.close()
 
