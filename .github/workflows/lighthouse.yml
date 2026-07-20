@@ -60,7 +60,7 @@ jobs:
 
       - name: Upload Lighthouse artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lighthouse-results
           path: ${{ env.LHCI_TMPDIR }}/lighthouse-results
@@ -74,7 +74,7 @@ jobs:
 
       - name: Upload Lighthouse diagnostics
         if: always() && steps.lighthouse-ci.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lighthouse-diagnostics
           path: |
@@ -151,7 +151,7 @@ jobs:
 
       - name: Upload FD inheritance diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fd-inheritance-diagnostics
           path: |
@@ -279,7 +279,7 @@ jobs:
 
       - name: Upload Browser matrix diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: browser-matrix-diagnostics
           path: |
