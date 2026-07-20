@@ -4107,6 +4107,8 @@ const hipotecaBdtFirmadasYear = document.getElementById("hipotecaBdtFirmadasYear
 const hipotecaBdtPrintListado = document.getElementById("hipotecaBdtPrintListado");
 const hipotecaBdtPrintFichas = document.getElementById("hipotecaBdtPrintFichas");
 const hipotecaBdtPrintFirmadas = document.getElementById("hipotecaBdtPrintFirmadas");
+const hipotecaBdtPrintFirmadas2026 = document.getElementById("hipotecaBdtPrintFirmadas2026");
+const hipotecaBdtExcelFirmadas2026 = document.getElementById("hipotecaBdtExcelFirmadas2026");
 const hipotecaBdtVincularSelect = document.getElementById("hipotecaBdtVincularSelect");
 const hipotecaBdtVincularBtn = document.getElementById("hipotecaBdtVincularBtn");
 const hipotecaBdtVincularStatus = document.getElementById("hipotecaBdtVincularStatus");
@@ -42677,6 +42679,39 @@ const openHipotecaBdtListadoPrint = async () => {
   openCrmPrintWindow({ title: "Listado de hipotecas", html });
 };
 
+const openHipotecaFirmadasListadoPrint = async (selectedYear = "2026") => {
+  let popup = null;
+  try {
+    popup = window.open("", "_blank", "noopener,noreferrer");
+  } catch (e) {}
+  let cached = state.hipotecaBdtCache?.data || null;
+  if (!cached || !Array.isArray(cached.columns) || !Array.isArray(cached.rows)) {
+    await loadHipotecaBdt(true);
+    cached = state.hipotecaBdtCache?.data || null;
+  }
+  const columns = Array.isArray(cached?.columns) ? cached.columns : [];
+  const rows = Array.isArray(cached?.rows) ? cached.rows : [];
+  const filters = getHipotecaBdtListadoFilters();
+  const year = String(selectedYear || "").trim();
+  const result = filterHipotecaBdtRows(
+    rows,
+    columns,
+    filters.query,
+    { year, estado: "Firmada", order: filters.order },
+    { limit: Infinity }
+  );
+  const filteredRows = Array.isArray(result.filtered) ? result.filtered.filter((row) => isHipotecaSignedForExport(row, columns)) : [];
+  const html = buildHipotecaListadoPrintHtml(filteredRows, columns, result.filters || { ...filters, year, estado: "Firmada" });
+  if (popup && !popup.closed) {
+    const written = writeCrmPrintWindow(popup, { title: `Listado de hipotecas firmadas ${year || ""}`.trim(), html });
+    if (written) return;
+    try {
+      popup.close();
+    } catch (e) {}
+  }
+  openCrmPrintWindow({ title: `Listado de hipotecas firmadas ${year || ""}`.trim(), html });
+};
+
 const renderHipotecaBdtFromCache = () => {
   const cached = state.hipotecaBdtCache?.data || {};
   const columns = Array.isArray(cached.columns) ? cached.columns : [];
@@ -44766,12 +44801,12 @@ const downloadHipotecaBdtPdf = async (mode = "listado", popup = null) => {
   );
 };
 
-const downloadHipotecasFirmadasExcel = () => {
+const downloadHipotecasFirmadasExcel = (yearOverride = "") => {
   const empresa = resolveCrmFinEmpresa();
   const empresaId = resolveLegacyEmpresaId(empresa);
   if (!empresaId) return;
   const params = new URLSearchParams({ empresa_id: empresaId });
-  const year = String(hipotecaBdtExportYear?.value || "").trim();
+  const year = String(yearOverride || hipotecaBdtExportYear?.value || "").trim();
   if (year) params.set("year", year);
   const url = `/api/hipotecas_firmadas_excel?${params.toString()}`;
   window.location.href = url;
@@ -90422,6 +90457,37 @@ if (hipotecaBdtPrintFirmadas) {
       hipotecaBdtPrintFirmadas.disabled = false;
       hipotecaBdtPrintFirmadas.textContent = originalText;
     }
+  });
+}
+
+if (hipotecaBdtPrintFirmadas2026) {
+  hipotecaBdtPrintFirmadas2026.addEventListener("click", async () => {
+    let popup = null;
+    const originalText = hipotecaBdtPrintFirmadas2026.textContent;
+    hipotecaBdtPrintFirmadas2026.disabled = true;
+    hipotecaBdtPrintFirmadas2026.textContent = "Generando...";
+    try {
+      popup = window.open("", "_blank", "noopener");
+    } catch (e) {}
+    try {
+      await openHipotecaFirmadasListadoPrint("2026");
+    } catch (error) {
+      alert(`No se pudo imprimir el listado de firmadas 2026. ${String(error?.message || error || "").trim() || "Revisa los filtros e inténtalo de nuevo."}`);
+    } finally {
+      try {
+        if (popup && !popup.closed && popup.location && popup.location.href === "about:blank") {
+          popup.close();
+        }
+      } catch (e) {}
+      hipotecaBdtPrintFirmadas2026.disabled = false;
+      hipotecaBdtPrintFirmadas2026.textContent = originalText;
+    }
+  });
+}
+
+if (hipotecaBdtExcelFirmadas2026) {
+  hipotecaBdtExcelFirmadas2026.addEventListener("click", () => {
+    downloadHipotecasFirmadasExcel("2026");
   });
 }
 

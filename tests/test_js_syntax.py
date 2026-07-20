@@ -239,6 +239,11 @@ return {{
         for label in ("Fecha de firma", "Nombre cliente", "Banco", "Importe de hipoteca", "Comisión cobrada"):
             self.assertIn(label, app_js)
         self.assertIn("openHipotecaBdtListadoPrint", app_js)
+        self.assertIn("openHipotecaFirmadasListadoPrint", app_js)
         self.assertIn("writeCrmPrintWindow", app_js)
         self.assertIn('id="hipotecaBdtPrintListado"', index_html)
         self.assertIn(">Imprimir listado<", index_html)
+        self.assertIn('id="hipotecaBdtPrintFirmadas2026"', index_html)
+        self.assertIn('PDF firmadas 2026', index_html)
+        self.assertIn('id="hipotecaBdtExcelFirmadas2026"', index_html)
+        self.assertIn('Excel firmadas 2026', index_html)
