@@ -5478,8 +5478,9 @@ def build_hipoteca_dashboard_entity_rows(entity_total_rows, entity_year_rows):
     }
 
 
-def resolve_hipoteca_contabilidad_link(conn, hipoteca_id):
+def resolve_hipoteca_contabilidad_link(conn, hipoteca_id, empresa_id=""):
     hipoteca_id = str(hipoteca_id or "").strip()
+    empresa_id = str(empresa_id or "").strip()
     if not hipoteca_id:
         return {"cliente": "", "banco": "", "fecha_firma": "", "cliente_id": None}
     try:
@@ -5499,10 +5500,19 @@ def resolve_hipoteca_contabilidad_link(conn, hipoteca_id):
     cliente_nombre = str(row["cliente"] or "").strip()
     cliente_id = str(row["cliente_id"] or "").strip() or None if "cliente_id" in row.keys() else None
     if not cliente_id and cliente_nombre:
-        cliente_row = conn.execute(
-            "SELECT id FROM clientes WHERE UPPER(COALESCE(nombre, '')) = UPPER(?) ORDER BY created_at DESC LIMIT 1",
-            (cliente_nombre,),
-        ).fetchone()
+        cliente_row = None
+        if empresa_id:
+            cliente_row = conn.execute(
+                """
+                SELECT id
+                FROM clientes
+                WHERE UPPER(COALESCE(nombre, '')) = UPPER(?)
+                  AND (COALESCE(empresa_id, '') = '' OR empresa_id = ?)
+                ORDER BY CASE WHEN empresa_id = ? THEN 0 ELSE 1 END, updated_at DESC, created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (cliente_nombre, empresa_id, empresa_id),
+            ).fetchone()
         if cliente_row:
             cliente_id = cliente_row["id"]
     return {
@@ -5616,25 +5626,19 @@ def _build_hipoteca_cliente_fields(conn, cliente_id, cliente_nombre="", empresa_
     ).fetchone() if cliente_id else None
     if not cliente_row:
         cliente_nombre = str(cliente_nombre or "").strip()
-        if cliente_nombre:
-            empresa_id = str(empresa_id or "").strip()
-            if empresa_id:
-                cliente_row = conn.execute(
-                    """
-                    SELECT *
-                    FROM clientes
-                    WHERE UPPER(COALESCE(nombre, '')) = UPPER(?)
-                      AND (COALESCE(empresa_id, '') = '' OR empresa_id = ?)
-                    ORDER BY CASE WHEN empresa_id = ? THEN 0 ELSE 1 END, updated_at DESC, created_at DESC, id DESC
-                    LIMIT 1
-                    """,
-                    (cliente_nombre, empresa_id, empresa_id),
-                ).fetchone()
-            else:
-                cliente_row = conn.execute(
-                    "SELECT * FROM clientes WHERE UPPER(COALESCE(nombre, '')) = UPPER(?) ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1",
-                    (cliente_nombre,),
-                ).fetchone()
+        empresa_id = str(empresa_id or "").strip()
+        if cliente_nombre and empresa_id:
+            cliente_row = conn.execute(
+                """
+                SELECT *
+                FROM clientes
+                WHERE UPPER(COALESCE(nombre, '')) = UPPER(?)
+                  AND (COALESCE(empresa_id, '') = '' OR empresa_id = ?)
+                ORDER BY CASE WHEN empresa_id = ? THEN 0 ELSE 1 END, updated_at DESC, created_at DESC, id DESC
+                LIMIT 1
+                """,
+                (cliente_nombre, empresa_id, empresa_id),
+            ).fetchone()
     if not cliente_row:
         return {}
     cliente_fields = {}
@@ -7528,7 +7532,7 @@ def sync_hipotecas_contabilidad_entries(conn, empresa_id, now=None):
         if not hipoteca_id:
             continue
         entries = build_hipoteca_accounting_entries(row)
-        link = resolve_hipoteca_contabilidad_link(conn, hipoteca_id)
+        link = resolve_hipoteca_contabilidad_link(conn, hipoteca_id, empresa_id)
         cliente_id = link.get("cliente_id")
         cliente_ids_json = json.dumps([cliente_id], ensure_ascii=False) if cliente_id else None
         for item in entries:
@@ -16406,6 +16410,89 @@ def apply_gestoria_import_lote(conn, lote_id, empresa_id, now, limit=None):
         lote = dict(lote) if lote else None
     return {"applied": applied, "errors": errors, "lote": lote}
 
+
+def resolve_seguros_ocr_empresa_id(payload, conn):
+    empresa_id = str(payload.get("empresa_id") or "").strip()
+    if empresa_id:
+        return empresa_id
+    empresa_nombre = str(payload.get("empresa_nombre") or "").strip()
+    if not empresa_nombre:
+        return ""
+    try:
+        row = conn.execute(
+            "SELECT id FROM empresas WHERE nombre = ? LIMIT 1",
+            (empresa_nombre,),
+        ).fetchone()
+    except Exception:
+        return ""
+    return str(row["id"] or "").strip() if row else ""
+
+
+def resolve_seguros_ocr_cliente_id(conn, empresa_id, nif="", nombre=""):
+    empresa_id = str(empresa_id or "").strip()
+    nif_norm = re.sub(r"\s+", "", str(nif or "").upper().strip())
+    nombre_norm = re.sub(r"\s+", " ", str(nombre or "")).strip().upper()
+    if not nif_norm and not nombre_norm:
+        return None
+    if not empresa_id:
+        return None
+
+    def _select(query, params):
+        try:
+            row = conn.execute(query, params).fetchone()
+        except Exception:
+            return None
+        if row:
+            return row["id"]
+        return None
+
+    def _company_where(alias="c"):
+        return (
+            f"""
+              AND (
+                {alias}.empresa_id = ?
+                OR ce.id IS NOT NULL
+                OR COALESCE(TRIM({alias}.empresa_id), '') = ''
+              )
+            """,
+            [empresa_id],
+        )
+
+    company_clause, company_params = _company_where("c")
+    if nif_norm:
+        query = f"""
+            SELECT c.id, c.empresa_id, c.updated_at, c.created_at
+            FROM clientes c
+            LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id AND ce.empresa_id = ?
+            WHERE REPLACE(REPLACE(REPLACE(UPPER(c.nif), ' ', ''), '-', ''), '.', '') = ?
+            {company_clause}
+            ORDER BY CASE WHEN c.empresa_id = ? THEN 0 ELSE 1 END,
+                     c.updated_at DESC, c.created_at DESC, c.id DESC
+            LIMIT 1
+        """
+        params = [empresa_id, nif_norm, *company_params, empresa_id]
+        found = _select(query, params)
+        if found:
+            return found
+
+    if nombre_norm:
+        query = f"""
+            SELECT c.id, c.empresa_id, c.updated_at, c.created_at
+            FROM clientes c
+            LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id AND ce.empresa_id = ?
+            WHERE TRIM(UPPER(c.nombre)) = ?
+            {company_clause}
+            ORDER BY CASE WHEN c.empresa_id = ? THEN 0 ELSE 1 END,
+                     c.updated_at DESC, c.created_at DESC, c.id DESC
+            LIMIT 1
+        """
+        params = [empresa_id, nombre_norm, *company_params, empresa_id]
+        found = _select(query, params)
+        if found:
+            return found
+    return None
+
+
 def process_seguros_ocr(payload, conn, *, session=None):
     raw_bytes, mime, payload_hint = decode_seguros_payload(payload, conn=conn, session=session)
     fast_mode = str(payload.get("fast_mode") or "").strip().lower() in ("1", "true", "yes", "on")
@@ -16422,6 +16509,7 @@ def process_seguros_ocr(payload, conn, *, session=None):
         ]
     ).strip()
     hinted_company = detect_company_from_metadata(source_hint)
+    empresa_id = resolve_seguros_ocr_empresa_id(payload, conn)
     required_keys = ("tomador", "poliza_numero", "compania", "fecha_efecto")
     ai_used = False
     ai_error = ""
@@ -16719,24 +16807,9 @@ def process_seguros_ocr(payload, conn, *, session=None):
         tomador = (fields.get("tomador") or "").strip()
         nif = (fields.get("nif") or fields.get("dni") or "").strip()
         if tomador or nif:
-            if nif:
-                nif_norm = re.sub(r"\s+", "", nif).upper()
-                row = conn.execute(
-                    "SELECT id FROM clientes WHERE REPLACE(UPPER(nif), ' ', '') = ?",
-                    (nif_norm,),
-                ).fetchone()
-                if row:
-                    cliente_id = row["id"]
-                    cliente_match = True
-            if not cliente_match and tomador:
-                nombre_norm = re.sub(r"\s+", " ", tomador).strip().upper()
-                row = conn.execute(
-                    "SELECT id FROM clientes WHERE TRIM(UPPER(nombre)) = ?",
-                    (nombre_norm,),
-                ).fetchone()
-                if row:
-                    cliente_id = row["id"]
-                    cliente_match = True
+            cliente_id = resolve_seguros_ocr_cliente_id(conn, empresa_id, nif=nif, nombre=tomador)
+            if cliente_id:
+                cliente_match = True
         return {
             "fields": fields,
             "text": text,
@@ -16752,6 +16825,66 @@ def process_seguros_ocr(payload, conn, *, session=None):
     finally:
         if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+
+def resolve_gestoria_factura_cliente_id(conn, empresa_id, nif="", nombre=""):
+    empresa_id = str(empresa_id or "").strip()
+    nif_norm = re.sub(r"\s+", "", str(nif or "").upper().strip())
+    nombre_norm = re.sub(r"\s+", " ", str(nombre or "")).strip()
+    if not nif_norm and not nombre_norm:
+        return None
+    if not empresa_id:
+        return None
+
+    def _select(query, params):
+        try:
+            row = conn.execute(query, params).fetchone()
+        except Exception:
+            row = None
+        if row:
+            try:
+                return str(row["id"] or "").strip() or None
+            except Exception:
+                return str(row[0] or "").strip() or None
+        return None
+
+    if nif_norm and empresa_id:
+        client_id = _select(
+            """
+            SELECT c.id
+            FROM clientes c
+            LEFT JOIN clientes_empresas ce
+              ON ce.cliente_id = c.id
+             AND ce.empresa_id = ?
+            WHERE REPLACE(UPPER(COALESCE(c.nif, '')), ' ', '') = ?
+              AND (c.empresa_id = ? OR ce.id IS NOT NULL OR COALESCE(TRIM(c.empresa_id), '') = '')
+            ORDER BY CASE WHEN c.empresa_id = ? THEN 0 ELSE 1 END, c.updated_at DESC, c.created_at DESC, c.id DESC
+            LIMIT 1
+            """,
+            (empresa_id, nif_norm, empresa_id, empresa_id),
+        )
+        if client_id:
+            return client_id
+
+    if nombre_norm and empresa_id:
+        client_id = _select(
+            """
+            SELECT c.id
+            FROM clientes c
+            LEFT JOIN clientes_empresas ce
+              ON ce.cliente_id = c.id
+             AND ce.empresa_id = ?
+            WHERE TRIM(UPPER(COALESCE(c.nombre, ''))) = ?
+              AND (c.empresa_id = ? OR ce.id IS NOT NULL OR COALESCE(TRIM(c.empresa_id), '') = '')
+            ORDER BY CASE WHEN c.empresa_id = ? THEN 0 ELSE 1 END, c.updated_at DESC, c.created_at DESC, c.id DESC
+            LIMIT 1
+            """,
+            (empresa_id, nombre_norm.upper(), empresa_id, empresa_id),
+        )
+        if client_id:
+            return client_id
+
+    return None
 
 
 def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, session=None):
@@ -16826,6 +16959,13 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
             third_type,
             now,
         )
+        if not cliente_id:
+            cliente_id = resolve_gestoria_factura_cliente_id(
+                conn,
+                empresa_id,
+                parsed_factura.get("nif"),
+                parsed_factura.get("tercero"),
+            )
         doc_key = (payload.get("s3_key") or "").strip()
         archivo_hash = hashlib.sha256(doc_bytes).hexdigest() if doc_bytes else ""
         dedupe_key = compute_gestoria_factura_dedupe_key(
@@ -23849,6 +23989,13 @@ def parse_asesoramiento_text(text):
 def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None):
     if not tomador:
         return None
+    try:
+        ensure_column(conn, "clientes", "empresa_id", "empresa_id TEXT")
+    except Exception:
+        pass
+    empresa_id = str(empresa_id or "").strip()
+    if not empresa_id:
+        return None
     tomador = normalize_person_name(tomador)
     nif = (nif or "").strip()
     extra = extra or {}
@@ -23857,16 +24004,33 @@ def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None):
     if nif_norm:
         cliente = conn.execute(
             """
-            SELECT id FROM clientes
-            WHERE REPLACE(REPLACE(REPLACE(UPPER(nif), ' ', ''), '-', ''), '.', '') = ?
+            SELECT c.id
+            FROM clientes c
+            LEFT JOIN clientes_empresas ce
+              ON ce.cliente_id = c.id
+             AND ce.empresa_id = ?
+             AND LOWER(TRIM(COALESCE(ce.servicio, ''))) = 'seguros'
+            WHERE REPLACE(REPLACE(REPLACE(UPPER(COALESCE(c.nif, '')), ' ', ''), '-', ''), '.', '') = ?
+              AND (c.empresa_id = ? OR ce.id IS NOT NULL OR COALESCE(TRIM(c.empresa_id), '') = '')
+            LIMIT 1
             """,
-            (nif_norm,),
+            (empresa_id, nif_norm, empresa_id),
         ).fetchone()
     if not cliente:
         nombre_norm = normalize_person_name(tomador).upper()
         cliente = conn.execute(
-            "SELECT id FROM clientes WHERE TRIM(UPPER(nombre)) = ?",
-            (nombre_norm,),
+            """
+            SELECT c.id
+            FROM clientes c
+            LEFT JOIN clientes_empresas ce
+              ON ce.cliente_id = c.id
+             AND ce.empresa_id = ?
+             AND LOWER(TRIM(COALESCE(ce.servicio, ''))) = 'seguros'
+            WHERE TRIM(UPPER(COALESCE(c.nombre, ''))) = ?
+              AND (c.empresa_id = ? OR ce.id IS NOT NULL OR COALESCE(TRIM(c.empresa_id), '') = '')
+            LIMIT 1
+            """,
+            (empresa_id, nombre_norm, empresa_id),
         ).fetchone()
     if not cliente:
         tipo_persona = None
@@ -24037,6 +24201,13 @@ def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=No
     if not nombre and not nif:
         return None
     extra = extra or {}
+    try:
+        ensure_column(conn, "clientes", "empresa_id", "empresa_id TEXT")
+    except Exception:
+        pass
+    empresa_id = str(empresa_id or "").strip()
+    if not empresa_id:
+        return None
     nombre_norm = normalize_person_name(nombre)
     nif_norm = normalize_nif(nif)
     email_norm = normalize_email(extra.get("email"))
@@ -24045,49 +24216,71 @@ def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=No
     if nif_norm:
         cliente = conn.execute(
             """
-            SELECT *
-            FROM clientes
-            WHERE REPLACE(REPLACE(REPLACE(UPPER(COALESCE(nif, '')), ' ', ''), '-', ''), '.', '') = ?
-            ORDER BY updated_at DESC, created_at DESC
+            SELECT c.*
+            FROM clientes c
+            LEFT JOIN clientes_empresas ce
+              ON ce.cliente_id = c.id
+             AND ce.empresa_id = ?
+             AND LOWER(TRIM(COALESCE(ce.servicio, ''))) = 'inmobiliaria'
+            WHERE REPLACE(REPLACE(REPLACE(UPPER(COALESCE(c.nif, '')), ' ', ''), '-', ''), '.', '') = ?
+              AND (c.empresa_id = ? OR ce.id IS NOT NULL OR COALESCE(TRIM(c.empresa_id), '') = '')
+            ORDER BY CASE WHEN c.empresa_id = ? THEN 0 ELSE 1 END, updated_at DESC, created_at DESC, c.id DESC
             LIMIT 1
             """,
-            (nif_norm,),
+            (empresa_id, nif_norm, empresa_id, empresa_id),
         ).fetchone()
     if not cliente and email_norm:
         cliente = conn.execute(
             """
-            SELECT *
-            FROM clientes
-            WHERE LOWER(COALESCE(email, '')) = LOWER(?)
-            ORDER BY updated_at DESC, created_at DESC
+            SELECT c.*
+            FROM clientes c
+            LEFT JOIN clientes_empresas ce
+              ON ce.cliente_id = c.id
+             AND ce.empresa_id = ?
+             AND LOWER(TRIM(COALESCE(ce.servicio, ''))) = 'inmobiliaria'
+            WHERE LOWER(COALESCE(c.email, '')) = LOWER(?)
+              AND (c.empresa_id = ? OR ce.id IS NOT NULL OR COALESCE(TRIM(c.empresa_id), '') = '')
+            ORDER BY CASE WHEN c.empresa_id = ? THEN 0 ELSE 1 END, updated_at DESC, created_at DESC, c.id DESC
             LIMIT 1
             """,
-            (email_norm,),
+            (empresa_id, email_norm, empresa_id, empresa_id),
         ).fetchone()
     if not cliente and telefono_norm:
         phone_digits = re.sub(r"\D+", "", telefono_norm)
         if phone_digits:
             cliente = conn.execute(
                 """
-                SELECT *
-                FROM clientes
-                WHERE REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(telefono, ''), ' ', ''), '-', ''), '.', ''), '+', '') = ?
-                   OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(movil, ''), ' ', ''), '-', ''), '.', ''), '+', '') = ?
-                ORDER BY updated_at DESC, created_at DESC
+                SELECT c.*
+                FROM clientes c
+                LEFT JOIN clientes_empresas ce
+                  ON ce.cliente_id = c.id
+                 AND ce.empresa_id = ?
+                 AND LOWER(TRIM(COALESCE(ce.servicio, ''))) = 'inmobiliaria'
+                WHERE (
+                    REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(c.telefono, ''), ' ', ''), '-', ''), '.', ''), '+', '') = ?
+                    OR REPLACE(REPLACE(REPLACE(REPLACE(COALESCE(c.movil, ''), ' ', ''), '-', ''), '.', ''), '+', '') = ?
+                )
+                  AND (c.empresa_id = ? OR ce.id IS NOT NULL OR COALESCE(TRIM(c.empresa_id), '') = '')
+                ORDER BY CASE WHEN c.empresa_id = ? THEN 0 ELSE 1 END, updated_at DESC, created_at DESC, c.id DESC
                 LIMIT 1
                 """,
-                (phone_digits, phone_digits),
+                (empresa_id, phone_digits, phone_digits, empresa_id, empresa_id),
             ).fetchone()
     if not cliente and nombre_norm:
         cliente = conn.execute(
             """
-            SELECT *
-            FROM clientes
-            WHERE TRIM(UPPER(COALESCE(nombre, ''))) = ?
-            ORDER BY updated_at DESC, created_at DESC
+            SELECT c.*
+            FROM clientes c
+            LEFT JOIN clientes_empresas ce
+              ON ce.cliente_id = c.id
+             AND ce.empresa_id = ?
+             AND LOWER(TRIM(COALESCE(ce.servicio, ''))) = 'inmobiliaria'
+            WHERE TRIM(UPPER(COALESCE(c.nombre, ''))) = ?
+              AND (c.empresa_id = ? OR ce.id IS NOT NULL OR COALESCE(TRIM(c.empresa_id), '') = '')
+            ORDER BY CASE WHEN c.empresa_id = ? THEN 0 ELSE 1 END, updated_at DESC, created_at DESC, c.id DESC
             LIMIT 1
             """,
-            (nombre_norm.upper(),),
+            (empresa_id, nombre_norm.upper(), empresa_id, empresa_id),
         ).fetchone()
     if cliente:
         updates = {}
@@ -28110,16 +28303,7 @@ def resolve_inmobiliaria_contact_candidate(conn, empresa_id, payload, *, role_pr
             (demanda_id, empresa_id),
         ).fetchone()
         if not demanda:
-            demanda = conn.execute(
-                """
-                SELECT d.cliente_id, c.nombre, c.nif, c.telefono, c.email
-                FROM demandas d
-                LEFT JOIN clientes c ON c.id = d.cliente_id
-                WHERE d.id = ?
-                LIMIT 1
-                """,
-                (demanda_id,),
-            ).fetchone()
+            return {"cliente_id": None, "nombre": "", "nif": "", "telefono": "", "email": ""}
         if demanda and (demanda["cliente_id"] or demanda["nombre"]):
             return {
                 "cliente_id": demanda["cliente_id"],
@@ -28144,18 +28328,7 @@ def resolve_inmobiliaria_contact_candidate(conn, empresa_id, payload, *, role_pr
             (empresa_id, inmueble_id),
         ).fetchall()
         if not rows:
-            rows = conn.execute(
-                """
-                SELECT DISTINCT d.cliente_id, c.nombre, c.nif, c.telefono, c.email
-                FROM visitas v
-                JOIN demandas d ON d.id = v.demanda_id
-                LEFT JOIN clientes c ON c.id = d.cliente_id
-                WHERE v.inmueble_id = ?
-                  AND d.cliente_id IS NOT NULL
-                ORDER BY v.created_at DESC
-                """,
-                (inmueble_id,),
-            ).fetchall()
+            return {"cliente_id": None, "nombre": "", "nif": "", "telefono": "", "email": ""}
         unique = []
         seen = set()
         for row in rows:
@@ -29373,6 +29546,74 @@ def fetch_demanda_for_empresa(conn, demanda_id, empresa_id):
         "SELECT * FROM demandas WHERE id = ? AND empresa_id = ? LIMIT 1",
         (did, eid),
     ).fetchone()
+
+
+def resolve_cliente_scope_access(conn, cliente_id, *, empresa_id="", empresa_ids=None):
+    cid = str(cliente_id or "").strip()
+    if not cid:
+        return "missing"
+    scoped_ids = [str(eid or "").strip() for eid in (empresa_ids or []) if str(eid or "").strip()]
+    eid = str(empresa_id or "").strip()
+    row = None
+    try:
+        if scoped_ids:
+            placeholders = ",".join(["?"] * len(scoped_ids))
+            row = conn.execute(
+                f"""
+                SELECT c.id
+                FROM clientes c
+                LEFT JOIN clientes_empresas ce
+                  ON ce.cliente_id = c.id
+                 AND ce.empresa_id IN ({placeholders})
+                WHERE c.id = ?
+                  AND (c.empresa_id IN ({placeholders}) OR ce.id IS NOT NULL)
+                LIMIT 1
+                """,
+                [*scoped_ids, cid, *scoped_ids],
+            ).fetchone()
+        elif eid:
+            row = conn.execute(
+                """
+                SELECT c.id
+                FROM clientes c
+                LEFT JOIN clientes_empresas ce
+                  ON ce.cliente_id = c.id
+                 AND ce.empresa_id = ?
+                WHERE c.id = ?
+                  AND (c.empresa_id = ? OR ce.id IS NOT NULL)
+                LIMIT 1
+                """,
+                (eid, cid, eid),
+            ).fetchone()
+        else:
+            return "missing"
+    except Exception:
+        row = None
+    if row:
+        return "ok"
+    try:
+        exists = conn.execute("SELECT id FROM clientes WHERE id = ? LIMIT 1", (cid,)).fetchone()
+    except Exception:
+        exists = None
+    if exists:
+        return "forbidden"
+    return "missing"
+
+
+def resolve_scoped_record_access(conn, record_id, empresa_id, *, table, fetch_fn):
+    rid = str(record_id or "").strip()
+    eid = str(empresa_id or "").strip()
+    if not rid or not eid:
+        return None
+    if fetch_fn(conn, rid, eid):
+        return "ok"
+    try:
+        exists = conn.execute(f"SELECT id FROM {table} WHERE id = ? LIMIT 1", (rid,)).fetchone()
+    except Exception:
+        exists = None
+    if exists:
+        return "forbidden"
+    return "missing"
 
 
 def _inmo_match_text(value):
@@ -34333,11 +34574,13 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
 def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=None):
     if not nombre:
         return None
+    empresa_id = str(empresa_id or "").strip()
+    if not empresa_id:
+        return None
     try:
         ensure_column(conn, "clientes", "empresa_id", "empresa_id TEXT")
     except Exception:
         pass
-    empresa_id = str(empresa_id or "").strip()
     nombre = normalize_person_name(nombre or "")
     nif = normalize_nif(nif or "")
     extra = extra or {}
@@ -39071,6 +39314,311 @@ def resolve_workspace_scope_empresa_ids(conn, workspace_id, *, empresa_id=""):
     except Exception:
         platform_eid = ""
     return [platform_eid] if platform_eid else []
+
+
+def resolve_cliente_lookup_row(conn, nif, *, workspace_id="", empresa_id=""):
+    nif_norm = normalize_nif(nif)
+    if not nif_norm:
+        return None
+    workspace_id = str(workspace_id or "").strip()
+    empresa_id = str(empresa_id or "").strip()
+
+    def _fetch(query, params):
+        try:
+            return conn.execute(query, params).fetchone()
+        except Exception:
+            _rollback_best_effort(conn)
+            return None
+
+    if workspace_id:
+        empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id) or []
+        empresa_ids = [str(eid or "").strip() for eid in empresa_ids if str(eid or "").strip()]
+        if not empresa_ids:
+            return None
+        placeholders = ",".join(["?"] * len(empresa_ids))
+        row = _fetch(
+            f"""
+            SELECT c.id, c.nombre, c.nif, c.telefono, c.email
+            FROM clientes c
+            LEFT JOIN clientes_empresas ce
+              ON ce.cliente_id = c.id
+             AND ce.empresa_id IN ({placeholders})
+            WHERE REPLACE(REPLACE(REPLACE(UPPER(c.nif), ' ', ''), '-', ''), '.', '') = ?
+              AND (
+                c.empresa_id IN ({placeholders})
+                OR ce.id IS NOT NULL
+                OR COALESCE(TRIM(c.empresa_id), '') = ''
+              )
+            ORDER BY CASE WHEN c.empresa_id IN ({placeholders}) THEN 0 ELSE 1 END,
+                     c.updated_at DESC, c.created_at DESC, c.id DESC
+            LIMIT 1
+            """,
+            [*empresa_ids, nif_norm, *empresa_ids, *empresa_ids],
+        )
+        return row
+
+    if empresa_id:
+        return _fetch(
+            """
+            SELECT c.id, c.nombre, c.nif, c.telefono, c.email
+            FROM clientes c
+            LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id AND ce.empresa_id = ?
+            WHERE REPLACE(REPLACE(REPLACE(UPPER(c.nif), ' ', ''), '-', ''), '.', '') = ?
+              AND (
+                c.empresa_id = ?
+                OR ce.id IS NOT NULL
+                OR COALESCE(TRIM(c.empresa_id), '') = ''
+              )
+            ORDER BY CASE WHEN c.empresa_id = ? THEN 0 ELSE 1 END,
+                     c.updated_at DESC, c.created_at DESC, c.id DESC
+            LIMIT 1
+            """,
+            (empresa_id, nif_norm, empresa_id, empresa_id),
+        )
+
+    return _fetch(
+        """
+        SELECT id, nombre, nif, telefono, email
+        FROM clientes
+        WHERE REPLACE(REPLACE(REPLACE(UPPER(nif), ' ', ''), '-', ''), '.', '') = ?
+        """,
+        (nif_norm,),
+    )
+
+
+def resolve_cliente_duplicate_id(conn, nombre="", nif="", *, workspace_id="", empresa_id=""):
+    workspace_id = str(workspace_id or "").strip()
+    empresa_id = str(empresa_id or "").strip()
+    nif_norm = normalize_nif(nif)
+    nombre_norm = re.sub(r"\s+", " ", str(nombre or "")).strip().upper()
+    if not nif_norm and not nombre_norm:
+        return None
+
+    def _select(query, params):
+        try:
+            row = conn.execute(query, params).fetchone()
+        except Exception:
+            _rollback_best_effort(conn)
+            return None
+        if row:
+            try:
+                return str(row["id"] or "").strip() or None
+            except Exception:
+                return str(row[0] or "").strip() or None
+        return None
+
+    def _scope_empresa_ids():
+        if not workspace_id:
+            return []
+        ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id) or []
+        return [str(eid or "").strip() for eid in ids if str(eid or "").strip()]
+
+    company_ids = _scope_empresa_ids()
+    if company_ids:
+        placeholders = ",".join(["?"] * len(company_ids))
+        if nif_norm:
+            found = _select(
+                f"""
+                SELECT c.id
+                FROM clientes c
+                LEFT JOIN clientes_empresas ce
+                  ON ce.cliente_id = c.id
+                 AND ce.empresa_id IN ({placeholders})
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(COALESCE(c.nif, '')), ' ', ''), '-', ''), '.', '') = ?
+                  AND (
+                    c.empresa_id IN ({placeholders})
+                    OR ce.id IS NOT NULL
+                    OR COALESCE(TRIM(c.empresa_id), '') = ''
+                  )
+                ORDER BY CASE WHEN c.empresa_id IN ({placeholders}) THEN 0 ELSE 1 END,
+                         c.updated_at DESC, c.created_at DESC, c.id DESC
+                LIMIT 1
+                """,
+                [*company_ids, nif_norm, *company_ids, *company_ids],
+            )
+            if found:
+                return found
+        if nombre_norm:
+            found = _select(
+                f"""
+                SELECT c.id
+                FROM clientes c
+                LEFT JOIN clientes_empresas ce
+                  ON ce.cliente_id = c.id
+                 AND ce.empresa_id IN ({placeholders})
+                WHERE TRIM(UPPER(COALESCE(c.nombre, ''))) = ?
+                  AND (
+                    c.empresa_id IN ({placeholders})
+                    OR ce.id IS NOT NULL
+                    OR COALESCE(TRIM(c.empresa_id), '') = ''
+                  )
+                ORDER BY CASE WHEN c.empresa_id IN ({placeholders}) THEN 0 ELSE 1 END,
+                         c.updated_at DESC, c.created_at DESC, c.id DESC
+                LIMIT 1
+                """,
+                [*company_ids, nombre_norm, *company_ids, *company_ids],
+            )
+            if found:
+                return found
+        return None
+
+    if empresa_id:
+        if nif_norm:
+            found = _select(
+                """
+                SELECT c.id
+                FROM clientes c
+                LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id AND ce.empresa_id = ?
+                WHERE REPLACE(REPLACE(REPLACE(UPPER(COALESCE(c.nif, '')), ' ', ''), '-', ''), '.', '') = ?
+                  AND (
+                    c.empresa_id = ?
+                    OR ce.id IS NOT NULL
+                    OR COALESCE(TRIM(c.empresa_id), '') = ''
+                  )
+                ORDER BY CASE WHEN c.empresa_id = ? THEN 0 ELSE 1 END,
+                         c.updated_at DESC, c.created_at DESC, c.id DESC
+                LIMIT 1
+                """,
+                (empresa_id, nif_norm, empresa_id, empresa_id),
+            )
+            if found:
+                return found
+        if nombre_norm:
+            found = _select(
+                """
+                SELECT c.id
+                FROM clientes c
+                LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id AND ce.empresa_id = ?
+                WHERE TRIM(UPPER(COALESCE(c.nombre, ''))) = ?
+                  AND (
+                    c.empresa_id = ?
+                    OR ce.id IS NOT NULL
+                    OR COALESCE(TRIM(c.empresa_id), '') = ''
+                  )
+                ORDER BY CASE WHEN c.empresa_id = ? THEN 0 ELSE 1 END,
+                         c.updated_at DESC, c.created_at DESC, c.id DESC
+                LIMIT 1
+                """,
+                (empresa_id, nombre_norm, empresa_id, empresa_id),
+            )
+            if found:
+                return found
+        return None
+
+    if nif_norm:
+        found = _select(
+            """
+            SELECT id
+            FROM clientes
+            WHERE REPLACE(REPLACE(REPLACE(UPPER(COALESCE(nif, '')), ' ', ''), '-', ''), '.', '') = ?
+            ORDER BY updated_at DESC, created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (nif_norm,),
+        )
+        if found:
+            return found
+    if nombre_norm:
+        found = _select(
+            """
+            SELECT id
+            FROM clientes
+            WHERE TRIM(UPPER(COALESCE(nombre, ''))) = ?
+            ORDER BY updated_at DESC, created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (nombre_norm,),
+        )
+        if found:
+            return found
+    return None
+
+
+def resolve_clientes_by_nif_rows(conn, nif, *, limit=6, services=None, workspace_id="", empresa_id=""):
+    nif_norm = re.sub(r"[^0-9A-Za-z]", "", str(nif or "").upper().strip())
+    if not nif_norm:
+        return []
+    workspace_id = str(workspace_id or "").strip()
+    empresa_id = str(empresa_id or "").strip()
+    try:
+        limit_val = max(1, min(25, int(limit)))
+    except Exception:
+        limit_val = 6
+    normalized_services = [normalize_service_key(service) for service in (services or []) if normalize_service_key(service)]
+
+    if normalized_services:
+        service_clause, service_values = service_sql_match_clause("ce", normalized_services)
+        where = [service_clause] if service_clause else []
+        values = list(service_values)
+        ce_cols = table_columns(conn, "clientes_empresas") or set()
+        if workspace_id and "workspace_id" in ce_cols:
+            where.append("COALESCE(ce.workspace_id, '') = ?")
+            values.append(workspace_id)
+        elif workspace_id:
+            empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id) or []
+            if empresa_ids:
+                placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                where.append(f"ce.empresa_id IN ({placeholders_ws})")
+                values.extend(empresa_ids)
+            elif empresa_id:
+                where.append("COALESCE(ce.empresa_id, '') = ?")
+                values.append(empresa_id)
+        elif empresa_id:
+            where.append("COALESCE(ce.empresa_id, '') = ?")
+            values.append(empresa_id)
+        where.append("REPLACE(REPLACE(UPPER(COALESCE(c.nif, '')), ' ', ''), '-', '') = ?")
+        values.append(nif_norm)
+        values.append(limit_val)
+        return conn.execute(
+            f"""
+            SELECT c.id, c.nombre, c.nif, c.telefono, c.email
+            FROM clientes c
+            JOIN clientes_empresas ce ON ce.cliente_id = c.id
+            WHERE {' AND '.join(where)}
+            GROUP BY c.id, c.nombre, c.nif, c.telefono, c.email
+            ORDER BY
+              MAX(COALESCE(c.updated_at, c.created_at)) DESC,
+              MAX(c.created_at) DESC
+            LIMIT ?
+            """,
+            values,
+        ).fetchall()
+
+    c_cols = table_columns(conn, "clientes") or set()
+    where = ["REPLACE(REPLACE(UPPER(COALESCE(nif, '')), ' ', ''), '-', '') = ?"]
+    values = [nif_norm]
+    if workspace_id:
+        if "workspace_id" in c_cols:
+            empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id) or []
+            if empresa_ids:
+                placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                where.insert(0, f"(COALESCE(workspace_id, '') = ? OR (COALESCE(workspace_id, '') = '' AND COALESCE(empresa_id, '') IN ({placeholders_ws})))")
+                values[0:0] = [workspace_id, *empresa_ids]
+            else:
+                where.insert(0, "COALESCE(workspace_id, '') = ?")
+                values.insert(0, workspace_id)
+        else:
+            empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id) or []
+            if empresa_ids:
+                placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                where.insert(0, f"COALESCE(empresa_id, '') IN ({placeholders_ws})")
+                values[0:0] = list(empresa_ids)
+            else:
+                return []
+    elif empresa_id and "empresa_id" in c_cols:
+        where.insert(0, "COALESCE(empresa_id, '') = ?")
+        values.insert(0, empresa_id)
+    values.append(limit_val)
+    return conn.execute(
+        f"""
+        SELECT id, nombre, nif, telefono, email
+        FROM clientes
+        WHERE {' AND '.join(where)}
+        ORDER BY updated_at DESC, created_at DESC
+        LIMIT ?
+        """,
+        values,
+    ).fetchall()
 
 
 def build_service_scope_filter(conn, table_name: str, alias: str, workspace_id: str, empresa_id: str):
@@ -44350,24 +44898,71 @@ def ensure_workspace_budget_client(
     fecha_inicio="",
     now=None,
 ):
+    workspace_id = str(workspace_id or "").strip()
+    empresa_id = str(empresa_id or "").strip()
     lookup = re.sub(r"\s+", " ", str(cliente_lookup or "")).strip()
     nif = re.sub(r"\s+", "", str(cliente_nif or "")).upper()
     row = None
+    scope_empresa_ids = []
+    if workspace_id:
+        scope_empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id) or []
+        scope_empresa_ids = [str(eid or "").strip() for eid in scope_empresa_ids if str(eid or "").strip()]
+
+    def _fetch_scoped_row(query, params):
+        try:
+            return conn.execute(query, params).fetchone()
+        except Exception:
+            return None
+
+    def _scoped_row_by_id(target_id):
+        target_id = str(target_id or "").strip()
+        if not target_id:
+            return None
+        if workspace_id:
+            if not scope_empresa_ids:
+                return None
+            placeholders = ",".join(["?"] * len(scope_empresa_ids))
+            return _fetch_scoped_row(
+                f"""
+                SELECT c.id, c.nombre, COALESCE(c.nif, '') AS nif, COALESCE(c.telefono, '') AS telefono, COALESCE(c.email, '') AS email
+                FROM clientes c
+                LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id AND ce.empresa_id IN ({placeholders})
+                WHERE c.id = ?
+                  AND (
+                    c.empresa_id IN ({placeholders})
+                    OR ce.id IS NOT NULL
+                    OR COALESCE(TRIM(c.empresa_id), '') = ''
+                  )
+                LIMIT 1
+                """,
+                [*scope_empresa_ids, target_id, *scope_empresa_ids],
+            )
+        if empresa_id:
+            return _fetch_scoped_row(
+                """
+                SELECT c.id, c.nombre, COALESCE(c.nif, '') AS nif, COALESCE(c.telefono, '') AS telefono, COALESCE(c.email, '') AS email
+                FROM clientes c
+                LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id AND ce.empresa_id = ?
+                WHERE c.id = ?
+                  AND (
+                    c.empresa_id = ?
+                    OR ce.id IS NOT NULL
+                    OR COALESCE(TRIM(c.empresa_id), '') = ''
+                  )
+                LIMIT 1
+                """,
+                (empresa_id, target_id, empresa_id),
+            )
+        return None
+
     if cliente_id:
-        row = conn.execute(
-            "SELECT id, nombre, COALESCE(nif, '') AS nif, COALESCE(telefono, '') AS telefono, COALESCE(email, '') AS email FROM clientes WHERE id = ? LIMIT 1",
-            (cliente_id,),
-        ).fetchone()
+        row = _scoped_row_by_id(cliente_id)
     if not row and nif:
-        row = conn.execute(
-            "SELECT id, nombre, COALESCE(nif, '') AS nif, COALESCE(telefono, '') AS telefono, COALESCE(email, '') AS email FROM clientes WHERE REPLACE(UPPER(COALESCE(nif, '')), ' ', '') = ? LIMIT 1",
-            (nif,),
-        ).fetchone()
+        found_id = resolve_cliente_lookup_row(conn, nif, workspace_id=workspace_id, empresa_id=empresa_id)
+        row = _scoped_row_by_id(found_id)
     if not row and lookup:
-        row = conn.execute(
-            "SELECT id, nombre, COALESCE(nif, '') AS nif, COALESCE(telefono, '') AS telefono, COALESCE(email, '') AS email FROM clientes WHERE TRIM(UPPER(nombre)) = ? LIMIT 1",
-            (lookup.upper(),),
-        ).fetchone()
+        found_id = resolve_cliente_duplicate_id(conn, lookup, "", workspace_id=workspace_id, empresa_id=empresa_id)
+        row = _scoped_row_by_id(found_id)
     if not row and lookup:
         cliente_id = os.urandom(16).hex()
         conn.execute(
@@ -54793,9 +55388,12 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 cliente_id = str(payload_fields.get("cliente_id") or "").strip() or None
                 if cliente_id:
-                    client_row = conn.execute("SELECT id FROM clientes WHERE id = ? LIMIT 1", (cliente_id,)).fetchone()
-                    if not client_row:
+                    cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=empresa_id)
+                    if cliente_access == "missing":
                         json_response(self, {"error": "cliente no encontrado"}, status=404)
+                        return
+                    if cliente_access == "forbidden":
+                        json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
                         return
                 periodo = str(payload_fields.get("periodo") or "").strip() or None
                 tipo_lote = normalize_lookup_text(payload_fields.get("tipo_lote") or payload_fields.get("tipo") or "emitidas")
@@ -61306,12 +61904,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
             cliente_id = str(payload.get("cliente_id") or "").strip()
             if cliente_id:
-                cliente_exists = conn.execute(
-                    "SELECT id FROM clientes WHERE id = ? LIMIT 1",
-                    (cliente_id,),
-                ).fetchone()
-                if not cliente_exists:
+                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=empresa_id)
+                if cliente_access == "missing":
                     json_response(self, {"error": "cliente no encontrado"}, status=404)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
                     return
             serie = (payload.get("serie") or "").strip() or None
             numero = (payload.get("numero") or "").strip() or None
@@ -66298,12 +66896,12 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 cliente_id = str(payload.get("cliente_id") or "").strip() or None
                 if cliente_id:
-                    cliente_exists = conn.execute(
-                        "SELECT id FROM clientes WHERE id = ? LIMIT 1",
-                        (cliente_id,),
-                    ).fetchone()
-                    if not cliente_exists:
+                    cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=str(row["empresa_id"] or "").strip())
+                    if cliente_access == "missing":
                         json_response(self, {"error": "cliente no encontrado"}, status=404)
+                        return
+                    if cliente_access == "forbidden":
+                        json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
                         return
                 conn.execute(
                     """
@@ -66373,7 +66971,7 @@ class Handler(BaseHTTPRequestHandler):
                     conn.commit()
                     json_response(self, {"ok": True, "auto_promoted": True})
                     return
-                hipoteca_link = resolve_hipoteca_contabilidad_link(conn, hipoteca_id)
+                hipoteca_link = resolve_hipoteca_contabilidad_link(conn, hipoteca_id, empresa["id"])
                 if hipoteca_link.get("cliente_id") and not cliente_ids:
                     cliente_ids = [hipoteca_link["cliente_id"]]
                     cliente_id = hipoteca_link["cliente_id"]
@@ -66462,7 +67060,7 @@ class Handler(BaseHTTPRequestHandler):
             if "hipoteca_id" in payload:
                 hipoteca_id = (payload.get("hipoteca_id") or "").strip()
                 if hipoteca_id:
-                    hipoteca_link = resolve_hipoteca_contabilidad_link(conn, hipoteca_id)
+                    hipoteca_link = resolve_hipoteca_contabilidad_link(conn, hipoteca_id, empresa["id"])
                     if hipoteca_link.get("cliente_id") and not cliente_ids:
                         cliente_ids = [hipoteca_link["cliente_id"]]
                         updates.append("cliente_ids_json = ?")
@@ -66548,6 +67146,15 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
+            scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
+            if scope_empresa_id:
+                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
+                if cliente_access == "missing":
+                    json_response(self, {"error": "cliente no encontrado"}, status=404)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                    return
             periodo = payload.get("periodo")
             fecha_inicio = payload.get("fecha_inicio")
             responsable = payload.get("responsable")
@@ -66585,6 +67192,15 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id or not periodo or not isinstance(tareas, list):
                 json_response(self, {"error": "cliente_id, periodo y tareas requeridos"}, status=400)
                 return
+            scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
+            if scope_empresa_id:
+                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
+                if cliente_access == "missing":
+                    json_response(self, {"error": "cliente no encontrado"}, status=404)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                    return
             conn.execute(
                 "DELETE FROM gestoria_conta_tasks WHERE cliente_id = ? AND periodo = ?",
                 (cliente_id, periodo),
@@ -67135,12 +67751,12 @@ class Handler(BaseHTTPRequestHandler):
                 estado_incoming = "Contratada"
             cliente_id = payload.get("cliente_id")
             if cliente_id:
-                exists = conn.execute(
-                    "SELECT id FROM clientes WHERE id = ?",
-                    (cliente_id,),
-                ).fetchone()
-                if not exists:
+                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=empresa["id"] if empresa else "")
+                if cliente_access == "missing":
                     cliente_id = None
+                elif cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                    return
             if not cliente_id:
                 cliente_id = ensure_cliente_for_seguro(
                     conn,
@@ -67834,9 +68450,12 @@ class Handler(BaseHTTPRequestHandler):
             incoming_cliente_id = str(updates.get("cliente_id") or "").strip()
             if "cliente_id" in updates:
                 if incoming_cliente_id:
-                    exists = conn.execute("SELECT id FROM clientes WHERE id = ? LIMIT 1", (incoming_cliente_id,)).fetchone()
-                    if not exists:
+                    cliente_access = resolve_cliente_scope_access(conn, incoming_cliente_id, empresa_id=row_empresa_id or req_empresa_id)
+                    if cliente_access == "missing":
                         json_response(self, {"error": "cliente_id no válido"}, status=400)
+                        return
+                    if cliente_access == "forbidden":
+                        json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
                         return
                     updates["cliente_id"] = incoming_cliente_id
                 else:
@@ -68183,12 +68802,12 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             incoming_cliente_id = updates.get("cliente_id")
             if incoming_cliente_id:
-                cliente_exists = conn.execute(
-                    "SELECT id FROM clientes WHERE id = ?",
-                    (incoming_cliente_id,),
-                ).fetchone()
-                if not cliente_exists:
+                cliente_access = resolve_cliente_scope_access(conn, incoming_cliente_id, empresa_id=current_row["empresa_id"])
+                if cliente_access == "missing":
                     json_response(self, {"error": "cliente_id no válido"}, status=400)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
                     return
             poliza_candidate = updates.get("poliza_numero", current_row["poliza_numero"])
             compania_candidate = updates.get("compania", current_row["compania"])
@@ -68346,12 +68965,12 @@ class Handler(BaseHTTPRequestHandler):
             nuevo_estado = payload.get("nuevo_estado") or "En vigor"
             nuevo_cliente_id = payload.get("cliente_id") or row["cliente_id"]
             if nuevo_cliente_id:
-                cliente_exists = conn.execute(
-                    "SELECT id FROM clientes WHERE id = ?",
-                    (nuevo_cliente_id,),
-                ).fetchone()
-                if not cliente_exists:
+                cliente_access = resolve_cliente_scope_access(conn, nuevo_cliente_id, empresa_id=row["empresa_id"])
+                if cliente_access == "missing":
                     json_response(self, {"error": "cliente_id no válido"}, status=400)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
                     return
             version_grupo = (row["version_grupo"] or row["id"] or "").strip() or row["id"]
             old_policy = row["poliza_numero"]
@@ -68785,6 +69404,13 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id or not empresa_id:
                 json_response(self, {"error": "cliente_id y empresa_id requeridos"}, status=400)
                 return
+            cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=empresa_id)
+            if cliente_access == "missing":
+                json_response(self, {"error": "cliente no encontrado"}, status=404)
+                return
+            if cliente_access == "forbidden":
+                json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                return
             rec_id = os.urandom(16).hex()
             estado = (payload.get("estado") or "abierta").strip()
             fecha_apertura = (payload.get("fecha_apertura") or payload.get("fecha") or now[:10]).strip()
@@ -68896,6 +69522,14 @@ class Handler(BaseHTTPRequestHandler):
                 poliza_numero = poliza_numero or (row["poliza_numero"] or "").strip()
                 compania = compania or (row["compania"] or "").strip()
                 ramo = ramo or canonicalize_ramo(row["ramo"])
+            if cliente_id:
+                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=empresa_id)
+                if cliente_access == "missing":
+                    json_response(self, {"error": "cliente no encontrado"}, status=404)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                    return
             comision_pct = None
             try:
                 if abs(prima_total) > 0.0001 and abs(comision) > 0.0001:
@@ -69172,6 +69806,14 @@ class Handler(BaseHTTPRequestHandler):
                 cliente_id = cliente_id or pol["cliente_id"]
                 compania = compania or (pol["compania"] or "").strip()
                 ramo = ramo or canonicalize_ramo(pol["ramo"])
+            if cliente_id:
+                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=empresa_id)
+                if cliente_access == "missing":
+                    json_response(self, {"error": "cliente no encontrado"}, status=404)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                    return
             fecha_apertura = str(payload.get("fecha_apertura") or fecha_siniestro or now[:10]).strip() or now[:10]
             fecha_cierre = str(payload.get("fecha_cierre") or "").strip() or None
             estado_norm = (estado or "").strip().lower()
@@ -69598,6 +70240,15 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
+            scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
+            if scope_empresa_id:
+                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
+                if cliente_access == "missing":
+                    json_response(self, {"error": "cliente no encontrado"}, status=404)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                    return
             prefs = (
                 "prioridad_precio",
                 "prioridad_compania",
@@ -69793,6 +70444,13 @@ class Handler(BaseHTTPRequestHandler):
                 cliente_id = str(seguro_row["cliente_id"] or "").strip()
             if not empresa_id or not cliente_id:
                 json_response(self, {"error": "empresa_id y cliente_id requeridos (o seguro_id)"}, status=400)
+                return
+            cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=empresa_id)
+            if cliente_access == "missing":
+                json_response(self, {"error": "cliente no encontrado"}, status=404)
+                return
+            if cliente_access == "forbidden":
+                json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
                 return
             actor = (
                 _session_user_label(getattr(self, "auth_session", None) or self._current_session())
@@ -73859,17 +74517,32 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(cliente_ids, list):
                 json_response(self, {"error": "cliente_ids invalido"}, status=400)
                 return
+            scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
+            inmueble = None
+            if scope_empresa_id:
+                inmueble = fetch_inmueble_for_empresa(conn, inmueble_id, scope_empresa_id)
+                if not inmueble:
+                    json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                    return
+            else:
+                inmueble = conn.execute(
+                    "SELECT id, empresa_id FROM inmuebles WHERE id = ? LIMIT 1",
+                    (inmueble_id,),
+                ).fetchone()
+                if not inmueble:
+                    json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                    return
             conn.execute(
                 "DELETE FROM inmueble_propietarios WHERE inmueble_id = ?",
                 (inmueble_id,),
             )
             for cliente_id in cliente_ids:
-                exists = conn.execute(
-                    "SELECT id FROM clientes WHERE id = ?",
-                    (cliente_id,),
-                ).fetchone()
-                if not exists:
+                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=inmueble["empresa_id"])
+                if cliente_access == "missing":
                     continue
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                    return
                 conn.execute(
                     """
                     INSERT INTO inmueble_propietarios (
@@ -74208,18 +74881,13 @@ class Handler(BaseHTTPRequestHandler):
                     return
             cliente_id = payload.get("cliente_id")
             if cliente_id:
-                cliente_row = conn.execute(
-                    "SELECT id FROM clientes WHERE id = ? AND empresa_id = ? LIMIT 1",
-                    (cliente_id, empresa["id"]),
-                ).fetchone()
-                if not cliente_row:
-                    cliente_row = conn.execute(
-                        "SELECT id FROM clientes WHERE id = ? LIMIT 1",
-                        (cliente_id,),
-                    ).fetchone()
-                    if not cliente_row:
-                        json_response(self, {"error": "Cliente no encontrado"}, status=404)
-                        return
+                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=empresa["id"])
+                if cliente_access == "missing":
+                    json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                    return
             if not cliente_id:
                 cliente_id = ensure_cliente_for_inmobiliaria(
                     conn,
@@ -74319,16 +74987,32 @@ class Handler(BaseHTTPRequestHandler):
                     return
             inmueble_id = str(payload.get("inmueble_id") or "").strip()
             demanda_id = str(payload.get("demanda_id") or "").strip()
-            if inmueble_id and not fetch_inmueble_for_empresa(conn, inmueble_id, empresa["id"]):
-                exists = conn.execute("SELECT id FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
-                if not exists:
-                    json_response(self, {"error": "Inmueble no encontrado"}, status=404)
-                    return
-            if demanda_id and not fetch_demanda_for_empresa(conn, demanda_id, empresa["id"]):
-                exists = conn.execute("SELECT id FROM demandas WHERE id = ? LIMIT 1", (demanda_id,)).fetchone()
-                if not exists:
-                    json_response(self, {"error": "Demanda no encontrada"}, status=404)
-                    return
+            inmueble_scope = resolve_scoped_record_access(
+                conn,
+                inmueble_id,
+                empresa["id"],
+                table="inmuebles",
+                fetch_fn=fetch_inmueble_for_empresa,
+            )
+            if inmueble_scope == "missing":
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            if inmueble_scope == "forbidden":
+                json_response(self, {"error": "Inmueble fuera del scope de empresa"}, status=403)
+                return
+            demanda_scope = resolve_scoped_record_access(
+                conn,
+                demanda_id,
+                empresa["id"],
+                table="demandas",
+                fetch_fn=fetch_demanda_for_empresa,
+            )
+            if demanda_scope == "missing":
+                json_response(self, {"error": "Demanda no encontrada"}, status=404)
+                return
+            if demanda_scope == "forbidden":
+                json_response(self, {"error": "Demanda fuera del scope de empresa"}, status=403)
+                return
             v_cols = table_columns(conn, "visitas") or set()
             has_ws = "workspace_id" in v_cols
             cols = [
@@ -74390,22 +75074,18 @@ class Handler(BaseHTTPRequestHandler):
                 if not ok:
                     json_response(self, {"error": err or "No autorizado"}, status=403)
                     return
+            empresa_scope_id = str(empresa["id"] if empresa else "").strip()
             nombre_norm = re.sub(r"\s+", " ", str(nombre)).strip()
             nif = (payload.get("nif") or "").strip()
-            dup = None
-            if nif:
-                nif_norm = re.sub(r"\s+", "", nif).upper()
-                dup = conn.execute(
-                    "SELECT id FROM clientes WHERE REPLACE(UPPER(nif), ' ', '') = ?",
-                    (nif_norm,),
-                ).fetchone()
-            if not dup:
-                dup = conn.execute(
-                    "SELECT id FROM clientes WHERE TRIM(UPPER(nombre)) = ?",
-                    (nombre_norm.upper(),),
-                ).fetchone()
-            if dup:
-                json_response(self, {"error": "Cliente duplicado", "id": dup["id"]}, status=409)
+            dup_id = resolve_cliente_duplicate_id(
+                conn,
+                nombre_norm,
+                nif,
+                workspace_id=workspace_id,
+                empresa_id=empresa_scope_id,
+            )
+            if dup_id:
+                json_response(self, {"error": "Cliente duplicado", "id": dup_id}, status=409)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
             actor_user_id = str(getattr(session, "user_id", "") or "").strip() if session else ""
@@ -74521,13 +75201,6 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
-            cliente_exists = conn.execute(
-                "SELECT id FROM clientes WHERE id = ?",
-                (cliente_id,),
-            ).fetchone()
-            if not cliente_exists:
-                json_response(self, {"error": "Cliente no encontrado"}, status=400)
-                return
             if workspace_id:
                 session = getattr(self, "auth_session", None) or self._current_session()
                 ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
@@ -74540,6 +75213,13 @@ class Handler(BaseHTTPRequestHandler):
             empresa_exists = conn.execute("SELECT id FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
             if not empresa_exists:
                 json_response(self, {"error": "Empresa no encontrada"}, status=400)
+                return
+            cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=empresa_id)
+            if cliente_access == "missing":
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
+            if cliente_access == "forbidden":
+                json_response(self, {"error": "Cliente fuera de la empresa"}, status=403)
                 return
             servicio = (payload.get("servicio") or "").strip()
             if not servicio:
@@ -75103,6 +75783,15 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id or not entry_id or not ejercicio:
                 json_response(self, {"error": "cliente_id, entry_id y ejercicio requeridos"}, status=400)
                 return
+            scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
+            if scope_empresa_id:
+                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
+                if cliente_access == "missing":
+                    json_response(self, {"error": "cliente no encontrado"}, status=404)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                    return
             cg_row = conn.execute(
                 "SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
                 (cliente_id,),
@@ -75973,23 +76662,38 @@ class Handler(BaseHTTPRequestHandler):
             if cliente_id == related_cliente_id:
                 json_response(self, {"error": "Un cliente no puede relacionarse consigo mismo"}, status=400)
                 return
+            scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
             vinculo = str(payload.get("vinculo") or "").strip()
             notas = str(payload.get("notas") or "").strip()
             usar_en_renta = 1 if str(payload.get("usar_en_renta") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
             usar_en_seguros = 1 if str(payload.get("usar_en_seguros") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
             usar_en_inmobiliaria = 1 if str(payload.get("usar_en_inmobiliaria") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
             declaracion_conjunta = 1 if str(payload.get("declaracion_conjunta") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
-            exists = conn.execute(
-                "SELECT id FROM clientes WHERE id = ?",
-                (cliente_id,),
-            ).fetchone()
-            exists_related = conn.execute(
-                "SELECT id FROM clientes WHERE id = ?",
-                (related_cliente_id,),
-            ).fetchone()
-            if not exists or not exists_related:
-                json_response(self, {"error": "Cliente relacionado no válido"}, status=404)
-                return
+            if scope_empresa_id:
+                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
+                related_access = resolve_cliente_scope_access(conn, related_cliente_id, empresa_id=scope_empresa_id)
+                if cliente_access == "missing" or related_access == "missing":
+                    json_response(self, {"error": "Cliente relacionado no válido"}, status=404)
+                    return
+                if cliente_access == "forbidden" or related_access == "forbidden":
+                    json_response(self, {"error": "Cliente fuera de la empresa"}, status=403)
+                    return
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT id, empresa_id
+                    FROM clientes
+                    WHERE id IN (?, ?)
+                    """,
+                    (cliente_id, related_cliente_id),
+                ).fetchall()
+                if len(rows) != 2:
+                    json_response(self, {"error": "Cliente relacionado no válido"}, status=404)
+                    return
+                empresa_ids = {str(row["empresa_id"] or "").strip() for row in rows if str(row["empresa_id"] or "").strip()}
+                if len(empresa_ids) > 1:
+                    json_response(self, {"error": "Cliente fuera de la empresa"}, status=403)
+                    return
             if not relation_id:
                 existing = conn.execute(
                     """
@@ -76788,6 +77492,15 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
+            scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
+            if scope_empresa_id:
+                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
+                if cliente_access == "missing":
+                    json_response(self, {"error": "cliente no encontrado"}, status=404)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                    return
             new_id = os.urandom(16).hex()
             principal = 1 if str(payload.get("principal", "0")) in ("1", "true", "True") else 0
             conn.execute(
@@ -76824,6 +77537,22 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
+            if scope_empresa_id:
+                row = conn.execute(
+                    "SELECT cliente_id FROM cliente_profesional WHERE id = ?",
+                    (record_id,),
+                ).fetchone()
+                if not row:
+                    json_response(self, {"error": "id requerido"}, status=400)
+                    return
+                cliente_access = resolve_cliente_scope_access(conn, row["cliente_id"], empresa_id=scope_empresa_id)
+                if cliente_access == "missing":
+                    json_response(self, {"error": "cliente no encontrado"}, status=404)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                    return
             allowed = ("cnae", "iae", "actividad", "iban", "principal")
             updates = {key: payload.get(key) for key in allowed if key in payload}
             if not updates:
@@ -76856,12 +77585,37 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
+            if scope_empresa_id:
+                row = conn.execute(
+                    "SELECT cliente_id FROM cliente_profesional WHERE id = ?",
+                    (record_id,),
+                ).fetchone()
+                if not row:
+                    json_response(self, {"error": "id requerido"}, status=400)
+                    return
+                cliente_access = resolve_cliente_scope_access(conn, row["cliente_id"], empresa_id=scope_empresa_id)
+                if cliente_access == "missing":
+                    json_response(self, {"error": "cliente no encontrado"}, status=404)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                    return
             conn.execute("DELETE FROM cliente_profesional WHERE id = ?", (record_id,))
         elif parsed.path == "/api/gestoria_modelos":
             cliente_id = payload.get("cliente_id")
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
+            scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
+            if scope_empresa_id:
+                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
+                if cliente_access == "missing":
+                    json_response(self, {"error": "cliente no encontrado"}, status=404)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                    return
             new_id = os.urandom(16).hex()
             conn.execute(
                 """
@@ -76890,6 +77644,22 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
+            if scope_empresa_id:
+                row = conn.execute(
+                    "SELECT cliente_id FROM gestoria_modelos WHERE id = ?",
+                    (record_id,),
+                ).fetchone()
+                if not row:
+                    json_response(self, {"error": "id requerido"}, status=400)
+                    return
+                cliente_access = resolve_cliente_scope_access(conn, row["cliente_id"], empresa_id=scope_empresa_id)
+                if cliente_access == "missing":
+                    json_response(self, {"error": "cliente no encontrado"}, status=404)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                    return
             allowed = ("modelo", "periodicidad", "proxima_fecha", "responsable", "estado", "notas")
             updates = {key: payload.get(key) for key in allowed if key in payload}
             if not updates:
@@ -76907,6 +77677,22 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
+            if scope_empresa_id:
+                row = conn.execute(
+                    "SELECT cliente_id FROM gestoria_modelos WHERE id = ?",
+                    (record_id,),
+                ).fetchone()
+                if not row:
+                    json_response(self, {"error": "id requerido"}, status=400)
+                    return
+                cliente_access = resolve_cliente_scope_access(conn, row["cliente_id"], empresa_id=scope_empresa_id)
+                if cliente_access == "missing":
+                    json_response(self, {"error": "cliente no encontrado"}, status=404)
+                    return
+                if cliente_access == "forbidden":
+                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                    return
             conn.execute("DELETE FROM gestoria_modelos WHERE id = ?", (record_id,))
             audit("gestoria_modelo", record_id, "eliminar", None, payload.get("usuario"))
         elif parsed.path == "/api/hipotecas":
@@ -80266,15 +81052,13 @@ class Handler(BaseHTTPRequestHandler):
             servicio = (params.get("servicio", [""])[0] or "").strip()
             services = parse_services_param(servicio)
             workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
-            nif_norm = normalize_nif(nif)
-            row = conn.execute(
-                """
-                SELECT id, nombre, nif, telefono, email
-                FROM clientes
-                WHERE REPLACE(REPLACE(REPLACE(UPPER(nif), ' ', ''), '-', ''), '.', '') = ?
-                """,
-                (nif_norm,),
-            ).fetchone()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            row = resolve_cliente_lookup_row(
+                conn,
+                nif,
+                workspace_id=workspace_id,
+                empresa_id=empresa_id,
+            )
             if not row:
                 json_response(self, {"found": False})
                 return
@@ -80411,6 +81195,7 @@ class Handler(BaseHTTPRequestHandler):
             servicio = (params.get("servicio", [""])[0] or "").strip()
             services = parse_services_param(servicio)
             workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
             # Multi-servicio: por defecto NO devolvemos clientes globales a usuarios no privilegiados.
             try:
                 session = getattr(self, "auth_session", None) or self._current_session()
@@ -80430,48 +81215,14 @@ class Handler(BaseHTTPRequestHandler):
             if not nif_norm:
                 json_response(self, {"rows": []})
                 return
-            if normalized_services:
-                service_clause, service_values = service_sql_match_clause("ce", normalized_services)
-                where = [service_clause] if service_clause else []
-                values = list(service_values)
-                ce_cols = table_columns(conn, "clientes_empresas") or set()
-                if workspace_id and "workspace_id" in ce_cols:
-                    where.append("COALESCE(ce.workspace_id, '') = ?")
-                    values.append(workspace_id)
-                elif workspace_id:
-                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
-                    if empresa_ids:
-                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                        where.append(f"ce.empresa_id IN ({placeholders_ws})")
-                        values.extend(empresa_ids)
-                where.append("REPLACE(REPLACE(UPPER(COALESCE(c.nif, '')), ' ', ''), '-', '') = ?")
-                values.append(nif_norm)
-                values.append(limit_val)
-                rows = conn.execute(
-                    f"""
-                    SELECT c.id, c.nombre, c.nif, c.telefono, c.email
-                    FROM clientes c
-                    JOIN clientes_empresas ce ON ce.cliente_id = c.id
-                    WHERE {' AND '.join(where)}
-                    GROUP BY c.id, c.nombre, c.nif, c.telefono, c.email
-                    ORDER BY
-                      MAX(COALESCE(c.updated_at, c.created_at)) DESC,
-                      MAX(c.created_at) DESC
-                    LIMIT ?
-                    """,
-                    values,
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT id, nombre, nif, telefono, email
-                    FROM clientes
-                    WHERE REPLACE(REPLACE(UPPER(COALESCE(nif, '')), ' ', ''), '-', '') = ?
-                    ORDER BY updated_at DESC, created_at DESC
-                    LIMIT ?
-                    """,
-                    (nif_norm, limit_val),
-                ).fetchall()
+            rows = resolve_clientes_by_nif_rows(
+                conn,
+                nif_norm,
+                limit=limit_val,
+                services=normalized_services,
+                workspace_id=workspace_id,
+                empresa_id=empresa_id,
+            )
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 

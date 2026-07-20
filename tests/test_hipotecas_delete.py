@@ -11,6 +11,7 @@ from web.server import (
     build_hipoteca_export_row,
     build_hipoteca_fixed_cost_entries,
     build_hipoteca_accounting_entries,
+    _build_hipoteca_cliente_fields,
     collect_gestoria_renta_card_items,
     compute_gestoria_dashboard_segmentacion_trabajos,
     collect_hipotecas_export_rows,
@@ -18,8 +19,11 @@ from web.server import (
     delete_gestoria_contabilidad_record,
     delete_hipoteca_record,
     derive_hipoteca_commissions,
+    ensure_cliente_for_inmobiliaria,
+    ensure_cliente_for_seguro,
     is_gestoria_dashboard_active_state,
     maybe_promote_study_hipoteca_accounting,
+    resolve_inmobiliaria_contact_candidate,
     resolve_hipoteca_contabilidad_link,
     sanitize_renta_entry,
     sync_hipotecas_contabilidad_entries,
@@ -374,13 +378,49 @@ class HipotecasDeleteTests(unittest.TestCase):
             );
             CREATE TABLE clientes (
               id TEXT PRIMARY KEY,
+              empresa_id TEXT,
               nombre TEXT,
-              created_at TEXT
+              created_at TEXT,
+              updated_at TEXT
             );
             INSERT INTO hipotecas (id, empresa_id, cliente, banco, fecha_firma)
             VALUES ('h1', 'e1', 'Cliente Uno', 'Banco Test', '2025-02-10');
-            INSERT INTO clientes (id, nombre, created_at)
-            VALUES ('c1', 'Cliente Uno', '2026-03-24');
+            INSERT INTO clientes (id, empresa_id, nombre, created_at, updated_at)
+            VALUES ('c1', 'e1', 'Cliente Uno', '2026-03-24', '2026-03-24');
+            """
+        )
+        try:
+            link = resolve_hipoteca_contabilidad_link(legacy, "h1", "e1")
+        finally:
+            legacy.close()
+        self.assertEqual(link["cliente"], "Cliente Uno")
+        self.assertEqual(link["banco"], "Banco Test")
+        self.assertEqual(link["fecha_firma"], "2025-02-10")
+        self.assertEqual(link["cliente_id"], "c1")
+
+    def test_resolve_hipoteca_contabilidad_link_requires_empresa_scope_for_name_fallback(self):
+        legacy = sqlite3.connect(":memory:")
+        legacy.row_factory = sqlite3.Row
+        legacy.executescript(
+            """
+            CREATE TABLE hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              banco TEXT,
+              fecha_firma TEXT
+            );
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            INSERT INTO hipotecas (id, empresa_id, cliente, banco, fecha_firma)
+            VALUES ('h1', 'e1', 'Cliente Uno', 'Banco Test', '2025-02-10');
+            INSERT INTO clientes (id, empresa_id, nombre, created_at, updated_at)
+            VALUES ('c1', 'e1', 'Cliente Uno', '2026-03-24', '2026-03-24');
             """
         )
         try:
@@ -390,7 +430,419 @@ class HipotecasDeleteTests(unittest.TestCase):
         self.assertEqual(link["cliente"], "Cliente Uno")
         self.assertEqual(link["banco"], "Banco Test")
         self.assertEqual(link["fecha_firma"], "2025-02-10")
-        self.assertEqual(link["cliente_id"], "c1")
+        self.assertIsNone(link["cliente_id"])
+
+    def test_resolve_hipoteca_contabilidad_link_scopes_name_fallback_by_empresa(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              cliente_id TEXT,
+              banco TEXT,
+              fecha_firma TEXT
+            );
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            INSERT INTO hipotecas (id, empresa_id, cliente, cliente_id, banco, fecha_firma)
+            VALUES ('h1', 'e1', 'Cliente Uno', '', 'Banco Test', '2025-02-10');
+            INSERT INTO clientes (id, empresa_id, nombre, created_at, updated_at)
+            VALUES ('c-other', 'e2', 'Cliente Uno', '2026-03-24', '2026-03-24');
+            INSERT INTO clientes (id, empresa_id, nombre, created_at, updated_at)
+            VALUES ('c-right', 'e1', 'Cliente Uno', '2026-03-25', '2026-03-25');
+            """
+        )
+        try:
+            link = resolve_hipoteca_contabilidad_link(conn, "h1", "e1")
+        finally:
+            conn.close()
+        self.assertEqual(link["cliente"], "Cliente Uno")
+        self.assertEqual(link["banco"], "Banco Test")
+        self.assertEqual(link["fecha_firma"], "2025-02-10")
+        self.assertEqual(link["cliente_id"], "c-right")
+
+    def test_build_hipoteca_cliente_fields_requires_empresa_scope_for_name_fallback(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              telefono TEXT,
+              email TEXT,
+              direccion TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, direccion, created_at, updated_at)
+            VALUES ('c-right', 'e1', 'Cliente Uno', '12345678A', '600000000', 'demo@example.com', 'Calle Demo 1', '2026-03-01', '2026-03-01');
+            """
+        )
+        try:
+            fields = _build_hipoteca_cliente_fields(conn, "", "Cliente Uno", "")
+            scoped = _build_hipoteca_cliente_fields(conn, "", "Cliente Uno", "e1")
+        finally:
+            conn.close()
+        self.assertEqual(fields, {})
+        self.assertEqual(scoped.get("id"), "c-right")
+        self.assertEqual(scoped.get("nombre"), "Cliente Uno")
+
+    def test_ensure_cliente_for_inmobiliaria_scopes_name_fallback_by_empresa(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              telefono TEXT,
+              movil TEXT,
+              otro_telefono TEXT,
+              email TEXT,
+              fecha_nacimiento TEXT,
+              direccion TEXT,
+              procedencia_canal TEXT,
+              procedencia_detalle TEXT,
+              procedencia_user_id TEXT,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              estado TEXT,
+              fecha_inicio TEXT,
+              fecha_fin TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, estado, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("c-other", "e2", "Cliente Inmo", "99999999Z", "699000000", "other@example.com", "Activo", "2026-01-01", "2026-01-01"),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, estado, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("c-right", "e1", "Cliente Inmo", "12345678A", "611222333", "right@example.com", "Activo", "2026-02-01", "2026-02-01"),
+        )
+
+        cliente_id = ensure_cliente_for_inmobiliaria(
+            conn,
+            "e1",
+            "Cliente Inmo",
+            "",
+            "2026-03-01T10:00:00+00:00",
+            {"telefono": "611222333", "email": "right@example.com"},
+        )
+        self.assertEqual(cliente_id, "c-right")
+        link = conn.execute(
+            """
+            SELECT id
+            FROM clientes_empresas
+            WHERE cliente_id = ? AND empresa_id = ? AND LOWER(servicio) = 'inmobiliaria'
+            """,
+            ("c-right", "e1"),
+        ).fetchone()
+        self.assertIsNotNone(link)
+
+    def test_ensure_cliente_for_inmobiliaria_requires_empresa_scope(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              telefono TEXT,
+              email TEXT,
+              fecha_nacimiento TEXT,
+              direccion TEXT,
+              procedencia_canal TEXT,
+              procedencia_detalle TEXT,
+              procedencia_user_id TEXT,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              estado TEXT,
+              fecha_inicio TEXT,
+              fecha_fin TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, estado, created_at, updated_at)
+            VALUES ('c-global', '', 'Cliente Inmo Global', '12345678A', '611222333', 'global@example.com', 'Activo', '2026-01-01', '2026-01-01');
+            """
+        )
+        try:
+            result = ensure_cliente_for_inmobiliaria(
+                conn,
+                "",
+                "Cliente Inmo Global",
+                "12345678A",
+                "2026-03-01T10:00:00+00:00",
+                {"telefono": "611222333", "email": "global@example.com"},
+            )
+        finally:
+            conn.close()
+
+        self.assertIsNone(result)
+
+    def test_ensure_cliente_for_seguro_scopes_name_fallback_by_empresa(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              telefono TEXT,
+              email TEXT,
+              fecha_nacimiento TEXT,
+              direccion TEXT,
+              procedencia_canal TEXT,
+              procedencia_detalle TEXT,
+              procedencia_user_id TEXT,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              estado TEXT,
+              fecha_inicio TEXT,
+              fecha_fin TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, estado, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("c-other", "e2", "Tomador Seguro", "99999999Z", "699000000", "other@example.com", "Activo", "2026-01-01", "2026-01-01"),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, estado, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("c-right", "e1", "Tomador Seguro", "12345678A", "611222333", "right@example.com", "Activo", "2026-02-01", "2026-02-01"),
+        )
+
+        cliente_id = ensure_cliente_for_seguro(
+            conn,
+            "e1",
+            "Tomador Seguro",
+            "",
+            "2026-03-01T10:00:00+00:00",
+            {"telefono": "611222333", "email": "right@example.com"},
+        )
+        self.assertEqual(cliente_id, "c-right")
+        link = conn.execute(
+            """
+            SELECT id
+            FROM clientes_empresas
+            WHERE cliente_id = ? AND empresa_id = ? AND LOWER(servicio) = 'seguros'
+            """,
+            ("c-right", "e1"),
+        ).fetchone()
+        self.assertIsNotNone(link)
+
+    def test_ensure_cliente_for_seguro_requires_empresa_scope(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              telefono TEXT,
+              email TEXT,
+              fecha_nacimiento TEXT,
+              direccion TEXT,
+              procedencia_canal TEXT,
+              procedencia_detalle TEXT,
+              procedencia_user_id TEXT,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              estado TEXT,
+              fecha_inicio TEXT,
+              fecha_fin TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, estado, created_at, updated_at)
+            VALUES ('c-global', '', 'Tomador Seguro Global', '12345678A', '600000000', 'global@example.com', 'Activo', '2026-01-01', '2026-01-01');
+            """
+        )
+        try:
+            result = ensure_cliente_for_seguro(
+                conn,
+                "",
+                "Tomador Seguro Global",
+                "12345678A",
+                "2026-03-01T10:00:00+00:00",
+                {"telefono": "600000000", "email": "global@example.com"},
+            )
+        finally:
+            conn.close()
+
+        self.assertIsNone(result)
+
+    def test_resolve_inmobiliaria_contact_candidate_requires_empresa_scope_for_demanda_fallback(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              telefono TEXT,
+              email TEXT,
+              fecha_nacimiento TEXT,
+              direccion TEXT,
+              procedencia_canal TEXT,
+              procedencia_detalle TEXT,
+              procedencia_user_id TEXT,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE demandas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente_id TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE visitas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              demanda_id TEXT,
+              inmueble_id TEXT,
+              created_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, estado, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("c-other", "e2", "Comprador Externo", "12345678A", "611222333", "other@example.com", "Activo", "2026-03-01", "2026-03-01"),
+        )
+        conn.execute(
+            "INSERT INTO demandas (id, empresa_id, cliente_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            ("d-other", "e2", "c-other", "2026-03-01", "2026-03-01"),
+        )
+        try:
+            result = resolve_inmobiliaria_contact_candidate(
+                conn,
+                "e1",
+                {},
+                demanda_id="d-other",
+                inmueble_id="",
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual(result, {"cliente_id": None, "nombre": "", "nif": "", "telefono": "", "email": ""})
+
+    def test_resolve_inmobiliaria_contact_candidate_requires_empresa_scope_for_inmueble_fallback(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              telefono TEXT,
+              email TEXT,
+              fecha_nacimiento TEXT,
+              direccion TEXT,
+              procedencia_canal TEXT,
+              procedencia_detalle TEXT,
+              procedencia_user_id TEXT,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE demandas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente_id TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE visitas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              demanda_id TEXT,
+              inmueble_id TEXT,
+              created_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, estado, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("c-other", "e2", "Comprador Externo", "12345678A", "611222333", "other@example.com", "Activo", "2026-03-01", "2026-03-01"),
+        )
+        conn.execute(
+            "INSERT INTO demandas (id, empresa_id, cliente_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            ("d-other", "e2", "c-other", "2026-03-01", "2026-03-01"),
+        )
+        conn.execute(
+            "INSERT INTO visitas (id, empresa_id, demanda_id, inmueble_id, created_at) VALUES (?, ?, ?, ?, ?)",
+            ("v-other", "e2", "d-other", "inm-1", "2026-03-02"),
+        )
+        try:
+            result = resolve_inmobiliaria_contact_candidate(
+                conn,
+                "e1",
+                {},
+                demanda_id="",
+                inmueble_id="inm-1",
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual(result, {"cliente_id": None, "nombre": "", "nif": "", "telefono": "", "email": ""})
 
     def test_collect_signed_export_rows_filters_year_and_non_signed_statuses(self):
         if not OPENPYXL_AVAILABLE:

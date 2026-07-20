@@ -1184,6 +1184,9 @@ const startSegurosOcrJob = async (payload) => {
   if (!safePayload.empresa_nombre) {
     safePayload.empresa_nombre = resolveCrmSegurosEmpresaNombre();
   }
+  if (!safePayload.empresa_id) {
+    safePayload.empresa_id = resolveLegacyEmpresaId(resolveCrmSegurosEmpresa());
+  }
   return postJsonWithRetryBasic("/api/seguros_ocr_async", safePayload, {
     maxRetries: 5,
     baseDelayMs: 450,
@@ -1245,6 +1248,9 @@ const runSegurosOcrDirectPayload = async (payload, options = {}) => {
   const safePayload = payload && typeof payload === "object" ? payload : {};
   if (!safePayload.empresa_nombre) {
     safePayload.empresa_nombre = resolveCrmSegurosEmpresaNombre();
+  }
+  if (!safePayload.empresa_id) {
+    safePayload.empresa_id = resolveLegacyEmpresaId(resolveCrmSegurosEmpresa());
   }
   return postJsonWithRetryBasic("/api/seguros_ocr", safePayload, {
     maxRetries: options.maxRetries || 4,
@@ -1562,7 +1568,7 @@ const runSegurosBdtRowOcr = async (recordId, file, statusEl, rowMap = {}) => {
   if (!ok) return;
   const enrichPayload = { empresa_nombre: resolveCrmSegurosEmpresaNombre(), id: recordId, ...fields };
   if (fields.nif || fields.dni) {
-    const lookup = await lookupClienteByNif(fields.nif || fields.dni);
+    const lookup = await lookupClienteByNif(fields.nif || fields.dni, getSegurosOcrLookupScope());
     if (lookup?.found) {
       enrichPayload.cliente_id = lookup.cliente?.id || "";
     }
@@ -25869,6 +25875,34 @@ const resolveEmpresaById = (empresaId) => {
 const resolveLegacyEmpresaId = (empresa) =>
   String((empresa && (empresa.legacy_empresa_id || empresa.id)) || "").trim();
 
+const resolveSafeLegacyEmpresaId = (empresa) => {
+  try {
+    return String(
+      typeof resolveLegacyEmpresaId === "function"
+        ? resolveLegacyEmpresaId(empresa)
+        : (empresa && (empresa.legacy_empresa_id || empresa.id)) || ""
+    ).trim();
+  } catch (err) {
+    return String((empresa && (empresa.legacy_empresa_id || empresa.id)) || "").trim();
+  }
+};
+
+const resolveSafeCrmGestoriaEmpresa = () => {
+  try {
+    return typeof resolveCrmGestoriaEmpresa === "function" ? resolveCrmGestoriaEmpresa() : null;
+  } catch (err) {
+    return null;
+  }
+};
+
+const resolveSafeCrmSegurosEmpresa = () => {
+  try {
+    return typeof resolveCrmSegurosEmpresa === "function" ? resolveCrmSegurosEmpresa() : null;
+  } catch (err) {
+    return null;
+  }
+};
+
 const SERVICE_COMPANY_STORAGE = {
   inmobiliaria: "crm.serviceCompany.inmobiliaria",
   seguros: "crm.serviceCompany.seguros",
@@ -37934,7 +37968,7 @@ const syncCaptacionOwnerByNif = async () => {
     return;
   }
   try {
-    const data = await api(`/api/cliente_lookup?nif=${encodeURIComponent(nif)}`);
+    const data = await lookupClienteByNif(nif, resolveInmoScopeParams() || {});
     if (data?.found && data?.cliente) {
       applyCaptacionOwnerMatch(data.cliente);
       return;
@@ -37956,7 +37990,7 @@ const syncCaptacionOwnerByName = async () => {
   if (normalizeNifValue(nifInput ? nifInput.value : "")) return;
   if (!String(nombreInput.value || "").trim()) return;
   try {
-    const match = await lookupClienteByNombre(nombreInput.value);
+    const match = await lookupClienteByNombre(nombreInput.value, resolveInmoScopeParams() || {});
     if (!match?.id) return;
     applyCaptacionOwnerMatch(match, { message: `Cliente vinculado por nombre: ${match.nombre}` });
   } catch (e) {}
@@ -39228,6 +39262,11 @@ const createGestoriaContaChecklist = () => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       cliente_id: state.currentClienteId,
+      ...((typeof resolveLegacyEmpresaId === "function"
+        ? resolveLegacyEmpresaId(typeof resolveCrmGestoriaEmpresa === "function" ? resolveCrmGestoriaEmpresa() : null)
+        : "") ? { empresa_id: (typeof resolveLegacyEmpresaId === "function"
+        ? resolveLegacyEmpresaId(typeof resolveCrmGestoriaEmpresa === "function" ? resolveCrmGestoriaEmpresa() : null)
+        : "") } : {}),
       periodo,
       tareas,
       usuario: getCurrentUser(),
@@ -45989,7 +46028,10 @@ const vincularHipotecaSeleccionada = async () => {
   hipotecaBdtVincularBtn?.setAttribute("disabled", "disabled");
   hipotecaBdtVincularStatus.textContent = "Vinculando hipoteca con cliente...";
   try {
-    const existing = await lookupClienteByNombre(nombreCliente);
+    const lookupScope = isTenantWorkspaceMode() && state.currentWorkspaceId
+      ? { workspace_id: state.currentWorkspaceId }
+      : { empresa_id: empresaId };
+    const existing = await lookupClienteByNombre(nombreCliente, lookupScope);
     let clienteId = existing?.id || "";
     let wasNew = false;
     if (!clienteId) {
@@ -61178,7 +61220,8 @@ const loadGestoriaCrm = async () => {
   // En vista Gestoría (no renta-cards) permitimos buscar por DNI/NIF aunque la tabla "gestoria" no tenga columna documento.
   if (!isRentaTab && docQuery && docQuery.length >= 5) {
     try {
-      const match = await api(`/api/clientes_by_nif?nif=${encodeURIComponent(docQuery)}&limit=16`);
+      const matchParams = buildGestoriaClientesByNifParams(docQuery, 16);
+      const match = await api(`/api/clientes_by_nif?${matchParams.toString()}`);
       const candidates = Array.isArray(match?.rows) ? match.rows : [];
       const names = [];
       const nameSet = new Set();
@@ -62020,6 +62063,12 @@ const buildGestoriaWorkspaceParams = (initial = {}) => {
   if (fallbackEmpresaId) params.set("empresa_id", fallbackEmpresaId);
   return params;
 };
+
+const buildGestoriaClientesByNifParams = (nif, limit = 6) =>
+  buildGestoriaWorkspaceParams({
+    nif: String(nif || "").trim(),
+    limit: String(limit || 6).trim() || "6",
+  });
 
 const setGestoriaDashboardView = (viewKey = "general") => {
   const key = normalizeGestoriaDashboardView(viewKey);
@@ -67443,12 +67492,32 @@ const resetSegurosUpdatePanel = () => {
   if (segurosUpdateSelect) segurosUpdateSelect.value = "";
 };
 
-const lookupClienteByNif = async (nif) => {
+const getSegurosOcrLookupScope = () => {
+  const empresaId = resolveLegacyEmpresaId(resolveCrmSegurosEmpresa());
+  const workspaceId = getWorkspaceIdForStorage();
+  const scope = { servicio: "seguros" };
+  if (empresaId) scope.empresa_id = empresaId;
+  if (workspaceId) scope.workspace_id = workspaceId;
+  return scope;
+};
+
+const lookupClienteByNif = async (nif, scope = {}) => {
   if (!nif) return null;
   const serviceParam = getServiceFilterParam();
   const params = new URLSearchParams({ nif });
-  if (serviceParam) {
+  const scopeService = String(scope.servicio || "").trim();
+  const scopeEmpresaId = String(scope.empresa_id || "").trim();
+  const scopeWorkspaceId = String(scope.workspace_id || "").trim();
+  if (scopeService) {
+    params.set("servicio", scopeService);
+  } else if (serviceParam) {
     params.set("servicio", serviceParam);
+  }
+  if (scopeEmpresaId) {
+    params.set("empresa_id", scopeEmpresaId);
+  }
+  if (scopeWorkspaceId) {
+    params.set("workspace_id", scopeWorkspaceId);
   }
   try {
     return await api(`/api/cliente_lookup?${params.toString()}`);
@@ -67457,7 +67526,7 @@ const lookupClienteByNif = async (nif) => {
   }
 };
 
-const lookupClienteByNombre = async (nombre) => {
+const lookupClienteByNombre = async (nombre, scope = {}) => {
   const text = String(nombre || "").trim();
   if (!text) return null;
   const params = new URLSearchParams({
@@ -67465,6 +67534,18 @@ const lookupClienteByNombre = async (nombre) => {
     include_id: "1",
     limit: "100",
   });
+  const scopeService = String(scope.servicio || "").trim();
+  const scopeEmpresaId = String(scope.empresa_id || "").trim();
+  const scopeWorkspaceId = String(scope.workspace_id || "").trim();
+  if (scopeService) {
+    params.set("servicio", scopeService);
+  }
+  if (scopeEmpresaId) {
+    params.set("empresa_id", scopeEmpresaId);
+  }
+  if (scopeWorkspaceId) {
+    params.set("workspace_id", scopeWorkspaceId);
+  }
   try {
     const data = await api(`/api/clientes?${params.toString()}`);
     const columns = data?.columns || [];
@@ -67511,6 +67592,7 @@ const getClienteServicios = async (clienteId) => {
 const resolveOcrClienteMatch = async (type, fields) => {
   const ctx = getOcrClienteContext(type);
   if (!ctx) return;
+  const scope = getSegurosOcrLookupScope();
   const nifRaw = fields.nif || fields.dni || "";
   const nif = String(nifRaw || "").trim();
   setOcrClienteUi(ctx, { status: "Comprobando cliente..." });
@@ -67518,7 +67600,7 @@ const resolveOcrClienteMatch = async (type, fields) => {
   let clienteNombre = "";
   let servicios = [];
   if (nif) {
-    const data = await lookupClienteByNif(nif);
+    const data = await lookupClienteByNif(nif, scope);
     if (data && data.found) {
       const cliente = data.cliente || {};
       clienteId = cliente.id || data.cliente_id || "";
@@ -67527,7 +67609,7 @@ const resolveOcrClienteMatch = async (type, fields) => {
     }
   }
   if (!clienteId) {
-    const byName = await lookupClienteByNombre(fields.tomador || "");
+    const byName = await lookupClienteByNombre(fields.tomador || "", scope);
     if (byName && byName.id) {
       clienteId = byName.id;
       clienteNombre = byName.nombre || "";
@@ -68135,7 +68217,7 @@ const saveSegurosOcrRecord = async () => {
     payload.comision = comisionEstimada;
   }
   if (!payload.cliente_id && payload.nif) {
-    const data = await lookupClienteByNif(payload.nif);
+    const data = await lookupClienteByNif(payload.nif, getSegurosOcrLookupScope());
     if (data && data.found) {
       const foundId = (data.cliente && data.cliente.id) || data.cliente_id;
       if (foundId) {
@@ -72947,7 +73029,8 @@ const loadGestoriaRentaQuickPendientes = async () => {
       if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = `Buscando cliente por NIF: ${nif}...`;
       let matches = null;
       try {
-        matches = await api(`/api/clientes_by_nif?nif=${encodeURIComponent(nif)}&limit=6`);
+        const matchParams = buildGestoriaClientesByNifParams(nif, 6);
+        matches = await api(`/api/clientes_by_nif?${matchParams.toString()}`);
       } catch {
         matches = { rows: [] };
       }
@@ -73679,7 +73762,8 @@ const submitGestoriaRentaQuick = async () => {
       return;
     }
     if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = `DNI/NIF detectado: ${nif}. Buscando cliente...`;
-    const matches = await api(`/api/clientes_by_nif?nif=${encodeURIComponent(nif)}&limit=6`);
+    const matchParams = buildGestoriaClientesByNifParams(nif, 6);
+    const matches = await api(`/api/clientes_by_nif?${matchParams.toString()}`);
     const rows = Array.isArray(matches?.rows) ? matches.rows : [];
     const ctx = {
       nif,
@@ -74571,10 +74655,17 @@ const loadGestoriaModelos = (clienteIdOrOpts, empresaId = "") => {
 };
 
 const saveGestoriaModeloField = (id, field, value) => {
+  const empresa = typeof resolveCrmGestoriaEmpresa === "function" ? resolveCrmGestoriaEmpresa() : null;
+  const empresaId = typeof resolveLegacyEmpresaId === "function" ? resolveLegacyEmpresaId(empresa) : String((empresa && (empresa.legacy_empresa_id || empresa.id)) || "").trim();
   fetch("/api/gestoria_modelos_update", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id, [field]: value, usuario: getCurrentUser() }),
+    body: JSON.stringify({
+      id,
+      [field]: value,
+      usuario: getCurrentUser(),
+      ...(empresaId ? { empresa_id: empresaId } : {}),
+    }),
   });
 };
 
@@ -74583,10 +74674,16 @@ const deleteGestoriaModelo = (id, scopeOrClienteId = "") => {
     scopeOrClienteId && typeof scopeOrClienteId === "object"
       ? scopeOrClienteId
       : { clienteId: String(scopeOrClienteId || "").trim() };
+  const empresa = typeof resolveCrmGestoriaEmpresa === "function" ? resolveCrmGestoriaEmpresa() : null;
+  const empresaId = typeof resolveLegacyEmpresaId === "function" ? resolveLegacyEmpresaId(empresa) : String((empresa && (empresa.legacy_empresa_id || empresa.id)) || "").trim();
   fetch("/api/gestoria_modelos_delete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id, usuario: getCurrentUser() }),
+    body: JSON.stringify({
+      id,
+      usuario: getCurrentUser(),
+      ...(empresaId ? { empresa_id: empresaId } : {}),
+    }),
   })
     .then((res) => res.json())
     .then(() => {
@@ -74598,10 +74695,16 @@ const saveClienteProfesionalField = (id, field, value) => {
   if (clienteProfesionalStatus) {
     clienteProfesionalStatus.textContent = "Guardando...";
   }
+  const empresa = typeof resolveCrmGestoriaEmpresa === "function" ? resolveCrmGestoriaEmpresa() : null;
+  const empresaId = typeof resolveLegacyEmpresaId === "function" ? resolveLegacyEmpresaId(empresa) : String((empresa && (empresa.legacy_empresa_id || empresa.id)) || "").trim();
   fetch("/api/cliente_profesional_update", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id, [field]: value }),
+    body: JSON.stringify({
+      id,
+      [field]: value,
+      ...(empresaId ? { empresa_id: empresaId } : {}),
+    }),
   })
     .then((res) => res.json())
     .then((data) => {
@@ -74617,10 +74720,15 @@ const saveClienteProfesionalField = (id, field, value) => {
 };
 
 const deleteClienteProfesional = (id, clienteId) => {
+  const empresa = typeof resolveCrmGestoriaEmpresa === "function" ? resolveCrmGestoriaEmpresa() : null;
+  const empresaId = typeof resolveLegacyEmpresaId === "function" ? resolveLegacyEmpresaId(empresa) : String((empresa && (empresa.legacy_empresa_id || empresa.id)) || "").trim();
   fetch("/api/cliente_profesional_delete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({
+      id,
+      ...(empresaId ? { empresa_id: empresaId } : {}),
+    }),
   })
     .then((res) => res.json())
     .then(() => {
@@ -76883,7 +76991,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
         return;
       }
       editStatus.textContent = "Buscando cliente por tomador...";
-      const byName = await lookupClienteByNombre(tomador);
+      const byName = await lookupClienteByNombre(tomador, getSegurosOcrLookupScope());
       if (!byName?.id) {
         editStatus.textContent = "No se encontró cliente para este tomador.";
         return;
@@ -76897,7 +77005,7 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
       try {
         const tomadorValue = editTomador.value.trim();
         if (tomadorValue) {
-          const byName = await lookupClienteByNombre(tomadorValue);
+          const byName = await lookupClienteByNombre(tomadorValue, getSegurosOcrLookupScope());
           if (byName?.id) {
             linkedClienteId = String(byName.id || "").trim();
           }
@@ -80752,8 +80860,8 @@ if (segurosRecibosTo) {
 }
 if (segurosRecibosExportBtn) {
   segurosRecibosExportBtn.addEventListener("click", () => {
-    const empresa = resolveCrmSegurosEmpresa();
-    const empresaId = resolveLegacyEmpresaId(empresa);
+    const empresa = typeof resolveCrmSegurosEmpresa === "function" ? resolveCrmSegurosEmpresa() : null;
+    const empresaId = typeof resolveLegacyEmpresaId === "function" ? resolveLegacyEmpresaId(empresa) : String((empresa && (empresa.legacy_empresa_id || empresa.id)) || "").trim();
     if (!empresaId) return;
     const params = new URLSearchParams({ empresa_id: empresaId });
     const q = segurosRecibosSearch ? segurosRecibosSearch.value.trim() : "";
@@ -81026,6 +81134,10 @@ if (segurosReclamacionForm) {
       detalle: segurosReclamacionDetalle ? segurosReclamacionDetalle.value.trim() : "",
       fecha_apertura: formatAgendaDate(new Date()),
     };
+    const reclamacionEmpresaId = resolveLegacyEmpresaId(empresa);
+    if (reclamacionEmpresaId) {
+      payload.empresa_id = reclamacionEmpresaId;
+    }
     const resp = await postJsonWithDbRetry("/api/seguros_reclamacion", payload, {
       maxRetries: 6,
       baseDelayMs: 350,
@@ -81037,9 +81149,8 @@ if (segurosReclamacionForm) {
     }
     if (segurosReclamacionStatus) segurosReclamacionStatus.textContent = "Reclamación creada.";
     if (segurosReclamacionForm) segurosReclamacionForm.reset();
-    const empresaId = resolveLegacyEmpresaId(empresa);
-    loadSegurosReclamaciones(empresaId);
-    loadSegurosComplianceKpis(empresaId);
+    loadSegurosReclamaciones(reclamacionEmpresaId);
+    loadSegurosComplianceKpis(reclamacionEmpresaId);
     loadSegurosEventos(seguroId);
   });
 }
@@ -81107,6 +81218,11 @@ if (segurosPreferenciasForm) {
     const formData = new FormData(segurosPreferenciasForm);
     const payload = Object.fromEntries(formData.entries());
     payload.cliente_id = clienteData.cliente_id;
+    const empresa = typeof resolveCrmSegurosEmpresa === "function" ? resolveCrmSegurosEmpresa() : null;
+    const empresaId = typeof resolveLegacyEmpresaId === "function" ? resolveLegacyEmpresaId(empresa) : String((empresa && (empresa.legacy_empresa_id || empresa.id)) || "").trim();
+    if (empresaId) {
+      payload.empresa_id = empresaId;
+    }
     if (segurosPreferenciasStatus) {
       segurosPreferenciasStatus.textContent = "Guardando...";
     }
@@ -86746,6 +86862,11 @@ const bindClienteProfesionalForm = (formEl, payloadBuilder) => {
     const payload = Object.fromEntries(formData.entries());
     const extra = payloadBuilder ? payloadBuilder(payload) : payload;
     extra.cliente_id = state.currentClienteId;
+    const empresa = typeof resolveCrmGestoriaEmpresa === "function" ? resolveCrmGestoriaEmpresa() : null;
+    const empresaId = typeof resolveLegacyEmpresaId === "function" ? resolveLegacyEmpresaId(empresa) : String((empresa && (empresa.legacy_empresa_id || empresa.id)) || "").trim();
+    if (empresaId) {
+      extra.empresa_id = empresaId;
+    }
     fetch("/api/cliente_profesional", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -86797,8 +86918,8 @@ if (clienteGestoriaForm) {
     }
     const formData = new FormData(clienteGestoriaForm);
     const payload = Object.fromEntries(formData.entries());
-    const empresa = resolveCrmGestoriaEmpresa();
-    const empresaId = resolveLegacyEmpresaId(empresa);
+    const empresa = typeof resolveCrmGestoriaEmpresa === "function" ? resolveCrmGestoriaEmpresa() : null;
+    const empresaId = typeof resolveLegacyEmpresaId === "function" ? resolveLegacyEmpresaId(empresa) : String((empresa && (empresa.legacy_empresa_id || empresa.id)) || "").trim();
     if (empresaId) payload.empresa_id = empresaId;
     const checkboxFields = [
       "mod_fiscal",
@@ -86859,6 +86980,11 @@ if (gestoriaModeloForm) {
     const payload = Object.fromEntries(formData.entries());
     payload.usuario = getCurrentUser();
     payload.cliente_id = state.currentClienteId;
+  const empresa = typeof resolveCrmGestoriaEmpresa === "function" ? resolveCrmGestoriaEmpresa() : null;
+  const empresaId = typeof resolveLegacyEmpresaId === "function" ? resolveLegacyEmpresaId(empresa) : String((empresa && (empresa.legacy_empresa_id || empresa.id)) || "").trim();
+    if (empresaId) {
+      payload.empresa_id = empresaId;
+    }
     fetch("/api/gestoria_modelos", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -88125,6 +88251,11 @@ if (gestoriaContaConfigForm) {
     const formData = new FormData(gestoriaContaConfigForm);
     const payload = Object.fromEntries(formData.entries());
     payload.cliente_id = state.currentClienteId;
+  const empresa = typeof resolveCrmGestoriaEmpresa === "function" ? resolveCrmGestoriaEmpresa() : null;
+  const empresaId = typeof resolveLegacyEmpresaId === "function" ? resolveLegacyEmpresaId(empresa) : String((empresa && (empresa.legacy_empresa_id || empresa.id)) || "").trim();
+    if (empresaId) {
+      payload.empresa_id = empresaId;
+    }
     fetch("/api/gestoria_conta_config", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -88184,8 +88315,8 @@ if (gestoriaImportQueueBtn) {
 if (gestoriaImportUploadForm) {
   gestoriaImportUploadForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const empresa = resolveCrmGestoriaEmpresa();
-    const empresaId = resolveLegacyEmpresaId(empresa);
+  const empresa = typeof resolveCrmGestoriaEmpresa === "function" ? resolveCrmGestoriaEmpresa() : null;
+  const empresaId = typeof resolveLegacyEmpresaId === "function" ? resolveLegacyEmpresaId(empresa) : String((empresa && (empresa.legacy_empresa_id || empresa.id)) || "").trim();
     const clienteId = String(state.currentClienteId || "").trim();
     const activeEmpresaId = clienteId ? empresaId : String(state.currentWorkspaceCompanyId || empresaId || "").trim();
     const files = Array.from(gestoriaImportUploadFiles?.files || []);
@@ -89744,9 +89875,8 @@ if (gestoriaAltaForm) {
     try {
       if (nifNorm) {
         try {
-          const dupData = await api(
-            `/api/clientes_by_nif?nif=${encodeURIComponent(nifNorm)}&limit=2`
-          );
+          const dupParams = buildGestoriaClientesByNifParams(nifNorm, 2);
+          const dupData = await api(`/api/clientes_by_nif?${dupParams.toString()}`);
           const dupRows = Array.isArray(dupData.rows) ? dupData.rows : [];
           if (dupRows.length) {
             existingCliente = dupRows[0];

@@ -232,6 +232,440 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
             ocr_service.map_docai_poliza_fields(poliza_fields),
         )
 
+    def test_resolve_gestoria_factura_cliente_id_scopes_nif_and_name_by_empresa(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              estado TEXT,
+              fecha_inicio TEXT,
+              fecha_fin TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            ("c-other", "e2", "Cliente Factura", "99999999Z", "2026-03-01", "2026-03-01"),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            ("c-right", "e1", "Cliente Factura", "12345678A", "2026-03-02", "2026-03-02"),
+        )
+        conn.execute(
+            "INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio, estado, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("link-right", "c-right", "e1", "Gestoria", "Activo", "2026-03-02", "2026-03-02"),
+        )
+
+        try:
+            by_nif = server.resolve_gestoria_factura_cliente_id(conn, "e1", "12345678A", "")
+            by_name = server.resolve_gestoria_factura_cliente_id(conn, "e1", "", "Cliente Factura")
+        finally:
+            conn.close()
+
+        self.assertEqual(by_nif, "c-right")
+        self.assertEqual(by_name, "c-right")
+
+    def test_resolve_gestoria_factura_cliente_id_requires_empresa_scope(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              estado TEXT,
+              fecha_inicio TEXT,
+              fecha_fin TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            ("c-global", "", "Cliente Global", "12345678A", "2026-03-01", "2026-03-01"),
+        )
+
+        try:
+            result = server.resolve_gestoria_factura_cliente_id(conn, "", "12345678A", "Cliente Global")
+        finally:
+            conn.close()
+
+        self.assertIsNone(result)
+
+    def test_resolve_seguros_ocr_cliente_id_scopes_nif_and_name_by_empresa(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              estado TEXT,
+              fecha_inicio TEXT,
+              fecha_fin TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            ("c-other", "e2", "Cliente Seguro", "12345678A", "2026-03-03", "2026-03-03"),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            ("c-right", "e1", "Cliente Seguro", "12345678A", "2026-03-01", "2026-03-01"),
+        )
+        conn.execute(
+            "INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio, estado, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("link-right", "c-right", "e1", "Seguros", "Activo", "2026-03-01", "2026-03-01"),
+        )
+
+        try:
+            by_nif = server.resolve_seguros_ocr_cliente_id(conn, "e1", "12345678A", "")
+            by_name = server.resolve_seguros_ocr_cliente_id(conn, "e1", "", "Cliente Seguro")
+        finally:
+            conn.close()
+
+        self.assertEqual(by_nif, "c-right")
+        self.assertEqual(by_name, "c-right")
+
+    def test_resolve_seguros_ocr_cliente_id_requires_empresa_scope(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              estado TEXT,
+              fecha_inicio TEXT,
+              fecha_fin TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            ("c-global", "", "Cliente Seguro Global", "12345678A", "2026-03-01", "2026-03-01"),
+        )
+
+        try:
+            result = server.resolve_seguros_ocr_cliente_id(conn, "", "12345678A", "Cliente Seguro Global")
+        finally:
+            conn.close()
+
+        self.assertIsNone(result)
+
+    def test_ensure_cliente_for_financiacion_requires_empresa_scope(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              telefono TEXT,
+              email TEXT,
+              fecha_nacimiento TEXT,
+              direccion TEXT,
+              procedencia_canal TEXT,
+              procedencia_detalle TEXT,
+              procedencia_user_id TEXT,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+
+        try:
+            result = server.ensure_cliente_for_financiacion(
+                conn,
+                "",
+                "Cliente Financiacion",
+                "12345678A",
+                "2026-03-01",
+                {"telefono": "600000000", "email": "cliente@example.com"},
+            )
+            count = conn.execute("SELECT COUNT(*) AS total FROM clientes").fetchone()["total"]
+        finally:
+            conn.close()
+
+        self.assertIsNone(result)
+        self.assertEqual(count, 0)
+
+    def test_resolve_cliente_lookup_row_scopes_workspace_company_ids_by_workspace(self):
+        conn = self._make_workspace_scope_conn()
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              telefono TEXT,
+              email TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              estado TEXT,
+              fecha_inicio TEXT,
+              fecha_fin TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("c-other", "e2", "Cliente Fuera", "12345678A", "", "", "2026-03-04", "2026-03-04"),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("c-right", "emp-1", "Cliente Dentro", "12345678A", "", "", "2026-03-01", "2026-03-01"),
+        )
+        conn.execute(
+            "INSERT INTO workspace_empresas (id, workspace_id, empresa_id) VALUES (?, ?, ?)",
+            ("we-1", "ws-1", "e1"),
+        )
+
+        try:
+            row = server.resolve_cliente_lookup_row(conn, "12345678A", workspace_id="ws-1")
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(row)
+        self.assertEqual(row["id"], "c-right")
+
+    def test_resolve_cliente_duplicate_id_scopes_workspace_company_ids_by_workspace(self):
+        conn = self._make_workspace_scope_conn()
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              telefono TEXT,
+              email TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              estado TEXT,
+              fecha_inicio TEXT,
+              fecha_fin TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("c-other", "e2", "Cliente Duplicado", "12345678A", "", "", "2026-03-04", "2026-03-04"),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("c-right", "emp-1", "Cliente Duplicado", "12345678A", "", "", "2026-03-01", "2026-03-01"),
+        )
+
+        try:
+            by_nif = server.resolve_cliente_duplicate_id(
+                conn,
+                "",
+                "12345678A",
+                workspace_id="ws-1",
+            )
+            by_name = server.resolve_cliente_duplicate_id(
+                conn,
+                "Cliente Duplicado",
+                "",
+                workspace_id="ws-1",
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual(by_nif, "c-right")
+        self.assertEqual(by_name, "c-right")
+
+    def test_resolve_clientes_by_nif_rows_scopes_workspace_and_legacy_company_ids(self):
+        conn = self._make_workspace_scope_conn()
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              telefono TEXT,
+              email TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              estado TEXT,
+              fecha_inicio TEXT,
+              fecha_fin TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("c-other", "e2", "Cliente Fuera", "12345678A", "", "", "2026-03-04", "2026-03-04"),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("c-right", "emp-1", "Cliente Dentro", "12345678A", "", "", "2026-03-01", "2026-03-01"),
+        )
+
+        try:
+            by_workspace = server.resolve_clientes_by_nif_rows(
+                conn,
+                "12345678A",
+                workspace_id="ws-1",
+                limit=6,
+            )
+            by_empresa = server.resolve_clientes_by_nif_rows(
+                conn,
+                "12345678A",
+                empresa_id="emp-1",
+                limit=6,
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual([row["id"] for row in by_workspace], ["c-right"])
+        self.assertEqual([row["id"] for row in by_empresa], ["c-right"])
+
+    def test_ensure_workspace_budget_client_scopes_workspace_company_ids_by_workspace(self):
+        conn = self._make_workspace_scope_conn()
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              telefono TEXT,
+              email TEXT,
+              procedencia_canal TEXT,
+              procedencia_detalle TEXT,
+              procedencia_user_id TEXT,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              estado TEXT,
+              fecha_inicio TEXT,
+              fecha_fin TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, procedencia_canal, procedencia_detalle, procedencia_user_id, estado, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("c-other", "e2", "Cliente Presupuesto", "12345678A", "", "", "", "", None, "Lead", "2026-03-04", "2026-03-04"),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, procedencia_canal, procedencia_detalle, procedencia_user_id, estado, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ("c-right", "emp-1", "Cliente Presupuesto", "12345678A", "", "", "", "", None, "Lead", "2026-03-01", "2026-03-01"),
+        )
+        conn.execute(
+            "INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio, estado, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("link-right", "c-right", "emp-1", "Gestoría", "Presupuesto", "2026-03-01", "2026-03-01"),
+        )
+
+        try:
+            cliente_id, cliente_nombre = server.ensure_workspace_budget_client(
+                conn,
+                workspace_id="ws-1",
+                empresa_id="emp-1",
+                servicio="gestoria",
+                cliente_nif="12345678A",
+                cliente_lookup="Cliente Presupuesto",
+                now="2026-03-04",
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual(cliente_id, "c-right")
+        self.assertEqual(cliente_nombre, "Cliente Presupuesto")
+
     def test_fetch_workspace_company_ids_does_not_backfill_every_company(self):
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
@@ -321,6 +755,82 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
             self.assertEqual((eid, wc_id, err), ("emp-1", "wc-1", ""))
         finally:
             conn.close()
+
+    def test_resolve_scoped_record_access_distinguishes_missing_and_foreign_records(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE inmuebles (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT
+            );
+            CREATE TABLE demandas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT
+            );
+            """
+        )
+        conn.execute("INSERT INTO inmuebles (id, empresa_id) VALUES (?, ?)", ("inm-foreign", "emp-2"))
+        conn.execute("INSERT INTO demandas (id, empresa_id) VALUES (?, ?)", ("dem-foreign", "emp-2"))
+        try:
+            inm_status = server.resolve_scoped_record_access(
+                conn,
+                "inm-foreign",
+                "emp-1",
+                table="inmuebles",
+                fetch_fn=server.fetch_inmueble_for_empresa,
+            )
+            dem_status = server.resolve_scoped_record_access(
+                conn,
+                "dem-foreign",
+                "emp-1",
+                table="demandas",
+                fetch_fn=server.fetch_demanda_for_empresa,
+            )
+            missing_status = server.resolve_scoped_record_access(
+                conn,
+                "inm-missing",
+                "emp-1",
+                table="inmuebles",
+                fetch_fn=server.fetch_inmueble_for_empresa,
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual(inm_status, "forbidden")
+        self.assertEqual(dem_status, "forbidden")
+        self.assertEqual(missing_status, "missing")
+
+    def test_resolve_cliente_scope_access_distinguishes_allowed_forbidden_and_missing(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT
+            );
+            """
+        )
+        conn.execute("INSERT INTO clientes (id, empresa_id) VALUES (?, ?)", ("cli-ok", "emp-1"))
+        conn.execute("INSERT INTO clientes (id, empresa_id) VALUES (?, ?)", ("cli-foreign", "emp-2"))
+        conn.execute("INSERT INTO clientes_empresas (id, cliente_id, empresa_id) VALUES (?, ?, ?)", ("link-ok", "cli-ok", "emp-1"))
+        try:
+            allowed = server.resolve_cliente_scope_access(conn, "cli-ok", empresa_id="emp-1")
+            forbidden = server.resolve_cliente_scope_access(conn, "cli-foreign", empresa_id="emp-1")
+            missing = server.resolve_cliente_scope_access(conn, "cli-missing", empresa_id="emp-1")
+        finally:
+            conn.close()
+
+        self.assertEqual(allowed, "ok")
+        self.assertEqual(forbidden, "forbidden")
+        self.assertEqual(missing, "missing")
 
     def test_resolve_request_legacy_empresa_id_normalizes_workspace_company_sources(self):
         conn = self._make_workspace_scope_conn()

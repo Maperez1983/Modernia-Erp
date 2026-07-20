@@ -1795,6 +1795,84 @@ class SegurosPresupuestosTests(unittest.TestCase):
             ),
         )
 
+
+class FrontendSegurosLookupScopeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.load_segment = extract_segment(
+            "const loadSegurosCrm =",
+            "const renderSegurosRamosDashboard =",
+        ).replace("api(", "globalThis.api(")
+        cls.segment = extract_segment(
+            "const lookupClienteByNif = async",
+            "const getClienteServicios = async",
+        ).replace("api(", "lookupApi(")
+        cls.param_names = [
+            "getServiceFilterParam",
+            "lookupApi",
+            "normalizeName",
+            "buildNameCandidates",
+            "scoreNameSimilarity",
+        ]
+        cls.return_names = ["lookupClienteByNif", "lookupClienteByNombre"]
+
+    def _run(self, prelude: str, body: str) -> None:
+        script = make_factory_script(self.segment, self.param_names, self.return_names, prelude, body)
+        run_node_script(script)
+
+    def _run_load(self, prelude: str, body: str) -> None:
+        script = make_factory_script(self.load_segment, [], ["loadSegurosCrm"], prelude, body)
+        run_node_script(script)
+
+    def test_lookup_helpers_accept_company_and_workspace_scope(self):
+        self._run(
+            dedent(
+                """
+                const getServiceFilterParam = () => "gestoria";
+                const apiCalls = [];
+                const lookupApi = async (url) => {
+                  apiCalls.push(url);
+                  return {
+                    columns: ["id", "nombre"],
+                    rows: [["c-1", "Cliente Demo"]],
+                  };
+                };
+                const normalizeName = (value) => String(value || "").trim().toUpperCase();
+                const buildNameCandidates = (text) => [String(text || "").trim().toUpperCase()];
+                const scoreNameSimilarity = (a, b) => (normalizeName(a) === normalizeName(b) ? 1 : 0);
+                """
+            ),
+            dedent(
+                """
+                const { lookupClienteByNif, lookupClienteByNombre } = api;
+                const nifResult = await lookupClienteByNif("12345678A", {
+                  servicio: "seguros",
+                  empresa_id: "emp-1",
+                  workspace_id: "ws-1",
+                });
+                assert.deepStrictEqual(nifResult, {
+                  columns: ["id", "nombre"],
+                  rows: [["c-1", "Cliente Demo"]],
+                });
+                const nombreResult = await lookupClienteByNombre("Cliente Demo", {
+                  servicio: "seguros",
+                  empresa_id: "emp-1",
+                  workspace_id: "ws-1",
+                });
+                assert.deepStrictEqual(nombreResult, { id: "c-1", nombre: "Cliente Demo" });
+                assert.strictEqual(apiCalls.length, 2);
+                assert.ok(apiCalls[0].startsWith("/api/cliente_lookup?"));
+                assert.ok(apiCalls[0].includes("servicio=seguros"));
+                assert.ok(apiCalls[0].includes("empresa_id=emp-1"));
+                assert.ok(apiCalls[0].includes("workspace_id=ws-1"));
+                assert.ok(apiCalls[1].startsWith("/api/clientes?"));
+                assert.ok(apiCalls[1].includes("servicio=seguros"));
+                assert.ok(apiCalls[1].includes("empresa_id=emp-1"));
+                assert.ok(apiCalls[1].includes("workspace_id=ws-1"));
+                """
+            ),
+        )
+
     def test_load_seguros_crm_survives_renderer_error(self):
         self._run_load(
             dedent(
@@ -1935,6 +2013,57 @@ class SegurosPresupuestosTests(unittest.TestCase):
                 assert.ok(state.segurosCrmData);
                 assert.strictEqual(state.segurosCrmData.rows.length, 1);
                 assert.strictEqual(segurosCrmInfo.textContent, "");
+                """
+            ),
+        )
+
+
+class FrontendGestoriaLookupScopeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const resolveGestoriaDashboardEmpresaId =",
+            "const setGestoriaDashboardView =",
+        )
+        cls.param_names = [
+            "state",
+            "resolveCrmGestoriaEmpresa",
+            "resolveLegacyEmpresaId",
+        ]
+        cls.return_names = [
+            "getGestoriaWorkspaceScopeKey",
+            "buildGestoriaWorkspaceParams",
+            "buildGestoriaClientesByNifParams",
+        ]
+
+    def _run(self, prelude: str, body: str) -> None:
+        script = make_factory_script(self.segment, self.param_names, self.return_names, prelude, body)
+        run_node_script(script)
+
+    def test_build_clientes_by_nif_params_carries_workspace_or_company_scope(self):
+        self._run(
+            dedent(
+                """
+                const state = { currentWorkspaceId: "ws-1" };
+                const resolveCrmGestoriaEmpresa = () => ({ id: "emp-1", legacy_empresa_id: "emp-1" });
+                const resolveLegacyEmpresaId = (empresa) => String((empresa && (empresa.legacy_empresa_id || empresa.id)) || "").trim();
+                """
+            ),
+            dedent(
+                """
+                const { buildGestoriaClientesByNifParams, getGestoriaWorkspaceScopeKey } = api;
+                assert.strictEqual(getGestoriaWorkspaceScopeKey(), "workspace:ws-1");
+                const scoped = buildGestoriaClientesByNifParams("12345678A", 16);
+                assert.strictEqual(scoped.get("nif"), "12345678A");
+                assert.strictEqual(scoped.get("limit"), "16");
+                assert.strictEqual(scoped.get("workspace_id"), "ws-1");
+                assert.strictEqual(scoped.get("empresa_id"), null);
+                state.currentWorkspaceId = "";
+                const legacy = buildGestoriaClientesByNifParams("87654321B");
+                assert.strictEqual(legacy.get("nif"), "87654321B");
+                assert.strictEqual(legacy.get("limit"), "6");
+                assert.strictEqual(legacy.get("empresa_id"), "emp-1");
+                assert.strictEqual(legacy.get("workspace_id"), null);
                 """
             ),
         )
