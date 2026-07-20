@@ -5396,10 +5396,7 @@ def compute_hipotecas_commission_by_bank(conn, empresa_id, year=None):
 
 
 def collect_hipoteca_dashboard_entity_total_rows(conn, empresa_id):
-    signed_closed_expr = (
-        "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')"
-        " AND fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
-    )
+    signed_expr = "fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
     return conn.execute(
         """
         SELECT banco AS label, COUNT(*) AS total
@@ -5408,7 +5405,7 @@ def collect_hipoteca_dashboard_entity_total_rows(conn, empresa_id):
           AND banco IS NOT NULL
           AND TRIM(banco) != ''
           AND """
-        + signed_closed_expr
+        + signed_expr
         + """
         GROUP BY banco
         ORDER BY COUNT(*) DESC

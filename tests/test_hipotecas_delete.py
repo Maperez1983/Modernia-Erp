@@ -1232,6 +1232,137 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
         self.assertIn("Entidad Nueva", labels)
         self.assertEqual(sum(int(row["total"]) for row in rows), len(banks))
 
+    def test_collect_hipoteca_dashboard_entity_total_rows_counts_signed_rows_even_with_nonstandard_state(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE hipotecas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente TEXT,
+              banco TEXT,
+              precio REAL,
+              importe_hipoteca REAL,
+              porcentaje REAL,
+              entrada REAL,
+              comision REAL,
+              oficina TEXT,
+              cliente_id TEXT,
+              fecha_encargo TEXT,
+              encargo TEXT,
+              tipo_hipoteca TEXT,
+              fecha_firma TEXT,
+              cesion REAL,
+              comision_juan REAL,
+              comision_modernia REAL,
+              inmobiliaria_compra TEXT,
+              asesor TEXT,
+              estado TEXT,
+              anio INTEGER,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            """
+        )
+        conn.executemany(
+            """
+            INSERT INTO hipotecas (
+              id, empresa_id, cliente, banco, precio, importe_hipoteca, porcentaje, entrada, comision,
+              oficina, cliente_id, fecha_encargo, encargo, tipo_hipoteca, fecha_firma, cesion,
+              comision_juan, comision_modernia, inmobiliaria_compra, asesor, estado, anio, created_at, updated_at
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            )
+            """,
+            [
+                (
+                    "h1",
+                    "e1",
+                    "Cliente 1",
+                    "Banco Santander",
+                    250000,
+                    200000,
+                    80,
+                    50000,
+                    3000,
+                    "Oficina Central",
+                    "c1",
+                    "2026-06-10",
+                    "Sí",
+                    "Compra",
+                    "2026-06-20",
+                    600,
+                    600,
+                    1800,
+                    "Inmo Sur",
+                    "María",
+                    "Tramitada",
+                    2026,
+                    "2026-06-20",
+                    "2026-06-20",
+                ),
+                (
+                    "h2",
+                    "e1",
+                    "Cliente 2",
+                    "Banco Santander",
+                    250000,
+                    200000,
+                    80,
+                    50000,
+                    3000,
+                    "Oficina Central",
+                    "c2",
+                    "2026-06-11",
+                    "Sí",
+                    "Compra",
+                    "2026-06-21",
+                    600,
+                    600,
+                    1800,
+                    "Inmo Sur",
+                    "María",
+                    "",
+                    2026,
+                    "2026-06-21",
+                    "2026-06-21",
+                ),
+                (
+                    "h3",
+                    "e1",
+                    "Cliente 3",
+                    "Banco Santander",
+                    250000,
+                    200000,
+                    80,
+                    50000,
+                    3000,
+                    "Oficina Central",
+                    "c3",
+                    "2026-06-12",
+                    "Sí",
+                    "Compra",
+                    "",
+                    600,
+                    600,
+                    1800,
+                    "Inmo Sur",
+                    "María",
+                    "Pendiente",
+                    2026,
+                    "2026-06-22",
+                    "2026-06-22",
+                ),
+            ],
+        )
+
+        rows = collect_hipoteca_dashboard_entity_total_rows(conn, "e1")
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["label"], "Banco Santander")
+        self.assertEqual(rows[0]["total"], 2)
+
     def test_build_hipoteca_export_row_uses_cliente_inmueble_json_fallbacks(self):
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
