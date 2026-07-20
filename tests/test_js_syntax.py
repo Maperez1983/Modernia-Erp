@@ -229,3 +229,16 @@ return {{
                 capture_output=True,
                 text=True,
             )
+
+    def test_hipotecas_listado_print_uses_excel_like_columns(self):
+        root = Path(__file__).resolve().parents[1]
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn('const HIPOTECA_BDT_PRINT_COLUMNS = [', app_js)
+        for label in ("Fecha de firma", "Nombre cliente", "Banco", "Importe de hipoteca", "Comisión cobrada"):
+            self.assertIn(label, app_js)
+        self.assertIn("openHipotecaBdtListadoPrint", app_js)
+        self.assertIn("writeCrmPrintWindow", app_js)
+        self.assertIn('id="hipotecaBdtPrintListado"', index_html)
+        self.assertIn(">Imprimir listado<", index_html)

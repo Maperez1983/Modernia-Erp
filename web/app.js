@@ -42426,13 +42426,10 @@ const HIPOTECA_BDT_STATE_ORDER = [
 ];
 
 const HIPOTECA_BDT_PRINT_COLUMNS = [
-  { key: "cliente", label: "Nombre y apellidos cliente" },
-  { key: "banco", label: "Banco" },
-  { key: "fecha_encargo", label: "Fecha de encargo" },
   { key: "fecha_firma", label: "Fecha de firma" },
-  { key: "precio", label: "Valor compra inmueble" },
-  { key: "entrada", label: "Entrada" },
-  { key: "importe_hipoteca", label: "Hipoteca" },
+  { key: "cliente", label: "Nombre cliente" },
+  { key: "banco", label: "Banco" },
+  { key: "importe_hipoteca", label: "Importe de hipoteca" },
   { key: "comision", label: "Comisión cobrada" },
 ];
 
@@ -42602,19 +42599,10 @@ const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}) =>
   const rowsHtml = items
     .map((row) => {
       const values = {
+        fecha_firma: formatHipotecaListadoDate(getHipotecaFieldValue(row, columns, ["fecha_firma", "fecha"])),
         cliente: getHipotecaDisplayName(row, columns) || "-",
         banco: getHipotecaFieldValue(row, columns, ["banco", "entidad", "entidad_financiera"]) || "-",
-        fecha_encargo: formatHipotecaListadoDate(
-          getHipotecaFieldValue(row, columns, ["fecha_encargo", "fecha_encargo_cliente", "fecha_encargo_banco", "fecha"])
-        ),
-        fecha_firma: formatHipotecaListadoDate(getHipotecaFieldValue(row, columns, ["fecha_firma", "fecha"])),
-        precio: formatHipotecaListadoMoney(
-          getHipotecaFieldValue(row, columns, ["precio", "valor_compra_inmueble", "valor_compra", "precio_compra"])
-        ),
-        entrada: formatHipotecaListadoMoney(getHipotecaFieldValue(row, columns, ["entrada"])),
-        importe_hipoteca: formatHipotecaListadoMoney(
-          getHipotecaFieldValue(row, columns, ["importe_hipoteca", "hipoteca"])
-        ),
+        importe_hipoteca: formatHipotecaListadoMoney(getHipotecaFieldValue(row, columns, ["importe_hipoteca", "hipoteca"])),
         comision: formatHipotecaListadoMoney(
           getHipotecaFieldValue(row, columns, ["comision_cobrada", "comision", "honorarios"])
         ),
@@ -42634,20 +42622,59 @@ const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}) =>
       .hipoteca-print-table th, .hipoteca-print-table td{padding:8px 9px;border-bottom:1px solid #dbe3ed;vertical-align:top;word-break:break-word;}
       .hipoteca-print-table tbody tr:nth-child(even) td{background:#f8fafc;}
       .hipoteca-print-table tbody tr:hover td{background:#eef4ff;}
-      .hipoteca-print-table td:nth-child(3), .hipoteca-print-table td:nth-child(4){white-space:nowrap;}
-      .hipoteca-print-table td:nth-child(n+5){text-align:right;}
+      .hipoteca-print-table td:nth-child(1){white-space:nowrap;}
+      .hipoteca-print-table td:nth-child(4), .hipoteca-print-table td:nth-child(5){text-align:right;white-space:nowrap;}
     </style>
     <div class="hipoteca-print-meta">
       <span>${escapeHtml(summary)}</span>
       <strong>${total} registros</strong>
     </div>
     <table class="hipoteca-print-table">
+      <colgroup>
+        <col style="width: 14%;" />
+        <col style="width: 35%;" />
+        <col style="width: 20%;" />
+        <col style="width: 16%;" />
+        <col style="width: 15%;" />
+      </colgroup>
       <thead>
         <tr>${HIPOTECA_BDT_PRINT_COLUMNS.map((column) => `<th>${escapeHtml(column.label)}</th>`).join("")}</tr>
       </thead>
       <tbody>${rowsHtml}</tbody>
     </table>
   `;
+};
+
+const openHipotecaBdtListadoPrint = async () => {
+  let popup = null;
+  try {
+    popup = window.open("", "_blank", "noopener,noreferrer");
+  } catch (e) {}
+  let cached = state.hipotecaBdtCache?.data || null;
+  if (!cached || !Array.isArray(cached.columns) || !Array.isArray(cached.rows)) {
+    await loadHipotecaBdt(true);
+    cached = state.hipotecaBdtCache?.data || null;
+  }
+  const columns = Array.isArray(cached?.columns) ? cached.columns : [];
+  const rows = Array.isArray(cached?.rows) ? cached.rows : [];
+  const filters = getHipotecaBdtListadoFilters();
+  const result = filterHipotecaBdtRows(
+    rows,
+    columns,
+    filters.query,
+    { year: filters.year, estado: filters.estado, order: filters.order },
+    { limit: Infinity }
+  );
+  const filteredRows = Array.isArray(result.filtered) ? result.filtered : [];
+  const html = buildHipotecaListadoPrintHtml(filteredRows, columns, result.filters || filters);
+  if (popup && !popup.closed) {
+    const written = writeCrmPrintWindow(popup, { title: "Listado de hipotecas", html });
+    if (written) return;
+    try {
+      popup.close();
+    } catch (e) {}
+  }
+  openCrmPrintWindow({ title: "Listado de hipotecas", html });
 };
 
 const renderHipotecaBdtFromCache = () => {
@@ -54354,6 +54381,11 @@ const openCrmPrintWindow = ({ title = "Impresión", html = "" } = {}) => {
     alert("No se pudo abrir la ventana de impresión (popup bloqueado).");
     return;
   }
+  writeCrmPrintWindow(win, { title, html });
+};
+
+const writeCrmPrintWindow = (win, { title = "Impresión", html = "" } = {}) => {
+  if (!win) return false;
   win.document.open();
   win.document.write(`<!doctype html>
     <html lang="es">
@@ -54376,6 +54408,7 @@ const openCrmPrintWindow = ({ title = "Impresión", html = "" } = {}) => {
       </body>
     </html>`);
   win.document.close();
+  return true;
 };
 
 const normalizeCrmMapaTipo = (raw) => {
@@ -90328,23 +90361,14 @@ if (hipotecaBdtListOrder) {
 
 if (hipotecaBdtPrintListado) {
   hipotecaBdtPrintListado.addEventListener("click", async () => {
-    let popup = null;
     const originalText = hipotecaBdtPrintListado.textContent;
     hipotecaBdtPrintListado.disabled = true;
-    hipotecaBdtPrintListado.textContent = "Generando...";
+    hipotecaBdtPrintListado.textContent = "Imprimiendo...";
     try {
-      popup = window.open("", "_blank", "noopener");
-    } catch (e) {}
-    try {
-      await downloadHipotecaBdtPdf("listado", popup);
+      await openHipotecaBdtListadoPrint();
     } catch (error) {
-      alert(`No se pudo descargar el listado. ${String(error?.message || error || "").trim() || "Revisa los filtros e inténtalo de nuevo."}`);
+      alert(`No se pudo imprimir el listado. ${String(error?.message || error || "").trim() || "Revisa los filtros e inténtalo de nuevo."}`);
     } finally {
-      try {
-        if (popup && !popup.closed && popup.location && popup.location.href === "about:blank") {
-          popup.close();
-        }
-      } catch (e) {}
       hipotecaBdtPrintListado.disabled = false;
       hipotecaBdtPrintListado.textContent = originalText;
     }
