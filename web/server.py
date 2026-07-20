@@ -5439,7 +5439,8 @@ def build_hipoteca_dashboard_entity_rows(entity_total_rows, entity_year_rows):
             ("deutsche bank", "Deutsche Bank España"),
         )
         for needle, canonical in rules:
-            if needle and needle in norm:
+            needle_norm = normalize_lookup_text(needle)
+            if needle_norm and needle_norm in norm:
                 return canonical
         return raw
 

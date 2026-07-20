@@ -1142,6 +1142,24 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
         self.assertEqual(payload["entity_total_map"]["Banco Santander"]["total"], 9)
         self.assertEqual(payload["entity_year_rows"][0]["label"], "Banco Santander")
 
+    def test_build_hipoteca_dashboard_entity_rows_normalizes_bank_aliases_case_insensitively(self):
+        total_rows = [
+            {"label": "Cajamar", "total": 1},
+            {"label": "Cajamar Caja Rural", "total": 1},
+            {"label": "Banco Santander", "total": 1},
+        ]
+        year_rows = [
+            {"label": "Cajamar", "total": 1},
+        ]
+
+        payload = build_hipoteca_dashboard_entity_rows(total_rows, year_rows)
+
+        self.assertEqual([row["label"] for row in payload["series_entidades"]], ["Cajamar Caja Rural", "Banco Santander"])
+        self.assertEqual(payload["entity_total_map"]["Cajamar Caja Rural"]["total"], 2)
+        self.assertEqual(payload["entity_total_map"]["Banco Santander"]["total"], 1)
+        self.assertEqual(payload["entity_year_rows"][0]["label"], "Cajamar Caja Rural")
+        self.assertEqual(payload["entity_year_rows"][0]["total"], 1)
+
     def test_collect_hipoteca_dashboard_entity_total_rows_does_not_truncate_history(self):
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
