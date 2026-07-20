@@ -169,20 +169,13 @@
   const openBlobInNewTab = (blob, filename = "archivo") => {
     if (!(blob instanceof Blob)) return false;
     const url = URL.createObjectURL(blob);
-    let opened = null;
-    try {
-      opened = window.open(url, "_blank", "noopener,noreferrer");
-    } catch {
-      opened = null;
-    }
-    if (!opened) {
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename || "archivo";
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-    }
+  const a = document.createElement("a");
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noopener,noreferrer";
+  document.body.appendChild(a);
+  a.click();
+    document.body.removeChild(a);
     setTimeout(() => {
       try {
         URL.revokeObjectURL(url);

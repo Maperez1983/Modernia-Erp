@@ -10,6 +10,8 @@ class JavaScriptSyntaxTests(unittest.TestCase):
     def test_shared_bundle_references_use_real_filename(self):
         root = Path(__file__).resolve().parents[1]
         index_html = (root / "web" / "index.html").read_text(encoding="utf-8")
+        app_js = (root / "web" / "app.js").read_text(encoding="utf-8")
+        app_shared_js = (root / "web" / "app_shared.js").read_text(encoding="utf-8")
         sw_js = (root / "web" / "sw.js").read_text(encoding="utf-8")
         server_py = (root / "web" / "server.py").read_text(encoding="utf-8")
 
@@ -26,6 +28,24 @@ class JavaScriptSyntaxTests(unittest.TestCase):
         self.assertNotIn("/app-shared.js?v=1", sw_js)
         self.assertIn('"app_shared.js"', server_py)
         self.assertNotIn('"app-shared.js"', server_py)
+        self.assertIn('const openBlobInNewTab = (blob, filename = "archivo") => {', app_shared_js)
+        self.assertIn('a.target = "_blank";', app_shared_js)
+        self.assertNotIn('a.download = filename || "archivo";', app_shared_js)
+        self.assertNotIn('window.open(url, "_blank", "noopener,noreferrer")', app_shared_js)
+        self.assertIn('const openCrmPrintWindow = ({ title = "Impresión", html = "" } = {}) => {', app_js)
+        open_blob_snippet = app_js[
+            app_js.index("const fallbackOpenBlobInNewTab =")
+            : app_js.index("const fallbackFetchBlobFromGet =")
+        ]
+        print_window_snippet = app_js[
+            app_js.index("const openCrmPrintWindow =")
+            : app_js.index("const writeCrmPrintWindow =")
+        ]
+        self.assertIn('a.target = "_blank";', open_blob_snippet)
+        self.assertNotIn('a.download = filename || "archivo";', open_blob_snippet)
+        self.assertIn('a.target = "_blank";', print_window_snippet)
+        self.assertNotIn("a.download", print_window_snippet)
+        self.assertIn('window.print()', app_js)
 
     def test_app_js_boot_falls_back_without_shared_module_and_prefers_shared_helpers(self):
         node = shutil.which("node")

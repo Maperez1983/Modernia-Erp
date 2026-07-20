@@ -261,20 +261,13 @@ const fallbackSafeOpenUrl = (value) => fallbackSafeUrlValue(value, { allowBlob: 
 const fallbackOpenBlobInNewTab = (blob, filename = "archivo") => {
   if (!(blob instanceof Blob)) return false;
   const url = URL.createObjectURL(blob);
-  let opened = null;
-  try {
-    opened = window.open(url, "_blank", "noopener,noreferrer");
-  } catch {
-    opened = null;
-  }
-  if (!opened) {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename || "archivo";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  }
+  const a = document.createElement("a");
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noopener,noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
   setTimeout(() => {
     try {
       URL.revokeObjectURL(url);
@@ -42648,10 +42641,6 @@ const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}) =>
 };
 
 const openHipotecaBdtListadoPrint = async () => {
-  let popup = null;
-  try {
-    popup = window.open("", "_blank", "noopener,noreferrer");
-  } catch (e) {}
   let cached = state.hipotecaBdtCache?.data || null;
   if (!cached || !Array.isArray(cached.columns) || !Array.isArray(cached.rows)) {
     await loadHipotecaBdt(true);
@@ -42669,21 +42658,10 @@ const openHipotecaBdtListadoPrint = async () => {
   );
   const filteredRows = Array.isArray(result.filtered) ? result.filtered : [];
   const html = buildHipotecaListadoPrintHtml(filteredRows, columns, result.filters || filters);
-  if (popup && !popup.closed) {
-    const written = writeCrmPrintWindow(popup, { title: "Listado de hipotecas", html });
-    if (written) return;
-    try {
-      popup.close();
-    } catch (e) {}
-  }
   openCrmPrintWindow({ title: "Listado de hipotecas", html });
 };
 
 const openHipotecaFirmadasListadoPrint = async (selectedYear = "2026") => {
-  let popup = null;
-  try {
-    popup = window.open("", "_blank", "noopener,noreferrer");
-  } catch (e) {}
   let cached = state.hipotecaBdtCache?.data || null;
   if (!cached || !Array.isArray(cached.columns) || !Array.isArray(cached.rows)) {
     await loadHipotecaBdt(true);
@@ -42702,13 +42680,6 @@ const openHipotecaFirmadasListadoPrint = async (selectedYear = "2026") => {
   );
   const filteredRows = Array.isArray(result.filtered) ? result.filtered.filter((row) => isHipotecaSignedForExport(row, columns)) : [];
   const html = buildHipotecaListadoPrintHtml(filteredRows, columns, result.filters || { ...filters, year, estado: "Firmada" });
-  if (popup && !popup.closed) {
-    const written = writeCrmPrintWindow(popup, { title: `Listado de hipotecas firmadas ${year || ""}`.trim(), html });
-    if (written) return;
-    try {
-      popup.close();
-    } catch (e) {}
-  }
   openCrmPrintWindow({ title: `Listado de hipotecas firmadas ${year || ""}`.trim(), html });
 };
 
@@ -54411,12 +54382,45 @@ const loadCrmInmuebles = () => {
 };
 
 const openCrmPrintWindow = ({ title = "Impresión", html = "" } = {}) => {
-  const win = window.open("", "_blank", "noopener,noreferrer");
-  if (!win) {
-    alert("No se pudo abrir la ventana de impresión (popup bloqueado).");
-    return;
-  }
-  writeCrmPrintWindow(win, { title, html });
+  const blob = new Blob(
+    [
+      `<!doctype html>
+      <html lang="es">
+        <head>
+          <meta charset="utf-8" />
+          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <title>${escapeHtml(title)}</title>
+          <style>
+            body{font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:18px;color:#0f172a;}
+            h1{font-size:18px;margin:0 0 12px;}
+            table{width:100%;border-collapse:collapse;font-size:12px;}
+            th,td{padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:left;vertical-align:top;}
+            th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#475569;}
+          </style>
+        </head>
+        <body>
+          <h1>${escapeHtml(title)}</h1>
+          ${html}
+          <script>window.focus(); setTimeout(()=>window.print(), 200);</script>
+        </body>
+      </html>`,
+    ],
+    { type: "text/html;charset=utf-8" }
+  );
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.target = "_blank";
+  a.rel = "noopener,noreferrer";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => {
+    try {
+      URL.revokeObjectURL(url);
+    } catch (e) {}
+  }, 120000);
 };
 
 const writeCrmPrintWindow = (win, { title = "Impresión", html = "" } = {}) => {
@@ -72066,7 +72070,7 @@ const downloadPdfFromApi = async (endpoint, payload, options = {}) => {
       }
     } catch (e) {}
   }
-  downloadBlobFile(filename, blob);
+  openBlobInNewTab(blob, filename);
 };
 
 const buildPlantillaConversorRows = (diario = []) => {
@@ -90437,23 +90441,14 @@ if (hipotecaBdtPrintFichas) {
 
 if (hipotecaBdtPrintFirmadas) {
   hipotecaBdtPrintFirmadas.addEventListener("click", async () => {
-    let popup = null;
     const originalText = hipotecaBdtPrintFirmadas.textContent;
     hipotecaBdtPrintFirmadas.disabled = true;
     hipotecaBdtPrintFirmadas.textContent = "Generando...";
     try {
-      popup = window.open("", "_blank", "noopener");
-    } catch (e) {}
-    try {
-      await downloadHipotecaBdtPdf("firmadas", popup);
+      await downloadHipotecaBdtPdf("firmadas");
     } catch (error) {
       alert(`No se pudieron generar los PDFs firmados. ${String(error?.message || error || "").trim() || "Revisa la conexión e inténtalo de nuevo."}`);
     } finally {
-      try {
-        if (popup && !popup.closed && popup.location && popup.location.href === "about:blank") {
-          popup.close();
-        }
-      } catch (e) {}
       hipotecaBdtPrintFirmadas.disabled = false;
       hipotecaBdtPrintFirmadas.textContent = originalText;
     }
