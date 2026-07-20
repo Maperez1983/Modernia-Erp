@@ -20,7 +20,7 @@
     "lighthouse:local": "node scripts/lighthouse-local.cjs"
   },
   "devDependencies": {
-    "@lhci/cli": "^0.14.0",
+    "@lhci/cli": "^0.15.1",
     "axe-core": "^4.12.1",
     "eslint": "^10.7.0",
     "globals": "^17.7.0",
