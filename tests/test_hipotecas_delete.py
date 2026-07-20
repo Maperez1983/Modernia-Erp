@@ -868,6 +868,33 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                "c3",
+                "Prestataria JSON",
+                "e2",
+                "99999999Z",
+                "699000000",
+                "699000000",
+                "",
+                "otra@example.com",
+                "Otra calle 99",
+                "Otra calle 99",
+                "08001",
+                "Barcelona",
+                "Barcelona",
+                "1975-12-31",
+                "Activo",
+                "2026-08-01",
+                "2026-08-01",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO clientes (
+              id, nombre, empresa_id, nif, telefono, movil, otro_telefono, email, direccion, domicilio,
+              codigo_postal, poblacion, provincia, fecha_nacimiento, estado, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
                 "c2",
                 "Prestataria JSON",
                 "e1",
@@ -963,6 +990,8 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
         self.assertEqual(item2["cliente_email"], "prestataria@example.com")
         self.assertEqual(item2["cliente_fields"]["movil"], "611222333")
         self.assertEqual(item2["cliente_fields"]["codigo_postal"], "28001")
+        self.assertNotEqual(item2["cliente_fields"]["nif"], "99999999Z")
+        self.assertNotEqual(item2["cliente_fields"]["email"], "otra@example.com")
 
         if OPENPYXL_AVAILABLE:
             wb = build_hipotecas_listado_excel_workbook([item], "2026")

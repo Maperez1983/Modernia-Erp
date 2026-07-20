@@ -5608,7 +5608,7 @@ def _hipoteca_export_json_text(primary, cliente_inmueble, *nested_paths, default
     return default
 
 
-def _build_hipoteca_cliente_fields(conn, cliente_id, cliente_nombre=""):
+def _build_hipoteca_cliente_fields(conn, cliente_id, cliente_nombre="", empresa_id=""):
     cliente_id = str(cliente_id or "").strip()
     cliente_row = conn.execute(
         "SELECT * FROM clientes WHERE id = ? LIMIT 1",
@@ -5617,10 +5617,24 @@ def _build_hipoteca_cliente_fields(conn, cliente_id, cliente_nombre=""):
     if not cliente_row:
         cliente_nombre = str(cliente_nombre or "").strip()
         if cliente_nombre:
-            cliente_row = conn.execute(
-                "SELECT * FROM clientes WHERE UPPER(COALESCE(nombre, '')) = UPPER(?) ORDER BY created_at DESC LIMIT 1",
-                (cliente_nombre,),
-            ).fetchone()
+            empresa_id = str(empresa_id or "").strip()
+            if empresa_id:
+                cliente_row = conn.execute(
+                    """
+                    SELECT *
+                    FROM clientes
+                    WHERE UPPER(COALESCE(nombre, '')) = UPPER(?)
+                      AND (COALESCE(empresa_id, '') = '' OR empresa_id = ?)
+                    ORDER BY CASE WHEN empresa_id = ? THEN 0 ELSE 1 END, updated_at DESC, created_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (cliente_nombre, empresa_id, empresa_id),
+                ).fetchone()
+            else:
+                cliente_row = conn.execute(
+                    "SELECT * FROM clientes WHERE UPPER(COALESCE(nombre, '')) = UPPER(?) ORDER BY updated_at DESC, created_at DESC, id DESC LIMIT 1",
+                    (cliente_nombre,),
+                ).fetchone()
     if not cliente_row:
         return {}
     cliente_fields = {}
@@ -5632,6 +5646,7 @@ def _build_hipoteca_cliente_fields(conn, cliente_id, cliente_nombre=""):
 def build_hipoteca_export_row(conn, row):
     cliente_inmueble = _safe_json_object(row_value(row, "cliente_inmueble_json", "") or "{}")
     cliente_id = str(row_value(row, "cliente_id", "") or "").strip()
+    empresa_id = str(row_value(row, "empresa_id", "") or "").strip()
     cliente = _hipoteca_export_json_text(
         row_value(row, "cliente", ""),
         cliente_inmueble,
@@ -5677,9 +5692,9 @@ def build_hipoteca_export_row(conn, row):
     )
     cliente_fields = {}
     if cliente_id:
-        cliente_fields = _build_hipoteca_cliente_fields(conn, cliente_id, cliente)
+        cliente_fields = _build_hipoteca_cliente_fields(conn, cliente_id, cliente, empresa_id)
     elif cliente:
-        cliente_fields = _build_hipoteca_cliente_fields(conn, "", cliente)
+        cliente_fields = _build_hipoteca_cliente_fields(conn, "", cliente, empresa_id)
     if cliente_fields:
         cliente_row = cliente_fields if cliente_fields else None
         if cliente_row:
