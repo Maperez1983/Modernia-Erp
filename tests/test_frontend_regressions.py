@@ -2114,3 +2114,83 @@ class FrontendHipotecaLookupScopeTests(unittest.TestCase):
                 """
             ),
         )
+
+
+class FrontendTenantWorkspaceCompanyResolutionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const resolveCrmInmoEmpresa = () => {",
+            "const resolveCrmTecnocloudVertical = () => {",
+        )
+        cls.param_names = [
+            "state",
+            "resolveEmpresaById",
+            "getStoredServiceCompanyId",
+            "resolveWorkspaceDefaultEmpresa",
+            "isTenantWorkspaceMode",
+            "normalizeSimple",
+            "SERVICE_COMPANY_MAP",
+            "FINCAS_COMPANY",
+            "FIN_COMPANY",
+        ]
+        cls.return_names = [
+            "resolveCrmInmoEmpresa",
+            "resolveCrmSegurosEmpresa",
+            "resolveSegurosDashboardEmpresaId",
+        ]
+
+    def _run(self, prelude: str, body: str) -> None:
+        script = make_factory_script(self.segment, self.param_names, self.return_names, prelude, body)
+        run_node_script(script)
+
+    def test_tenant_mode_prefers_active_workspace_company_over_stored_service_selection(self):
+        self._run(
+            dedent(
+                """
+                const companies = new Map([
+                  ["emp-active", { id: "emp-active", legacy_empresa_id: "emp-active", nombre: "Activa Workspace" }],
+                  ["emp-stale", { id: "emp-stale", legacy_empresa_id: "emp-stale", nombre: "Antigua Guardada" }],
+                ]);
+                const state = {
+                  currentWorkspaceEntryMode: "tenant",
+                  currentWorkspaceCompanyId: "emp-active",
+                  currentEmpresaId: "",
+                  crmInmoEmpresaId: "",
+                  crmSegurosEmpresaId: "",
+                  crmGestoriaEmpresaId: "",
+                  crmFinEmpresaId: "",
+                  empresas: Array.from(companies.values()),
+                };
+                const resolveEmpresaById = (id) => companies.get(String(id || "").trim()) || null;
+                const getStoredServiceCompanyId = (serviceKey) => (
+                  serviceKey === "inmobiliaria" || serviceKey === "seguros" ? "emp-stale" : ""
+                );
+                const resolveWorkspaceDefaultEmpresa = () => null;
+                const isTenantWorkspaceMode = () => state.currentWorkspaceEntryMode === "tenant";
+                const normalizeSimple = (value) => String(value || "").trim().toLowerCase();
+                globalThis.SERVICE_COMPANY_MAP = {
+                  Inmobiliaria: "Activa Workspace",
+                  Seguros: "Activa Workspace",
+                };
+                globalThis.FINCAS_COMPANY = "Activa Workspace";
+                globalThis.FIN_COMPANY = "Financiaciones Modernia";
+                """
+            ),
+            dedent(
+                """
+                const {
+                  resolveCrmInmoEmpresa,
+                  resolveCrmSegurosEmpresa,
+                  resolveSegurosDashboardEmpresaId,
+                } = api;
+                assert.strictEqual(resolveCrmInmoEmpresa().id, "emp-active");
+                assert.strictEqual(resolveCrmSegurosEmpresa().id, "emp-active");
+                assert.strictEqual(resolveSegurosDashboardEmpresaId(), "emp-active");
+                state.currentWorkspaceEntryMode = "platform";
+                assert.strictEqual(resolveCrmInmoEmpresa().id, "emp-stale");
+                assert.strictEqual(resolveCrmSegurosEmpresa().id, "emp-stale");
+                assert.strictEqual(resolveSegurosDashboardEmpresaId(), "emp-stale");
+                """
+            ),
+        )

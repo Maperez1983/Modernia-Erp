@@ -25993,6 +25993,17 @@ const resolveWorkspaceDefaultEmpresa = (serviceKey = "") => {
 };
 
 const resolveCrmInmoEmpresa = () => {
+  // En modo tenant, la empresa activa del workspace es la fuente de verdad.
+  // Evita reusar una selección almacenada de Inmobiliaria que pertenezca a otro contexto.
+  try {
+    if (isTenantWorkspaceMode()) {
+      const activeWsCompanyId = String(state.currentWorkspaceCompanyId || "").trim();
+      if (activeWsCompanyId) {
+        const active = resolveEmpresaById(activeWsCompanyId);
+        if (active) return active;
+      }
+    }
+  } catch (e) {}
   // 1) Si ya hay empresa "Inmo" fijada (p.ej. usuario cambiando de ficha), úsala.
   const explicit = resolveEmpresaById(state.crmInmoEmpresaId);
   if (explicit) return explicit;
@@ -26041,6 +26052,17 @@ const resolveCrmGestoriaEmpresaNombre = () => resolveCrmGestoriaEmpresa()?.nombr
 const resolveCrmFinEmpresaNombre = () => resolveCrmFinEmpresa()?.nombre || FIN_COMPANY;
 
 const resolveCrmSegurosEmpresa = () => {
+  // En modo tenant, la empresa activa del workspace es la fuente de verdad.
+  // Evita reusar una selección almacenada de Seguros que pertenezca a otro contexto.
+  try {
+    if (isTenantWorkspaceMode()) {
+      const activeWsCompanyId = String(state.currentWorkspaceCompanyId || "").trim();
+      if (activeWsCompanyId) {
+        const active = resolveEmpresaById(activeWsCompanyId);
+        if (active) return active;
+      }
+    }
+  } catch (e) {}
   const explicit = resolveEmpresaById(state.crmSegurosEmpresaId);
   if (explicit) return explicit;
   const stored = resolveEmpresaById(getStoredServiceCompanyId("seguros"));
@@ -26056,6 +26078,12 @@ const resolveCrmSegurosEmpresa = () => {
 };
 
 const resolveSegurosDashboardEmpresaId = () => {
+  try {
+    if (isTenantWorkspaceMode()) {
+      const activeWsCompanyId = String(state.currentWorkspaceCompanyId || "").trim();
+      if (activeWsCompanyId) return activeWsCompanyId;
+    }
+  } catch (e) {}
   return String(
     state.currentEmpresaId || state.crmSegurosEmpresaId || resolveCrmSegurosEmpresa()?.id || ""
   ).trim();
