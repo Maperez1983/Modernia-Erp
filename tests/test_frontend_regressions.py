@@ -2194,3 +2194,95 @@ class FrontendTenantWorkspaceCompanyResolutionTests(unittest.TestCase):
                 """
             ),
         )
+
+
+class ClienteDocsTabVisibilityTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const setClienteDocsTab = (tab) => {",
+            "const syncHoldingUrlParams = () => {",
+        )
+        cls.param_names = [
+            "state",
+            "clienteDocsTabs",
+            "clienteDocsUploadService",
+            "clienteDocsSeguros",
+            "clienteDocsGestoria",
+            "clienteDocsFin",
+            "clienteDocsInmo",
+            "loadClienteDocsByService",
+            "getVisibleServiceKeys",
+            "normalizeSimple",
+        ]
+        cls.return_names = ["setClienteDocsTab"]
+
+    def _run(self, prelude: str, body: str) -> None:
+        script = make_factory_script(self.segment, self.param_names, self.return_names, prelude, body)
+        run_node_script(script)
+
+    def test_empty_visible_service_set_keeps_docs_tab_hidden_and_does_not_fallback_to_seguros(self):
+        self._run(
+            dedent(
+                """
+                const makeClassList = () => {
+                  const flags = new Set();
+                  return {
+                    flags,
+                    toggle(name, force) {
+                      const next = typeof force === "boolean" ? force : !flags.has(name);
+                      if (next) flags.add(name);
+                      else flags.delete(name);
+                      return next;
+                    },
+                    add(name) { flags.add(name); },
+                    remove(name) { flags.delete(name); },
+                    contains(name) { return flags.has(name); },
+                  };
+                };
+                const makeTab = (docsTab) => ({
+                  dataset: { docsTab },
+                  classList: makeClassList(),
+                });
+                const tabs = [
+                  makeTab("seguros"),
+                  makeTab("gestoria"),
+                  makeTab("financiaciones"),
+                  makeTab("inmobiliaria"),
+                ];
+                const clienteDocsTabs = {
+                  querySelectorAll: () => tabs,
+                };
+                const clienteDocsUploadService = { value: "seguros" };
+                const clienteDocsSeguros = { classList: makeClassList(), innerHTML: "stale-seguros" };
+                const clienteDocsGestoria = { classList: makeClassList(), innerHTML: "stale-gestoria" };
+                const clienteDocsFin = { classList: makeClassList(), innerHTML: "stale-fin" };
+                const clienteDocsInmo = { classList: makeClassList(), innerHTML: "stale-inmo" };
+                const state = { currentClienteId: "cliente-1", clienteDocsTab: "seguros" };
+                const loadCalls = [];
+                const loadClienteDocsByService = (clienteId, service, container) => {
+                  loadCalls.push([clienteId, service, container]);
+                };
+                const getVisibleServiceKeys = () => new Set();
+                const normalizeSimple = (value) => String(value || "").trim().toLowerCase();
+                """
+            ),
+            dedent(
+                """
+                const { setClienteDocsTab } = api;
+                setClienteDocsTab("inmobiliaria");
+                assert.strictEqual(state.clienteDocsTab, "");
+                assert.strictEqual(clienteDocsUploadService.value, "");
+                assert.strictEqual(loadCalls.length, 0);
+                assert.strictEqual(clienteDocsSeguros.innerHTML.includes("No tienes servicios de documentos visibles"), true);
+                assert.strictEqual(clienteDocsSeguros.classList.contains("hidden"), false);
+                assert.strictEqual(clienteDocsGestoria.classList.contains("hidden"), true);
+                assert.strictEqual(clienteDocsFin.classList.contains("hidden"), true);
+                assert.strictEqual(clienteDocsInmo.classList.contains("hidden"), true);
+                tabs.forEach((tab) => {
+                  assert.strictEqual(tab.classList.contains("hidden"), true);
+                  assert.strictEqual(tab.classList.contains("active"), false);
+                });
+                """
+            ),
+        )

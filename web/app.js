@@ -29978,6 +29978,34 @@ const setClienteDocsTab = (tab) => {
   if (!clienteDocsTabs) return;
   const normalized = tab || "seguros";
   const allowed = getVisibleServiceKeys();
+  if (allowed instanceof Set && allowed.size === 0) {
+    state.clienteDocsTab = "";
+    if (clienteDocsUploadService) {
+      clienteDocsUploadService.value = "";
+    }
+    clienteDocsTabs.querySelectorAll(".tab").forEach((btn) => {
+      btn.classList.toggle("hidden", true);
+      btn.classList.toggle("active", false);
+    });
+    if (clienteDocsSeguros) {
+      clienteDocsSeguros.classList.remove("hidden");
+      clienteDocsSeguros.innerHTML =
+        "<p class='muted'>No tienes servicios de documentos visibles para este cliente.</p>";
+    }
+    if (clienteDocsGestoria) {
+      clienteDocsGestoria.classList.add("hidden");
+      clienteDocsGestoria.innerHTML = "";
+    }
+    if (clienteDocsFin) {
+      clienteDocsFin.classList.add("hidden");
+      clienteDocsFin.innerHTML = "";
+    }
+    if (clienteDocsInmo) {
+      clienteDocsInmo.classList.add("hidden");
+      clienteDocsInmo.innerHTML = "";
+    }
+    return;
+  }
   const fallback = allowed ? Array.from(allowed)[0] || "seguros" : normalized;
   const targetTab = allowed && !allowed.has(normalizeSimple(normalized)) ? fallback : normalized;
   state.clienteDocsTab = targetTab;
