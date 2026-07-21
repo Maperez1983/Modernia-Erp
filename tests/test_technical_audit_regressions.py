@@ -530,6 +530,52 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
         self.assertEqual(result["services"]["fincas"]["kpis"]["facturado_total"], 200.0)
         self.assertEqual(result["pending"]["total"], 1)
 
+    def test_compute_workspace_rrhh_productividad_routes_service_aliases(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        facturacion_calls = []
+
+        def fake_facturacion_anual(conn_arg, workspace_id, empresa_id, persona_id, *, servicio_keys, ejercicio=""):
+            facturacion_calls.append(
+                {
+                    "workspace_id": workspace_id,
+                    "empresa_id": empresa_id,
+                    "persona_id": persona_id,
+                    "servicio_keys": {str(item) for item in servicio_keys},
+                    "ejercicio": ejercicio,
+                }
+            )
+            return {"kpis": {"origin": "facturacion", "ejercicio": ejercicio}, "items": []}
+
+        with mock.patch.object(server, "compute_workspace_rrhh_productividad_renta", return_value={"kpis": {"origin": "renta"}, "items": []}) as renta_mock:
+            with mock.patch.object(server, "compute_workspace_rrhh_productividad_seguros", return_value={"kpis": {"origin": "seguros"}, "items": []}) as seguros_mock:
+                with mock.patch.object(server, "compute_workspace_rrhh_productividad_hipotecas", return_value={"kpis": {"origin": "hipotecas"}, "items": []}) as hipotecas_mock:
+                    with mock.patch.object(server, "compute_workspace_rrhh_productividad_facturacion_anual", side_effect=fake_facturacion_anual) as facturacion_mock:
+                        renta = server.compute_workspace_rrhh_productividad(conn, "ws-1", "emp-1", "p-1", "renta", ejercicio="2026")
+                        seguros = server.compute_workspace_rrhh_productividad(conn, "ws-1", "emp-1", "p-1", "seguros", ejercicio="2026")
+                        hipotecas = server.compute_workspace_rrhh_productividad(conn, "ws-1", "emp-1", "p-1", "hipotecas", ejercicio="2026")
+                        gestoria = server.compute_workspace_rrhh_productividad(conn, "ws-1", "emp-1", "p-1", "gestoría", ejercicio="2026")
+                        fincas = server.compute_workspace_rrhh_productividad(conn, "ws-1", "emp-1", "p-1", "administración fincas", ejercicio="2026")
+
+        conn.close()
+
+        self.assertEqual(renta, {"kpis": {"origin": "renta"}, "items": []})
+        self.assertEqual(seguros, {"kpis": {"origin": "seguros"}, "items": []})
+        self.assertEqual(hipotecas, {"kpis": {"origin": "hipotecas"}, "items": []})
+        self.assertEqual(gestoria, {"kpis": {"origin": "facturacion", "ejercicio": "2026"}, "items": []})
+        self.assertEqual(fincas, {"kpis": {"origin": "facturacion", "ejercicio": "2026"}, "items": []})
+
+        self.assertEqual(renta_mock.call_count, 1)
+        self.assertEqual(seguros_mock.call_count, 1)
+        self.assertEqual(hipotecas_mock.call_count, 1)
+        self.assertEqual(facturacion_mock.call_count, 2)
+        self.assertEqual(facturacion_calls[0]["servicio_keys"], {"gestoria", "gestoría"})
+        self.assertEqual(facturacion_calls[0]["ejercicio"], "2026")
+        self.assertEqual(
+            facturacion_calls[1]["servicio_keys"],
+            {"administracion fincas", "administración fincas"},
+        )
+
     def test_resolve_seguros_ocr_cliente_id_scopes_nif_and_name_by_empresa(self):
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
