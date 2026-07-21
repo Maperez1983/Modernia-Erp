@@ -8870,7 +8870,9 @@
                 <p class="muted">Resumen anual de hipotecas firmadas e indemnización.</p>
               </div>
               <div class="section-head-actions">
-                <select id="hipotecaDashboardYear" class="inline-input"></select>
+                <select id="hipotecaDashboardYear" class="inline-input" aria-label="Año del dashboard de hipotecas">
+                  <option value="">Año · Elegir…</option>
+                </select>
                 <button type="button" id="hipotecaDashboardRefresh" class="secondary">Recargar</button>
               </div>
             </div>
@@ -9179,9 +9181,14 @@
                 <option value="desc">Orden · Más recientes</option>
                 <option value="asc">Orden · Más antiguas</option>
               </select>
-              <button type="button" id="hipotecaBdtPrintListado" class="secondary">PDF listado</button>
-              <button type="button" id="hipotecaBdtExcelListado" class="secondary">Excel listado</button>
-              <button type="button" id="hipotecaBdtPrintFichas" class="secondary">Fichas de hipotecas</button>
+              <details class="hipoteca-export-details">
+                <summary class="secondary">Exportar</summary>
+                <div class="hipoteca-export-menu">
+                  <button type="button" id="hipotecaBdtPrintListado" class="secondary">PDF listado</button>
+                  <button type="button" id="hipotecaBdtExcelListado" class="secondary">Excel listado</button>
+                  <button type="button" id="hipotecaBdtPrintFichas" class="secondary">Fichas de hipotecas</button>
+                </div>
+              </details>
             </div>
 	            <div class="crm-actions u-mb-10 u-gap-8 u-wrap">
               <select id="hipotecaBdtVincularSelect" style="min-width:260px; max-width:420px;">

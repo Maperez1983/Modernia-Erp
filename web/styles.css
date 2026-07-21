@@ -11009,6 +11009,42 @@ body.density-compact #crmSection [id$="Table"] table {
   gap: 6px;
 }
 
+#hipotecaBdtPanel .hipoteca-export-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#hipotecaBdtPanel .hipoteca-export-details > summary.secondary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+#hipotecaBdtPanel .hipoteca-export-details > summary.secondary::-webkit-details-marker {
+  display: none;
+}
+
+#hipotecaBdtPanel .hipoteca-export-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(227, 221, 211, 0.9);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 8px 18px rgba(11, 29, 51, 0.06);
+}
+
+#hipotecaBdtPanel .hipoteca-export-menu .secondary {
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 10px;
+}
+
 #hipotecaBdtPanel .crm-actions input,
 #hipotecaBdtPanel .crm-actions select,
 #hipotecaBdtPanel .crm-actions button {

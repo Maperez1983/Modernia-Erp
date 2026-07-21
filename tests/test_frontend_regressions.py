@@ -2286,3 +2286,50 @@ class ClienteDocsTabVisibilityTests(unittest.TestCase):
                 """
             ),
         )
+
+
+class HipotecaDashboardYearSelectionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const syncHipotecaDashboardYearSelect =",
+            "const syncHipotecaListadoFilters =",
+        )
+        cls.param_names = ["createOption"]
+        cls.return_names = ["syncHipotecaDashboardYearSelect"]
+
+    def _run(self, prelude: str, body: str) -> None:
+        script = make_factory_script(self.segment, self.param_names, self.return_names, prelude, body)
+        run_node_script(script)
+
+    def test_dashboard_year_select_requires_explicit_choice(self):
+        self._run(
+            dedent(
+                """
+                const select = {
+                  value: "2026",
+                  disabled: false,
+                  innerHTML: "stale",
+                  options: [],
+                  appendChild(option) {
+                    this.options.push(option);
+                  },
+                };
+                const createOption = (value, label) => ({ value, label });
+                """
+            ),
+            dedent(
+                """
+                const { syncHipotecaDashboardYearSelect } = api;
+                const resolved = syncHipotecaDashboardYearSelect(select, ["2024", "2025", "2026"], "");
+                assert.strictEqual(resolved, "");
+                assert.strictEqual(select.value, "");
+                assert.strictEqual(select.disabled, false);
+                assert.strictEqual(select.innerHTML, "");
+                assert.deepStrictEqual(select.options[0], { value: "", label: "Año · Elegir…" });
+                assert.strictEqual(select.options.some((option) => option.value === "2026"), true);
+                assert.strictEqual(select.options.some((option) => option.value === "2025"), true);
+                assert.strictEqual(select.options.some((option) => option.value === "2024"), true);
+                """
+            ),
+        )
