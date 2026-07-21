@@ -98,6 +98,7 @@ jobs:
       LHCI_TMPDIR: ${{ github.workspace }}/fd-inheritance-artifacts
       LHCI_FD_INHERITANCE_DIAGNOSTIC: "1"
       LHCI_FD_INHERITANCE_SCRUB: "1"
+      LHCI_FD_INHERITANCE_HELPER_ISOLATION: "1"
 
     steps:
       - name: Checkout repository

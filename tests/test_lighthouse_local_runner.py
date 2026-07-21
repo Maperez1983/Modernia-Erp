@@ -144,6 +144,7 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
         fd_job_block = LIGHTHOUSE_WORKFLOW.split("fd-inheritance-diagnostic:", 1)[1]
         assert 'LHCI_FD_INHERITANCE_DIAGNOSTIC: "1"' in fd_job_block
         assert 'LHCI_FD_INHERITANCE_SCRUB: "1"' in fd_job_block
+        assert 'LHCI_FD_INHERITANCE_HELPER_ISOLATION: "1"' in fd_job_block
         assert "Resolve Chrome stable path for FD diagnostics" in fd_job_block
         assert "LHCI_FD_INHERITANCE_STABLE_CHROME_PATH" in fd_job_block
         assert "continue-on-error: true" in fd_job_block
@@ -1712,6 +1713,44 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
         )
         run_node_script(script)
 
+    def test_fd_inheritance_mode_adds_helper_isolation_variant_when_enabled(self):
+        chunk = extract_chunk("function isTruthyEnvFlag", "function buildBrowserMatrixVariants")
+        script = (
+            dedent(
+                """
+                const assert = require("assert");
+                const source = [
+                  'const { StringDecoder } = require("node:string_decoder");',
+                  'const { ensureSwClearedUrl } = require("./scripts/lighthouse-url.cjs");',
+                  'const sanitizeDiagnosticText = (value) => String(value || "").trim();',
+                  __SOURCE__,
+                ].join("\\n");
+                const factory = new Function(
+                  source + "\\nreturn { buildFdInheritanceMatrixVariants };"
+                );
+                const api = factory();
+                const variants = api.buildFdInheritanceMatrixVariants("/tmp/current-chrome", {
+                  LHCI_FD_INHERITANCE_HELPER_ISOLATION: "1",
+                });
+
+                assert.deepStrictEqual(
+                  variants.map((variant) => variant.id),
+                  ["F1", "F2", "F3", "F4", "F5", "F9", "F6", "F7"]
+                );
+                assert.strictEqual(variants[5].launcherTransport, "python");
+                assert.strictEqual(variants[5].label, "auxiliary-scrubbed-helper-isolated");
+                assert.strictEqual(variants[5].bootstrapHelperTree, true);
+                assert.strictEqual(variants[5].closeInheritedPipeFds, true);
+                assert.strictEqual(variants[5].scrubInheritedFds, true);
+                assert.strictEqual(variants[5].sandboxMode, "no-sandbox");
+                assert.strictEqual(variants[5].includeNoSandbox, true);
+                assert.strictEqual(variants[5].executablePath, "/tmp/current-chrome");
+                """
+            )
+            .replace("__SOURCE__", json.dumps(chunk))
+        )
+        run_node_script(script)
+
     def test_fd_inheritance_mode_adds_google_chrome_stable_variant_when_available(self):
         chunk = extract_chunk("function isTruthyEnvFlag", "function buildBrowserMatrixVariants")
         script = (
@@ -2112,6 +2151,7 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                         "wsEndpoint": "ws://127.0.0.1:9222/devtools/browser/test",
                     },
                     "chromeFdsBeforeLaunch": {"available": True, "entries": []},
+                    "bootstrapHelperTree": bool(config.get("bootstrapHelperTree")),
                 },
                 "python_pid": 111,
                 "chrome_pid": fake_proc.pid,
@@ -2148,6 +2188,7 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
                 {
                     "completionTimeoutMs": 1000,
                     "completionGraceMs": 1000,
+                    "bootstrapHelperTree": True,
                 },
                 stdin_stream=stdin_stream,
                 stdout_stream=stdout_stream,
@@ -2162,12 +2203,140 @@ class LighthouseLocalRunnerTests(unittest.TestCase):
         assert emitted_lines[0]["devtoolsPort"] == 9222
         assert emitted_lines[0]["devtoolsPath"] == "/devtools/browser/test"
         assert emitted_lines[0]["profileDir"] == "/tmp/profile"
+        assert emitted_lines[0]["bootstrapHelperTree"] is True
         assert launch_info["phase"] == "launch_info"
         assert complete_info["phase"] == "complete_info"
         assert fake_proc.terminated is True
         assert launch_calls
+        assert launch_calls[0]["bootstrapHelperTree"] is True
         assert complete_calls and complete_calls[0]["terminated"] is True
         assert 'launch_info' in complete_calls[0]["stdout"]
+
+    def test_python_fd_inheritance_bootstrap_helper_tree_uses_close_fds_and_relays_streams(self):
+        launcher_path = ROOT / "scripts" / "chrome_clean_launcher.py"
+        spec = importlib.util.spec_from_file_location("chrome_clean_launcher", launcher_path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+
+        close_received = threading.Event()
+        popen_calls = []
+        stdout_stream = io.StringIO()
+        stderr_stream = io.StringIO()
+        stdin_stream = io.StringIO('{"command":"close"}\n')
+
+        launch_line = json.dumps(
+            {
+                "phase": "launch_info",
+                "pythonPid": 111,
+                "chromePid": 4321,
+                "browserWSEndpoint": "ws://127.0.0.1:9222/devtools/browser/test",
+                "devtoolsPort": 9222,
+                "devtoolsPath": "/devtools/browser/test",
+                "profileDir": "/tmp/profile",
+                "bootstrapHelperTree": True,
+            }
+        ) + "\n"
+        complete_line = json.dumps(
+            {
+                "phase": "complete_info",
+                "pythonPid": 111,
+                "chromePid": 4321,
+                "chromeExitCode": 0,
+                "chromeExitSignal": None,
+                "chromeTimedOut": False,
+                "chromeStdoutText": "chrome stdout line\n",
+                "chromeStderrText": "Chrome stderr line\n",
+            }
+        ) + "\n"
+
+        class FakeReadable:
+            def __init__(self, scripted_lines):
+                self._scripted_lines = list(scripted_lines)
+                self.closed = False
+
+            def readline(self):
+                if not self._scripted_lines:
+                    return ""
+                item = self._scripted_lines.pop(0)
+                if callable(item):
+                    return item()
+                return item
+
+            def close(self):
+                self.closed = True
+
+        class FakeWritable:
+            def __init__(self):
+                self.closed = False
+                self.writes = []
+
+            def write(self, chunk):
+                text = str(chunk)
+                self.writes.append(text)
+                if '"command":"close"' in text:
+                    close_received.set()
+                return len(text)
+
+            def flush(self):
+                return None
+
+            def close(self):
+                self.closed = True
+
+        class FakeProc:
+            def __init__(self):
+                self.pid = 9876
+                self.stdin = FakeWritable()
+                self.stdout = FakeReadable([
+                    launch_line,
+                    lambda: (
+                        close_received.wait(timeout=1),
+                        complete_line,
+                    )[1],
+                ])
+                self.stderr = FakeReadable(["helper stderr line\n"])
+                self._returncode = 0
+
+            def wait(self, timeout=None):
+                close_received.wait(timeout=1)
+                self._returncode = 0
+                return 0
+
+        fake_proc = FakeProc()
+
+        class FakeSubprocess:
+            PIPE = subprocess.PIPE
+            DEVNULL = subprocess.DEVNULL
+
+            @staticmethod
+            def Popen(*args, **kwargs):
+                popen_calls.append({"args": args, "kwargs": kwargs})
+                return fake_proc
+
+        result = module.bootstrap_helper_tree(
+            {"bootstrapHelperTree": True},
+            subprocess_module=FakeSubprocess,
+            stdin_stream=stdin_stream,
+            stdout_stream=stdout_stream,
+            stderr_stream=stderr_stream,
+        )
+
+        assert result == 0
+        assert popen_calls
+        call = popen_calls[0]["kwargs"]
+        assert call["close_fds"] is True
+        assert call["pass_fds"] == ()
+        assert call["stdin"] is subprocess.PIPE
+        assert call["stdout"] is subprocess.PIPE
+        assert call["stderr"] is subprocess.PIPE
+        assert call["text"] is True
+        assert "--bootstrap-child" in popen_calls[0]["args"][0]
+        assert '"command":"close"' in "".join(fake_proc.stdin.writes)
+        assert stdout_stream.getvalue().count('"phase": "launch_info"') == 1
+        assert stdout_stream.getvalue().count('"phase": "complete_info"') == 1
+        assert "helper stderr line" in stderr_stream.getvalue()
+        assert fake_proc.stdin.closed is True
 
     def test_chrome_clean_launcher_closes_only_inherited_pipe_fds(self):
         script = dedent(

@@ -1708,6 +1708,10 @@ function isFdInheritanceDiagnosticEnabled() {
   return isTruthyEnvFlag(process.env.LHCI_FD_INHERITANCE_DIAGNOSTIC);
 }
 
+function isFdInheritanceHelperIsolationEnabled() {
+  return isTruthyEnvFlag(process.env.LHCI_FD_INHERITANCE_HELPER_ISOLATION);
+}
+
 function buildDiagnosticMatrixCases(auditUrl) {
   const rootUrl = new URL(auditUrl);
   rootUrl.searchParams.delete('swcleared');
@@ -1749,6 +1753,7 @@ function buildFdInheritanceMatrixVariants(chromePath, env = process.env) {
       env.CHROME_STABLE_PATH
   );
   const stableChromeVariantEnabled = Boolean(stableChromePath && stableChromePath !== currentChromePath);
+  const helperIsolationVariantEnabled = isTruthyEnvFlag(env.LHCI_FD_INHERITANCE_HELPER_ISOLATION);
 
   return [
     {
@@ -1796,6 +1801,24 @@ function buildFdInheritanceMatrixVariants(chromePath, env = process.env) {
       includeNoSandbox: true,
       executablePath: currentChromePath,
     },
+    ...(helperIsolationVariantEnabled
+      ? [
+          {
+            id: 'F9',
+            label: 'auxiliary-scrubbed-helper-isolated',
+            launcherKind: 'auxiliary',
+            launcherTransport: 'python',
+            stdioMode: 'pipe',
+            closeInheritedPipeFds: true,
+            scrubInheritedFds: true,
+            bootstrapHelperTree: true,
+            sandboxMode: 'no-sandbox',
+            extraFlags: [],
+            includeNoSandbox: true,
+            executablePath: currentChromePath,
+          },
+        ]
+      : []),
     {
       id: 'F6',
       label: 'auxiliary-scrubbed-network-service-in-process',
@@ -1958,6 +1981,7 @@ async function runChromeFdInheritanceCaseViaPythonLauncher(config, deps = {}) {
     launcherTransport: config.launcherTransport || 'python',
     closeInheritedPipeFds: Boolean(config.closeInheritedPipeFds),
     scrubInheritedFds: Boolean(config.scrubInheritedFds),
+    bootstrapHelperTree: Boolean(config.bootstrapHelperTree),
     sandboxMode: config.sandboxMode || (config.includeNoSandbox === false ? 'sandbox-enabled' : 'no-sandbox'),
     extraFlags: Array.isArray(config.extraFlags) ? config.extraFlags : [],
     includeNoSandbox: config.includeNoSandbox !== false,
@@ -1983,6 +2007,7 @@ async function runChromeFdInheritanceCaseViaPythonLauncher(config, deps = {}) {
     launcherTransport: variant.launcherTransport,
     closeInheritedPipeFds: false,
     scrubInheritedFds,
+    bootstrapHelperTree: variant.bootstrapHelperTree,
     auditUrl,
     chromePath,
     tempDir,
@@ -1999,6 +2024,9 @@ async function runChromeFdInheritanceCaseViaPythonLauncher(config, deps = {}) {
   const helperArgs = [wrapperScriptPath, `--config-json=${JSON.stringify(helperConfig)}`];
   if (scrubInheritedFds) {
     helperArgs.push('--scrub-inherited-fds');
+  }
+  if (variant.bootstrapHelperTree) {
+    helperArgs.push('--bootstrap-helper-tree');
   }
 
   const helperProcess = spawnImpl(
@@ -2463,6 +2491,7 @@ async function runChromeFdInheritanceCaseViaPythonLauncher(config, deps = {}) {
     summary.navigation.launcherTransport = variant.launcherTransport;
     summary.navigation.stdioMode = variant.stdioMode;
     summary.navigation.closeInheritedPipeFds = variant.closeInheritedPipeFds;
+    summary.navigation.bootstrapHelperTree = Boolean(variant.bootstrapHelperTree);
     summary.navigation.scrubInheritedFds = scrubInheritedFds;
     summary.navigation.sandboxMode = variant.sandboxMode || (variant.includeNoSandbox === false ? 'sandbox-enabled' : 'no-sandbox');
     summary.navigation.extraFlags = Array.isArray(variant.extraFlags) ? variant.extraFlags : [];
@@ -2488,6 +2517,7 @@ async function runChromeFdInheritanceCaseViaPythonLauncher(config, deps = {}) {
     summary.navigation.fd145InChrome = summary.fd145InChrome;
     summary.navigation.fd142InNetworkService = summary.fd142InNetworkService;
     summary.navigation.fd145InNetworkService = summary.fd145InNetworkService;
+    summary.bootstrapHelperTree = Boolean(variant.bootstrapHelperTree);
 
     return sanitizeDiagnosticValue(summary);
   } finally {
@@ -2517,6 +2547,7 @@ async function runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath})
       launcherTransport: variant.launcherTransport || 'node',
       stdioMode: variant.stdioMode,
       closeInheritedPipeFds: variant.closeInheritedPipeFds,
+      bootstrapHelperTree: Boolean(variant.bootstrapHelperTree),
       scrubInheritedFds:
         ['F5', 'F6', 'F7', 'F8'].includes(variant.id) &&
         isTruthyEnvFlag(process.env.LHCI_FD_INHERITANCE_SCRUB),
@@ -2565,6 +2596,7 @@ async function runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath})
       scrubInheritedFds:
         ['F5', 'F6', 'F7', 'F8'].includes(variant.id) &&
         isTruthyEnvFlag(process.env.LHCI_FD_INHERITANCE_SCRUB),
+      bootstrapHelperTree: Boolean(variant.bootstrapHelperTree),
       sandboxMode: variant.sandboxMode || (variant.includeNoSandbox === false ? 'sandbox-enabled' : 'no-sandbox'),
       extraFlags: Array.isArray(variant.extraFlags) ? variant.extraFlags : [],
       includeNoSandbox: variant.includeNoSandbox !== false,
@@ -2583,7 +2615,7 @@ async function runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath})
     };
 
     console.log(
-      `[lighthouse][fd-matrix] ${variant.id} start launcher=${variant.launcherKind} stdio=${variant.stdioMode} scrub=${caseConfig.scrubInheritedFds ? '1' : '0'} net=${variant.extraFlags && variant.extraFlags.includes('--enable-features=NetworkService,NetworkServiceInProcess') ? 'in-process' : 'out-of-process'} sandbox=${variant.includeNoSandbox === false ? 'enabled' : 'disabled'}`
+      `[lighthouse][fd-matrix] ${variant.id} start launcher=${variant.launcherKind} stdio=${variant.stdioMode} scrub=${caseConfig.scrubInheritedFds ? '1' : '0'} bootstrap=${caseConfig.bootstrapHelperTree ? '1' : '0'} net=${variant.extraFlags && variant.extraFlags.includes('--enable-features=NetworkService,NetworkServiceInProcess') ? 'in-process' : 'out-of-process'} sandbox=${variant.includeNoSandbox === false ? 'enabled' : 'disabled'}`
     );
     const parentFdsBefore = captureChromeCleanFdListing(process.pid);
     let helperStdout = '';
@@ -2655,6 +2687,7 @@ async function runFdInheritanceMatrixDiagnostic({auditUrl, tempDir, chromePath})
       kind: variant.launcherKind,
       stdioMode: variant.stdioMode,
       closeInheritedPipeFds: variant.closeInheritedPipeFds,
+      bootstrapHelperTree: Boolean(variant.bootstrapHelperTree),
     };
     sanitizedCaseResult.variantId = variant.id;
     sanitizedCaseResult.label = variant.label;

@@ -352,6 +352,7 @@ def launch_chrome_process(
         "close_fds": True,
         "pass_fds": [],
         "scrubInheritedFds": scrub_inherited_fds,
+        "bootstrapHelperTree": bool(config.get("bootstrapHelperTree")),
         "scrubbedFds": scrubbed_fds["closed"],
     }
 
@@ -479,6 +480,84 @@ def wait_for_close_command_or_exit(
             }
 
 
+def bootstrap_helper_tree(
+    config: Dict[str, Any],
+    *,
+    subprocess_module=subprocess,
+    stdin_stream=sys.stdin,
+    stdout_stream=sys.stdout,
+    stderr_stream=sys.stderr,
+) -> int:
+    """Launch a clean child copy of this helper with close_fds=True."""
+
+    helper_script_path = Path(__file__).resolve()
+    child_config = dict(config)
+    child_config["bootstrapHelperTree"] = False
+    child_args = [
+        sys.executable,
+        str(helper_script_path),
+        "--bootstrap-child",
+        f"--config-json={json.dumps(child_config, ensure_ascii=False)}",
+    ]
+    child = subprocess_module.Popen(
+        child_args,
+        close_fds=True,
+        pass_fds=(),
+        stdin=subprocess_module.PIPE,
+        stdout=subprocess_module.PIPE,
+        stderr=subprocess_module.PIPE,
+        text=True,
+        bufsize=1,
+    )
+    if child.stdin is None or child.stdout is None or child.stderr is None:
+        raise RuntimeError("No se pudo inicializar el bootstrap limpio del helper.")
+
+    def relay_input() -> None:
+        try:
+            for raw_line in iter(stdin_stream.readline, ""):
+                try:
+                    child.stdin.write(raw_line)
+                    child.stdin.flush()
+                except Exception:
+                    break
+        finally:
+            try:
+                child.stdin.close()
+            except Exception:
+                pass
+
+    def relay_output(source_stream, destination_stream) -> None:
+        try:
+            for raw_line in iter(source_stream.readline, ""):
+                try:
+                    destination_stream.write(raw_line)
+                    destination_stream.flush()
+                except Exception:
+                    break
+        finally:
+            try:
+                source_stream.close()
+            except Exception:
+                pass
+
+    input_thread = threading.Thread(target=relay_input, daemon=True)
+    stdout_thread = threading.Thread(target=relay_output, args=(child.stdout, stdout_stream), daemon=True)
+    stderr_thread = threading.Thread(target=relay_output, args=(child.stderr, stderr_stream), daemon=True)
+    input_thread.start()
+    stdout_thread.start()
+    stderr_thread.start()
+    try:
+        return child.wait()
+    finally:
+        try:
+            child.stdin.close()
+        except Exception:
+            pass
+        input_thread.join(timeout=1)
+        stdout_thread.join(timeout=1)
+        stderr_thread.join(timeout=1)
+
+
 def run_launcher(
     config: Dict[str, Any],
     *,
@@ -524,6 +603,8 @@ def _load_config(argv: List[str]) -> Dict[str, Any]:
     parser.add_argument("--config-json", dest="config_json")
     parser.add_argument("--config-file", dest="config_file")
     parser.add_argument("--scrub-inherited-fds", dest="scrub_inherited_fds", action="store_true")
+    parser.add_argument("--bootstrap-helper-tree", dest="bootstrap_helper_tree", action="store_true")
+    parser.add_argument("--bootstrap-child", dest="bootstrap_child", action="store_true")
     args, _ = parser.parse_known_args(argv)
 
     config_text = ""
@@ -540,6 +621,9 @@ def _load_config(argv: List[str]) -> Dict[str, Any]:
     config = json.loads(config_text)
     if args.scrub_inherited_fds:
         config["scrubInheritedFds"] = True
+    if args.bootstrap_helper_tree:
+        config["bootstrapHelperTree"] = True
+    config["bootstrapChild"] = bool(args.bootstrap_child)
     return config
 
 
@@ -547,25 +631,27 @@ def main(argv: Optional[List[str]] = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     started_at = time.monotonic()
     try:
-      config = _load_config(argv)
-      run_launcher(config, started_at=started_at)
-      return 0
+        config = _load_config(argv)
+        if config.get("bootstrapHelperTree") and not config.get("bootstrapChild"):
+            return bootstrap_helper_tree(config)
+        run_launcher(config, started_at=started_at)
+        return 0
     except Exception as exc:
-      error_record = {
-          "phase": "error",
-          "message": str(exc),
-          "monotonicMs": _monotonic_ms(started_at),
-      }
-      try:
-          _write_json_record(sys.stdout, error_record)
-      except Exception:
-          pass
-      try:
-          sys.stderr.write(f"{exc}\n")
-          sys.stderr.flush()
-      except Exception:
-          pass
-      return 1
+        error_record = {
+            "phase": "error",
+            "message": str(exc),
+            "monotonicMs": _monotonic_ms(started_at),
+        }
+        try:
+            _write_json_record(sys.stdout, error_record)
+        except Exception:
+            pass
+        try:
+            sys.stderr.write(f"{exc}\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
+        return 1
 
 
 if __name__ == "__main__":
