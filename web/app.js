@@ -26088,6 +26088,15 @@ const resolveCrmGestoriaEmpresa = () => {
 };
 
 const resolveCrmFinEmpresa = () => {
+  try {
+    if (isTenantWorkspaceMode()) {
+      const activeWsCompanyId = String(state.currentWorkspaceCompanyId || "").trim();
+      if (activeWsCompanyId) {
+        const active = resolveEmpresaById(activeWsCompanyId);
+        if (active) return active;
+      }
+    }
+  } catch (e) {}
   const explicit = resolveEmpresaById(state.crmFinEmpresaId);
   if (explicit) return explicit;
   const stored = resolveEmpresaById(getStoredServiceCompanyId("financiaciones"));

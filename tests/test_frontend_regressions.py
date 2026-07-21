@@ -2051,3 +2051,66 @@ class FrontendGestoriaLookupScopeTests(unittest.TestCase):
                 """
             ),
         )
+
+
+class FrontendHipotecaLookupScopeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const resolveCrmGestoriaEmpresa =",
+            "const resolveCrmTecnocloudVertical =",
+        )
+        cls.param_names = [
+            "state",
+            "resolveEmpresaById",
+            "getStoredServiceCompanyId",
+            "getWorkspaceDefaultCompanyIdForServiceKey",
+            "resolveWorkspaceDefaultEmpresa",
+            "isTenantWorkspaceMode",
+            "normalizeSimple",
+            "SERVICE_COMPANY_MAP",
+            "FIN_COMPANY",
+        ]
+        cls.return_names = [
+            "resolveCrmFinEmpresa",
+        ]
+
+    def _run(self, prelude: str, body: str) -> None:
+        script = make_factory_script(self.segment, self.param_names, self.return_names, prelude, body)
+        run_node_script(script)
+
+    def test_tenant_mode_prefers_active_workspace_company_over_stored_service_selection(self):
+        self._run(
+            dedent(
+                """
+                const companies = new Map([
+                  ["emp-active", { id: "emp-active", legacy_empresa_id: "emp-active", nombre: "Financiaciones Modernia" }],
+                  ["emp-stale", { id: "emp-stale", legacy_empresa_id: "emp-stale", nombre: "Hipotecas Viejas" }],
+                ]);
+                const state = {
+                  currentWorkspaceEntryMode: "tenant",
+                  currentWorkspaceCompanyId: "emp-active",
+                  crmFinEmpresaId: "",
+                  empresas: Array.from(companies.values()),
+                };
+                const resolveEmpresaById = (id) => companies.get(String(id || "").trim()) || null;
+                const getStoredServiceCompanyId = (serviceKey) => (serviceKey === "financiaciones" ? "emp-stale" : "");
+                const getWorkspaceDefaultCompanyIdForServiceKey = () => "";
+                const resolveWorkspaceDefaultEmpresa = () => null;
+                const isTenantWorkspaceMode = () => state.currentWorkspaceEntryMode === "tenant";
+                const normalizeSimple = (value) => String(value || "").toLowerCase();
+                globalThis.SERVICE_COMPANY_MAP = { Hipotecas: "Financiaciones Modernia" };
+                globalThis.FIN_COMPANY = "Financiaciones Modernia";
+                """
+            ),
+            dedent(
+                """
+                const { resolveCrmFinEmpresa } = api;
+                assert.strictEqual(resolveCrmFinEmpresa().id, "emp-active");
+                assert.strictEqual(resolveCrmFinEmpresa().nombre, "Financiaciones Modernia");
+                state.currentWorkspaceEntryMode = "platform";
+                assert.strictEqual(resolveCrmFinEmpresa().id, "emp-stale");
+                assert.strictEqual(resolveCrmFinEmpresa().nombre, "Hipotecas Viejas");
+                """
+            ),
+        )
