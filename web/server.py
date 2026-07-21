@@ -32047,7 +32047,7 @@ def compute_workspace_rrhh_productividad_facturacion_anual(conn, workspace_id, e
 
 
 def compute_workspace_rrhh_productividad(conn, workspace_id, empresa_id, persona_id, servicio, ejercicio=""):
-    service_key = normalize_lookup_text(servicio or "")
+    service_key = normalize_service_key(servicio or "")
     if service_key in {"renta", "rentas"}:
         return compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, persona_id, ejercicio=ejercicio)
     if service_key in {"seguro", "seguros"}:
