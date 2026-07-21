@@ -31944,48 +31944,48 @@ def compute_workspace_rrhh_productividad_facturacion_anual(conn, workspace_id, e
     if not matchers:
         return {"kpis": {}, "items": []}
 
-        keys = [str(k or "").strip().lower() for k in (servicio_keys or []) if str(k or "").strip()]
-        # Dedup para reducir placeholders y joins.
-        try:
-            keys = list(dict.fromkeys(keys))
-        except Exception:
-            pass
-        if not keys:
-            return {"kpis": {}, "items": []}
-        placeholders = ",".join(["?"] * len(keys))
+    keys = [str(k or "").strip().lower() for k in (servicio_keys or []) if str(k or "").strip()]
+    # Dedup para reducir placeholders y joins.
+    try:
+        keys = list(dict.fromkeys(keys))
+    except Exception:
+        pass
+    if not keys:
+        return {"kpis": {}, "items": []}
+    placeholders = ",".join(["?"] * len(keys))
 
-        where = ["f.workspace_id = ?", "f.empresa_id = ?", f"LOWER(TRIM(COALESCE(f.servicio,''))) IN ({placeholders})"]
-        values = [workspace_id, empresa_id, *keys]
+    where = ["f.workspace_id = ?", "f.empresa_id = ?", f"LOWER(TRIM(COALESCE(f.servicio,''))) IN ({placeholders})"]
+    values = [*keys, workspace_id, empresa_id, *keys]
     if ejercicio_val:
         where.append("SUBSTR(NULLIF(f.fecha_emision,''), 1, 4) = ?")
         values.append(ejercicio_val)
 
-        rows = conn.execute(
-            f"""
-            SELECT
-              f.cliente_id,
-                  COALESCE(c.nombre, '') AS cliente_nombre,
-                  COALESCE(c.nif, '') AS cliente_nif,
-                  COALESCE(f.responsable, '') AS responsable,
-                  COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id,
-                  MAX(COALESCE(ce.procedencia_canal, c.procedencia_canal, '')) AS canal,
-                  SUM(COALESCE(f.subtotal, 0)) AS total_facturado,
-                  MIN(COALESCE(f.fecha_emision,'')) AS first_fecha,
-                  MAX(COALESCE(f.fecha_emision,'')) AS last_fecha,
-              COUNT(*) AS num_facturas,
-              SUM(CASE WHEN COALESCE(f.cobrada, 0) = 1 THEN 1 ELSE 0 END) AS num_cobradas
-            FROM workspace_facturacion f
-            LEFT JOIN clientes c ON c.id = f.cliente_id
-            LEFT JOIN clientes_empresas ce
-              ON ce.cliente_id = f.cliente_id
-             AND ce.empresa_id = f.empresa_id
-             AND LOWER(TRIM(COALESCE(ce.servicio,''))) IN ({placeholders})
-            WHERE {' AND '.join(where)}
-              AND COALESCE(f.cliente_id,'') != ''
-            GROUP BY f.cliente_id, COALESCE(f.responsable,''), COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '')
-            """,
-            values + keys,
-        ).fetchall()
+    rows = conn.execute(
+        f"""
+        SELECT
+          f.cliente_id,
+              COALESCE(c.nombre, '') AS cliente_nombre,
+              COALESCE(c.nif, '') AS cliente_nif,
+              COALESCE(f.responsable, '') AS responsable,
+              COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '') AS captado_por_user_id,
+              MAX(COALESCE(ce.procedencia_canal, c.procedencia_canal, '')) AS canal,
+              SUM(COALESCE(f.subtotal, 0)) AS total_facturado,
+              MIN(COALESCE(f.fecha_emision,'')) AS first_fecha,
+              MAX(COALESCE(f.fecha_emision,'')) AS last_fecha,
+          COUNT(*) AS num_facturas,
+          SUM(CASE WHEN COALESCE(f.cobrada, 0) = 1 THEN 1 ELSE 0 END) AS num_cobradas
+        FROM workspace_facturacion f
+        LEFT JOIN clientes c ON c.id = f.cliente_id
+        LEFT JOIN clientes_empresas ce
+          ON ce.cliente_id = f.cliente_id
+         AND ce.empresa_id = f.empresa_id
+         AND LOWER(TRIM(COALESCE(ce.servicio,''))) IN ({placeholders})
+        WHERE {' AND '.join(where)}
+          AND COALESCE(f.cliente_id,'') != ''
+        GROUP BY f.cliente_id, COALESCE(f.responsable,''), COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '')
+        """,
+        values,
+    ).fetchall()
 
     items = []
     clientes = 0

@@ -318,6 +318,99 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
 
         self.assertIsNone(result)
 
+    def test_compute_workspace_rrhh_productividad_facturacion_anual_handles_empty_year_filter(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE workspace_registro_personal (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              nombre TEXT,
+              usuario_id TEXT
+            );
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              nombre TEXT,
+              nif TEXT,
+              captado_por_user_id TEXT,
+              procedencia_canal TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              captado_por_user_id TEXT,
+              procedencia_canal TEXT
+            );
+            CREATE TABLE workspace_facturacion (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              empresa_id TEXT NOT NULL,
+              cliente_id TEXT,
+              servicio TEXT,
+              fecha_emision TEXT,
+              responsable TEXT,
+              subtotal REAL,
+              cobrada INTEGER
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO workspace_registro_personal (id, workspace_id, nombre, usuario_id) VALUES (?, ?, ?, ?)",
+            ("p-1", "ws-1", "Persona Demo", "u-1"),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, nombre, nif, captado_por_user_id, procedencia_canal) VALUES (?, ?, ?, ?, ?)",
+            ("c-gestoria", "Cliente Gestoria", "11111111A", "u-1", "web"),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, nombre, nif, captado_por_user_id, procedencia_canal) VALUES (?, ?, ?, ?, ?)",
+            ("c-fincas", "Cliente Fincas", "22222222B", "u-1", "web"),
+        )
+        conn.execute(
+            "INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio, captado_por_user_id, procedencia_canal) VALUES (?, ?, ?, ?, ?, ?)",
+            ("ce-gestoria", "c-gestoria", "emp-1", "gestoria", "u-1", "web"),
+        )
+        conn.execute(
+            "INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio, captado_por_user_id, procedencia_canal) VALUES (?, ?, ?, ?, ?, ?)",
+            ("ce-fincas", "c-fincas", "emp-1", "administración fincas", "u-1", "web"),
+        )
+        conn.execute(
+            """
+            INSERT INTO workspace_facturacion (
+              id, workspace_id, empresa_id, cliente_id, servicio, fecha_emision, responsable, subtotal, cobrada
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("f-1", "ws-1", "emp-1", "c-gestoria", "gestoria", "2026-01-15", "", 100.0, 1),
+        )
+        conn.execute(
+            """
+            INSERT INTO workspace_facturacion (
+              id, workspace_id, empresa_id, cliente_id, servicio, fecha_emision, responsable, subtotal, cobrada
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("f-2", "ws-1", "emp-1", "c-fincas", "administración fincas", "2026-02-20", "", 200.0, 0),
+        )
+
+        try:
+            result = server.compute_workspace_rrhh_productividad_facturacion_anual(
+                conn,
+                "ws-1",
+                "emp-1",
+                "p-1",
+                servicio_keys={"gestoria", "administración fincas"},
+                ejercicio="",
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual(result["kpis"]["clientes"], 2)
+        self.assertEqual(result["kpis"]["facturado_total"], 300.0)
+        self.assertEqual(result["kpis"]["comision_total"], 30.0)
+        self.assertEqual(len(result["items"]), 2)
+
     def test_resolve_seguros_ocr_cliente_id_scopes_nif_and_name_by_empresa(self):
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
