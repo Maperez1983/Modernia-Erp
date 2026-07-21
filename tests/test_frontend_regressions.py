@@ -2333,3 +2333,86 @@ class HipotecaDashboardYearSelectionTests(unittest.TestCase):
                 """
             ),
         )
+
+
+class HipotecaDashboardResetTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const syncHipotecaDashboardYearSelect =",
+            "const syncHipotecaListadoFilters =",
+        )
+        cls.param_names = [
+            "createOption",
+            "hipotecaDashboardKpis",
+            "hipotecaDashboardInfo",
+            "hipotecaEntidadKpis",
+            "hipotecaFirmadasChart",
+            "hipotecaComisionChart",
+            "hipotecaPorcentajeChart",
+            "hipotecaEntidadChart",
+            "hipotecaOficinaChart",
+        ]
+        cls.return_names = ["syncHipotecaDashboardYearSelect", "clearHipotecaDashboardResults"]
+
+    def _run(self, prelude: str, body: str) -> None:
+        script = make_factory_script(self.segment, self.param_names, self.return_names, prelude, body)
+        run_node_script(script)
+
+    def test_clear_hipoteca_dashboard_results_resets_charts_and_messages(self):
+        self._run(
+            dedent(
+                """
+                const createOption = (value, label) => ({ value, label });
+                const makeCanvas = (name) => {
+                  const cleared = [];
+                  return {
+                    name,
+                    width: 600,
+                    height: 300,
+                    __barChartHandlers: {
+                      click() {},
+                      move() {},
+                    },
+                    cleared,
+                    getContext(kind) {
+                      assert.strictEqual(kind, "2d");
+                      return {
+                        clearRect(...args) {
+                          cleared.push(args);
+                        },
+                      };
+                    },
+                    removeEventListener(type, fn) {
+                      this.removed ??= [];
+                      this.removed.push([type, fn]);
+                    },
+                  };
+                };
+                const hipotecaDashboardKpis = { innerHTML: "stale" };
+                const hipotecaDashboardInfo = { textContent: "stale info" };
+                const hipotecaEntidadKpis = { innerHTML: "stale entities" };
+                const hipotecaFirmadasChart = makeCanvas("firmadas");
+                const hipotecaComisionChart = makeCanvas("comision");
+                const hipotecaPorcentajeChart = makeCanvas("porcentaje");
+                const hipotecaEntidadChart = makeCanvas("entidad");
+                const hipotecaOficinaChart = makeCanvas("oficina");
+                """
+            ),
+            dedent(
+                """
+                const { clearHipotecaDashboardResults } = api;
+                clearHipotecaDashboardResults(
+                  "<div class='card'><p class='muted'>Selecciona un año para ver el resumen de hipotecas firmadas e indemnización.</p></div>",
+                  "Elige un año para cargar el dashboard."
+                );
+                assert.ok(hipotecaDashboardKpis.innerHTML.includes("Selecciona un año para ver el resumen de hipotecas firmadas e indemnización."));
+                assert.strictEqual(hipotecaDashboardInfo.textContent, "Elige un año para cargar el dashboard.");
+                assert.strictEqual(hipotecaEntidadKpis.innerHTML, "");
+                for (const canvas of [hipotecaFirmadasChart, hipotecaComisionChart, hipotecaPorcentajeChart, hipotecaEntidadChart, hipotecaOficinaChart]) {
+                  assert.deepStrictEqual(canvas.removed.map(([type]) => type), ["click", "mousemove"]);
+                  assert.deepStrictEqual(canvas.cleared, [[0, 0, 600, 300]]);
+                }
+                """
+            ),
+        )

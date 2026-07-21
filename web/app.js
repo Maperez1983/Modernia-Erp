@@ -42638,6 +42638,38 @@ const syncHipotecaDashboardYearSelect = (select, availableYears = [], selectedYe
   return String(select.value || "").trim();
 };
 
+let hipotecaDashboardRenderSeq = 0;
+
+const clearHipotecaDashboardResults = (kpisHtml = "", infoText = "") => {
+  if (hipotecaDashboardKpis) {
+    hipotecaDashboardKpis.innerHTML = kpisHtml;
+  }
+  if (hipotecaDashboardInfo) {
+    hipotecaDashboardInfo.textContent = infoText;
+  }
+  if (hipotecaEntidadKpis) {
+    hipotecaEntidadKpis.innerHTML = "";
+  }
+  [hipotecaFirmadasChart, hipotecaComisionChart, hipotecaPorcentajeChart, hipotecaEntidadChart, hipotecaOficinaChart].forEach((canvas) => {
+    if (!canvas || typeof canvas.getContext !== "function") return;
+    try {
+      if (canvas.__barChartHandlers) {
+        try {
+          canvas.removeEventListener("click", canvas.__barChartHandlers.click);
+          canvas.removeEventListener("mousemove", canvas.__barChartHandlers.move);
+        } catch (e) {}
+        canvas.__barChartHandlers = null;
+      }
+      const ctx = canvas.getContext("2d");
+      if (!ctx || typeof ctx.clearRect !== "function") return;
+      const rect = typeof canvas.getBoundingClientRect === "function" ? canvas.getBoundingClientRect() : null;
+      const width = Number(canvas.width || canvas.clientWidth || rect?.width || 0) || 1;
+      const height = Number(canvas.height || canvas.clientHeight || rect?.height || 0) || 1;
+      ctx.clearRect(0, 0, width, height);
+    } catch (error) {}
+  });
+};
+
 const syncHipotecaListadoFilters = (rows = [], columns = [], filters = {}) => {
   const yearSelect = hipotecaBdtListYear;
   const estadoSelect = hipotecaBdtListEstado;
@@ -46463,11 +46495,11 @@ const loadHipotecaDashboard = () => {
   ) {
     return;
   }
+  const renderSeq = ++hipotecaDashboardRenderSeq;
   const empresa = resolveCrmFinEmpresa();
   const empresaId = resolveLegacyEmpresaId(empresa);
   if (!empresaId) {
-    hipotecaDashboardKpis.innerHTML = "<p class='muted'>Sin empresa de hipotecas configurada.</p>";
-    if (hipotecaDashboardInfo) hipotecaDashboardInfo.textContent = "";
+    clearHipotecaDashboardResults("<p class='muted'>Sin empresa de hipotecas configurada.</p>", "");
     return;
   }
   if (hipotecaDashboardInfo) {
@@ -46480,15 +46512,14 @@ const loadHipotecaDashboard = () => {
   }
   hipotecaDashboardApi(`/api/hipoteca_dashboard?${params.toString()}`)
     .then((data) => {
+      if (renderSeq !== hipotecaDashboardRenderSeq) return;
       const availableYears = Array.isArray(data?.available_years) ? data.available_years.map((item) => String(item)) : [];
       const selectedYear = syncHipotecaDashboardYearSelect(hipotecaDashboardYearSelect, availableYears, requestedYear);
       if (!requestedYear) {
-        if (hipotecaDashboardKpis) {
-          hipotecaDashboardKpis.innerHTML = "<div class='card'><p class='muted'>Selecciona un año para ver el resumen de hipotecas firmadas e indemnización.</p></div>";
-        }
-        if (hipotecaDashboardInfo) {
-          hipotecaDashboardInfo.textContent = "Elige un año para cargar el dashboard.";
-        }
+        clearHipotecaDashboardResults(
+          "<div class='card'><p class='muted'>Selecciona un año para ver el resumen de hipotecas firmadas e indemnización.</p></div>",
+          "Elige un año para cargar el dashboard."
+        );
         return;
       }
       const currentYear = String(data?.current_year || selectedYear || requestedYear || new Date().getFullYear());
@@ -46606,7 +46637,9 @@ const loadHipotecaDashboard = () => {
       // Importante: cuando el dashboard se abre desde un tab, los <canvas> pueden medir 0px
       // en el primer frame (Safari/iOS). Retrasamos el dibujo 2 frames para asegurar layout.
       requestAnimationFrame(() => {
+        if (renderSeq !== hipotecaDashboardRenderSeq) return;
         requestAnimationFrame(() => {
+          if (renderSeq !== hipotecaDashboardRenderSeq) return;
           const seriesYears = buildYearIndex([data?.series_totales || []]);
           drawBarChart(
             hipotecaFirmadasChart,
@@ -46717,6 +46750,7 @@ const loadHipotecaDashboard = () => {
               labelRotationAngle: Math.PI / 3.35,
             }
           );
+          if (renderSeq !== hipotecaDashboardRenderSeq) return;
           if (hipotecaDashboardInfo) {
             hipotecaDashboardInfo.textContent = "Actualizado.";
           }
@@ -46724,11 +46758,9 @@ const loadHipotecaDashboard = () => {
       });
     })
     .catch((error) => {
+      if (renderSeq !== hipotecaDashboardRenderSeq) return;
       const message = error?.data?.error || error?.message || "No se pudo cargar el dashboard.";
-      hipotecaDashboardKpis.innerHTML = `<p class='muted'>${message}</p>`;
-      if (hipotecaDashboardInfo) {
-        hipotecaDashboardInfo.textContent = message;
-      }
+      clearHipotecaDashboardResults(`<p class='muted'>${message}</p>`, message);
     });
 };
 

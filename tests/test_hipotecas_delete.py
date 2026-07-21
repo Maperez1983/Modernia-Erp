@@ -1250,7 +1250,7 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
         self.assertIn("Entidad Nueva", labels)
         self.assertEqual(sum(int(row["total"]) for row in rows), len(banks))
 
-    def test_collect_hipoteca_dashboard_entity_total_rows_counts_signed_rows_even_with_nonstandard_state(self):
+    def test_collect_hipoteca_dashboard_entity_total_rows_ignores_rows_without_closed_state(self):
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         conn.executescript(
@@ -1315,7 +1315,7 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
                     1800,
                     "Inmo Sur",
                     "María",
-                    "Tramitada",
+                    "Firmada",
                     2026,
                     "2026-06-20",
                     "2026-06-20",
@@ -1341,7 +1341,7 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
                     1800,
                     "Inmo Sur",
                     "María",
-                    "",
+                    "Tramitada",
                     2026,
                     "2026-06-21",
                     "2026-06-21",
@@ -1379,7 +1379,7 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["label"], "Banco Santander")
-        self.assertEqual(rows[0]["total"], 2)
+        self.assertEqual(rows[0]["total"], 1)
 
     def test_build_hipoteca_export_row_uses_cliente_inmueble_json_fallbacks(self):
         conn = sqlite3.connect(":memory:")
@@ -1523,8 +1523,13 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
                         "nombre": "Cliente JSON",
                         "nif": "87654321Z",
                         "telefono": "699888777",
+                        "movil": "699888777",
                         "email": "json@example.com",
                         "domicilio": "Calle JSON 7",
+                        "codigo_postal": "29001",
+                        "poblacion": "Málaga",
+                        "provincia": "Málaga",
+                        "estado_civil": "Soltero",
                     }
                 },
             },
@@ -1552,6 +1557,11 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
         self.assertEqual(item["cliente_direccion"], "Calle JSON 7")
         self.assertEqual(item["cliente_telefono"], "699888777")
         self.assertEqual(item["cliente_email"], "json@example.com")
+        self.assertEqual(item["cliente_fields"]["movil"], "699888777")
+        self.assertEqual(item["cliente_fields"]["codigo_postal"], "29001")
+        self.assertEqual(item["cliente_fields"]["poblacion"], "Málaga")
+        self.assertEqual(item["cliente_fields"]["provincia"], "Málaga")
+        self.assertEqual(item["cliente_fields"]["estado_civil"], "Soltero")
 
         prestataria_only_json = json.dumps(
             {
@@ -1602,6 +1612,12 @@ class HipotecaDashboardEntityRowsTests(unittest.TestCase):
             self.assertEqual(detail["E2"].value, "699888777")
             self.assertEqual(detail["F2"].value, "json@example.com")
             self.assertEqual(detail["G2"].value, "Calle JSON 7")
+            headers = {cell.value: idx + 1 for idx, cell in enumerate(detail[1]) if cell.value}
+            self.assertEqual(detail.cell(row=2, column=headers["Cliente · Móvil"]).value, "699888777")
+            self.assertEqual(detail.cell(row=2, column=headers["Cliente · Código postal"]).value, "29001")
+            self.assertEqual(detail.cell(row=2, column=headers["Cliente · Población"]).value, "Málaga")
+            self.assertEqual(detail.cell(row=2, column=headers["Cliente · Provincia"]).value, "Málaga")
+            self.assertEqual(detail.cell(row=2, column=headers["Cliente · Estado civil"]).value, "Soltero")
             wb2 = build_hipotecas_listado_excel_workbook([item2], "2026")
             detail2 = wb2["Operaciones listado"]
             self.assertEqual(detail2["C2"].value, "Prestataria JSON")

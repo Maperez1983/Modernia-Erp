@@ -5396,7 +5396,7 @@ def compute_hipotecas_commission_by_bank(conn, empresa_id, year=None):
 
 
 def collect_hipoteca_dashboard_entity_total_rows(conn, empresa_id):
-    signed_expr = "fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
+    signed_expr = hipoteca_dashboard_closed_signed_expr()
     return conn.execute(
         """
         SELECT banco AS label, COUNT(*) AS total
@@ -5585,6 +5585,148 @@ HIPOTECA_CLIENT_EXPORT_LABELS = {
 }
 
 
+HIPOTECA_CLIENT_EXPORT_JSON_FALLBACKS = {
+    "tipo_persona": ("tipo_persona",),
+    "movil": (
+        "movil",
+        "telefono",
+        "comprador.c1.movil",
+        "comprador.c1.telefono",
+        "comprador.c2.movil",
+        "comprador.c2.telefono",
+        "prestataria.p1.movil",
+        "prestataria.p1.telefono",
+        "prestataria.p2.movil",
+        "prestataria.p2.telefono",
+    ),
+    "otro_telefono": (
+        "otro_telefono",
+        "comprador.c1.otro_telefono",
+        "comprador.c2.otro_telefono",
+        "prestataria.p1.otro_telefono",
+        "prestataria.p2.otro_telefono",
+    ),
+    "codigo_postal": (
+        "codigo_postal",
+        "cp",
+        "comprador.c1.codigo_postal",
+        "comprador.c2.codigo_postal",
+        "prestataria.p1.codigo_postal",
+        "prestataria.p2.codigo_postal",
+        "inmueble.codigo_postal",
+    ),
+    "poblacion": (
+        "poblacion",
+        "localidad",
+        "comprador.c1.poblacion",
+        "comprador.c2.poblacion",
+        "prestataria.p1.poblacion",
+        "prestataria.p2.poblacion",
+        "inmueble.localidad",
+    ),
+    "provincia": (
+        "provincia",
+        "comprador.c1.provincia",
+        "comprador.c2.provincia",
+        "prestataria.p1.provincia",
+        "prestataria.p2.provincia",
+        "inmueble.provincia",
+    ),
+    "pais": (
+        "pais",
+        "comprador.c1.pais",
+        "comprador.c2.pais",
+        "prestataria.p1.pais",
+        "prestataria.p2.pais",
+        "inmueble.pais",
+    ),
+    "fecha_nacimiento": (
+        "fecha_nacimiento",
+        "comprador.c1.fecha_nacimiento",
+        "comprador.c2.fecha_nacimiento",
+        "prestataria.p1.fecha_nacimiento",
+        "prestataria.p2.fecha_nacimiento",
+    ),
+    "estado": (
+        "estado",
+        "comprador.c1.estado",
+        "comprador.c2.estado",
+        "prestataria.p1.estado",
+        "prestataria.p2.estado",
+    ),
+    "estado_civil": (
+        "estado_civil",
+        "comprador.c1.estado_civil",
+        "comprador.c2.estado_civil",
+        "prestataria.p1.estado_civil",
+        "prestataria.p2.estado_civil",
+    ),
+    "profesion": (
+        "profesion",
+        "comprador.c1.profesion",
+        "comprador.c2.profesion",
+        "prestataria.p1.profesion",
+        "prestataria.p2.profesion",
+    ),
+    "cargo": (
+        "cargo",
+        "comprador.c1.cargo",
+        "comprador.c2.cargo",
+        "prestataria.p1.cargo",
+        "prestataria.p2.cargo",
+    ),
+    "empresa": (
+        "empresa",
+        "comprador.c1.empresa",
+        "comprador.c2.empresa",
+        "prestataria.p1.empresa",
+        "prestataria.p2.empresa",
+    ),
+    "observaciones": (
+        "observaciones",
+        "comprador.c1.observaciones",
+        "comprador.c2.observaciones",
+        "prestataria.p1.observaciones",
+        "prestataria.p2.observaciones",
+    ),
+    "notas": (
+        "notas",
+        "comprador.c1.notas",
+        "comprador.c2.notas",
+        "prestataria.p1.notas",
+        "prestataria.p2.notas",
+    ),
+    "notas_comerciales": (
+        "notas_comerciales",
+        "comprador.c1.notas_comerciales",
+        "comprador.c2.notas_comerciales",
+        "prestataria.p1.notas_comerciales",
+        "prestataria.p2.notas_comerciales",
+    ),
+    "procedencia_canal": (
+        "procedencia_canal",
+        "comprador.c1.procedencia_canal",
+        "comprador.c2.procedencia_canal",
+        "prestataria.p1.procedencia_canal",
+        "prestataria.p2.procedencia_canal",
+    ),
+    "procedencia_detalle": (
+        "procedencia_detalle",
+        "comprador.c1.procedencia_detalle",
+        "comprador.c2.procedencia_detalle",
+        "prestataria.p1.procedencia_detalle",
+        "prestataria.p2.procedencia_detalle",
+    ),
+    "procedencia_user_id": (
+        "procedencia_user_id",
+        "comprador.c1.procedencia_user_id",
+        "comprador.c2.procedencia_user_id",
+        "prestataria.p1.procedencia_user_id",
+        "prestataria.p2.procedencia_user_id",
+    ),
+}
+
+
 def _hipoteca_cliente_export_label(field_name):
     raw = str(field_name or "").strip()
     if not raw:
@@ -5643,6 +5785,21 @@ def _build_hipoteca_cliente_fields(conn, cliente_id, cliente_nombre="", empresa_
     for key in cliente_row.keys():
         cliente_fields[key] = _clean_hipoteca_export_value(cliente_row[key])
     return cliente_fields
+
+
+def _merge_hipoteca_cliente_fields_from_json(cliente_fields, cliente_inmueble):
+    merged = dict(cliente_fields or {})
+    cliente_inmueble = cliente_inmueble if isinstance(cliente_inmueble, dict) else {}
+    if not cliente_inmueble:
+        return merged
+    for field_name, nested_paths in HIPOTECA_CLIENT_EXPORT_JSON_FALLBACKS.items():
+        current = str(merged.get(field_name) or "").strip()
+        if current:
+            continue
+        fallback = _hipoteca_export_json_text("", cliente_inmueble, *nested_paths)
+        if fallback:
+            merged[field_name] = _clean_hipoteca_export_value(fallback)
+    return merged
 
 
 def build_hipoteca_export_row(conn, row):
@@ -5744,6 +5901,7 @@ def build_hipoteca_export_row(conn, row):
                 "comprador.c1.email",
                 "comprador.c2.email",
             )
+    cliente_fields = _merge_hipoteca_cliente_fields_from_json(cliente_fields, cliente_inmueble)
     return {
         "id": str(row["id"] or "").strip(),
         "cliente": cliente,
@@ -5839,6 +5997,13 @@ def is_hipoteca_signed_for_export(row):
     if not parse_iso_date(row["fecha_firma"]):
         return False
     return normalize_hipoteca_estado(row["estado"]) in ("firmada", "firmado")
+
+
+def hipoteca_dashboard_closed_signed_expr():
+    return (
+        "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion') "
+        "AND fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
+    )
 
 
 def collect_hipotecas_firmadas_export_rows(conn, empresa_id, selected_year=None):
@@ -89050,10 +89215,7 @@ class Handler(BaseHTTPRequestHandler):
             signed_month_expr = _month_from_expr("NULLIF(fecha_firma, '')")
             closed_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')"
             signed_expr = "fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
-            signed_closed_expr = (
-                "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')"
-                " AND fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
-            )
+            signed_closed_expr = hipoteca_dashboard_closed_signed_expr()
             # Encargo: solo hipotecas en estado "Encargo" (no el check/campo `encargo`).
             encargo_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('encargo', 'encargado', 'encargada')"
             estudio_expr = encargo_expr
