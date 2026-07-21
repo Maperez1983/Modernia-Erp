@@ -11005,6 +11005,12 @@ body.density-compact #crmSection [id$="Table"] table {
   font-size: 12px;
 }
 
+#hipotecaDashboardPanel .hipoteca-dashboard-hint,
+#hipotecaBdtPanel .hipoteca-bdt-hint {
+  margin: -2px 0 12px;
+  font-size: 12px;
+}
+
 #hipotecaBdtPanel .crm-actions {
   gap: 6px;
 }
@@ -11013,6 +11019,7 @@ body.density-compact #crmSection [id$="Table"] table {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  width: fit-content;
 }
 
 #hipotecaBdtPanel .hipoteca-export-details > summary.secondary {
@@ -11037,6 +11044,12 @@ body.density-compact #crmSection [id$="Table"] table {
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.82);
   box-shadow: 0 8px 18px rgba(11, 29, 51, 0.06);
+}
+
+#hipotecaBdtPanel .hipoteca-export-hint {
+  flex: 1 0 100%;
+  margin: 0 0 2px;
+  font-size: 12px;
 }
 
 #hipotecaBdtPanel .hipoteca-export-menu .secondary {
