@@ -133,23 +133,17 @@
 		          </div>
 	          <div class="crm-workspace-view" data-workspace-view="tenant">
 		            <div class="crm-workspace-tabs tc-modulebar tc-modulebar--micro crm-lightning-subbar" id="workspaceTenantTabs">
-		              <button class="tab tc-module active" type="button" data-workspace-tenant-tab="general" title="General">
-		                <span class="tc-mod-ico" aria-hidden="true">
-		                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-clipboard"></use></svg>
-		                </span>
-		                <span class="tc-mod-label">General</span>
-		              </button>
-		              <button class="tab tc-module" type="button" data-workspace-tenant-tab="permisos" title="Permisos">
-		                <span class="tc-mod-ico" aria-hidden="true">
-		                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-shield"></use></svg>
-		                </span>
-		                <span class="tc-mod-label">Permisos</span>
-		              </button>
-		              <button class="tab tc-module" type="button" data-workspace-tenant-tab="empresas" title="Empresas">
-		                <span class="tc-mod-ico" aria-hidden="true">
-		                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-building-gear"></use></svg>
-		                </span>
-		                <span class="tc-mod-label">Empresas</span>
+	              <button class="tab tc-module active" type="button" data-workspace-tenant-tab="general" title="General">
+	                <span class="tc-mod-ico" aria-hidden="true">
+				                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-clipboard"></use></svg>
+			                </span>
+			                <span class="tc-mod-label">General</span>
+			              </button>
+			              <button class="tab tc-module" type="button" data-workspace-tenant-tab="empresas" title="Empresas">
+			                <span class="tc-mod-ico" aria-hidden="true">
+			                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-building-gear"></use></svg>
+			                </span>
+			                <span class="tc-mod-label">Empresas</span>
 		              </button>
 		              <button class="tab tc-module" type="button" data-workspace-tenant-tab="usuarios" title="Usuarios">
 		                <span class="tc-mod-ico" aria-hidden="true">
@@ -157,12 +151,18 @@
 		                </span>
 		                <span class="tc-mod-label">Usuarios</span>
 		              </button>
-		              <button class="tab tc-module" type="button" data-workspace-tenant-tab="modulos" title="Módulos">
-		                <span class="tc-mod-ico" aria-hidden="true">
-		                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-layers"></use></svg>
-		                </span>
-		                <span class="tc-mod-label">Módulos</span>
-		              </button>
+			              <button class="tab tc-module" type="button" data-workspace-tenant-tab="modulos" title="Módulos">
+			                <span class="tc-mod-ico" aria-hidden="true">
+			                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-layers"></use></svg>
+			                </span>
+			                <span class="tc-mod-label">Módulos</span>
+			              </button>
+			              <button class="tab tc-module" type="button" data-workspace-tenant-tab="permisos" title="Permisos">
+			                <span class="tc-mod-ico" aria-hidden="true">
+			                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-shield"></use></svg>
+			                </span>
+			                <span class="tc-mod-label">Permisos</span>
+			              </button>
 		            </div>
           </div>
         <div id="workspaceCompanySwitcher" class="workspace-company-switcher"></div>
@@ -305,17 +305,14 @@
           </aside>
           <section class="workspace-config-main">
             <div class="form-card" data-tenant-section="general">
-              <h3>Configuración del workspace</h3>
-              <p class="muted">Usa las pestañas de arriba para configurar permisos, empresas, usuarios y módulos.</p>
-            </div>
-            <div class="form-card" data-tenant-section="permisos">
               <div class="section-head">
                 <div>
-                  <h3>Matriz de accesos</h3>
-                  <p class="muted">Plantillas de permisos recomendadas por perfil.</p>
+                  <span class="home-section-kicker">Resumen</span>
+                  <h3>Workspace activo</h3>
+                  <p class="muted">Primero entiende el contexto, luego entra en empresas, usuarios, módulos y permisos.</p>
                 </div>
               </div>
-              <div id="workspacePermissionMatrix"></div>
+              <div id="workspaceTenantSummary"></div>
             </div>
             <div class="form-card" data-tenant-section="empresas">
               <div class="section-head">
@@ -324,134 +321,134 @@
                   <p class="muted">Sociedades operativas que viven dentro del workspace.</p>
                 </div>
               </div>
-	              <div id="workspaceCompanies"></div>
-		              <div id="workspaceCompanyEditor" class="form-card hidden u-mt-14">
-                <div class="section-head">
-                  <div>
-                    <h3>Editar empresa</h3>
-                    <p class="muted">CIF/dirección, sector, convenio y CNAE (múltiples).</p>
+              <div id="workspaceCompanies"></div>
+            </div>
+            <div id="workspaceCompanyEditor" class="form-card hidden u-mt-14">
+              <div class="section-head">
+                <div>
+                  <h3>Editar empresa</h3>
+                  <p class="muted">CIF/dirección, sector, convenio y CNAE (múltiples).</p>
+                </div>
+                <div class="toolbar">
+                  <button type="button" id="workspaceCompanyEditorClose" class="secondary ghost">Cerrar</button>
+                </div>
+              </div>
+              <form id="workspaceCompanyForm" class="form-grid">
+                <input type="hidden" name="id" />
+                <input type="hidden" name="workspace_company_id" />
+                <label>
+                  Empresa
+                  <input name="nombre" disabled />
+                </label>
+                <label>
+                  Razón social
+                  <input name="razon_social" placeholder="Ej. Empresa Servicios S.L." />
+                </label>
+                <label>
+                  CIF/NIF
+                  <input name="nif" placeholder="B12345678" />
+                </label>
+                <label class="span-2">
+                  Dirección
+                  <input name="direccion" placeholder="C/ ... · Ciudad" />
+                </label>
+                <label class="span-2">
+                  Dirección fiscal
+                  <input name="direccion_fiscal" placeholder="(si es distinta)" />
+                </label>
+                <label>
+                  Teléfono
+                  <input name="telefono" placeholder="+34 ..." />
+                </label>
+                <label>
+                  Email
+                  <input name="email" type="email" placeholder="info@empresa.com" />
+                </label>
+                <label class="span-2">
+                  Web
+                  <input name="web" placeholder="https://..." />
+                </label>
+                <label>
+                  Contacto (nombre)
+                  <input name="contacto_nombre" placeholder="Persona responsable" />
+                </label>
+                <label>
+                  Contacto (email)
+                  <input name="contacto_email" type="email" placeholder="contacto@..." />
+                </label>
+                <label>
+                  Contacto (teléfono)
+                  <input name="contacto_telefono" placeholder="+34 ..." />
+                </label>
+                <label class="span-2">
+                  Logo (URL)
+                  <input name="logo_url" placeholder="https://..." />
+                </label>
+                <div class="span-2 u-row u-gap-14 u-items-start u-wrap">
+                  <div style="min-width:180px">
+                    <div class="muted u-mb-6">Vista previa</div>
+                    <div style="width:180px;height:64px;border:1px solid #e1e5ea;border-radius:12px;display:flex;align-items:center;justify-content:center;background:#fff;overflow:hidden">
+                      <img id="workspaceCompanyLogoPreview" alt="" style="max-width:170px;max-height:56px;object-fit:contain" />
+                    </div>
                   </div>
-                  <div class="toolbar">
-                    <button type="button" id="workspaceCompanyEditorClose" class="secondary ghost">Cerrar</button>
+                  <div style="flex:1;min-width:240px">
+                    <div class="muted u-mb-6">Subir logo (PNG/JPG/SVG)</div>
+                    <div class="u-row u-gap-10 u-items-center u-wrap">
+                      <input id="workspaceCompanyLogoFile" type="file" accept="image/*" />
+                      <button type="button" id="workspaceCompanyLogoUploadBtn" class="secondary ghost">Subir</button>
+                      <span id="workspaceCompanyLogoStatus" class="muted"></span>
+                    </div>
                   </div>
                 </div>
-	                <form id="workspaceCompanyForm" class="form-grid">
-	                  <input type="hidden" name="id" />
-	                  <input type="hidden" name="workspace_company_id" />
-	                  <label>
-	                    Empresa
-	                    <input name="nombre" disabled />
-                  </label>
-                  <label>
-                    Razón social
-                    <input name="razon_social" placeholder="Ej. Empresa Servicios S.L." />
-                  </label>
-                  <label>
-                    CIF/NIF
-                    <input name="nif" placeholder="B12345678" />
-                  </label>
-                  <label class="span-2">
-                    Dirección
-                    <input name="direccion" placeholder="C/ ... · Ciudad" />
-                  </label>
-                  <label class="span-2">
-                    Dirección fiscal
-                    <input name="direccion_fiscal" placeholder="(si es distinta)" />
-                  </label>
-                  <label>
-                    Teléfono
-                    <input name="telefono" placeholder="+34 ..." />
-                  </label>
-                  <label>
-                    Email
-                    <input name="email" type="email" placeholder="info@empresa.com" />
-                  </label>
-                  <label class="span-2">
-                    Web
-                    <input name="web" placeholder="https://..." />
-                  </label>
-                  <label>
-                    Contacto (nombre)
-                    <input name="contacto_nombre" placeholder="Persona responsable" />
-                  </label>
-                  <label>
-                    Contacto (email)
-                    <input name="contacto_email" type="email" placeholder="contacto@..." />
-                  </label>
-                  <label>
-                    Contacto (teléfono)
-                    <input name="contacto_telefono" placeholder="+34 ..." />
-                  </label>
-                  <label class="span-2">
-                    Logo (URL)
-                    <input name="logo_url" placeholder="https://..." />
-                  </label>
-	                  <div class="span-2 u-row u-gap-14 u-items-start u-wrap">
-                    <div style="min-width:180px">
-	                      <div class="muted u-mb-6">Vista previa</div>
-                      <div style="width:180px;height:64px;border:1px solid #e1e5ea;border-radius:12px;display:flex;align-items:center;justify-content:center;background:#fff;overflow:hidden">
-                        <img id="workspaceCompanyLogoPreview" alt="" style="max-width:170px;max-height:56px;object-fit:contain" />
-                      </div>
-                    </div>
-                    <div style="flex:1;min-width:240px">
-	                      <div class="muted u-mb-6">Subir logo (PNG/JPG/SVG)</div>
-	                      <div class="u-row u-gap-10 u-items-center u-wrap">
-                        <input id="workspaceCompanyLogoFile" type="file" accept="image/*" />
-                        <button type="button" id="workspaceCompanyLogoUploadBtn" class="secondary ghost">Subir</button>
-                        <span id="workspaceCompanyLogoStatus" class="muted"></span>
-                      </div>
-                    </div>
-                  </div>
-                  <label class="span-2">
-                    Sector / actividad
-                    <input name="sector" placeholder="Ej. Administración de fincas, inmobiliaria..." />
-                  </label>
-                  <label class="span-2">
-                    Buscar CNAE por actividad (texto)
-                    <input id="workspaceCompanyCnaeQuery" placeholder="Ej. gestión de comunidades, asesoría laboral..." />
-                  </label>
-                  <div id="workspaceCompanyCnaeResults" class="crm-mini-list span-2"></div>
-                  <label class="span-2">
-                    CNAE(s) (separados por coma)
-                    <input id="workspaceCompanyCnaes" name="cnaes" placeholder="68.32, 69.20" />
-                  </label>
-                  <label class="span-2">
-                    Convenio (nombre o referencia)
-                    <input name="convenio_nombre" placeholder="Ej. Oficinas y despachos provincial..." />
-                  </label>
-                  <label>
-                    Convenio key (interno)
-                    <input name="convenio_key" placeholder="oficinas_y_despachos" />
-                  </label>
-                  <label>
-                    Vacaciones (modo)
-                    <select name="vacaciones_modo">
-                      <option value="habiles">Hábiles</option>
-                      <option value="naturales">Naturales</option>
-                    </select>
-                  </label>
-                  <label>
-                    Vacaciones días/año
-                    <input name="vacaciones_dias_anuales" placeholder="22" />
-                  </label>
-                  <label class="span-2">
-                    IBAN (para facturas/remesas)
-                    <input name="iban" placeholder="ES00 0000 0000 00 0000000000" />
-                  </label>
-                  <label>
-                    BIC/SWIFT
-                    <input name="bic" placeholder="XXXXESXX" />
-                  </label>
-                  <label class="span-2">
-                    Banco
-                    <input name="banco_nombre" placeholder="Ej. Banco Santander" />
-                  </label>
-                  <div class="form-actions span-2">
-                    <button type="submit">Guardar empresa</button>
-                    <span id="workspaceCompanyFormStatus" class="muted"></span>
-                  </div>
-                </form>
-              </div>
+                <label class="span-2">
+                  Sector / actividad
+                  <input name="sector" placeholder="Ej. Administración de fincas, inmobiliaria..." />
+                </label>
+                <label class="span-2">
+                  Buscar CNAE por actividad (texto)
+                  <input id="workspaceCompanyCnaeQuery" placeholder="Ej. gestión de comunidades, asesoría laboral..." />
+                </label>
+                <div id="workspaceCompanyCnaeResults" class="crm-mini-list span-2"></div>
+                <label class="span-2">
+                  CNAE(s) (separados por coma)
+                  <input id="workspaceCompanyCnaes" name="cnaes" placeholder="68.32, 69.20" />
+                </label>
+                <label class="span-2">
+                  Convenio (nombre o referencia)
+                  <input name="convenio_nombre" placeholder="Ej. Oficinas y despachos provincial..." />
+                </label>
+                <label>
+                  Convenio key (interno)
+                  <input name="convenio_key" placeholder="oficinas_y_despachos" />
+                </label>
+                <label>
+                  Vacaciones (modo)
+                  <select name="vacaciones_modo">
+                    <option value="habiles">Hábiles</option>
+                    <option value="naturales">Naturales</option>
+                  </select>
+                </label>
+                <label>
+                  Vacaciones días/año
+                  <input name="vacaciones_dias_anuales" placeholder="22" />
+                </label>
+                <label class="span-2">
+                  IBAN (para facturas/remesas)
+                  <input name="iban" placeholder="ES00 0000 0000 00 0000000000" />
+                </label>
+                <label>
+                  BIC/SWIFT
+                  <input name="bic" placeholder="XXXXESXX" />
+                </label>
+                <label class="span-2">
+                  Banco
+                  <input name="banco_nombre" placeholder="Ej. Banco Santander" />
+                </label>
+                <div class="form-actions span-2">
+                  <button type="submit">Guardar empresa</button>
+                  <span id="workspaceCompanyFormStatus" class="muted"></span>
+                </div>
+              </form>
             </div>
             <div class="workspace-central-layout" data-tenant-section="usuarios">
               <div class="form-card">
@@ -481,6 +478,15 @@
                 </div>
               </div>
               <div id="workspaceModules"></div>
+            </div>
+            <div class="form-card" data-tenant-section="permisos">
+              <div class="section-head">
+                <div>
+                  <h3>Matriz de accesos</h3>
+                  <p class="muted">Plantillas de permisos recomendadas por perfil.</p>
+                </div>
+              </div>
+              <div id="workspacePermissionMatrix"></div>
             </div>
           </section>
         </div>
