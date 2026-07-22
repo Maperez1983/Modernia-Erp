@@ -814,8 +814,96 @@ class TechnicalAuditM5RegressionTests(unittest.TestCase):
 
         self.assertEqual(result, [])
         self.assertEqual(counting.execute_count, 4)
-        self.assertTrue(any(") AS today_entries" in sql for sql in counting.executed_sql))
+        self.assertTrue(any("ROW_NUMBER() OVER" in sql for sql in counting.executed_sql))
         counting.close()
+
+    def test_compute_worked_minutes_wraps_across_midnight(self):
+        self.assertEqual(server.compute_worked_minutes("22:00", "06:30", 30), 480)
+        self.assertEqual(server.compute_worked_minutes("23:15", "00:15", 0), 60)
+
+    def test_fetch_workspace_latest_time_entry_returns_previous_day_open_shift(self):
+        conn = self._create_sweep_conn()
+        yesterday = (FIXED_NOW.date() - timedelta(days=1)).isoformat()
+        conn.execute(
+            """
+            INSERT INTO workspace_registro_horario (
+              id, workspace_id, empresa_id, persona_id, usuario_id, persona_nombre,
+              fecha, hora_inicio, hora_fin, pausa_min, minutos_trabajados, metodo_registro,
+              estado, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "time-overnight",
+                "ws-ok",
+                "emp-1",
+                "rp-1",
+                "u-1",
+                "Persona OK",
+                yesterday,
+                "22:00",
+                "",
+                0,
+                0,
+                "Manual",
+                "Abierto",
+                FIXED_NOW.isoformat(),
+                FIXED_NOW.isoformat(),
+            ),
+        )
+        conn.commit()
+
+        try:
+            row = server.fetch_workspace_latest_time_entry(conn, "ws-ok", "rp-1", upto_date=FIXED_NOW.date().isoformat(), only_open=True)
+        finally:
+            conn.close()
+
+        self.assertIsNotNone(row)
+        self.assertEqual(row["fecha"], yesterday)
+        self.assertEqual(row["hora_inicio"], "22:00")
+        self.assertEqual(row["hora_fin"], "")
+
+    def test_run_workspace_time_missing_sweep_detects_overnight_open_shift(self):
+        conn = self._create_sweep_conn()
+        yesterday = (FIXED_NOW.date() - timedelta(days=1)).isoformat()
+        conn.execute(
+            """
+            INSERT INTO workspace_registro_horario (
+              id, workspace_id, empresa_id, persona_id, usuario_id, persona_nombre,
+              fecha, hora_inicio, hora_fin, pausa_min, minutos_trabajados, metodo_registro,
+              estado, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "time-overnight",
+                "ws-ok",
+                "emp-1",
+                "rp-1",
+                "u-1",
+                "Persona OK",
+                yesterday,
+                "22:00",
+                "",
+                0,
+                0,
+                "Manual",
+                "Abierto",
+                FIXED_NOW.isoformat(),
+                FIXED_NOW.isoformat(),
+            ),
+        )
+        conn.commit()
+
+        try:
+            created = server.run_workspace_time_missing_sweep(
+                conn,
+                "ws-ok",
+                now="2026-07-14T19:00:00+00:00",
+            )
+        finally:
+            conn.close()
+
+        self.assertIn("worker_missing_checkout", created)
+        self.assertIn("admin_missing_checkout", created)
 
     def test_m5_perf_indexes_are_created_once_on_sqlite(self):
         conn = sqlite3.connect(":memory:")

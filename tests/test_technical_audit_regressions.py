@@ -1,4 +1,5 @@
 import os
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -2357,3 +2358,300 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
         self.assertEqual(badge_server.size, badge_module.size)
         self.assertEqual(badge_server.mode, badge_module.mode)
         self.assertEqual(badge_server.tobytes(), badge_module.tobytes())
+
+
+class GestoriaServerRouteRegressionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.db_path = Path(self.tmpdir.name) / "gestoria.sqlite"
+        os.environ["APP_DB_BACKEND"] = "sqlite"
+        self._old_db_ready = getattr(server.Handler, "_db_ready", False)
+        self._old_db_ready_last_error = getattr(server.Handler, "_db_ready_last_error", "")
+        self._old_allow_reuse_port = getattr(server.ThreadingHTTPServer, "allow_reuse_port", False)
+        self._old_allow_reuse_address = getattr(server.ThreadingHTTPServer, "allow_reuse_address", True)
+        server.ThreadingHTTPServer.allow_reuse_port = False
+        server.ThreadingHTTPServer.allow_reuse_address = True
+        bootstrap_conn = sqlite3.connect(self.db_path)
+        bootstrap_conn.executescript(
+            """
+            CREATE TABLE empresas (
+              id TEXT PRIMARY KEY,
+              nombre TEXT,
+              activo INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE workspace_companies (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              legacy_empresa_id TEXT,
+              nombre TEXT,
+              activo INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              estado TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              estado TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE cliente_gestoria (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT UNIQUE,
+              mod_renta INTEGER,
+              renta_detalles TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE gestoria_terceros (
+              id TEXT PRIMARY KEY,
+              nombre TEXT,
+              nif TEXT
+            );
+            CREATE TABLE gestoria_facturas (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente_id TEXT,
+              tercero_id TEXT,
+              tipo TEXT,
+              numero TEXT,
+              fecha_emision TEXT,
+              descripcion TEXT,
+              base_imponible REAL,
+              cuota_iva REAL,
+              cuota_irpf REAL,
+              total REAL,
+              iva_pct REAL,
+              doc_key TEXT,
+              estado_ocr TEXT,
+              archivo_hash TEXT,
+              dedupe_key TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE gestoria_asientos (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              cliente_id TEXT,
+              factura_id TEXT,
+              fecha TEXT,
+              concepto TEXT,
+              referencia TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE gestoria_asiento_lineas (
+              id TEXT PRIMARY KEY,
+              asiento_id TEXT,
+              tercero_id TEXT,
+              cuenta TEXT,
+              descripcion TEXT,
+              debe REAL,
+              haber REAL,
+              impuesto_tipo TEXT,
+              impuesto_pct REAL
+            );
+            """
+        )
+        bootstrap_conn.commit()
+        bootstrap_conn.close()
+        self.conn = sqlite3.connect(self.db_path)
+        self.conn.row_factory = sqlite3.Row
+        server.Handler._db_ready = True
+        server.Handler._db_ready_last_error = ""
+        self._seed_gestoria_workspace()
+
+        server.Handler.db_path = str(self.db_path)
+        server.Handler.ocr_db_path = str(Path(self.tmpdir.name) / "ocr.sqlite")
+        server.Handler._gestoria_dashboard_cache.clear()
+
+        self._session_data = {"user_id": "u-admin", "rol": "ADMINISTRADOR", "servicio": "Gestoría"}
+        self._session_patch = mock.patch.object(server.Handler, "_current_session", lambda _handler: self._session_data)
+        self._session_patch.start()
+        self.base_url = "http://127.0.0.1"
+
+    def _call_gestoria_route(self, path):
+        from io import BytesIO
+
+        class DirectHandler(server.Handler):
+            def __init__(self, route_path, session_data):
+                self.path = route_path
+                self.command = "GET"
+                self.request_version = "HTTP/1.1"
+                self.headers = {}
+                self.rfile = None
+                self.wfile = BytesIO()
+                self.server = SimpleNamespace(server_name="127.0.0.1", server_port=0)
+                self.client_address = ("127.0.0.1", 0)
+                self._session_data = session_data
+                self._status = 0
+                self._headers = []
+                self.close_connection = True
+
+            def _current_session(self):
+                return self._session_data
+
+            def send_response(self, code, message=None):
+                self._status = int(code or 0)
+
+            def send_header(self, key, value):
+                self._headers.append((str(key), str(value)))
+
+            def end_headers(self):
+                return None
+
+            def log_message(self, *_args, **_kwargs):
+                return None
+
+        handler = DirectHandler(path, self._session_data)
+        server.Handler.do_GET(handler)
+        headers = {key: value for key, value in handler._headers}
+        return handler._status, headers, handler.wfile.getvalue()
+
+    def tearDown(self):
+        try:
+            self._session_patch.stop()
+        except Exception:
+            pass
+        try:
+            self.conn.close()
+        except Exception:
+            pass
+        try:
+            server.Handler._db_ready = self._old_db_ready
+            server.Handler._db_ready_last_error = self._old_db_ready_last_error
+        except Exception:
+            pass
+        try:
+            self.tmpdir.cleanup()
+        except Exception:
+            pass
+        try:
+            server.ThreadingHTTPServer.allow_reuse_port = self._old_allow_reuse_port
+            server.ThreadingHTTPServer.allow_reuse_address = self._old_allow_reuse_address
+        except Exception:
+            pass
+
+    def _seed_gestoria_workspace(self):
+        now = "2026-07-22T10:00:00+00:00"
+        self.conn.execute(
+            """
+            INSERT INTO workspace_companies (id, workspace_id, legacy_empresa_id, nombre, activo)
+            VALUES (?, ?, ?, ?, 1)
+            """,
+            ("wc-1", "ws-1", "emp-1", "Empresa Uno"),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO clientes (id, empresa_id, nombre, nif, estado, created_at, updated_at)
+            VALUES (?, ?, ?, ?, 'Activo', datetime(?), datetime(?))
+            """,
+            ("cli-1", "emp-1", "Cliente Uno", "12345678Z", now, now),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO cliente_gestoria (id, cliente_id, mod_renta, created_at, updated_at)
+            VALUES (?, ?, 1, datetime(?), datetime(?))
+            """,
+            ("cg-1", "cli-1", now, now),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_terceros (id, nombre, nif)
+            VALUES (?, ?, ?)
+            """,
+            ("t-1", "Proveedor Uno", "B12345678"),
+        )
+        self.conn.execute(
+            """
+            INSERT INTO gestoria_facturas (
+              id, empresa_id, cliente_id, tercero_id, tipo, numero, fecha_emision, descripcion,
+              base_imponible, cuota_iva, cuota_irpf, total, iva_pct, doc_key,
+              estado_ocr, archivo_hash, dedupe_key, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "f-1",
+                "emp-1",
+                "cli-1",
+                "t-1",
+                "compra",
+                "F-2026-001",
+                "2026-07-11",
+                "Factura de prueba",
+                100.0,
+                21.0,
+                0.0,
+                121.0,
+                21.0,
+                "doc-1",
+                "pendiente",
+                "hash-1",
+                "",
+                now,
+                now,
+            ),
+        )
+        for idx in range(2, 5):
+            self.conn.execute(
+                """
+                INSERT INTO cliente_gestoria (id, cliente_id, mod_renta, created_at, updated_at)
+                VALUES (?, ?, 1, datetime(?), datetime(?))
+                """,
+                (f"cg-extra-{idx}", f"renta-global-{idx}", now, now),
+            )
+        self.conn.commit()
+
+    def test_gestoria_excel_plantilla_route_returns_xlsx(self):
+        status, headers, body = self._call_gestoria_route("/api/gestoria_excel_plantilla?workspace_id=ws-1&cliente_id=cli-1")
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            headers.get("Content-Type"),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        disposition = headers.get("Content-Disposition") or ""
+        self.assertIn("plantilla_conversor_asientos", disposition)
+        self.assertGreater(len(body), 0)
+        self.assertEqual(body[:2], b"PK")
+        from io import BytesIO
+
+        from openpyxl import load_workbook
+
+        wb = load_workbook(BytesIO(body), data_only=False)
+        self.assertIn("Listado Facturas", wb.sheetnames)
+        self.assertIn("Control IVA", wb.sheetnames)
+        self.assertEqual(wb["Listado Facturas"]["A2"].value, 1)
+        self.assertEqual(wb["Listado Facturas"]["D2"].value, "F-2026-001")
+        self.assertEqual(wb["Control IVA"]["B2"].value, '=COUNTIF(\'Listado Facturas\'!C2:C2,"compra")')
+
+    def test_gestoria_dashboard_cache_is_scoped_by_access_mode(self):
+        self._session_data = {"user_id": "u-admin", "rol": "ADMINISTRADOR", "servicio": "Gestoría"}
+        admin_status, admin_headers, admin_body = self._call_gestoria_route("/api/gestoria_dashboard?workspace_id=ws-1")
+        self.assertEqual(admin_status, 200)
+        self.assertEqual(admin_headers.get("Content-Type"), "application/json; charset=utf-8")
+        admin_payload = json.loads(admin_body.decode("utf-8"))
+
+        self._session_data = {"user_id": "u-member", "rol": "Miembro", "servicio": "Gestoría"}
+        member_status, member_headers, member_body = self._call_gestoria_route("/api/gestoria_dashboard?workspace_id=ws-1")
+        self.assertEqual(member_status, 200)
+        self.assertEqual(member_headers.get("Content-Type"), "application/json; charset=utf-8")
+        member_payload = json.loads(member_body.decode("utf-8"))
+
+        self.assertEqual(admin_payload["counts"]["total"], 1)
+        self.assertEqual(member_payload["counts"]["total"], 1)
+        self.assertEqual(admin_payload["counts"]["clientes_renta_global"], 4)
+        self.assertEqual(member_payload["counts"]["clientes_renta_global"], 4)
+        self.assertEqual(
+            set(server.Handler._gestoria_dashboard_cache.keys()),
+            {"emp-1::full", "emp-1::limited"},
+        )

@@ -41321,14 +41321,20 @@ def fetch_workspace_inbox_queue(conn, workspace_id, limit=40):
 
 
 def fetch_gestoria_facturas_for_excel(conn, empresa_id, cliente_id):
-    empresa_id = str(empresa_id or "").strip()
+    if isinstance(empresa_id, (list, tuple, set)):
+        empresa_ids = [str(value or "").strip() for value in empresa_id]
+    else:
+        empresa_ids = [str(empresa_id or "").strip()]
+    empresa_ids = [value for value in empresa_ids if value]
     cliente_id = str(cliente_id or "").strip()
-    if not empresa_id or not cliente_id:
+    if not empresa_ids or not cliente_id:
         return []
+    placeholders = ",".join(["?"] * len(empresa_ids))
     rows = conn.execute(
-        """
+        f"""
         SELECT
           f.id,
+          COALESCE(f.empresa_id, '') AS empresa_id,
           COALESCE(f.fecha_emision, '') AS fecha_emision,
           COALESCE(f.numero, '') AS numero,
           COALESCE(f.tipo, '') AS tipo,
@@ -41346,14 +41352,14 @@ def fetch_gestoria_facturas_for_excel(conn, empresa_id, cliente_id):
           COALESCE(t.nif, '') AS tercero_nif
         FROM gestoria_facturas f
         LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
-        WHERE f.empresa_id = ? AND f.cliente_id = ?
+        WHERE f.empresa_id IN ({placeholders}) AND f.cliente_id = ?
         ORDER BY
           CASE WHEN COALESCE(f.fecha_emision, '') = '' THEN 1 ELSE 0 END,
           f.fecha_emision ASC,
           f.numero ASC,
           f.created_at ASC
         """,
-        (empresa_id, cliente_id),
+        tuple([*empresa_ids, cliente_id]),
     ).fetchall()
     # Defensa extra: si en BD ya existen duplicados (histórico o race conditions),
     # no deben contaminar el Excel ni los totalizadores.
@@ -41368,10 +41374,11 @@ def fetch_gestoria_facturas_for_excel(conn, empresa_id, cliente_id):
         total = float(row.get("total") or 0.0)
         base = float(row.get("base_imponible") or 0.0)
         cuota_iva = float(row.get("cuota_iva") or 0.0)
+        row_empresa_id = str(row.get("empresa_id") or "").strip() or (empresa_ids[0] if empresa_ids else "")
         key = str(row.get("dedupe_key") or "").strip()
         if not key:
             key = compute_gestoria_factura_dedupe_key(
-                empresa_id=empresa_id,
+                empresa_id=row_empresa_id,
                 cliente_id=cliente_id,
                 tipo=tipo,
                 tercero_nif=tercero_nif,
@@ -41600,6 +41607,181 @@ def add_gestoria_facturas_control_sheets(wb, facturas_rows):
     return wb
 
 
+def build_gestoria_excel_plantilla_response(conn, params, handler):
+    empresa_id = params.get("empresa_id", [""])[0]
+    workspace_id = params.get("workspace_id", [""])[0]
+    cliente_id = (params.get("cliente_id", [""])[0] or "").strip()
+    empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
+    if not empresa_ids:
+        json_response(handler, {"error": "Sin empresas en el workspace", "rows": []}, status=200)
+        return
+    if not cliente_id:
+        json_response(handler, {"error": "cliente_id requerido"}, status=400)
+        return
+    if not OPENPYXL_AVAILABLE:
+        json_response(handler, {"error": "openpyxl no disponible en servidor"}, status=500)
+        return
+    placeholders = ",".join(["?"] * len(empresa_ids))
+    diario = conn.execute(
+        f"""
+        SELECT a.id AS asiento_id, a.fecha, a.concepto, a.referencia,
+               l.cuenta, l.descripcion, l.debe, l.haber,
+               l.impuesto_tipo, l.impuesto_pct,
+               COALESCE(t.nombre, '') AS tercero,
+               COALESCE(t.nif, '') AS tercero_nif,
+               COALESCE(f.numero, '') AS factura_numero,
+               COALESCE(f.fecha_emision, '') AS factura_fecha,
+               COALESCE(f.total, 0) AS factura_total,
+               COALESCE(f.tipo, '') AS tipo_factura
+        FROM gestoria_asientos a
+        JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+        LEFT JOIN gestoria_terceros t ON t.id = l.tercero_id
+        LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
+        WHERE a.empresa_id IN ({placeholders}) AND a.cliente_id = ?
+        ORDER BY a.fecha ASC, a.created_at ASC, l.cuenta ASC
+        """,
+        tuple(list(empresa_ids) + [cliente_id]),
+    ).fetchall()
+    grouped = {}
+    for row in diario:
+        key = str(row["asiento_id"] or "").strip() or f"{row['fecha'] or ''}-{row['referencia'] or ''}"
+        grouped.setdefault(key, []).append(row)
+    output_rows = []
+    for _key, lines in grouped.items():
+        if not lines:
+            continue
+        sample = lines[0]
+        base = 0.0
+        iva_pct = 0.0
+        iva_importe = 0.0
+        subcuenta_tercero = ""
+        subcuenta_gyi = ""
+        tipo_venta = normalize_service_key(sample["tipo_factura"] or "") == "venta"
+        for line in lines:
+            cuenta = str(line["cuenta"] or "").strip()
+            debe = float(line["debe"] or 0)
+            haber = float(line["haber"] or 0)
+            imp_tipo = normalize_service_key(line["impuesto_tipo"] or "")
+            if not subcuenta_tercero and cuenta.startswith("4"):
+                subcuenta_tercero = cuenta
+            if not subcuenta_gyi and (cuenta.startswith("6") or cuenta.startswith("7")):
+                subcuenta_gyi = cuenta
+            if imp_tipo == "iva":
+                iva_importe += abs(haber if tipo_venta else debe)
+                if not iva_pct:
+                    iva_pct = float(line["impuesto_pct"] or 0)
+            if subcuenta_gyi == cuenta:
+                base += abs(haber if cuenta.startswith("7") else debe)
+        total = float(sample["factura_total"] or 0) or (base + iva_importe)
+        output_rows.append(
+            [
+                sample["fecha"] or "",
+                sample["factura_fecha"] or "",
+                sample["factura_numero"] or sample["referencia"] or "",
+                sample["concepto"] or "",
+                subcuenta_tercero,
+                sample["tercero_nif"] or "",
+                sample["tercero"] or "",
+                "",
+                "",
+                "",
+                "",
+                round(base, 2) if base else "",
+                round(iva_pct, 2) if iva_pct else "",
+                round(iva_importe, 2) if iva_importe else "",
+                subcuenta_gyi,
+                round(total, 2) if total else "",
+            ]
+        )
+    if GESTORIA_EXCEL_TEMPLATE.exists():
+        wb = load_workbook(GESTORIA_EXCEL_TEMPLATE)
+        ws = wb["Hoja1"] if "Hoja1" in wb.sheetnames else wb.active
+    else:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Hoja1"
+        headers = [
+            "FECHA ASIENTO",
+            "FECHA FACTURA",
+            "Nº FACTURA",
+            "CONCEPTO",
+            "SUBCUENTA",
+            "NIF",
+            "NOMBRE",
+            "DOMICILIO",
+            "LOCALIDAD",
+            "PROVINCIA",
+            "CODIGO POSTAL",
+            "BASE IMPONIBLE",
+            "% IVA",
+            "IMPORTE IVA",
+            "SUBCUENTA GASTOS/INGRESOS",
+            "IMPORTE (TOTAL)",
+        ]
+        ws.append(headers)
+        ws.append([None] * 16)
+
+    style_row_idx = 2
+    max_existing = max(ws.max_row, style_row_idx)
+    style_cells = [ws.cell(style_row_idx, col) for col in range(1, 17)]
+    # Limpia filas de datos previas (desde la fila 2).
+    for row_idx in range(2, max_existing + 1):
+        for col in range(1, 17):
+            ws.cell(row_idx, col).value = None
+
+    for offset, row in enumerate(output_rows, start=0):
+        row_idx = 2 + offset
+        for col in range(1, 17):
+            target = ws.cell(row_idx, col)
+            source = style_cells[col - 1]
+            target._style = shallow_copy(source._style)
+            target.number_format = source.number_format
+            target.protection = shallow_copy(source.protection)
+            target.alignment = shallow_copy(source.alignment)
+            target.font = shallow_copy(source.font)
+            target.fill = shallow_copy(source.fill)
+            target.border = shallow_copy(source.border)
+        ws.cell(row_idx, 1).value = row[0]
+        ws.cell(row_idx, 2).value = row[1]
+        ws.cell(row_idx, 3).value = row[2]
+        # Mantiene la lógica de tu plantilla original para el concepto.
+        ws.cell(row_idx, 4).value = f'=CONCATENATE(C{row_idx}," ",G{row_idx})'
+        ws.cell(row_idx, 5).value = row[4]
+        ws.cell(row_idx, 6).value = row[5]
+        ws.cell(row_idx, 7).value = row[6]
+        ws.cell(row_idx, 8).value = row[7]
+        ws.cell(row_idx, 9).value = row[8]
+        ws.cell(row_idx, 10).value = row[9]
+        ws.cell(row_idx, 11).value = row[10]
+        ws.cell(row_idx, 12).value = row[11]
+        ws.cell(row_idx, 13).value = row[12]
+        ws.cell(row_idx, 14).value = row[13]
+        ws.cell(row_idx, 15).value = row[14]
+        ws.cell(row_idx, 16).value = row[15]
+
+    facturas_rows = fetch_gestoria_facturas_for_excel(conn, empresa_ids, cliente_id)
+    add_gestoria_facturas_control_sheets(wb, facturas_rows)
+    bio = BytesIO()
+    wb.save(bio)
+    payload = bio.getvalue()
+    cliente = conn.execute("SELECT nombre FROM clientes WHERE id = ?", (cliente_id,)).fetchone()
+    cliente_slug = re.sub(r"[^a-z0-9]+", "_", normalize_lookup_text((cliente["nombre"] if cliente else "cliente"))).strip("_") or "cliente"
+    filename = f"plantilla_conversor_asientos_{cliente_slug}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+    handler.send_response(200)
+    handler.send_header("Access-Control-Allow-Origin", "*")
+    handler.send_header("Access-Control-Allow-Headers", "Content-Type")
+    handler.send_header("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+    handler.send_header(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    handler.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+    handler.send_header("Content-Length", str(len(payload)))
+    handler.end_headers()
+    handler.wfile.write(payload)
+    return
+
+
 def fetch_workspace_portal_clients(conn, workspace_id, limit=40):
     rows = conn.execute(
         """
@@ -41757,8 +41939,85 @@ def compute_worked_minutes(hora_inicio, hora_fin, pausa_min=0):
     end = parse_hhmm_to_minutes(hora_fin)
     if start is None or end is None:
         return 0
-    worked = end - start - max(0, int(pausa_min or 0))
+    worked = end - start
+    if worked < 0:
+        worked += 24 * 60
+    worked -= max(0, int(pausa_min or 0))
     return max(0, worked)
+
+
+def fetch_workspace_latest_time_entry(conn, workspace_id, persona_id, upto_date=None, only_open=False):
+    ws_id = str(workspace_id or "").strip()
+    pid = str(persona_id or "").strip()
+    if not ws_id or not pid:
+        return None
+    where = [
+        "workspace_id = ?",
+        "persona_id = ?",
+    ]
+    params = [ws_id, pid]
+    date_key = str(upto_date or "").strip()[:10]
+    if date_key:
+        where.append("TRIM(COALESCE(fecha, '')) != '' AND substr(fecha, 1, 10) <= ?")
+        params.append(date_key)
+    if only_open:
+        where.append("COALESCE(hora_fin, '') = ''")
+    row = conn.execute(
+        f"""
+        SELECT *
+        FROM workspace_registro_horario
+        WHERE {' AND '.join(where)}
+        ORDER BY substr(fecha, 1, 10) DESC,
+                 COALESCE(NULLIF(hora_inicio, ''), '00:00') DESC,
+                 COALESCE(updated_at, created_at, id) DESC
+        LIMIT 1
+        """,
+        params,
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def fetch_workspace_latest_time_entries(conn, workspace_id, persona_ids, upto_date=None, only_open=False):
+    ws_id = str(workspace_id or "").strip()
+    ids = [str(item or "").strip() for item in (persona_ids or []) if str(item or "").strip()]
+    if not ws_id or not ids:
+        return {}
+    where = [
+        "workspace_id = ?",
+        f"persona_id IN ({','.join('?' for _ in ids)})",
+    ]
+    params = [ws_id, *ids]
+    date_key = str(upto_date or "").strip()[:10]
+    if date_key:
+        where.append("TRIM(COALESCE(fecha, '')) != '' AND substr(fecha, 1, 10) <= ?")
+        params.append(date_key)
+    if only_open:
+        where.append("COALESCE(hora_fin, '') = ''")
+    rows = conn.execute(
+        f"""
+        SELECT *
+        FROM (
+          SELECT
+            *,
+            ROW_NUMBER() OVER (
+              PARTITION BY persona_id
+              ORDER BY substr(fecha, 1, 10) DESC,
+                       COALESCE(NULLIF(hora_inicio, ''), '00:00') DESC,
+                       COALESCE(updated_at, created_at, id) DESC
+            ) AS rn
+          FROM workspace_registro_horario
+          WHERE {' AND '.join(where)}
+        ) ranked
+        WHERE rn = 1
+        """,
+        params,
+    ).fetchall()
+    result = {}
+    for row in rows or []:
+        persona_key = str(row["persona_id"] or "").strip()
+        if persona_key:
+            result[persona_key] = dict(row)
+    return result
 
 
 def normalize_time_entry_state(raw_state, hora_fin):
@@ -44893,35 +45152,7 @@ def run_workspace_time_missing_sweep(conn, workspace_id, now=None):
             persona_key = str(turno_row["persona_id"] or "").strip()
             if persona_key:
                 turnos_by_persona[persona_key] = dict(turno_row)
-    today_entries = {}
-    if persona_ids:
-        entries_rows = conn.execute(
-            f"""
-            SELECT id, persona_id, hora_inicio, hora_fin
-            FROM (
-              SELECT
-                id,
-                persona_id,
-                hora_inicio,
-                hora_fin,
-                ROW_NUMBER() OVER (
-                  PARTITION BY persona_id
-                  ORDER BY COALESCE(NULLIF(hora_inicio, ''), '00:00') DESC,
-                           COALESCE(updated_at, created_at, id) DESC
-                ) AS rn
-              FROM workspace_registro_horario
-              WHERE workspace_id = ?
-                AND fecha = ?
-                AND persona_id IN ({persona_placeholders})
-            ) AS today_entries
-            WHERE rn = 1
-            """,
-            [workspace_id, today, *persona_ids],
-        ).fetchall()
-        for entry_row in entries_rows:
-            persona_key = str(entry_row["persona_id"] or "").strip()
-            if persona_key:
-                today_entries[persona_key] = dict(entry_row)
+    latest_entries = fetch_workspace_latest_time_entries(conn, workspace_id, persona_ids, upto_date=today)
     for row in personal:
         persona_id = str(row["id"] or "").strip()
         if not persona_id:
@@ -44977,9 +45208,12 @@ def run_workspace_time_missing_sweep(conn, workspace_id, now=None):
             "empresa_id": row["empresa_id"],
             "admin_contact": prefs.get("admin_contact") or row["alert_admin_contact"] or "",
         }
-        today_entry = today_entries.get(persona_id)
-        has_checkin = bool(today_entry and str(today_entry["hora_inicio"] or "").strip())
-        open_entry = bool(today_entry and not str(today_entry["hora_fin"] or "").strip())
+        today_entry = latest_entries.get(persona_id)
+        today_entry_date = str((today_entry or {}).get("fecha") or "").strip()[:10]
+        today_entry_in = str((today_entry or {}).get("hora_inicio") or "").strip()
+        today_entry_out = str((today_entry or {}).get("hora_fin") or "").strip()
+        has_checkin = bool(today_entry and (today_entry_date == today or not today_entry_out) and today_entry_in)
+        open_entry = bool(today_entry and not today_entry_out)
         if not has_checkin and now_minutes >= checkin_deadline and int(prefs.get("alert_missing_checkin") or row["alert_missing_checkin"] or 0) == 1:
             if last_sent.get("missing_checkin") != today:
                 if int(prefs.get("notify_worker") or row["alert_notify_worker"] or 0) == 1:
@@ -63479,8 +63713,8 @@ class Handler(BaseHTTPRequestHandler):
             if hora_fin:
                 start_min = parse_hhmm_to_minutes(hora_inicio)
                 end_min = parse_hhmm_to_minutes(hora_fin)
-                if start_min is None or end_min is None or end_min < start_min:
-                    json_response(self, {"error": "hora_fin debe ser posterior o igual a hora_inicio"}, status=400)
+                if start_min is None or end_min is None:
+                    json_response(self, {"error": "hora_inicio y hora_fin válidos requeridos"}, status=400)
                     return
             elif normalize_lookup_text(payload.get("estado")) in {"validado", "cerrado"}:
                 json_response(self, {"error": "hora_fin requerida para cerrar o validar un fichaje"}, status=400)
@@ -63713,16 +63947,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             now_hhmm = now_dt.strftime("%H:%M")
             now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
-            open_row = conn.execute(
-                """
-                SELECT id, hora_inicio, COALESCE(hora_fin, '') AS hora_fin, COALESCE(pausa_min, 0) AS pausa_min
-                FROM workspace_registro_horario
-                WHERE workspace_id = ? AND persona_id = ? AND fecha = ? AND COALESCE(hora_fin, '') = ''
-                ORDER BY hora_inicio DESC
-                LIMIT 1
-                """,
-                (workspace_id, persona_id, fecha),
-            ).fetchone()
+            open_row = fetch_workspace_latest_time_entry(conn, workspace_id, persona_id, upto_date=fecha, only_open=True)
             if not action:
                 action = "checkout" if open_row else "checkin"
             persona_nombre = str(persona_row["nombre"] or "").strip() or "-"
@@ -63986,16 +64211,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             now_hhmm = now_dt.strftime("%H:%M")
             now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
-            open_row = conn.execute(
-                """
-                SELECT id, hora_inicio, COALESCE(hora_fin, '') AS hora_fin, COALESCE(pausa_min, 0) AS pausa_min
-                FROM workspace_registro_horario
-                WHERE workspace_id = ? AND persona_id = ? AND fecha = ? AND COALESCE(hora_fin, '') = ''
-                ORDER BY hora_inicio DESC
-                LIMIT 1
-                """,
-                (workspace_id, persona_id, fecha),
-            ).fetchone()
+            open_row = fetch_workspace_latest_time_entry(conn, workspace_id, persona_id, upto_date=fecha, only_open=True)
             action = "checkout" if open_row else "checkin"
             persona_nombre = str(row_value(persona_row, "nombre") or "").strip() or "-"
             tipo_jornada = normalize_shift_type(row_value(persona_row, "tipo_jornada") or "")
@@ -78813,25 +79029,18 @@ class Handler(BaseHTTPRequestHandler):
             fecha = now_dt.date().isoformat()
             today_payload = {"fecha": fecha, "open": False, "checkin": "", "checkout": ""}
             if persona and persona.get("id"):
-                try:
-                    entry = conn.execute(
-                        """
-                        SELECT hora_inicio, COALESCE(hora_fin, '') AS hora_fin
-                        FROM workspace_registro_horario
-                        WHERE workspace_id = ? AND persona_id = ? AND fecha = ?
-                        ORDER BY hora_inicio DESC
-                        LIMIT 1
-                        """,
-                        (workspace_id, persona.get("id"), fecha),
-                    ).fetchone()
-                except Exception:
-                    entry = None
+                entry = fetch_workspace_latest_time_entry(conn, workspace_id, persona.get("id"), upto_date=fecha)
                 if entry:
-                    checkin = str(row_value(entry, "hora_inicio") or "").strip()
-                    checkout = str(row_value(entry, "hora_fin") or "").strip()
-                    today_payload["checkin"] = checkin
-                    today_payload["checkout"] = checkout
-                    today_payload["open"] = bool(checkin and not checkout)
+                    entry_date = str(entry.get("fecha") or "").strip()[:10]
+                    checkin = str(entry.get("hora_inicio") or "").strip()
+                    checkout = str(entry.get("hora_fin") or "").strip()
+                    open_entry = bool(checkin and not checkout)
+                    if entry_date == fecha or open_entry:
+                        today_payload["date"] = fecha
+                        today_payload["entry_date"] = entry_date or fecha
+                        today_payload["checkin"] = checkin
+                        today_payload["checkout"] = checkout
+                        today_payload["open"] = open_entry
             json_response(
                 self,
                 {
@@ -79705,19 +79914,18 @@ class Handler(BaseHTTPRequestHandler):
             workspace_id = str(row_value(persona_row, "workspace_id") or "").strip()
             persona_id = str(row_value(persona_row, "id") or "").strip()
             today = app_now().date().isoformat()
-            today_row = conn.execute(
-                """
-                SELECT id, hora_inicio, hora_fin
-                FROM workspace_registro_horario
-                WHERE workspace_id = ? AND persona_id = ? AND fecha = ?
-                ORDER BY hora_inicio DESC
-                LIMIT 1
-                """,
-                (workspace_id, persona_id, today),
-            ).fetchone()
-            today_in = str(row_value(today_row, "hora_inicio") or "").strip() if today_row else ""
-            today_out = str(row_value(today_row, "hora_fin") or "").strip() if today_row else ""
-            open_entry = bool(today_in and not today_out)
+            today_row = fetch_workspace_latest_time_entry(conn, workspace_id, persona_id, upto_date=today)
+            today_row_date = str((today_row or {}).get("fecha") or "").strip()[:10]
+            today_in = ""
+            today_out = ""
+            open_entry = False
+            if today_row:
+                entry_in = str(today_row.get("hora_inicio") or "").strip()
+                entry_out = str(today_row.get("hora_fin") or "").strip()
+                open_entry = bool(entry_in and not entry_out)
+                if today_row_date == today or open_entry:
+                    today_in = entry_in
+                    today_out = entry_out
             json_response(
                 self,
                 {
@@ -85738,6 +85946,10 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/gestoria_excel_plantilla":
+            build_gestoria_excel_plantilla_response(conn, params, self)
+            return
+
             if path == "/api/gestoria_excel_plantilla":
                 empresa_id = params.get("empresa_id", [""])[0]
                 workspace_id = params.get("workspace_id", [""])[0]
@@ -86263,7 +86475,8 @@ class Handler(BaseHTTPRequestHandler):
 
                 # Cache corta para evitar que el front (retries 502) y los usuarios disparen queries pesadas a la vez.
                 now_ts = time.time()
-                cache_key = ",".join(sorted(set(str(eid or "").strip() for eid in empresa_ids if str(eid or "").strip())))
+                cache_key_base = ",".join(sorted(set(str(eid or "").strip() for eid in empresa_ids if str(eid or "").strip())))
+                cache_key = f"{cache_key_base}::{'limited' if limited_mode else 'full'}" if cache_key_base else ""
                 if cache_key:
                     try:
                         with Handler._gestoria_dashboard_lock:
@@ -86347,8 +86560,6 @@ class Handler(BaseHTTPRequestHandler):
                         """
                     ).fetchone()
                     payload["counts"]["clientes_renta_global"] = int(row_value(renta_clientes, "total", 0) or 0)
-                    if payload["counts"]["clientes_renta_global"] > payload["counts"]["total"]:
-                        payload["counts"]["total"] = payload["counts"]["clientes_renta_global"]
                 except Exception as exc:
                     try:
                         Handler._record_api_error("/api/gestoria_dashboard:renta_clientes_global", exc)

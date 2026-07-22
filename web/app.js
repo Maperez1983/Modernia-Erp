@@ -2226,6 +2226,14 @@ const state = {
   currentWorkspaceEnabledModules: [],
   currentWorkspaceServiceMatrixRows: [],
   currentWorkspaceServiceCompanyDefaults: {},
+  currentWorkspaceLoadedAt: (() => {
+    try {
+      return localStorage.getItem("crm.currentWorkspaceLoadedAt") || "";
+    } catch {
+      return "";
+    }
+  })(),
+  currentWorkspaceHealth: null,
   currentWorkspaceName: "",
   legalCatalog: null,
   legalCurrentArea: "inmobiliaria",
@@ -2244,6 +2252,16 @@ const state = {
   workspaceCompanyShowInactive: false,
   workspaceFincasTab: "dashboard",
   currentWorkspaceData: {},
+  workspaceLastActivity: (() => {
+    try {
+      const raw = localStorage.getItem("crm.workspaceLastActivity") || "";
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch {
+      return null;
+    }
+  })(),
   workspaceBillingRows: [],
   workspaceFincasLedgerRows: [],
   workspaceClientOptions: [],
@@ -2342,6 +2360,7 @@ const adminActivationLink = document.getElementById("adminActivationLink");
 const adminUsersTable = document.getElementById("adminUsersTable");
 const adminUsersInfo = document.getElementById("adminUsersInfo");
 const adminUsersSearch = document.getElementById("adminUsersSearch");
+const homeHeroAside = document.getElementById("homeHeroAside");
 const adminServicioInput = document.getElementById("adminServicioInput");
 const adminServiceMulti = document.getElementById("adminServiceMulti");
 const adminPasswordInput = document.getElementById("adminPasswordInput");
@@ -2367,6 +2386,7 @@ const workspaceTenantTabs = document.getElementById("workspaceTenantTabs");
 const workspaceTenantContext = document.getElementById("workspaceTenantContext");
 const workspaceMotoresBackBtn = document.getElementById("workspaceMotoresBackBtn");
 const workspaceCompanySwitcher = document.getElementById("workspaceCompanySwitcher");
+const workspaceEntryBanner = document.getElementById("workspaceEntryBanner");
 const workspaceOverviewHealth = document.getElementById("workspaceOverviewHealth");
 const workspaceOverviewCommercial = document.getElementById("workspaceOverviewCommercial");
 const workspaceOverviewLauncherCard = document.getElementById("workspaceOverviewLauncherCard");
@@ -6461,6 +6481,7 @@ const renderCompanyCards = () => {
   if (coreCards) {
     coreCards.innerHTML = "";
   }
+  renderHomeGuidance();
   if (coreCards) {
     const user = getAuthScopeUser();
     const isPriv = canSeeAllWorkspacesHome(user);
@@ -6495,6 +6516,18 @@ const renderCompanyCards = () => {
         } catch (e) {}
       };
 
+      const appendHomeSectionHeader = (title, subtitle, eyebrow = "") => {
+        const section = document.createElement("div");
+        section.className = "home-section-header";
+        section.innerHTML = `
+          ${eyebrow ? `<span class="home-section-kicker">${escapeHtml(String(eyebrow || ""))}</span>` : ""}
+          <h4>${escapeHtml(String(title || ""))}</h4>
+          <p class="muted">${escapeHtml(String(subtitle || ""))}</p>
+        `;
+        coreCards.appendChild(section);
+        return section;
+      };
+
 	    const buildInitials = (value) => {
       const parts = String(value || "")
         .trim()
@@ -6505,7 +6538,7 @@ const renderCompanyCards = () => {
       return letters.toUpperCase();
     };
 
-			    const appendPersonalCard = () => {
+      const appendPersonalCard = () => {
 		      const employee = timeProfile?.employee || null;
 		      const homePersona = state.homeTimeStatus?.persona || null;
 		      const personaId = String(employee?.id || homePersona?.id || "").trim();
@@ -6564,7 +6597,7 @@ const renderCompanyCards = () => {
             ${photoUrl ? `<img src="${escapeHtml(buildPhotoSrc(photoUrl))}" alt="" />` : `<span class="rrhh-avatar-initials">${escapeHtml(buildInitials(displayName))}</span>`}
           </div>
           <div>
-            <h3>Personal</h3>
+            <h3>Perfil</h3>
             <div class="company-meta">${escapeHtml(displayName)}</div>
             <div class="company-meta">${escapeHtml(subtitle)}</div>
           </div>
@@ -6577,6 +6610,25 @@ const renderCompanyCards = () => {
 		      coreCards.appendChild(card);
 		    };
 
+      const appendWorkspaceContinueCard = () => {
+        const currentWorkspaceId = String(state.currentWorkspaceId || "").trim();
+        const currentWorkspaceName = getWorkspaceDisplayName(
+          state.currentWorkspaceDetail?.workspace || state.currentWorkspaceName || state.currentWorkspaceTarget || currentWorkspaceId || ""
+        );
+        const currentCompanyName = String(state.currentWorkspaceCompanyName || "").trim() || "Sin empresa activa";
+        const viewLabel = getWorkspaceViewLabel(state.currentWorkspaceView || "overview");
+        const card = document.createElement("div");
+        card.className = "company-card";
+        card.dataset.action = "workspace-continue";
+        card.innerHTML = `
+          <h3>Retomar trabajo</h3>
+          <div class="company-meta">${escapeHtml(currentWorkspaceName)}</div>
+          <div class="company-meta">${escapeHtml(currentCompanyName)} · ${escapeHtml(viewLabel)}</div>
+          <a class="card-link" href="${currentWorkspaceId ? `/?holding=1&mode=tenant&workspace=${encodeURIComponent(currentWorkspaceId)}&view=operations` : "/?holding=1&mode=platform&view=tenant"}" data-action="workspace-continue">Abrir</a>
+        `;
+        coreCards.appendChild(card);
+      };
+
 		    const appendServiceCard = (serviceKey) => {
 		      const service = normalizeSimple(serviceKey);
 		      const card = document.createElement("div");
@@ -6587,17 +6639,17 @@ const renderCompanyCards = () => {
 		      if (service === "inmobiliaria") {
 		        card.dataset.action = "crm-inmo";
 	        card.innerHTML = `
-	          <h3>CRM Inmobiliario</h3>
-	          <div class="company-meta">Noticias, inmuebles y operaciones.</div>
-	          <div class="company-meta">Servicio inmobiliario.</div>
+	          <h3>Inmobiliaria</h3>
+	          <div class="company-meta">Pipeline, inmuebles y captaciones.</div>
+	          <div class="company-meta">Acceso directo.</div>
 	          <a class="card-link" href="${tenantPrefix ? `${tenantPrefix}&crm=inmo&tab=crm` : "/?crm=inmo"}" data-action="crm-inmo">Entrar</a>
 	        `;
 		      } else if (service === "gestoria") {
 		        card.dataset.action = "crm-gestoria";
 		        card.innerHTML = `
-		          <h3>CRM Gestoría</h3>
-		          <div class="company-meta">Clientes en gestión y seguimiento.</div>
-		          <div class="company-meta">Servicio de gestoría.</div>
+		          <h3>Gestoría</h3>
+		          <div class="company-meta">Contabilidad, renta y seguimiento.</div>
+		          <div class="company-meta">Acceso directo.</div>
 		          <a class="card-link" href="${tenantPrefix ? `${tenantPrefix}&crm=gestoria&tab=gestoria-crm` : "/?crm=gestoria"}" data-action="crm-gestoria">Entrar</a>
 		        `;
 		      } else if (service === "fincas") {
@@ -6605,24 +6657,24 @@ const renderCompanyCards = () => {
 		        card.dataset.action = "workspace-fincas";
 		        card.innerHTML = `
 		          <h3>Fincas</h3>
-		          <div class="company-meta">Comunidades, incidencias, juntas y seguimiento.</div>
-		          <div class="company-meta">Área de administración de fincas.</div>
+		          <div class="company-meta">Comunidades, incidencias y juntas.</div>
+		          <div class="company-meta">Acceso directo.</div>
 		          <a class="card-link" href="${href}" data-action="workspace-fincas">Entrar</a>
 		        `;
 		      } else if (service === "seguros") {
 		        card.dataset.action = "crm-seguros";
 		        card.innerHTML = `
-	          <h3>CRM Seguros</h3>
-	          <div class="company-meta">Pólizas, renovaciones y oportunidades.</div>
-	          <div class="company-meta">Servicio de seguros.</div>
+	          <h3>Seguros</h3>
+	          <div class="company-meta">Pólizas, cartera y renovaciones.</div>
+	          <div class="company-meta">Acceso directo.</div>
 	          <a class="card-link" href="${tenantPrefix ? `${tenantPrefix}&crm=seguros&tab=seguros-crm` : "/?crm=seguros"}" data-action="crm-seguros">Entrar</a>
 	        `;
 	      } else if (service === "financiaciones") {
 	        card.dataset.action = "crm-fin";
 	        card.innerHTML = `
-	          <h3>CRM Financiaciones</h3>
-	          <div class="company-meta">Hipotecas y seguimiento.</div>
-	          <div class="company-meta">Servicio financiero.</div>
+	          <h3>Financiación</h3>
+	          <div class="company-meta">Hipotecas, firmas y seguimiento.</div>
+	          <div class="company-meta">Acceso directo.</div>
 		          <a class="card-link" href="${tenantPrefix ? `${tenantPrefix}&crm=fin&tab=fin-crm` : "/?crm=fin"}" data-action="crm-fin">Entrar</a>
 	        `;
 		      } else {
@@ -6643,10 +6695,15 @@ const renderCompanyCards = () => {
 	        <a class="card-link" href="${href}" data-action="workspace-simuladores">Abrir</a>
 	      `;
 	      coreCards.appendChild(card);
-	    };
+		    };
 
 		    if (!isPriv) {
+          appendHomeSectionHeader("Tu acceso", "Retoma tu perfil y sigue con lo que ya tenías abierto.", "Inicio");
 		      appendPersonalCard();
+          if (String(state.currentWorkspaceId || "").trim()) {
+            appendWorkspaceContinueCard();
+          }
+          appendHomeSectionHeader("Accesos directos", "Tus módulos y utilidades más frecuentes.", "Atajos");
 		      // Cards de servicios asignados: el usuario no admin debe poder entrar directamente al servicio.
 		      try {
 		        const services = expandServiceAliases(parseServiceList(user?.servicio || ""));
@@ -6666,7 +6723,10 @@ const renderCompanyCards = () => {
 		      return;
 		    }
 
+    appendHomeSectionHeader("Tu acceso", "Empieza por el contexto que ya estaba abierto.", "Inicio");
     appendPersonalCard();
+    appendWorkspaceContinueCard();
+    appendHomeSectionHeader("Administración", "Control global y configuración del workspace.", "Plataforma");
     const platformCard = document.createElement("div");
     platformCard.className = "company-card";
     platformCard.dataset.action = "holding-admin";
@@ -6678,6 +6738,7 @@ const renderCompanyCards = () => {
     `;
     coreCards.appendChild(platformCard);
 
+	    appendHomeSectionHeader("Workspaces", "Vuelve al workspace activo o abre el listado completo.", "Continuidad");
 	    const homeWorkspacesCard = document.createElement("div");
     homeWorkspacesCard.className = "company-card";
     homeWorkspacesCard.dataset.action = "holding-workspaces";
@@ -6716,7 +6777,20 @@ const renderCompanyCards = () => {
           try {
             homeWorkspacesCard.remove();
           } catch (e) {}
-          rows.forEach((row) => {
+          const currentWorkspaceId = String(state.currentWorkspaceId || "").trim();
+          const orderedRows = [...rows].sort((a, b) => {
+            const aId = String(a?.id || "").trim();
+            const bId = String(b?.id || "").trim();
+            if (aId && aId === currentWorkspaceId) return -1;
+            if (bId && bId === currentWorkspaceId) return 1;
+            return String(a?.nombre || a?.name || a?.slug || a?.id || "").localeCompare(
+              String(b?.nombre || b?.name || b?.slug || b?.id || ""),
+              "es",
+              { sensitivity: "base" }
+            );
+          });
+          const visibleRows = orderedRows.slice(0, 4);
+          visibleRows.forEach((row) => {
             const workspaceId = String(row?.id || "").trim();
             const rawName = String(row?.nombre || row?.name || row?.slug || row?.id || "").trim();
             const brandedName = getWorkspaceDisplayName(row);
@@ -6747,6 +6821,18 @@ const renderCompanyCards = () => {
             `;
             coreCards.appendChild(card);
           });
+          if (orderedRows.length > visibleRows.length) {
+            const moreCard = document.createElement("div");
+            moreCard.className = "company-card";
+            moreCard.dataset.action = "holding-workspaces-more";
+            moreCard.innerHTML = `
+              <h3>Ver todo</h3>
+              <div class="company-meta">Hay ${numberFormatter.format(orderedRows.length)} workspaces disponibles.</div>
+              <div class="company-meta">Abre la configuración completa para ver el resto.</div>
+              <a class="card-link" href="/?holding=1&mode=platform&view=tenant" data-action="holding-workspaces-more">Abrir listado</a>
+            `;
+            coreCards.appendChild(moreCard);
+          }
           dedupeCoreCards();
         })();
       } catch (e) {}
@@ -7036,6 +7122,653 @@ const renderWorkspaceTenantContext = () => {
   });
 };
 
+const getWorkspaceViewLabel = (value = "") => {
+  const key = normalizeSimple(value);
+  const labels = {
+    overview: "Resumen",
+    operations: "Operativa",
+    fincas: "Fincas",
+    rrhh: "RRHH",
+    motores: "Motores",
+    tenant: "Ajustes",
+    clients: "CRM 360",
+  };
+  return labels[key] || "Resumen";
+};
+
+const WORKSPACE_LAST_ACTIVITY_STORAGE_KEY = "crm.workspaceLastActivity";
+const WORKSPACE_LAST_SYNC_STORAGE_KEY = "crm.currentWorkspaceLoadedAt";
+
+const readWorkspaceActivityFromStorage = () => {
+  try {
+    const raw = localStorage.getItem(WORKSPACE_LAST_ACTIVITY_STORAGE_KEY) || "";
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+};
+
+const persistWorkspaceActivity = (value = null) => {
+  try {
+    if (!value || typeof value !== "object") {
+      localStorage.removeItem(WORKSPACE_LAST_ACTIVITY_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(WORKSPACE_LAST_ACTIVITY_STORAGE_KEY, JSON.stringify(value));
+  } catch (e) {}
+};
+
+const recordWorkspaceActivity = (payload = {}) => {
+  const at = new Date().toISOString();
+  const next = {
+    at,
+    label: String(payload.label || "").trim(),
+    detail: String(payload.detail || "").trim(),
+    workspaceId: String(payload.workspaceId || state.currentWorkspaceId || "").trim(),
+    workspaceName: String(payload.workspaceName || state.currentWorkspaceName || state.currentWorkspaceTarget || "").trim(),
+    companyName: String(payload.companyName || state.currentWorkspaceCompanyName || "").trim(),
+    view: String(payload.view || state.currentWorkspaceView || "").trim(),
+    engine: String(payload.engine || state.currentWorkspaceEngineView || "").trim(),
+    kind: String(payload.kind || "").trim(),
+    target: String(payload.target || "").trim(),
+  };
+  state.workspaceLastActivity = next;
+  persistWorkspaceActivity(next);
+  return next;
+};
+
+const getWorkspaceLastActivity = () => state.workspaceLastActivity || readWorkspaceActivityFromStorage();
+
+const formatRelativeTime = (value = "") => {
+  const ts = Date.parse(String(value || "").trim());
+  if (!Number.isFinite(ts)) return "";
+  const diffMs = Date.now() - ts;
+  if (diffMs < 0) return "ahora";
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return "hace unos segundos";
+  if (minutes < 60) return `hace ${numberFormatter.format(minutes)} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `hace ${numberFormatter.format(hours)} h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `hace ${numberFormatter.format(days)} d`;
+  try {
+    return new Intl.DateTimeFormat("es-ES", {
+      day: "2-digit",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(new Date(ts));
+  } catch {
+    return String(value || "").slice(0, 16);
+  }
+};
+
+const getWorkspacePendingCount = (health = null) => {
+  const source = health && typeof health === "object" ? health : state.currentWorkspaceHealth || {};
+  const checklist = Array.isArray(source.checklist) ? source.checklist : [];
+  const checklistPending = checklist.filter((item) => Number(item?.done || 0) !== 1).length;
+  const onboardingPending = Array.isArray(source.onboarding_actions) ? source.onboarding_actions.length : 0;
+  return Math.max(Number(checklistPending || 0), Number(onboardingPending || 0));
+};
+
+const buildWorkspaceQuickSearchCatalog = (user = null) => {
+  const currentWorkspaceId = String(state.currentWorkspaceId || "").trim();
+  const currentWorkspaceName = getWorkspaceDisplayName(
+    state.currentWorkspaceDetail?.workspace || state.currentWorkspaceName || state.currentWorkspaceTarget || currentWorkspaceId || ""
+  );
+  const currentCompanyName = String(state.currentWorkspaceCompanyName || "").trim() || "Sin empresa activa";
+  const currentView = getWorkspaceViewLabel(state.currentWorkspaceView || "overview");
+  const workspaceSlug = currentWorkspaceId || resolveDefaultTenantWorkspaceSlug();
+  const canAdmin = Boolean(user && canAccessAdminPanel(user));
+  const enabledModules = new Set((state.currentWorkspaceEnabledModules || []).map((key) => normalizeSimple(key)));
+  const isWorkspaceModuleVisible = (moduleKey = "") =>
+    !currentWorkspaceId ||
+    !enabledModules.size ||
+    enabledModules.has(normalizeSimple(moduleKey)) ||
+    canAdmin;
+  const items = [];
+  const push = (item = {}) => {
+    const visible = typeof item.visible === "function" ? Boolean(item.visible()) : item.visible !== false;
+    if (!visible || !item.label || typeof item.action !== "function") return;
+    const aliases = Array.isArray(item.aliases) ? item.aliases : [];
+    const searchText = normalizeSimple([item.label, item.summary, ...aliases].join(" "));
+    items.push({ ...item, searchText });
+  };
+
+  push({
+    key: "home-panel",
+    label: "Ir al panel",
+    summary: "Volver a la portada principal del CRM.",
+    aliases: ["inicio", "home", "panel"],
+    action: () => goHome(),
+  });
+  if (currentWorkspaceId) {
+    push({
+      key: "continue-workspace",
+      label: "Continuar workspace",
+      summary: `${currentWorkspaceName} · ${currentCompanyName} · ${currentView}`,
+      aliases: ["continuar", "retomar", "workspace", currentWorkspaceName, currentCompanyName, currentView],
+      action: () => openHolding({ mode: "tenant", workspace: currentWorkspaceId, view: "operations" }),
+    });
+    push({
+      key: "workspace-overview",
+      label: "Resumen workspace",
+      summary: "Salud, módulos y acceso rápido al contexto.",
+      aliases: ["resumen", "salud", "estado", "workspace"],
+      action: () => openHolding({ mode: "tenant", workspace: currentWorkspaceId, view: "overview" }),
+    });
+    push({
+      key: "workspace-settings",
+      label: "Ajustes del workspace",
+      summary: "Empresas, permisos y configuración global.",
+      aliases: ["ajustes", "configuracion", "configuración", "tenant", "workspaces"],
+      action: () => openHolding({ mode: "platform", view: "tenant" }),
+      visible: () => canAdmin,
+    });
+  }
+
+  push({
+    key: "crm-inmobiliaria",
+    label: "Inmobiliaria",
+    summary: "Pipeline comercial, inmuebles y captaciones.",
+    aliases: ["inmobiliaria", "inmo", "captaciones", "inmuebles", "visitas"],
+    visible: () => userCanAccessService("inmobiliaria"),
+    action: () => openCrmInmobiliario(),
+  });
+  push({
+    key: "crm-gestoria",
+    label: "Gestoría",
+    summary: "Contabilidad, renta y seguimiento fiscal.",
+    aliases: ["gestoria", "gestoría", "contabilidad", "renta", "modelos"],
+    visible: () => userCanAccessService("gestoria"),
+    action: () => openGestoriaServiceTab("gestoria-dash"),
+  });
+  push({
+    key: "crm-seguros",
+    label: "Seguros",
+    summary: "Pólizas, cartera y renovaciones.",
+    aliases: ["seguros", "pólizas", "polizas", "siniestros", "cartera"],
+    visible: () => userCanAccessService("seguros"),
+    action: () => openSegurosCrm(),
+  });
+  push({
+    key: "crm-fin",
+    label: "Hipotecas",
+    summary: "Expedientes de financiación y firmadas.",
+    aliases: ["hipotecas", "financiacion", "financiación", "prestamos", "préstamos"],
+    visible: () => userCanAccessService("financiaciones"),
+    action: () => openFinCrm(),
+  });
+  push({
+    key: "workspace-fincas",
+    label: "Fincas",
+    summary: "Comunidades, incidencias y juntas.",
+    aliases: ["fincas", "comunidades", "incidencias", "juntas"],
+    visible: () => isWorkspaceModuleVisible("fincas") || userCanAccessService("fincas"),
+    action: () => openHolding({ mode: "tenant", workspace: workspaceSlug, view: "fincas" }),
+  });
+  push({
+    key: "workspace-rrhh",
+    label: "RRHH",
+    summary: "Personas, ausencias y portal empleado.",
+    aliases: ["rrhh", "recursos humanos", "personas", "ausencias"],
+    visible: () => isWorkspaceModuleVisible("rrhh"),
+    action: () => openHolding({ mode: "tenant", workspace: workspaceSlug, view: "rrhh", rrhh: "self" }),
+  });
+  push({
+    key: "workspace-time",
+    label: "Registro horario",
+    summary: "Fichajes, turnos y control laboral.",
+    aliases: ["registro horario", "horario", "fichajes", "turnos"],
+    visible: () => isWorkspaceModuleVisible("registro_horario"),
+    action: () => openHolding({ mode: "tenant", workspace: workspaceSlug, view: "motores", engine: "registro_horario" }),
+  });
+  push({
+    key: "workspace-documental",
+    label: "Documental",
+    summary: "Entrada documental y revisión.",
+    aliases: ["documental", "documentos", "inbox", "archivo"],
+    visible: () => isWorkspaceModuleVisible("documental"),
+    action: () => openHolding({ mode: "tenant", workspace: workspaceSlug, view: "motores", engine: "documental" }),
+  });
+  push({
+    key: "workspace-facturacion",
+    label: "Facturación",
+    summary: "Cobros, remesas y seguimiento económico.",
+    aliases: ["facturacion", "facturación", "cobros", "remesas"],
+    visible: () => isWorkspaceModuleVisible("facturacion"),
+    action: () => openHolding({ mode: "tenant", workspace: workspaceSlug, view: "motores", engine: "facturacion" }),
+  });
+  push({
+    key: "workspace-portal",
+    label: "Portal cliente",
+    summary: "Accesos, documentación y requerimientos.",
+    aliases: ["portal", "portal cliente", "cliente", "requerimientos"],
+    visible: () => isWorkspaceModuleVisible("portal_cliente"),
+    action: () => openHolding({ mode: "tenant", workspace: workspaceSlug, view: "motores", engine: "portal_cliente" }),
+  });
+  push({
+    key: "workspace-automatizaciones",
+    label: "Automatizaciones",
+    summary: "Reglas y flujos del workspace.",
+    aliases: ["automatizaciones", "automatización", "automation", "flujos"],
+    visible: () => isWorkspaceModuleVisible("automatizaciones"),
+    action: () => openHolding({ mode: "tenant", workspace: workspaceSlug, view: "motores", engine: "automatizaciones" }),
+  });
+
+  return items;
+};
+
+const renderWorkspaceQuickSearch = (query = "", user = null) => {
+  if (!homeHeroAside) return;
+  const resultsHost = homeHeroAside.querySelector("[data-home-search-results]");
+  if (!resultsHost) return;
+  const normalizedQuery = normalizeSimple(query || "");
+  const catalog = buildWorkspaceQuickSearchCatalog(user);
+  let results = catalog;
+  if (normalizedQuery) {
+    results = catalog
+      .map((item) => {
+        const direct = item.searchText.includes(normalizedQuery) ? 1 : 0;
+        const starts = item.searchText.startsWith(normalizedQuery) ? 1 : 0;
+        const exact = normalizeSimple(item.label || "") === normalizedQuery ? 1 : 0;
+        const score = exact * 5 + starts * 3 + direct;
+        return { ...item, score };
+      })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score || String(a.label || "").localeCompare(String(b.label || ""), "es", { sensitivity: "base" }));
+  } else {
+    results = catalog.slice(0, 6);
+  }
+  const visible = results.slice(0, 6);
+  if (!visible.length) {
+    resultsHost.innerHTML = "<p class='muted'>No hay coincidencias para esa búsqueda.</p>";
+    return;
+  }
+  resultsHost.innerHTML = visible
+    .map(
+      (item) => `
+        <button type="button" class="home-guidance-search-item" data-home-search-action="${escapeHtml(item.key)}">
+          <strong>${escapeHtml(item.label || "")}</strong>
+          <span>${escapeHtml(item.summary || "")}</span>
+        </button>
+      `
+    )
+    .join("");
+  resultsHost.querySelectorAll("[data-home-search-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = String(button.dataset.homeSearchAction || "").trim();
+      const item = catalog.find((entry) => entry.key === key);
+      if (!item) return;
+      recordWorkspaceActivity({
+        label: item.label,
+        detail: item.summary,
+        kind: "quick-search",
+        target: item.key,
+      });
+      try {
+        item.action();
+      } catch (e) {}
+    });
+  });
+};
+
+const buildWorkspaceContinueAction = (user = null) => {
+  const currentWorkspaceId = String(state.currentWorkspaceId || "").trim();
+  const currentWorkspaceName = getWorkspaceDisplayName(
+    state.currentWorkspaceDetail?.workspace || state.currentWorkspaceName || state.currentWorkspaceTarget || currentWorkspaceId || ""
+  );
+  const currentCompanyName = String(state.currentWorkspaceCompanyName || "").trim();
+  const primaryService = getPrimaryRestrictedHomeService(user);
+  const canAdmin = Boolean(user && canAccessAdminPanel(user));
+  const currentView = getWorkspaceViewLabel(state.currentWorkspaceView || "overview");
+  const lastActivity = getWorkspaceLastActivity();
+  let action = null;
+  if (currentWorkspaceId) {
+    action = {
+      type: "workspace",
+      label: "Retomar trabajo",
+      description: "Abre el contexto activo y sigue donde lo dejaste.",
+      workspace: currentWorkspaceId,
+      view: "operations",
+    };
+  } else if (primaryService) {
+    action = {
+      type: "service",
+      label: `Abrir ${primaryService}`,
+      description: "Entra directamente en el servicio que usas cada día.",
+      service: primaryService,
+    };
+  } else if (canAdmin) {
+    action = {
+      type: "holding",
+      label: "Abrir panel",
+      description: "Accede al panel para escoger o ajustar un workspace.",
+      mode: "platform",
+      view: "tenant",
+    };
+  } else {
+    action = {
+      type: "home",
+      label: "Ir al panel",
+      description: "Empieza desde el panel principal.",
+    };
+  }
+  return {
+    workspaceName: currentWorkspaceName,
+    companyName: currentCompanyName,
+    viewName: currentView,
+    lastActivity,
+    action,
+    primaryService,
+    canAdmin,
+  };
+};
+
+const renderHomeGuidance = () => {
+  if (!homeHeroAside) return;
+  const user = getAuthScopeUser();
+  const guidance = buildWorkspaceContinueAction(user);
+  const workspaceName = guidance.workspaceName || "Sin workspace";
+  const companyName = guidance.companyName || (guidance.primaryService ? guidance.primaryService : "Sin empresa activa");
+  const viewName = guidance.viewName || "Resumen";
+  const actionLabel = guidance.action?.label || "Abrir";
+  const actionDescription = guidance.action?.description || "Accede al contexto activo en un clic.";
+  const lastActivity = guidance.lastActivity || null;
+  const lastActivityTitle = lastActivity?.label || "Sin movimiento reciente";
+  const lastActivityDetail = lastActivity?.detail || "Todavía no hay un acceso destacado.";
+  const lastAccessLabel = lastActivity?.at ? formatRelativeTime(lastActivity.at) : "";
+  const primaryActionLabel = actionLabel;
+  const primaryActionHref = (() => {
+    if (guidance.action?.type === "workspace" && String(state.currentWorkspaceId || "").trim()) {
+      return `/?holding=1&mode=tenant&workspace=${encodeURIComponent(state.currentWorkspaceId)}&view=operations`;
+    }
+    if (guidance.action?.type === "service" && guidance.action.service === "Gestoría") {
+      return "/?crm=gestoria&tab=gestoria-dash";
+    }
+    if (guidance.action?.type === "service" && guidance.action.service === "Seguros") {
+      return "/?crm=seguros";
+    }
+    if (guidance.action?.type === "service" && guidance.action.service === "Hipotecas") {
+      return "/?crm=fin&tab=fin-crm";
+    }
+    if (guidance.action?.type === "service" && guidance.action.service === "Inmobiliaria") {
+      return "/?crm=inmo";
+    }
+    if (guidance.action?.type === "holding") {
+      return "/?holding=1&mode=platform&view=tenant";
+    }
+    return "/";
+  })();
+  const secondaryActions = [];
+  if (guidance.action?.type === "workspace") {
+    secondaryActions.push({
+      label: "Resumen",
+      action: "workspace-overview",
+      note: "Ver el estado y los accesos.",
+    });
+    secondaryActions.push({
+      label: "Ajustes",
+      action: "workspace-tenant",
+      note: "Cambiar contexto o configuración.",
+    });
+  } else if (guidance.action?.type === "service") {
+    secondaryActions.push({
+      label: "Portal",
+      action: "open-panel",
+      note: "Volver al panel principal.",
+    });
+    if (guidance.canAdmin) {
+      secondaryActions.push({
+        label: "Workspaces",
+        action: "open-workspaces",
+        note: "Ver la administración global.",
+      });
+    }
+  } else if (guidance.action?.type === "holding") {
+    secondaryActions.push({
+      label: "Panel",
+      action: "open-panel",
+      note: "Volver al panel de inicio.",
+    });
+    secondaryActions.push({
+      label: "Administración",
+      action: "open-admin",
+      note: "Entrar en la configuración global.",
+    });
+  } else {
+    secondaryActions.push({
+      label: "Administración",
+      action: "open-admin",
+      note: "Entrar en la capa global.",
+    });
+  }
+  const metrics = [
+    { label: "Workspace", value: workspaceName, note: guidance.action?.type === "workspace" ? "Retoma el contexto activo" : "Sin workspace activo" },
+    { label: "Empresa", value: companyName, note: guidance.primaryService ? "Acceso directo" : "Activa ahora" },
+    { label: "Vista", value: viewName, note: guidance.action?.type === "workspace" ? "Última vista" : "Vista sugerida" },
+  ];
+  homeHeroAside.innerHTML = `
+    <div class="home-guidance-primary">
+      <div class="home-guidance-primary-copy">
+        <div class="home-guidance-kicker">Acceso rápido</div>
+        <div class="home-guidance-title">${escapeHtml(actionLabel)}</div>
+        <div class="home-guidance-copy">${escapeHtml(actionDescription)}</div>
+        <div class="home-guidance-last-action">
+          <span class="pill">Último movimiento</span>
+          <strong>${escapeHtml(lastActivityTitle)}</strong>
+          <span class="muted">${escapeHtml(lastActivityDetail)}${lastAccessLabel ? ` · ${escapeHtml(lastAccessLabel)}` : ""}</span>
+        </div>
+      </div>
+      <a class="secondary home-guidance-primary-action" href="${escapeHtml(primaryActionHref)}" data-home-action="${escapeHtml(guidance.action?.type === "workspace" ? "continue-workspace" : guidance.action?.type === "service" ? "open-service" : guidance.action?.type === "holding" ? "open-workspaces" : "open-panel")}" ${guidance.action?.service ? `data-home-value="${escapeHtml(String(guidance.action.service || ""))}"` : ""}>${escapeHtml(primaryActionLabel)}</a>
+    </div>
+    <div class="home-guidance-search">
+      <div class="home-guidance-search-head">
+        <label for="homeModuleSearch">Buscar módulo o vista</label>
+        <span class="muted">Encuentra áreas, accesos y servicios en segundos.</span>
+      </div>
+      <input id="homeModuleSearch" type="search" inputmode="search" autocomplete="off" placeholder="Hipotecas, Gestoría, RRHH, Documental..." data-home-module-search />
+      <div class="muted">Módulos, servicios o vistas en un solo gesto.</div>
+      <div class="home-guidance-search-results" data-home-search-results></div>
+    </div>
+    <div class="home-guidance-secondary">
+      ${secondaryActions
+        .map(
+          (item) => `
+            <button
+              type="button"
+              class="secondary ghost"
+              data-home-action="${escapeHtml(item.action || "")}"
+            >${escapeHtml(String(item.label || "Abrir"))}</button>
+          `
+        )
+        .join("")}
+    </div>
+    <div class="home-guidance-metrics">
+      ${metrics
+        .map(
+          (item) => `
+            <div class="home-guidance-metric">
+              <span class="label">${escapeHtml(item.label)}</span>
+              <strong>${escapeHtml(String(item.value || "—"))}</strong>
+              <span class="muted">${escapeHtml(String(item.note || ""))}</span>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+  homeHeroAside.querySelectorAll("[data-home-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = String(button.dataset.homeAction || "").trim();
+      const value = String(button.dataset.homeValue || "").trim();
+      recordWorkspaceActivity({
+        label: button.textContent || action,
+        detail: actionDescription,
+        kind: "home",
+        target: action,
+      });
+      if (action === "continue-workspace" && String(state.currentWorkspaceId || "").trim()) {
+        openHolding({ mode: "tenant", workspace: state.currentWorkspaceId, view: "operations" });
+      } else if (action === "workspace-overview" && String(state.currentWorkspaceId || "").trim()) {
+        openHolding({ mode: "tenant", workspace: state.currentWorkspaceId, view: "overview" });
+      } else if (action === "workspace-tenant" && String(state.currentWorkspaceId || "").trim()) {
+        openHolding({ mode: "tenant", workspace: state.currentWorkspaceId, view: "tenant" });
+      } else if (action === "open-service" && value) {
+        openServiceCrm(value);
+      } else if (action === "open-workspaces") {
+        openHolding({ mode: "platform", view: "tenant" });
+      } else if (action === "open-admin") {
+        openHolding({ mode: "platform", view: "tenant" });
+      } else if (action === "open-panel") {
+        goHome();
+      } else {
+        goHome();
+      }
+    });
+  });
+  const homeSearchInput = homeHeroAside.querySelector("[data-home-module-search]");
+  if (homeSearchInput) {
+    const refreshSearch = () => renderWorkspaceQuickSearch(String(homeSearchInput.value || "").trim(), user);
+    homeSearchInput.addEventListener("input", refreshSearch);
+    homeSearchInput.addEventListener("change", refreshSearch);
+    homeSearchInput.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      const catalog = buildWorkspaceQuickSearchCatalog(user);
+      const normalized = normalizeSimple(homeSearchInput.value || "");
+      const candidate = catalog.find((item) => !normalized || item.searchText.includes(normalized));
+      if (candidate) {
+        recordWorkspaceActivity({
+          label: candidate.label,
+          detail: candidate.summary,
+          kind: "home-search",
+          target: candidate.key,
+        });
+        try {
+          candidate.action();
+        } catch (e) {}
+      }
+    });
+    refreshSearch();
+  }
+  renderWorkspaceQuickSearch("", user);
+};
+
+const renderWorkspaceEntryBanner = () => {
+  if (!workspaceEntryBanner) return;
+  const user = getAuthScopeUser();
+  const workspaceName = getWorkspaceDisplayName(
+    state.currentWorkspaceDetail?.workspace || state.currentWorkspaceName || state.currentWorkspaceTarget || state.currentWorkspaceId || ""
+  );
+  const companyName = String(state.currentWorkspaceCompanyName || "").trim() || "Sin empresa activa";
+  const mode = state.currentWorkspaceEntryMode === "tenant" ? "tenant" : "platform";
+  const currentView = normalizeWorkspaceViewKey(state.currentWorkspaceView || "overview");
+  const viewLabel = getWorkspaceViewLabel(currentView);
+  const canManage = Boolean(user && isPrivilegedUser(user));
+  const health = state.currentWorkspaceHealth || {};
+  const lastActivity = getWorkspaceLastActivity();
+  const pendingCount = getWorkspacePendingCount(health);
+  const loadedAt = String(state.currentWorkspaceLoadedAt || "").trim();
+  const goLiveStatusRaw = String(health.go_live_status || "").trim() || "bloqueado";
+  const goLiveStatus = ({
+    listo: "Listo",
+    implantacion: "En implantación",
+    bloqueado: "Bloqueado",
+  }[normalizeSimple(goLiveStatusRaw)] || goLiveStatusRaw);
+  const allowedTenantViews = mode === "tenant"
+    ? ["operations", "fincas", "rrhh", "motores", ...(canManage ? ["tenant"] : [])]
+    : ["overview", "tenant"];
+  const nextView =
+    mode === "tenant"
+      ? (currentView === "operations" ? "fincas" : "operations")
+      : (currentView === "overview" ? "tenant" : "overview");
+  const nextLabel =
+    mode === "tenant"
+      ? (currentView === "operations" ? "Ir a fincas" : "Ir a operativa")
+      : (currentView === "overview" ? "Abrir ajustes" : "Volver al resumen");
+  const nextDescription =
+    mode === "tenant"
+      ? "Mantén el foco en la operativa diaria y cambia de área cuando haga falta."
+      : "Ajusta permisos, empresas y módulos desde una sola pantalla.";
+  const chips = allowedTenantViews.map((view) => ({
+    label: getWorkspaceViewLabel(view),
+    view,
+  }));
+  workspaceEntryBanner.innerHTML = `
+    <div class="workspace-entry-banner-context">
+      <div>
+        <span class="pill">${escapeHtml(mode === "tenant" ? "Workspace activo" : "Configuración de workspaces")}</span>
+        <span class="pill workspace-entry-status">${escapeHtml(goLiveStatus)}</span>
+      </div>
+      <div>
+        <strong>${escapeHtml(mode === "tenant" ? workspaceName : "Panel de workspaces")}</strong>
+        <div class="muted">${escapeHtml(companyName)} · ${escapeHtml(viewLabel)}${loadedAt ? ` · actualizado ${escapeHtml(formatRelativeTime(loadedAt))}` : ""}</div>
+      </div>
+    </div>
+    <div class="workspace-entry-banner-metrics">
+      <div class="workspace-entry-banner-metric">
+        <span class="label">Empresa activa</span>
+        <strong>${escapeHtml(companyName)}</strong>
+        <span class="muted">${escapeHtml(mode === "tenant" ? "Contexto activo" : "Contexto vinculado")}</span>
+      </div>
+      <div class="workspace-entry-banner-metric">
+        <span class="label">Vista actual</span>
+        <strong>${escapeHtml(viewLabel)}</strong>
+        <span class="muted">${escapeHtml(mode === "tenant" ? "Trabajo operativo" : "Configuración y administración")}</span>
+      </div>
+      <div class="workspace-entry-banner-metric">
+        <span class="label">Pendientes</span>
+        <strong>${escapeHtml(pendingCount ? `${numberFormatter.format(pendingCount)} tareas` : "Sin pendientes")}</strong>
+        <span class="muted">${escapeHtml(pendingCount ? "Acciones por cerrar" : "Todo al día")}</span>
+      </div>
+      <div class="workspace-entry-banner-metric">
+        <span class="label">Último movimiento</span>
+        <strong>${escapeHtml(lastActivity?.label || "Sin movimiento reciente")}</strong>
+        <span class="muted">${escapeHtml(lastActivity?.detail || "Aún no hay acciones recientes registradas.")}${lastActivity?.at ? ` · ${escapeHtml(formatRelativeTime(lastActivity.at))}` : ""}</span>
+      </div>
+    </div>
+    <div class="workspace-entry-banner-actions">
+      <button type="button" class="secondary" data-workspace-entry-next="${escapeHtml(nextView)}">${escapeHtml(nextLabel)}</button>
+      ${chips
+        .map(
+          (chip) => `
+            <button type="button" class="secondary ghost" data-workspace-entry-view="${escapeHtml(chip.view)}">
+              ${escapeHtml(chip.label)}
+            </button>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+  workspaceEntryBanner.querySelectorAll("[data-workspace-entry-next]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const view = String(button.dataset.workspaceEntryNext || "overview").trim();
+      recordWorkspaceActivity({
+        label: `${mode === "tenant" ? "Workspace" : "Workspaces"} · ${getWorkspaceViewLabel(view)}`,
+        detail: nextDescription,
+        kind: "workspace-banner",
+        view,
+      });
+      setWorkspaceView(view, { scroll: true, forceTenantView: mode === "tenant" && view !== "overview" });
+    });
+  });
+  workspaceEntryBanner.querySelectorAll("[data-workspace-entry-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const view = String(button.dataset.workspaceEntryView || "overview").trim();
+      recordWorkspaceActivity({
+        label: `${mode === "tenant" ? "Workspace" : "Workspaces"} · ${getWorkspaceViewLabel(view)}`,
+        detail: nextDescription,
+        kind: "workspace-banner",
+        view,
+      });
+      setWorkspaceView(view, { scroll: true, forceTenantView: mode === "tenant" && view !== "overview" });
+    });
+  });
+};
+
 const shouldShowWorkspaceCompanySwitcher = () => {
   const mode = state.currentWorkspaceEntryMode || "platform";
   if (mode === "tenant") return false;
@@ -7059,13 +7792,13 @@ const updateWorkspaceEntryChrome = () => {
     workspaceSource || "Workspace"
   );
   if (holdingTitle) {
-    holdingTitle.textContent = mode === "tenant" ? `Workspace ${workspaceName}` : "Gestión de workspaces";
+    holdingTitle.textContent = mode === "tenant" ? `Workspace ${workspaceName}` : "Panel de workspaces";
   }
   if (holdingSubtitle) {
     holdingSubtitle.textContent =
       mode === "tenant"
-        ? `Todo lo operativo de ${workspaceName} se organiza desde este workspace por contenedores de servicio.`
-        : "Administra workspaces, módulos activos, branding y estructura de clientes.";
+        ? `Todo lo operativo de ${workspaceName} se organiza desde este workspace, con el contexto siempre visible.`
+        : "Elige un workspace, revisa su configuración y entra en la operativa sin perder contexto.";
   }
   if (holdingBackBtn) {
     holdingBackBtn.textContent = mode === "tenant" ? "Volver al panel" : "Volver al panel";
@@ -7114,6 +7847,7 @@ const updateWorkspaceEntryChrome = () => {
     button.disabled = false;
   });
   renderWorkspaceTenantContext();
+  renderWorkspaceEntryBanner();
 };
 
 const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
@@ -7178,6 +7912,7 @@ const setWorkspaceCompanyContext = (companyId = "", options = {}) => {
   if (reloadScopedPanels) {
     loadWorkspaceCompanyScopedPanels();
   }
+  renderWorkspaceEntryBanner();
 };
 
 const getWorkspaceCompanyFilter = () =>
@@ -7373,9 +8108,12 @@ const renderWorkspaceCompanySwitcher = (rows = []) => {
   const activeId = String(state.currentWorkspaceCompanyId || companies[0]?.id || "");
   workspaceCompanySwitcher.innerHTML = `
     <div class="workspace-company-switcher-card">
-      <div>
-        <strong>Empresa activa</strong>
-        <div class="muted">El trabajo diario del workspace se aterriza sobre una empresa operativa del grupo.</div>
+      <div class="workspace-company-switcher-copy">
+        <span class="home-section-kicker">Contexto</span>
+        <div>
+          <strong>Empresa activa</strong>
+          <div class="muted">El contexto activo define datos, vistas y permisos al trabajar.</div>
+        </div>
       </div>
       <div class="workspace-company-switcher-actions">
         ${companies.map((row) => `
@@ -8156,6 +8894,15 @@ const ensureIrpfSimulators = () => {
 const setWorkspaceEngineView = (engine = "documental") => {
   const normalized = normalizeWorkspaceEngineKey(engine);
   state.currentWorkspaceEngineView = normalized;
+  try {
+    recordWorkspaceActivity({
+      label: `Motores · ${getWorkspaceViewLabel("motores")}`,
+      detail: `Motor activo: ${String(normalized || "documental")}`,
+      kind: "workspace-engine",
+      engine: normalized,
+      target: normalized,
+    });
+  } catch (e) {}
   // Al entrar por deep-link, selecciona automáticamente el grupo adecuado.
   try {
     setWorkspaceEngineGroup(inferWorkspaceEngineGroupForEngine(normalized), { persist: true });
@@ -8223,6 +8970,15 @@ const setWorkspaceView = (view = "overview", options = {}) => {
     state.workspaceRrhhEntry = "";
   }
   state.currentWorkspaceView = normalized;
+  try {
+    recordWorkspaceActivity({
+      label: `Workspace · ${getWorkspaceViewLabel(normalized)}`,
+      detail: tenantMode ? "Vista de operativa del workspace" : "Vista del panel de workspaces",
+      kind: "workspace-view",
+      view: normalized,
+      target: normalized,
+    });
+  } catch (e) {}
 
   const enabledModules = tenantMode
     ? new Set((state.currentWorkspaceEnabledModules || []).map((key) => normalizeSimple(key)))
@@ -8293,6 +9049,7 @@ const setWorkspaceView = (view = "overview", options = {}) => {
   if (workspaceCompanySwitcher) {
     workspaceCompanySwitcher.classList.toggle("hidden", !shouldShowWorkspaceCompanySwitcher());
   }
+  renderWorkspaceEntryBanner();
   if (scroll && workspaceViewTabs) {
     workspaceViewTabs.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -9625,6 +10382,7 @@ const renderWorkspaceKpis = (summary = {}) => {
 };
 
 const renderWorkspaceHealth = (data = {}) => {
+  state.currentWorkspaceHealth = data && typeof data === "object" ? data : {};
   const companyLabel = getWorkspaceCompanyContextLabel();
   if (workspaceHealthScore) {
     const score = Number(data.readiness_score || 0);
@@ -9633,9 +10391,9 @@ const renderWorkspaceHealth = (data = {}) => {
       <div class="workspace-health-score-card">
           <div class="workspace-health-ring">${score}%</div>
           <div>
-          <strong>Readiness de ${companyLabel}</strong>
+          <strong>Salud operativa de ${companyLabel}</strong>
           <div class="muted">
-            ${numberFormatter.format(Number(summary.clientes || 0))} clientes finales ·
+            ${numberFormatter.format(Number(summary.clientes || 0))} clientes ·
             ${numberFormatter.format(Number(summary.documentos || 0))} documentos ·
             ${numberFormatter.format(Number(summary.facturas || 0))} movimientos
           </div>
@@ -9777,6 +10535,11 @@ const renderWorkspaceHealth = (data = {}) => {
       }
     }
   } catch (e) {}
+  try {
+    if (workspaceEntryBanner) {
+      renderWorkspaceEntryBanner();
+    }
+  } catch (e) {}
 };
 
 const renderWorkspaceCommercialPack = (workspace = {}, packageData = {}) => {
@@ -9786,8 +10549,8 @@ const renderWorkspaceCommercialPack = (workspace = {}, packageData = {}) => {
     <div class="workspace-summary-list">
       <div class="workspace-summary-row">
         <div>
-          <strong>${packageData.label || workspace.plan || "Enterprise"}</strong>
-          <div class="muted">${packageData.pitch || "Sin narrativa comercial definida."}</div>
+          <strong>${packageData.label || workspace.plan || "Narrativa comercial"}</strong>
+          <div class="muted">${packageData.pitch || "La propuesta comercial de este workspace todavía no está definida."}</div>
         </div>
         <div class="workspace-summary-metrics">
           <span>${Number(packageData.enabled_focus_total || 0)} focos activos</span>
@@ -9802,7 +10565,7 @@ const renderWorkspaceCommercialPack = (workspace = {}, packageData = {}) => {
               ${included.map((item) => `<div class="workspace-chip"><strong>${item}</strong><span>Incluido</span></div>`).join("")}
             </div>
           `
-        : "<p class='muted'>Sin paquete comercial definido todavía para este workspace.</p>"
+        : "<p class='muted'>Todavía no hay un paquete comercial definido para este workspace.</p>"
     }
   `;
 };
@@ -13202,13 +13965,20 @@ const renderWorkspaceHomeAlerts = () => {
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     const rows = Array.isArray(state.workspaceHomeTimeRows) ? state.workspaceHomeTimeRows : [];
+    const homeStatus = state.homeTimeStatus || null;
+    const homeToday = homeStatus?.today || null;
+    const homeCheckin = String(homeToday?.checkin || "").trim();
+    const homeCheckout = String(homeToday?.checkout || "").trim();
+    const homeOpen = Boolean(homeToday?.open);
     const selfPersonaId = String(resolveWorkspacePersonaForAuthUser() || "").trim();
-    const hasFicha = Boolean(selfPersonaId) || rows.length > 0;
+    const hasFicha = Boolean(selfPersonaId) || rows.length > 0 || Boolean(homeStatus?.persona?.id);
     const todayRows = rows.filter((row) => String(row?.fecha || "").slice(0, 10) === today);
-    const open = todayRows.find((row) => !String(row?.hora_fin || "").trim()) || null;
-    const latest = todayRows.length
-      ? [...todayRows].sort((a, b) => String(b?.hora_inicio || "").localeCompare(String(a?.hora_inicio || "")))[0]
-      : null;
+    const open = homeOpen ? { hora_inicio: homeCheckin, hora_fin: homeCheckout } : todayRows.find((row) => !String(row?.hora_fin || "").trim()) || null;
+    const latest = homeCheckin || homeCheckout || homeOpen
+      ? { hora_inicio: homeCheckin, hora_fin: homeCheckout }
+      : (todayRows.length
+        ? [...todayRows].sort((a, b) => String(b?.hora_inicio || "").localeCompare(String(a?.hora_inicio || "")))[0]
+        : null);
     const entry = String((open || latest)?.hora_inicio || "").trim();
     const exit = String((open || latest)?.hora_fin || "").trim();
 
@@ -21080,6 +21850,23 @@ const findCurrentUserTimeProfile = () => {
     employees.find((row) => Number(row?.usuario_manual || 0) === 1 && String(row?.usuario_id || "") === uid)
     || employees.find((row) => String(row?.usuario_id || "") === uid);
   if (!employee) return null;
+  const homeStatus = state.homeTimeStatus || null;
+  const homePersonaId = String(homeStatus?.persona?.id || "").trim();
+  if (homePersonaId && String(employee.id || "") === homePersonaId) {
+    const homeToday = homeStatus?.today || {};
+    const homeCheckin = String(homeToday.checkin || "").trim();
+    const homeCheckout = String(homeToday.checkout || "").trim();
+    if (homeCheckin || homeCheckout || homeToday.open) {
+      return {
+        employee,
+        latestEntry: {
+          fecha: String(homeToday.entry_date || homeToday.date || "").trim() || new Date().toISOString().slice(0, 10),
+          hora_inicio: homeCheckin,
+          hora_fin: homeCheckout,
+        },
+      };
+    }
+  }
   const today = new Date().toISOString().slice(0, 10);
   const todayEntries = entries.filter((row) => String(row.usuario_id || "") === String(authUser.id) && String(row.fecha || "") === today);
   const latestEntry = todayEntries.sort((a, b) => {
@@ -24912,6 +25699,8 @@ const clearCurrentWorkspaceUi = () => {
   state.currentWorkspaceEnabledModules = [];
   state.currentWorkspaceMemberRole = "";
   state.currentWorkspaceName = "";
+  state.currentWorkspaceLoadedAt = "";
+  state.currentWorkspaceHealth = null;
   state.currentWorkspaceClientId = "";
   state.currentWorkspaceClientData = null;
   state.currentWorkspaceClients = [];
@@ -24965,6 +25754,9 @@ const clearCurrentWorkspaceUi = () => {
   fillWorkspaceFincasMeetingForm();
   renderWorkspaceDocumentHub({});
   syncCrmLegalAvailability();
+  try {
+    localStorage.removeItem(WORKSPACE_LAST_SYNC_STORAGE_KEY);
+  } catch (e) {}
 };
 
 const loadWorkspaceDetail = async (workspaceId) => {
@@ -25055,6 +25847,10 @@ const loadWorkspaceDetail = async (workspaceId) => {
   state.currentWorkspaceDetail = detail;
   state.currentWorkspaceEnabledModules = getWorkspaceEnabledModules(detail.modules || []);
   state.currentWorkspaceName = detail.workspace?.nombre || "";
+  state.currentWorkspaceLoadedAt = new Date().toISOString();
+  try {
+    localStorage.setItem(WORKSPACE_LAST_SYNC_STORAGE_KEY, state.currentWorkspaceLoadedAt);
+  } catch (e) {}
   {
     const matrix = await safeWorkspaceApi(
       `/api/workspace_service_matrix?workspace_id=${encodeURIComponent(workspaceId)}`,
@@ -25205,6 +26001,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
     remittances = boot?.remittances || await safeWorkspaceApi(`/api/workspace_remesas?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
     workspaceClients = boot?.clients || await safeWorkspaceApi(`/api/workspace_clientes?workspace_id=${encodeURIComponent(workspaceId)}&limit=60`, { rows: [] });
     health = boot?.health || await safeWorkspaceApi(`/api/workspace_health?workspace_id=${encodeURIComponent(workspaceId)}`, {});
+    state.currentWorkspaceHealth = health || {};
     gestoriaOverview = boot?.gestoria_overview || await safeWorkspaceApi(`/api/workspace_gestoria_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {});
     segurosOverview = boot?.seguros_overview || await safeWorkspaceApi(`/api/workspace_seguros_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {});
     finOverview = boot?.fin_overview || await safeWorkspaceApi(`/api/workspace_fin_overview?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}`, {});
@@ -25406,17 +26203,21 @@ const loadWorkspaceCentral = async () => {
       : (state.workspaces[0] && state.workspaces[0].id) || "");
 	  if (selectedId) {
 	    await loadWorkspaceDetail(selectedId);
-	  } else {
-	    clearCurrentWorkspaceUi();
-	    {
-	      const tenantMode = (state.currentWorkspaceEntryMode || "platform") === "tenant";
-	      const view = state.currentWorkspaceView || "overview";
+  } else {
+    clearCurrentWorkspaceUi();
+    {
+      const tenantMode = (state.currentWorkspaceEntryMode || "platform") === "tenant";
+      const view = state.currentWorkspaceView || "overview";
 	      setWorkspaceView(view, { forceTenantView: tenantMode && normalizeSimple(view) !== "operations" });
-	    }
-	    renderCompanyCards();
-	  }
-	  updateWorkspaceEntryChrome();
-	};
+    }
+    renderCompanyCards();
+  }
+  state.currentWorkspaceLoadedAt = new Date().toISOString();
+  try {
+    localStorage.setItem(WORKSPACE_LAST_SYNC_STORAGE_KEY, state.currentWorkspaceLoadedAt);
+  } catch (e) {}
+  updateWorkspaceEntryChrome();
+};
 
 const renderHoldingOrgChart = () => {
   if (!holdingOrgChart) {
@@ -41616,7 +42417,7 @@ const updateEstudioAltaTabs = () => {
   });
 };
 
-	const setCrmWorkspaceView = (view = "resumen") => {
+const setCrmWorkspaceView = (view = "resumen") => {
 		const allowed = new Set([
 		  "resumen",
 		  "clientes",
@@ -41654,6 +42455,15 @@ const updateEstudioAltaTabs = () => {
     syncDeferredCrmVerticals(nextView);
   } catch (e) {}
   state.crmWorkspaceView = nextView;
+  try {
+    recordWorkspaceActivity({
+      label: `CRM · ${getWorkspaceViewLabel(nextView)}`,
+      detail: "Navegación dentro del CRM vertical",
+      kind: "crm-view",
+      view: nextView,
+      target: nextView,
+    });
+  } catch (e) {}
   syncCrmLegalAvailability();
   syncCrmTecnocloudChrome();
 

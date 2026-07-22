@@ -63,17 +63,18 @@
               <div class="hero-copy app-lightning-topbar">
                 <div>
                   <h2>CRM 360 <span class="pill">Beta</span></h2>
-                  <p>Panel operativo: inmuebles, agenda, documentación y automatizaciones. Preparado para un portal de inmuebles verificados.</p>
+                  <p>Entrada limpia por workspace, empresa y módulo con acceso directo al trabajo diario.</p>
                 </div>
                 <div class="toolbar" id="tableToolbar">
                   <span class="pill">Año</span>
                   <select id="yearSelect"></select>
                 </div>
               </div>
+              <aside id="homeHeroAside" class="hero-aside" aria-label="Accesos rápidos de inicio"></aside>
             </div>
             <div class="home-block">
-              <h3>Producto</h3>
-              <p class="muted">CRM inmobiliario + futura plataforma de publicación con sello Verifika² (solo inmuebles verificados documentalmente).</p>
+              <h3>Accesos principales</h3>
+              <p class="muted">CRM operativo para inmobiliaria, gestoría, seguros y financiación con una home pensada para continuar el trabajo sin fricción.</p>
               <div id="coreCards" class="grid"></div>
             </div>
           </div>
@@ -83,11 +84,11 @@
         <div class="app-lightning-shell app-lightning-shell--sidebar">
           <aside id="holdingLightningSidebar" class="app-lightning-sidebar" aria-label="Navegación workspace">
             <div class="app-sidehead" aria-hidden="true">
-              <span>WS</span>
+              <span>Inicio</span>
             </div>
             <button type="button" class="app-side-item" data-workspace-view-tab="operations" title="Operativa">
               <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-dashboard"></use></svg></span>
-              <span class="app-side-label">Op.</span>
+              <span class="app-side-label">Operativa</span>
             </button>
             <button type="button" class="app-side-item" data-workspace-view-tab="fincas" title="Fincas">
               <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-building-home"></use></svg></span>
@@ -99,34 +100,35 @@
             </button>
             <button type="button" class="app-side-item" data-workspace-view-tab="motores" title="Motores">
               <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-spark"></use></svg></span>
-              <span class="app-side-label">Mot.</span>
+              <span class="app-side-label">Motores</span>
             </button>
-            <button type="button" class="app-side-item" data-workspace-view-tab="tenant" title="Configuración">
+            <button type="button" class="app-side-item" data-workspace-view-tab="tenant" title="Ajustes">
               <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-settings"></use></svg></span>
-              <span class="app-side-label">Config</span>
+              <span class="app-side-label">Ajustes</span>
             </button>
           </aside>
           <div class="app-lightning-main">
             <div class="section-head app-lightning-topbar">
               <div>
-                <h2 id="holdingTitle">Gestión de workspaces</h2>
-                <p id="holdingSubtitle" class="muted">Configura workspaces y entra después en la operativa de cada cliente.</p>
+                <h2 id="holdingTitle">Workspaces</h2>
+                <p id="holdingSubtitle" class="muted">Elige un workspace, continúa donde lo dejaste y entra en la operativa sin perder contexto.</p>
               </div>
               <button id="holdingBackBtn" class="secondary ghost">Volver al panel</button>
             </div>
+            <div id="workspaceEntryBanner" class="workspace-entry-banner"></div>
             <div class="crm-workspace-shell">
 				          <div class="crm-workspace-tabs tc-modulebar tc-modulebar--micro crm-lightning-subbar" id="workspaceViewTabs">
 				            <button class="tab tc-module active" type="button" data-workspace-view-tab="overview" title="Resumen">
 				              <span class="tc-mod-ico" aria-hidden="true">
 			                <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-clipboard"></use></svg>
-			              </span>
+		              </span>
 		              <span class="tc-mod-label">Resumen</span>
 		            </button>
-		            <button class="tab tc-module" type="button" data-workspace-view-tab="tenant" title="Configuración">
+		            <button class="tab tc-module" type="button" data-workspace-view-tab="tenant" title="Ajustes">
 		              <span class="tc-mod-ico" aria-hidden="true">
 		                <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-settings"></use></svg>
 		              </span>
-		              <span class="tc-mod-label">Config</span>
+		              <span class="tc-mod-label">Ajustes</span>
 		            </button>
 		          </div>
 	          <div class="crm-workspace-view" data-workspace-view="tenant">
@@ -169,8 +171,9 @@
           <div class="form-card">
             <div class="section-head">
               <div>
+                <span class="home-section-kicker">Diagnóstico</span>
                 <h3>Salud del workspace</h3>
-                <p class="muted">Nivel de configuración y readiness del workspace dentro de Verifika².</p>
+                <p class="muted">Lectura rápida del estado, checklist y puntos pendientes del workspace.</p>
               </div>
             </div>
             <div id="workspaceHealthScore"></div>
@@ -179,8 +182,9 @@
           <div class="form-card">
             <div class="section-head">
               <div>
+                <span class="home-section-kicker">Operativa</span>
                 <h3>Estado por módulo</h3>
-                <p class="muted">Qué módulos del workspace están operativos, configurándose o pendientes.</p>
+                <p class="muted">Qué módulos están listos, en configuración o todavía pendientes.</p>
               </div>
             </div>
             <div id="workspaceModuleHealth"></div>
@@ -190,8 +194,9 @@
           <div class="form-card">
             <div class="section-head">
               <div>
-                <h3>Paquete Comercial</h3>
-                <p class="muted">Cómo se empaqueta y se presenta este workspace dentro del producto Verifika².</p>
+                <span class="home-section-kicker">Comercial</span>
+                <h3>Presentación comercial</h3>
+                <p class="muted">Cómo se empaqueta y se enseña este workspace dentro del producto.</p>
               </div>
             </div>
             <div id="workspaceCommercialPack"></div>
@@ -199,23 +204,30 @@
           <div class="form-card">
             <div class="section-head">
               <div>
-                <h3>Go Live</h3>
-                <p class="muted">Acciones prioritarias para dejar el workspace listo para implantación o comercialización.</p>
+                <span class="home-section-kicker">Implantación</span>
+                <h3>Puesta en marcha</h3>
+                <p class="muted">Acciones prioritarias para dejar el workspace listo para operar.</p>
               </div>
             </div>
             <div id="workspaceOnboardingActions"></div>
           </div>
         </div>
         <div class="form-card crm-workspace-view" data-workspace-view="overview">
-          <h3>Mapa societario</h3>
-          <p class="muted">Relación operativa entre empresas del grupo (vista informativa).</p>
+          <div class="section-head">
+            <div>
+              <span class="home-section-kicker">Grupo</span>
+              <h3>Estructura del grupo</h3>
+              <p class="muted">Relación operativa entre empresas del grupo, en una sola vista.</p>
+            </div>
+          </div>
           <div id="holdingOrgChart" class="org-chart"></div>
         </div>
         <div id="workspaceOverviewLauncherCard" class="form-card crm-workspace-view" data-workspace-view="operations">
           <div class="section-head">
             <div>
-                <h3>Áreas del grupo</h3>
-                <p class="muted">Home operativa del workspace por contenedores de servicio y transversales comunes.</p>
+                <span class="home-section-kicker">Operativa</span>
+                <h3>Accesos operativos</h3>
+                <p class="muted">Accesos rápidos a lo que usas hoy dentro del workspace.</p>
             </div>
           </div>
           <div id="workspaceLauncher"></div>
@@ -225,8 +237,9 @@
             <div class="form-card">
               <div class="section-head">
                 <div>
+                  <span class="home-section-kicker">Administración</span>
                   <h3>Workspaces</h3>
-                  <p class="muted">Selecciona un workspace para configurarlo.</p>
+                  <p class="muted">Selecciona un workspace para configurarlo y ajustar su contexto.</p>
                 </div>
               </div>
               <div id="workspaceList"></div>
@@ -234,8 +247,9 @@
             <div class="form-card">
               <div class="section-head">
                 <div>
+                  <span class="home-section-kicker">Identidad</span>
                   <h3>Configuración</h3>
-                  <p class="muted">Nombre, estado, plan y branding.</p>
+                  <p class="muted">Nombre, estado, plan y branding del workspace.</p>
                 </div>
                 <div class="toolbar">
                   <button type="button" id="workspaceNewCustomerBtn" class="secondary ghost">Nuevo cliente</button>

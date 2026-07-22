@@ -2416,3 +2416,58 @@ class HipotecaDashboardResetTests(unittest.TestCase):
                 """
             ),
         )
+
+
+class WorkspaceTimeHomeProfileTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const findCurrentUserTimeProfile =",
+            "let _homeTimePunchModal = null;",
+        )
+        cls.return_names = ["findCurrentUserTimeProfile"]
+
+    def _run(self, prelude: str, body: str) -> None:
+        script = make_factory_script(self.segment, [], self.return_names, prelude, body)
+        run_node_script(script)
+
+    def test_home_profile_prefers_backend_status_for_overnight_shift(self):
+        self._run(
+            dedent(
+                """
+                const state = globalThis.state = {
+                  workspaceTimeEmployees: [
+                    { id: "persona-1", usuario_id: "u-1", usuario_manual: 1, nombre: "Persona Uno" },
+                  ],
+                  currentWorkspaceData: {
+                    timeRows: [
+                      { persona_id: "persona-1", usuario_id: "u-1", fecha: "2026-07-14", hora_inicio: "09:00", hora_fin: "17:00" },
+                    ],
+                  },
+                  homeTimeStatus: {
+                    persona: { id: "persona-1", nombre: "Persona Uno" },
+                    today: {
+                      date: "2026-07-14",
+                      entry_date: "2026-07-13",
+                      checkin: "22:00",
+                      checkout: "",
+                      open: true,
+                    },
+                  },
+                };
+                const getAuthScopeUser = () => ({ id: "u-1" });
+                const normalizeSimple = (value) => String(value || "").trim().toLowerCase();
+                """
+            ),
+            dedent(
+                """
+                const { findCurrentUserTimeProfile } = api;
+                const profile = findCurrentUserTimeProfile();
+                assert.ok(profile);
+                assert.strictEqual(profile.employee.id, "persona-1");
+                assert.strictEqual(profile.latestEntry.fecha, "2026-07-13");
+                assert.strictEqual(profile.latestEntry.hora_inicio, "22:00");
+                assert.strictEqual(profile.latestEntry.hora_fin, "");
+                """
+            ),
+        )
