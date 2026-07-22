@@ -2196,6 +2196,105 @@ class FrontendTenantWorkspaceCompanyResolutionTests(unittest.TestCase):
         )
 
 
+class FrontendWorkspaceCompanyEditorTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const resolveWorkspaceCompanyRowIds = (company = {}) => {",
+            "const renderWorkspaceCompanies = (rows = []) => {",
+        )
+        cls.param_names = [
+            "workspaceCompanyEditor",
+            "workspaceCompanyForm",
+            "workspaceCompanyCnaes",
+            "workspaceCompanyLogoPreview",
+            "buildPhotoSrc",
+        ]
+        cls.return_names = [
+            "resolveWorkspaceCompanyRowIds",
+            "prefillWorkspaceCompanyEditorFromRow",
+        ]
+
+    def _run(self, prelude: str, body: str) -> None:
+        script = make_factory_script(self.segment, self.param_names, self.return_names, prelude, body)
+        run_node_script(script)
+
+    def test_row_ids_keep_workspace_and_legacy_ids_separate(self):
+        self._run(
+            dedent(
+                """
+                const workspaceCompanyEditor = { classList: { remove() {} } };
+                const workspaceCompanyForm = { querySelector: () => null };
+                const workspaceCompanyCnaes = { value: "" };
+                const workspaceCompanyLogoPreview = { src: "" };
+                const buildPhotoSrc = (value) => `safe:${String(value || "")}`;
+                """
+            ),
+            dedent(
+                """
+                const { resolveWorkspaceCompanyRowIds } = api;
+                const v2 = resolveWorkspaceCompanyRowIds({
+                  id: "wc-1",
+                  legacy_empresa_id: "emp-1",
+                });
+                assert.deepStrictEqual(v2, {
+                  legacyEmpresaId: "emp-1",
+                  workspaceCompanyId: "wc-1",
+                  rowId: "wc-1",
+                });
+                const legacy = resolveWorkspaceCompanyRowIds({
+                  id: "emp-2",
+                });
+                assert.deepStrictEqual(legacy, {
+                  legacyEmpresaId: "emp-2",
+                  workspaceCompanyId: "",
+                  rowId: "emp-2",
+                });
+                """
+            ),
+        )
+
+    def test_prefill_workspace_company_editor_keeps_both_ids_in_sync(self):
+        self._run(
+            dedent(
+                """
+                const fields = {
+                  id: { value: "" },
+                  workspace_company_id: { value: "" },
+                  nombre: { value: "" },
+                  logo_url: { value: "" },
+                };
+                const workspaceCompanyEditor = { classList: { remove() {} } };
+                const workspaceCompanyForm = {
+                  querySelector: (selector) => {
+                    const match = String(selector || "").match(/\\[name="([^"]+)"\\]/);
+                    return match ? (fields[match[1]] || null) : null;
+                  },
+                };
+                const workspaceCompanyCnaes = { value: "" };
+                const workspaceCompanyLogoPreview = { src: "" };
+                const buildPhotoSrc = (value) => `safe:${String(value || "")}`;
+                """
+            ),
+            dedent(
+                """
+                const { prefillWorkspaceCompanyEditorFromRow } = api;
+                prefillWorkspaceCompanyEditorFromRow({
+                  id: "wc-1",
+                  legacy_empresa_id: "emp-1",
+                  nombre: "Empresa Uno",
+                  logo_url: "https://example.test/logo.png",
+                  _cnaes: ["69.20"],
+                });
+                assert.strictEqual(fields.id.value, "emp-1");
+                assert.strictEqual(fields.workspace_company_id.value, "wc-1");
+                assert.strictEqual(workspaceCompanyCnaes.value, "69.20");
+                assert.strictEqual(workspaceCompanyLogoPreview.src, "safe:https://example.test/logo.png");
+                """
+            ),
+        )
+
+
 class ClienteDocsTabVisibilityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

@@ -2517,6 +2517,49 @@ class GestoriaServerRouteRegressionTests(unittest.TestCase):
         headers = {key: value for key, value in handler._headers}
         return handler._status, headers, handler.wfile.getvalue()
 
+    def _call_gestoria_post_route(self, path, payload, session_data=None):
+        from io import BytesIO
+
+        body = json.dumps(payload).encode("utf-8")
+
+        class DirectHandler(server.Handler):
+            def __init__(self, route_path, session_data, body_bytes):
+                self.path = route_path
+                self.command = "POST"
+                self.request_version = "HTTP/1.1"
+                self.headers = {
+                    "Content-Type": "application/json",
+                    "Content-Length": str(len(body_bytes)),
+                }
+                self.rfile = BytesIO(body_bytes)
+                self.wfile = BytesIO()
+                self.server = SimpleNamespace(server_name="127.0.0.1", server_port=0)
+                self.client_address = ("127.0.0.1", 0)
+                self._session_data = session_data
+                self._status = 0
+                self._headers = []
+                self.close_connection = True
+
+            def _current_session(self):
+                return self._session_data
+
+            def send_response(self, code, message=None):
+                self._status = int(code or 0)
+
+            def send_header(self, key, value):
+                self._headers.append((str(key), str(value)))
+
+            def end_headers(self):
+                return None
+
+            def log_message(self, *_args, **_kwargs):
+                return None
+
+        handler = DirectHandler(path, session_data or self._session_data, body)
+        server.Handler.do_POST(handler)
+        headers = {key: value for key, value in handler._headers}
+        return handler._status, headers, handler.wfile.getvalue()
+
     def tearDown(self):
         try:
             self._session_patch.stop()
@@ -2655,3 +2698,128 @@ class GestoriaServerRouteRegressionTests(unittest.TestCase):
             set(server.Handler._gestoria_dashboard_cache.keys()),
             {"emp-1::full", "emp-1::limited"},
         )
+
+    def test_workspace_company_logo_upload_allows_workspace_admins(self):
+        server.ensure_workspace_core_tables(self.conn)
+        now = "2026-07-22T10:00:00+00:00"
+        try:
+            self.conn.execute("ALTER TABLE empresas ADD COLUMN logo_url TEXT")
+        except Exception:
+            pass
+        self.conn.execute(
+            "INSERT OR REPLACE INTO empresas (id, nombre, activo, logo_url) VALUES (?, ?, ?, ?)",
+            ("emp-1", "Empresa Uno", 1, ""),
+        )
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("wm-admin", "ws-1", "u-1", "Admin", now, now),
+        )
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO workspace_empresas (id, workspace_id, empresa_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("we-1", "ws-1", "emp-1", now, now),
+        )
+        self.conn.commit()
+        session = {"user_id": "u-1", "rol": "Miembro", "servicio": "Gestoría"}
+        self.assertFalse(server.workspace_actor_is_privileged(self.conn, session))
+        self.assertTrue(server.workspace_actor_can_manage_workspace(self.conn, session, "ws-1"))
+        payload = {
+            "workspace_id": "ws-1",
+            "empresa_id": "emp-1",
+            "filename": "logo.png",
+            "content_type": "image/png",
+            "file_base64": "data:image/png;base64,AA==",
+        }
+        dummy_client = SimpleNamespace(put_object=lambda **_kwargs: None)
+        with mock.patch.object(server, "s3_client", return_value=dummy_client), \
+            mock.patch.object(server, "s3_config", return_value=("bucket", "region")), \
+            mock.patch.object(server, "S3_BOTO3_AVAILABLE", True), \
+            mock.patch.object(server, "_s3_grant_key", return_value=None):
+            status, headers, body = self._call_gestoria_post_route("/api/workspace_company_logo_upload", payload, session)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers.get("Content-Type"), "application/json; charset=utf-8")
+        response = json.loads(body.decode("utf-8"))
+        self.assertTrue(response["ok"])
+        self.assertTrue(response["logo_url"].startswith("s3://"))
+
+    def test_workspace_service_matrix_upsert_and_delete_allow_workspace_admins(self):
+        server.ensure_workspace_core_tables(self.conn)
+        now = "2026-07-22T10:00:00+00:00"
+        self.conn.execute(
+            "INSERT OR REPLACE INTO empresas (id, nombre, activo) VALUES (?, ?, ?)",
+            ("emp-1", "Empresa Uno", 1),
+        )
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("wm-admin", "ws-1", "u-1", "Admin", now, now),
+        )
+        self.conn.execute(
+            """
+            INSERT OR REPLACE INTO workspace_empresas (id, workspace_id, empresa_id, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("we-1", "ws-1", "emp-1", now, now),
+        )
+        self.conn.commit()
+        session = {"user_id": "u-1", "rol": "Miembro", "servicio": "Gestoría"}
+        self.assertFalse(server.workspace_actor_is_privileged(self.conn, session))
+        self.assertTrue(server.workspace_actor_can_manage_workspace(self.conn, session, "ws-1"))
+        upsert_payload = {
+            "workspace_id": "ws-1",
+            "empresa_id": "emp-1",
+            "servicio_key": "gestoria",
+            "enabled": 1,
+            "is_default": 1,
+            "sort_order": 10,
+        }
+        upsert_status, upsert_headers, upsert_body = self._call_gestoria_post_route(
+            "/api/workspace_service_matrix_upsert",
+            upsert_payload,
+            session,
+        )
+        self.assertEqual(upsert_status, 200)
+        self.assertEqual(upsert_headers.get("Content-Type"), "application/json; charset=utf-8")
+        self.assertEqual(json.loads(upsert_body.decode("utf-8")), {"ok": True})
+        row = self.conn.execute(
+            """
+            SELECT workspace_id, servicio_key, empresa_id, enabled, is_default
+            FROM workspace_servicio_empresas
+            WHERE workspace_id = ? AND servicio_key = ? AND empresa_id = ?
+            LIMIT 1
+            """,
+            ("ws-1", "gestoria", "emp-1"),
+        ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(int(row["enabled"] or 0), 1)
+        self.assertEqual(int(row["is_default"] or 0), 1)
+
+        delete_status, delete_headers, delete_body = self._call_gestoria_post_route(
+            "/api/workspace_service_matrix_delete",
+            {
+                "workspace_id": "ws-1",
+                "empresa_id": "emp-1",
+                "servicio_key": "gestoria",
+            },
+            session,
+        )
+        self.assertEqual(delete_status, 200)
+        self.assertEqual(delete_headers.get("Content-Type"), "application/json; charset=utf-8")
+        self.assertEqual(json.loads(delete_body.decode("utf-8")), {"ok": True, "deleted": True})
+        remaining = self.conn.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM workspace_servicio_empresas
+            WHERE workspace_id = ? AND servicio_key = ? AND empresa_id = ?
+            """,
+            ("ws-1", "gestoria", "emp-1"),
+        ).fetchone()
+        self.assertEqual(int(remaining["total"] or 0), 0)

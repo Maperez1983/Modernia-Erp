@@ -55974,11 +55974,13 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_automatizaciones",
                 "/api/workspace_registro_notifications",
                 "/api/workspace_document_assign",
-                "/api/workspace_portal_upload",
-                "/api/workspace_portal_public_request",
-                "/api/workspace_company_logo_upload",
-                "/api/workspace_cobros",
-            "/api/workspace_remesas",
+	                "/api/workspace_portal_upload",
+	                "/api/workspace_portal_public_request",
+	                "/api/workspace_company_logo_upload",
+	                "/api/workspace_service_matrix_upsert",
+	                "/api/workspace_service_matrix_delete",
+	                "/api/workspace_cobros",
+	            "/api/workspace_remesas",
             "/api/workspace_portal_requerimientos",
             "/api/workspace_registro_personal",
             "/api/workspace_registro_personal_delete",
@@ -60781,9 +60783,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/empresa_update":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             empresa_id = str(payload.get("id") or payload.get("empresa_id") or "").strip()
             workspace_id = str(payload.get("workspace_id") or "").strip()
             if not empresa_id:
@@ -60803,6 +60802,9 @@ class Handler(BaseHTTPRequestHandler):
                         status=409,
                     )
                     return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
             linked = conn.execute(
                 "SELECT 1 FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ? LIMIT 1",
                 (workspace_id, empresa_id),
@@ -61465,9 +61467,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_company_logo_upload":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             workspace_id = str(payload.get("workspace_id") or "").strip()
             empresa_id = str(payload.get("empresa_id") or payload.get("id") or "").strip()
             filename = str(payload.get("filename") or "logo.png").strip() or "logo.png"
@@ -61480,6 +61479,9 @@ class Handler(BaseHTTPRequestHandler):
             ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
             if not ok:
                 json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
                 return
             linked = conn.execute(
                 "SELECT 1 FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ? LIMIT 1",
@@ -61565,10 +61567,6 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_service_matrix_upsert":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
-            ensure_workspace_core_tables(conn)
             workspace_id = str(payload.get("workspace_id") or "").strip()
             empresa_id = str(payload.get("empresa_id") or "").strip()
             servicio_key_raw = payload.get("servicio_key")
@@ -61580,6 +61578,10 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not empresa_id or not servicio_key:
                 json_response(self, {"error": "workspace_id, servicio_key y empresa_id requeridos"}, status=400)
                 return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            ensure_workspace_core_tables(conn)
             empresa = conn.execute("SELECT id FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
             if not empresa:
                 json_response(self, {"error": "Empresa no encontrada"}, status=400)
@@ -61655,16 +61657,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_service_matrix_delete":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
-            ensure_workspace_core_tables(conn)
             workspace_id = str(payload.get("workspace_id") or "").strip()
             empresa_id = str(payload.get("empresa_id") or "").strip()
             servicio_key = normalize_service_key(payload.get("servicio_key") or payload.get("service_key") or payload.get("servicio") or "")
             if not workspace_id or not empresa_id or not servicio_key:
                 json_response(self, {"error": "workspace_id, servicio_key y empresa_id requeridos"}, status=400)
                 return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            ensure_workspace_core_tables(conn)
             row = conn.execute(
                 """
                 SELECT id, COALESCE(is_default, 0) AS is_default
