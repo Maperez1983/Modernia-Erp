@@ -906,6 +906,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
 AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/login",
     "/api/logout",
+    "/api/auth_request_access_recovery",
     "/api/auth_set_password",
     "/api/leads",
     "/api/portal_leads",
@@ -1973,6 +1974,17 @@ def admin_force_reset_password_invite(conn, login_value, *, ttl_seconds=None):
     """
     Superadmin-only: limpia la contraseña del usuario y genera una nueva invitación.
     """
+    return _issue_auth_invite(
+        conn,
+        login_value,
+        ttl_seconds=ttl_seconds,
+        notes="admin_force_reset",
+        clear_password=True,
+        activate_user=True,
+    )
+
+
+def _issue_auth_invite(conn, login_value, *, ttl_seconds=None, notes="", clear_password=False, activate_user=False):
     login = str(login_value or "").strip()
     if not login:
         raise ValueError("login requerido")
@@ -1981,7 +1993,7 @@ def admin_force_reset_password_invite(conn, login_value, *, ttl_seconds=None):
     ttl = int(ttl_seconds or AUTH_INVITE_TTL_SECONDS)
     row = conn.execute(
         """
-        SELECT id, usuario, email
+        SELECT id, usuario, email, activo
         FROM usuarios
         WHERE LOWER(TRIM(COALESCE(usuario, ''))) = LOWER(TRIM(?))
            OR LOWER(TRIM(COALESCE(email, ''))) = LOWER(TRIM(?))
@@ -1994,9 +2006,10 @@ def admin_force_reset_password_invite(conn, login_value, *, ttl_seconds=None):
     user_id = str(row_value(row, "id") or row_value(row, 0) or "").strip()
     usuario = str(row_value(row, "usuario") or row_value(row, 1) or "").strip()
     email = str(row_value(row, "email") or row_value(row, 2) or "").strip()
+    if not email:
+        raise ValueError("El usuario no tiene email válido")
     token = secrets.token_urlsafe(32)
     expires_at = (datetime.now(timezone.utc) + timedelta(seconds=ttl)).isoformat()
-    # Revoca invitaciones anteriores (best-effort)
     try:
         conn.execute(
             "UPDATE auth_invites SET revoked_at = COALESCE(NULLIF(revoked_at,''), datetime('now')) WHERE user_id = ? AND used_at IS NULL",
@@ -2004,26 +2017,253 @@ def admin_force_reset_password_invite(conn, login_value, *, ttl_seconds=None):
         )
     except Exception:
         pass
+    update_assignments = [
+        "invite_token = ?",
+        "invite_expires_at = ?",
+        "invite_sent_at = datetime('now')",
+        "updated_at = datetime('now')",
+    ]
+    update_values = [token, expires_at]
+    if clear_password:
+        update_assignments.insert(0, "password_hash = NULL")
+    if activate_user:
+        update_assignments.append("activo = 1")
     conn.execute(
-        "UPDATE usuarios SET password_hash = NULL, invite_token = NULL, invite_expires_at = NULL, updated_at = datetime('now'), activo = 1 WHERE id = ?",
-        (user_id,),
+        f"UPDATE usuarios SET {', '.join(update_assignments)} WHERE id = ?",
+        (*update_values, user_id),
     )
     conn.execute(
         """
         INSERT INTO auth_invites (token, user_id, expires_at, created_at, sent_at, notes)
         VALUES (?, ?, ?, datetime('now'), datetime('now'), ?)
         """,
-        (token, user_id, expires_at, "admin_force_reset"),
+        (token, user_id, expires_at, notes or "auth_invite"),
     )
-    # Compat legacy fields (por si algún flujo aún lee invite_token)
-    try:
-        conn.execute(
-            "UPDATE usuarios SET invite_token = ?, invite_expires_at = ?, invite_sent_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
-            (token, expires_at, user_id),
-        )
-    except Exception:
-        pass
     return {"user_id": user_id, "usuario": usuario, "email": email, "token": token, "expires_at": expires_at}
+
+
+def _auth_invite_mode(notes):
+    notes_norm = normalize_lookup_text(notes or "")
+    return "recovery" if "RECOVERY" in notes_norm else "activation"
+
+
+def build_login_recovery_payload(login_value):
+    login = str(login_value or "").strip()
+    if not login:
+        return {}
+    return {
+        "recovery_available": True,
+        "recovery_login": login,
+        "recovery_message": "Si la cuenta existe, te enviaremos un enlace para recuperar el acceso.",
+    }
+
+
+def issue_access_recovery_invite(conn, login_value, *, ttl_seconds=None):
+    return _issue_auth_invite(
+        conn,
+        login_value,
+        ttl_seconds=ttl_seconds,
+        notes="access_recovery",
+        clear_password=False,
+        activate_user=False,
+    )
+
+
+def build_auth_invite_status_response(conn, token):
+    token = str(token or "").strip()
+    if not token:
+        return {"error": "token requerido"}, 400
+    ensure_auth_invites_table(conn)
+    invite = None
+    try:
+        invite = conn.execute(
+            """
+            SELECT
+              ai.user_id,
+              ai.expires_at,
+              ai.used_at,
+              ai.revoked_at,
+              ai.notes,
+              u.id,
+              u.nombre,
+              u.apellido,
+              u.usuario,
+              u.email,
+              u.activo,
+              u.password_hash
+            FROM auth_invites ai
+            JOIN usuarios u ON u.id = ai.user_id
+            WHERE ai.token = ?
+            LIMIT 1
+            """,
+            (token,),
+        ).fetchone()
+    except Exception:
+        invite = None
+    if invite:
+        expires_dt = _parse_iso_dt_utc(invite["expires_at"])
+        expired = bool(expires_dt and expires_dt < datetime.now(timezone.utc))
+        used = bool(str(invite["used_at"] or "").strip())
+        revoked = bool(str(invite["revoked_at"] or "").strip())
+        mode = _auth_invite_mode(invite["notes"] or "")
+        password_hash_present = bool(str(invite["password_hash"] or "").strip())
+        activated = bool(password_hash_present and mode != "recovery")
+        ok_user = bool(invite["activo"])
+        valid = bool(ok_user and (not expired) and (not used) and (not revoked) and (mode == "recovery" or not password_hash_present))
+        return (
+            {
+                "ok": True,
+                "valid": valid,
+                "expired": expired,
+                "used": used,
+                "activated": activated,
+                "mode": mode,
+                "user": {
+                    "id": invite["id"],
+                    "nombre": invite["nombre"] or "",
+                    "apellido": invite["apellido"] or "",
+                    "usuario": invite["usuario"] or "",
+                    "email": invite["email"] or "",
+                },
+            },
+            200,
+        )
+    row = conn.execute(
+        """
+        SELECT id, nombre, apellido, usuario, email, activo, password_hash, invite_expires_at
+        FROM usuarios
+        WHERE invite_token = ?
+        LIMIT 1
+        """,
+        (token,),
+    ).fetchone()
+    if not row:
+        return {"error": "Invitación inválida"}, 404
+    expires_raw = str(row["invite_expires_at"] or "").strip()
+    expired = False
+    if expires_raw:
+        try:
+            dt = _parse_iso_dt_utc(expires_raw)
+            expired = bool(dt and dt < datetime.now(timezone.utc))
+        except Exception:
+            expired = False
+    activated = bool(str(row["password_hash"] or "").strip())
+    return (
+        {
+            "ok": True,
+            "valid": bool(row["activo"]) and bool(token) and (not expired) and (not activated),
+            "expired": expired,
+            "used": False,
+            "activated": activated,
+            "mode": "activation",
+            "user": {
+                "id": row["id"],
+                "nombre": row["nombre"] or "",
+                "apellido": row["apellido"] or "",
+                "usuario": row["usuario"] or "",
+                "email": row["email"] or "",
+            },
+        },
+        200,
+    )
+
+
+def apply_auth_invite_password(conn, token, password):
+    token = str(token or "").strip()
+    password = str(password or "")
+    if not token or not password:
+        return {"error": "token y password requeridos"}, 400
+    if len(password) < 8:
+        return {"error": "La contraseña debe tener al menos 8 caracteres"}, 400
+    ensure_usuarios_schema(conn)
+    ensure_auth_invites_table(conn)
+    invite = None
+    try:
+        invite = conn.execute(
+            """
+            SELECT
+              ai.user_id,
+              ai.expires_at,
+              ai.used_at,
+              ai.revoked_at,
+              ai.notes,
+              u.activo,
+              u.password_hash
+            FROM auth_invites ai
+            JOIN usuarios u ON u.id = ai.user_id
+            WHERE ai.token = ?
+            LIMIT 1
+            """,
+            (token,),
+        ).fetchone()
+    except Exception:
+        invite = None
+    if invite:
+        user_id = str(invite["user_id"] or "").strip()
+        if not user_id:
+            return {"error": "Invitación inválida"}, 404
+        if not bool(invite["activo"]):
+            return {"error": "Usuario inactivo"}, 403
+        if str(invite["revoked_at"] or "").strip() or str(invite["used_at"] or "").strip():
+            return {"error": "Invitación inválida"}, 404
+        expires_dt = _parse_iso_dt_utc(invite["expires_at"])
+        if expires_dt and expires_dt < datetime.now(timezone.utc):
+            return {"error": "Invitación caducada"}, 410
+        invite_mode = _auth_invite_mode(invite["notes"] or "")
+        if invite_mode != "recovery" and str(invite["password_hash"] or "").strip():
+            return {"error": "La cuenta ya está activada"}, 409
+        conn.execute(
+            """
+            UPDATE usuarios
+            SET password_hash = ?, invite_token = NULL, invite_expires_at = NULL, invite_sent_at = NULL, updated_at = datetime('now')
+            WHERE id = ?
+            """,
+            (hash_password(password), user_id),
+        )
+        try:
+            conn.execute(
+                """
+                UPDATE auth_invites
+                SET used_at = COALESCE(NULLIF(used_at, ''), datetime('now'))
+                WHERE user_id = ?
+                  AND revoked_at IS NULL
+                """,
+                (user_id,),
+            )
+        except Exception:
+            pass
+        return {"ok": True}, 200
+    row = conn.execute(
+        """
+        SELECT id, activo, invite_expires_at
+        FROM usuarios
+        WHERE invite_token = ?
+        LIMIT 1
+        """,
+        (token,),
+    ).fetchone()
+    if not row:
+        return {"error": "Invitación inválida"}, 404
+    if not row["activo"]:
+        return {"error": "Usuario inactivo"}, 403
+    expires_raw = str(row["invite_expires_at"] or "").strip()
+    if expires_raw:
+        try:
+            dt = _parse_iso_dt_utc(expires_raw)
+            if dt and dt < datetime.now(timezone.utc):
+                return {"error": "Invitación caducada"}, 410
+        except Exception:
+            pass
+    conn.execute(
+        """
+        UPDATE usuarios
+        SET password_hash = ?, invite_token = NULL, invite_expires_at = NULL, updated_at = datetime('now')
+        WHERE id = ?
+        """,
+        (hash_password(password), row["id"]),
+    )
+    conn.commit()
+    return {"ok": True}, 200
 
 
 def ensure_user_admin_audit_table(conn):
@@ -55937,6 +56177,71 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if parsed.path == "/api/auth_request_access_recovery":
+            login = str(payload.get("login") or payload.get("usuario") or payload.get("email") or "").strip()
+            if not login:
+                json_response(self, {"error": "login requerido"}, status=400)
+                return
+            ip = _get_client_ip(self)
+            rate_key = f"recovery:{login}"
+            allowed, retry_after = check_login_rate_limit(ip, rate_key)
+            if not allowed:
+                json_response(
+                    self,
+                    {
+                        "error": "Demasiados intentos. Espera y vuelve a intentarlo.",
+                        "message": "Si la cuenta existe, hemos preparado un enlace de acceso.",
+                        "recovery_message": "Vuelve a intentarlo más tarde.",
+                    },
+                    status=429,
+                    extra_headers=[("Retry-After", str(int(retry_after or 1)))],
+                )
+                return
+            response = {
+                "ok": True,
+                "message": "Si la cuenta existe, hemos enviado un enlace para recuperar el acceso.",
+                "recovery_message": "Revisa tu correo para continuar.",
+            }
+            try:
+                result = issue_access_recovery_invite(conn, login)
+                conn.commit()
+                recovery_link = build_public_fragment_url("activar_token", result.get("token") or "", base_url=self._external_base_url())
+                recovery_email = str(result.get("email") or "").strip()
+                recovery_user = str(result.get("usuario") or login).strip() or login
+                if recovery_email:
+                    subject = "Recupera el acceso al CRM"
+                    text_body = (
+                        f"Hola {recovery_user},\n\n"
+                        "Hemos preparado un enlace para recuperar el acceso a tu cuenta.\n"
+                        "Pulsa este enlace para definir una nueva contraseña:\n\n"
+                        f"{recovery_link}\n\n"
+                        f"Este enlace caduca en {int(AUTH_INVITE_TTL_SECONDS/3600)} horas.\n"
+                    )
+                    safe_link = html.escape(recovery_link, quote=True)
+                    html_body = (
+                        f"<p>Hola {html.escape(recovery_user)},</p>"
+                        "<p>Hemos preparado un enlace para recuperar el acceso a tu cuenta.</p>"
+                        f"<p><a href=\"{safe_link}\">Pulsa aquí para definir una nueva contraseña</a></p>"
+                        "<p>Si el botón no funciona, copia este enlace:</p>"
+                        f"<p>{safe_link}</p>"
+                    )
+                    send_mail_smtp(subject, recovery_email, text_body, html_body=html_body)
+                else:
+                    response["mail_error"] = "El usuario no tiene email válido"
+            except LookupError:
+                pass
+            except ValueError as exc:
+                response["mail_error"] = str(exc)
+            except Exception as exc:
+                response["mail_error"] = str(exc)
+            finally:
+                try:
+                    register_login_attempt(ip, rate_key, ok=False)
+                except Exception:
+                    pass
+            json_response(self, response)
+            return
+
         if parsed.path == "/api/login":
             usuario_raw = str(payload.get("usuario") or payload.get("email") or "").strip()
             password = str(payload.get("password") or "")
@@ -55948,7 +56253,10 @@ class Handler(BaseHTTPRequestHandler):
             if not allowed:
                 json_response(
                     self,
-                    {"error": "Demasiados intentos. Espera y vuelve a intentarlo."},
+                    {
+                        "error": "Demasiados intentos. Espera y vuelve a intentarlo.",
+                        **build_login_recovery_payload(usuario_raw),
+                    },
                     status=429,
                     extra_headers=[("Retry-After", str(int(retry_after or 1)))],
                 )
@@ -55960,7 +56268,11 @@ class Handler(BaseHTTPRequestHandler):
             matches = fetch_active_users_by_login(conn, usuario_raw)
             if not matches:
                 register_login_attempt(ip, usuario_raw, ok=False)
-                json_response(self, {"error": "Usuario o contraseña incorrectos"}, status=401)
+                json_response(
+                    self,
+                    {"error": "Usuario o contraseña incorrectos", **build_login_recovery_payload(usuario_raw)},
+                    status=401,
+                )
                 return
             row = None
             if len(matches) > 1:
@@ -55980,7 +56292,11 @@ class Handler(BaseHTTPRequestHandler):
                         if "@" in usuario_raw
                         else "Usuario duplicado. Contacta con administración."
                     )
-                    json_response(self, {"error": message}, status=409)
+                    json_response(
+                        self,
+                        {"error": message, **build_login_recovery_payload(usuario_raw)},
+                        status=409,
+                    )
                     return
             else:
                 row = matches[0]
@@ -55989,7 +56305,11 @@ class Handler(BaseHTTPRequestHandler):
             if stored_hash:
                 if not verify_password(password, stored_hash):
                     register_login_attempt(ip, usuario_raw, ok=False)
-                    json_response(self, {"error": "Usuario o contraseña incorrectos"}, status=401)
+                    json_response(
+                        self,
+                        {"error": "Usuario o contraseña incorrectos", **build_login_recovery_payload(usuario_raw)},
+                        status=401,
+                    )
                     return
                 if needs_password_rehash(stored_hash):
                     conn.execute(
@@ -56007,10 +56327,21 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 if not AUTH_ALLOW_FIRST_PASSWORD_SET:
                     register_login_attempt(ip, usuario_raw, ok=False)
-                    json_response(self, {"error": "Usuario sin contraseña inicializada"}, status=403)
+                    json_response(
+                        self,
+                        {"error": "Usuario sin contraseña inicializada", **build_login_recovery_payload(usuario_raw)},
+                        status=403,
+                    )
                     return
                 if len(password) < 8:
-                    json_response(self, {"error": "La contraseña debe tener al menos 8 caracteres"}, status=400)
+                    json_response(
+                        self,
+                        {
+                            "error": "La contraseña debe tener al menos 8 caracteres",
+                            **build_login_recovery_payload(usuario_raw),
+                        },
+                        status=400,
+                    )
                     return
                 conn.execute(
                     "UPDATE usuarios SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
@@ -56041,117 +56372,15 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/auth_set_password":
             token = str(payload.get("token") or "").strip()
             password = str(payload.get("password") or "")
-            if not token or not password:
-                json_response(self, {"error": "token y password requeridos"}, status=400)
-                return
-            if len(password) < 8:
-                json_response(self, {"error": "La contraseña debe tener al menos 8 caracteres"}, status=400)
-                return
             try:
                 conn = get_db(self.db_path)
                 self._track_conn(conn)
-                ensure_usuarios_schema(conn)
-                ensure_auth_invites_table(conn)
+                result, status = apply_auth_invite_password(conn, token, password)
+                if status >= 400:
+                    json_response(self, result, status=status)
+                    return
                 conn.commit()
-
-                # Nuevo flujo (auth_invites): permite reenvíos sin invalidar enlaces previos, pero se anulan al activar.
-                invite = None
-                try:
-                    invite = conn.execute(
-                        """
-                        SELECT
-                          ai.user_id,
-                          ai.expires_at,
-                          ai.used_at,
-                          ai.revoked_at,
-                          u.activo,
-                          u.password_hash
-                        FROM auth_invites ai
-                        JOIN usuarios u ON u.id = ai.user_id
-                        WHERE ai.token = ?
-                        LIMIT 1
-                        """,
-                        (token,),
-                    ).fetchone()
-                except Exception:
-                    invite = None
-                if invite:
-                    user_id = str(invite["user_id"] or "").strip()
-                    if not user_id:
-                        json_response(self, {"error": "Invitación inválida"}, status=404)
-                        return
-                    if not bool(invite["activo"]):
-                        json_response(self, {"error": "Usuario inactivo"}, status=403)
-                        return
-                    if str(invite["revoked_at"] or "").strip() or str(invite["used_at"] or "").strip():
-                        json_response(self, {"error": "Invitación inválida"}, status=404)
-                        return
-                    if str(invite["password_hash"] or "").strip():
-                        json_response(self, {"error": "La cuenta ya está activada"}, status=409)
-                        return
-                    expires_dt = _parse_iso_dt_utc(invite["expires_at"])
-                    if expires_dt and expires_dt < datetime.now(timezone.utc):
-                        json_response(self, {"error": "Invitación caducada"}, status=410)
-                        return
-                    conn.execute(
-                        """
-                        UPDATE usuarios
-                        SET password_hash = ?, invite_token = NULL, invite_expires_at = NULL, updated_at = datetime('now')
-                        WHERE id = ?
-                        """,
-                        (hash_password(password), user_id),
-                    )
-                    # Invalida todas las invitaciones pendientes del usuario (evita que alguien cambie la contraseña con otro token).
-                    try:
-                        conn.execute(
-                            """
-                            UPDATE auth_invites
-                            SET used_at = COALESCE(NULLIF(used_at, ''), datetime('now'))
-                            WHERE user_id = ?
-                              AND revoked_at IS NULL
-                            """,
-                            (user_id,),
-                        )
-                    except Exception:
-                        pass
-                    conn.commit()
-                    json_response(self, {"ok": True})
-                    return
-
-                row = conn.execute(
-                    """
-                    SELECT id, activo, invite_expires_at
-                    FROM usuarios
-                    WHERE invite_token = ?
-                    LIMIT 1
-                    """,
-                    (token,),
-                ).fetchone()
-                if not row:
-                    json_response(self, {"error": "Invitación inválida"}, status=404)
-                    return
-                if not row["activo"]:
-                    json_response(self, {"error": "Usuario inactivo"}, status=403)
-                    return
-                expires_raw = str(row["invite_expires_at"] or "").strip()
-                if expires_raw:
-                    try:
-                        dt = _parse_iso_dt_utc(expires_raw)
-                        if dt and dt < datetime.now(timezone.utc):
-                            json_response(self, {"error": "Invitación caducada"}, status=410)
-                            return
-                    except Exception:
-                        pass
-                conn.execute(
-                    """
-                    UPDATE usuarios
-                    SET password_hash = ?, invite_token = NULL, invite_expires_at = NULL, updated_at = datetime('now')
-                    WHERE id = ?
-                    """,
-                    (hash_password(password), row["id"]),
-                )
-                conn.commit()
-                json_response(self, {"ok": True})
+                json_response(self, result, status=status)
                 return
             except Exception as exc:
                 try:
@@ -78294,101 +78523,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/auth_invite_status":
             token = _request_token_param(self, params, "token")
-            if not token:
-                json_response(self, {"error": "token requerido"}, status=400)
-                return
-            ensure_auth_invites_table(conn)
-            # Preferimos el flujo nuevo (auth_invites) para tolerar reenvíos.
-            invite = None
-            try:
-                invite = conn.execute(
-                    """
-                    SELECT
-                      ai.user_id,
-                      ai.expires_at,
-                      ai.used_at,
-                      ai.revoked_at,
-                      u.id,
-                      u.nombre,
-                      u.apellido,
-                      u.usuario,
-                      u.email,
-                      u.activo,
-                      u.password_hash
-                    FROM auth_invites ai
-                    JOIN usuarios u ON u.id = ai.user_id
-                    WHERE ai.token = ?
-                    LIMIT 1
-                    """,
-                    (token,),
-                ).fetchone()
-            except Exception:
-                invite = None
-            if invite:
-                expires_dt = _parse_iso_dt_utc(invite["expires_at"])
-                expired = bool(expires_dt and expires_dt < datetime.now(timezone.utc))
-                used = bool(str(invite["used_at"] or "").strip())
-                revoked = bool(str(invite["revoked_at"] or "").strip())
-                activated = bool(str(invite["password_hash"] or "").strip())
-                ok_user = bool(invite["activo"])
-                valid = bool(ok_user and (not expired) and (not used) and (not revoked) and (not activated))
-                json_response(
-                    self,
-                    {
-                        "ok": True,
-                        "valid": valid,
-                        "expired": expired,
-                        "used": used,
-                        "activated": activated,
-                        "user": {
-                            "id": invite["id"],
-                            "nombre": invite["nombre"] or "",
-                            "apellido": invite["apellido"] or "",
-                            "usuario": invite["usuario"] or "",
-                            "email": invite["email"] or "",
-                        },
-                    },
-                )
-                return
-            # Fallback legacy: usuarios.invite_token (1 token por usuario).
-            row = conn.execute(
-                """
-                SELECT id, nombre, apellido, usuario, email, activo, password_hash, invite_expires_at
-                FROM usuarios
-                WHERE invite_token = ?
-                LIMIT 1
-                """,
-                (token,),
-            ).fetchone()
-            if not row:
-                json_response(self, {"error": "Invitación inválida"}, status=404)
-                return
-            expires_raw = str(row["invite_expires_at"] or "").strip()
-            expired = False
-            if expires_raw:
-                try:
-                    dt = _parse_iso_dt_utc(expires_raw)
-                    expired = bool(dt and dt < datetime.now(timezone.utc))
-                except Exception:
-                    expired = False
-            activated = bool(str(row["password_hash"] or "").strip())
-            json_response(
-                self,
-                {
-                    "ok": True,
-                    "valid": bool(row["activo"]) and bool(token) and (not expired) and (not activated),
-                    "expired": expired,
-                    "used": False,
-                    "activated": activated,
-                    "user": {
-                        "id": row["id"],
-                        "nombre": row["nombre"] or "",
-                        "apellido": row["apellido"] or "",
-                        "usuario": row["usuario"] or "",
-                        "email": row["email"] or "",
-                    },
-                },
-            )
+            payload, status = build_auth_invite_status_response(conn, token)
+            json_response(self, payload, status=status)
             return
 
         if path == "/api/empresas":

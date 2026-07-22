@@ -68,6 +68,31 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
         conn.commit()
         return conn
 
+    def _make_auth_user_conn(self, *, user_id="u-auth-1", usuario="Mperez", email="mperez@example.com", password_hash=None):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        server.ensure_usuarios_schema(conn)
+        server.ensure_auth_invites_table(conn)
+        conn.execute(
+            """
+            INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, password_hash, activo, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+            """,
+            (
+                user_id,
+                "Miguel",
+                "Perez",
+                usuario,
+                email,
+                "Gestoría",
+                "Miembro",
+                password_hash,
+                1,
+            ),
+        )
+        conn.commit()
+        return conn
+
     def test_resolve_external_ocr_config_prefers_explicit_env_path(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             tmp_path = Path(tmpdir)
@@ -151,6 +176,102 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
                         with mock.patch.dict(os.environ, {}, clear=True):
                             self.assertEqual(server._resolve_external_ocr_config(), ("", ""))
                             self.assertEqual(ocr_service._resolve_external_ocr_config(), ("", ""))
+
+    def test_login_recovery_payload_includes_recovery_fields(self):
+        payload = server.build_login_recovery_payload("  Mperez  ")
+        self.assertEqual(
+            payload,
+            {
+                "recovery_available": True,
+                "recovery_login": "Mperez",
+                "recovery_message": "Si la cuenta existe, te enviaremos un enlace para recuperar el acceso.",
+            },
+        )
+        self.assertEqual(server.build_login_recovery_payload(""), {})
+
+    def test_recovery_invite_roundtrip_allows_password_reset_with_existing_hash(self):
+        with mock.patch.object(server.os, "urandom", return_value=b"\x01" * 16):
+            initial_hash = server.hash_password("InitialPwd123")
+        conn = self._make_auth_user_conn(password_hash=initial_hash)
+        try:
+            result = server.issue_access_recovery_invite(conn, "Mperez")
+            self.assertEqual(result["user_id"], "u-auth-1")
+            self.assertEqual(result["usuario"], "Mperez")
+            self.assertEqual(result["email"], "mperez@example.com")
+            self.assertTrue(result["token"])
+
+            stored = conn.execute(
+                """
+                SELECT invite_token, invite_expires_at, invite_sent_at, password_hash
+                FROM usuarios
+                WHERE id = ?
+                """,
+                ("u-auth-1",),
+            ).fetchone()
+            self.assertEqual(stored["invite_token"], result["token"])
+            self.assertTrue(str(stored["invite_expires_at"] or "").strip())
+            self.assertTrue(str(stored["invite_sent_at"] or "").strip())
+            self.assertEqual(stored["password_hash"], initial_hash)
+
+            status_payload, status_code = server.build_auth_invite_status_response(conn, result["token"])
+            self.assertEqual(status_code, 200)
+            self.assertTrue(status_payload["ok"])
+            self.assertTrue(status_payload["valid"])
+            self.assertEqual(status_payload["mode"], "recovery")
+            self.assertFalse(status_payload["activated"])
+            self.assertEqual(status_payload["user"]["usuario"], "Mperez")
+            self.assertEqual(status_payload["user"]["email"], "mperez@example.com")
+
+            apply_payload, apply_status = server.apply_auth_invite_password(conn, result["token"], "NuevaClave123")
+            self.assertEqual(apply_status, 200)
+            self.assertEqual(apply_payload, {"ok": True})
+
+            updated = conn.execute(
+                """
+                SELECT password_hash, invite_token, invite_expires_at, invite_sent_at
+                FROM usuarios
+                WHERE id = ?
+                """,
+                ("u-auth-1",),
+            ).fetchone()
+            self.assertTrue(str(updated["password_hash"] or "").strip())
+            self.assertTrue(server.verify_password("NuevaClave123", updated["password_hash"]))
+            self.assertFalse(str(updated["invite_token"] or "").strip())
+            self.assertFalse(str(updated["invite_expires_at"] or "").strip())
+            self.assertFalse(str(updated["invite_sent_at"] or "").strip())
+
+            invite_row = conn.execute(
+                "SELECT used_at, notes FROM auth_invites WHERE token = ?",
+                (result["token"],),
+            ).fetchone()
+            self.assertTrue(str(invite_row["used_at"] or "").strip())
+            self.assertEqual(invite_row["notes"], "access_recovery")
+        finally:
+            conn.close()
+
+    def test_activation_invite_with_existing_password_remains_rejected(self):
+        with mock.patch.object(server.os, "urandom", return_value=b"\x02" * 16):
+            initial_hash = server.hash_password("InitialPwd123")
+        conn = self._make_auth_user_conn(user_id="u-auth-2", usuario="Activacion", email="activacion@example.com", password_hash=initial_hash)
+        try:
+            invite = server._issue_auth_invite(
+                conn,
+                "Activacion",
+                notes="usuarios_invitar_v2",
+                clear_password=False,
+                activate_user=False,
+            )
+            status_payload, status_code = server.build_auth_invite_status_response(conn, invite["token"])
+            self.assertEqual(status_code, 200)
+            self.assertFalse(status_payload["valid"])
+            self.assertEqual(status_payload["mode"], "activation")
+            self.assertTrue(status_payload["activated"])
+
+            apply_payload, apply_status = server.apply_auth_invite_password(conn, invite["token"], "OtraClave123")
+            self.assertEqual(apply_status, 409)
+            self.assertEqual(apply_payload["error"], "La cuenta ya está activada")
+        finally:
+            conn.close()
 
     def test_external_ocr_functions_match_new_module(self):
         fake_response = mock.MagicMock()

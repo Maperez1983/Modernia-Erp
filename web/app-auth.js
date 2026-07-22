@@ -256,8 +256,11 @@
       }
       const user = data.user || {};
       const label = [user.nombre, user.apellido].filter(Boolean).join(" ").trim() || user.usuario || user.email || "usuario";
+      const mode = String(data?.mode || "").trim().toLowerCase();
       if (deps.authActivateIntro) {
-        deps.authActivateIntro.textContent = `Activa el acceso de ${label} y define tu contraseña.`;
+        deps.authActivateIntro.textContent = mode === "recovery"
+          ? `Restablece el acceso de ${label} y define una nueva contraseña.`
+          : `Activa el acceso de ${label} y define tu contraseña.`;
       }
     } catch (error) {
       if (deps.authActivateStatus) {
