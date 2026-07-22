@@ -1,6 +1,8 @@
 (function () {
   const DEEP_LINK_KEYS = ["activar_token", "portal_token", "firma_inmo", "token"];
   const SESSION_STATE_ENDPOINT = "/api/session_state";
+  let authLoginBusy = false;
+  let authRecoveryBusy = false;
 
   const getDeepLinkParams = () => {
     const params = new URLSearchParams(window.location.search || "");
@@ -28,6 +30,31 @@
     keys: DEEP_LINK_KEYS.slice(),
   });
 
+  function getLoginSubmitButton(deps) {
+    return deps?.authLoginForm?.querySelector?.('button[type="submit"]') || null;
+  }
+
+  function setLoginBusyState(deps, busy) {
+    authLoginBusy = Boolean(busy);
+    const submitBtn = getLoginSubmitButton(deps);
+    if (submitBtn) {
+      submitBtn.disabled = authLoginBusy;
+      submitBtn.setAttribute("aria-busy", authLoginBusy ? "true" : "false");
+    }
+    if (deps?.authLoginForm) {
+      deps.authLoginForm.dataset.busy = authLoginBusy ? "1" : "";
+    }
+  }
+
+  function setRecoveryBusyState(btn, busy) {
+    if (!btn) return;
+    const baseLabel = String(btn.dataset.baseLabel || btn.textContent || "Recuperar acceso").trim() || "Recuperar acceso";
+    btn.dataset.baseLabel = baseLabel;
+    btn.disabled = Boolean(busy);
+    btn.setAttribute("aria-busy", busy ? "true" : "false");
+    btn.textContent = busy ? "Preparando..." : baseLabel;
+  }
+
   function ensureRecoveryButton(deps) {
     if (deps.authRecoveryBtn && deps.authRecoveryBtn.isConnected) return deps.authRecoveryBtn;
     const status = deps.authLoginStatus;
@@ -36,11 +63,15 @@
     btn.type = "button";
     btn.className = "secondary-btn";
     btn.textContent = "Recuperar acceso";
+    btn.dataset.baseLabel = btn.textContent;
     btn.style.display = "none";
     btn.style.marginLeft = "8px";
     btn.addEventListener("click", async () => {
+      if (authRecoveryBusy || btn.disabled) return;
       const login = String(btn.dataset.login || "").trim();
       if (!login) return;
+      authRecoveryBusy = true;
+      setRecoveryBusyState(btn, true);
       if (deps.authLoginStatus) deps.authLoginStatus.textContent = "Preparando recuperación de acceso...";
       try {
         const res = await fetch("/api/auth_request_access_recovery", {
@@ -61,6 +92,9 @@
         }
       } catch {
         if (deps.authLoginStatus) deps.authLoginStatus.textContent = "Error de conexión al preparar la recuperación.";
+      } finally {
+        authRecoveryBusy = false;
+        setRecoveryBusyState(btn, false);
       }
     });
     status.parentElement.appendChild(btn);
@@ -73,13 +107,18 @@
     if (!btn) return;
     btn.style.display = "none";
     btn.dataset.login = "";
+    setRecoveryBusyState(btn, false);
   }
 
   function showRecoveryButton(deps, login) {
     const btn = ensureRecoveryButton(deps);
     if (!btn) return;
+    if (!btn.dataset.baseLabel) {
+      btn.dataset.baseLabel = btn.textContent || "Recuperar acceso";
+    }
     btn.dataset.login = String(login || "").trim();
     btn.style.display = btn.dataset.login ? "" : "none";
+    setRecoveryBusyState(btn, false);
   }
 
   async function waitForHealth(deps, options) {
@@ -315,6 +354,7 @@
   }
 
   async function submitAuthLogin(deps) {
+    if (authLoginBusy) return;
     const usuario = deps.authLoginUser?.value?.trim() || "";
     const password = deps.authLoginPass?.value || "";
     if (!usuario || !password) {
@@ -322,10 +362,12 @@
       if (deps.authLoginStatus) deps.authLoginStatus.textContent = "Introduce usuario/email y contraseña.";
       return;
     }
+    authLoginBusy = true;
+    setLoginBusyState(deps, true);
     hideRecoveryButton(deps);
     if (deps.authLoginStatus) deps.authLoginStatus.textContent = "Accediendo...";
-    await waitForHealth(deps, { maxMs: 90000, requestTimeoutMs: 12000 });
     try {
+      await waitForHealth(deps, { maxMs: 90000, requestTimeoutMs: 12000 });
       const res = await fetch("/api/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -508,6 +550,9 @@
       }
     } catch {
       if (deps.authLoginStatus) deps.authLoginStatus.textContent = "Error de conexión al iniciar sesión.";
+    } finally {
+      authLoginBusy = false;
+      setLoginBusyState(deps, false);
     }
   }
 

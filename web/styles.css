@@ -11762,6 +11762,12 @@ body.auth-pending #authLoginOverlay.auth-login-overlay.hidden {
   line-height: 1.35;
 }
 
+.auth-login-actions button:disabled,
+.secondary-btn:disabled {
+  opacity: 0.72;
+  cursor: wait;
+}
+
 .auth-login-card .success {
   color: #22C55E;
   font-weight: 600;

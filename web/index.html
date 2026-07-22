@@ -12045,9 +12045,95 @@
             const loginUser = document.getElementById("authLoginUser");
             const loginPass = document.getElementById("authLoginPass");
             const loginStatus = document.getElementById("authLoginStatus");
+            const loginSubmitBtn = loginForm ? loginForm.querySelector('button[type="submit"]') : null;
+            let loginBusy = false;
+            let recoveryBusy = false;
 
             const setStatus = (msg) => {
               try { if (loginStatus) loginStatus.textContent = msg || ""; } catch {}
+            };
+
+            const setLoginBusyState = (busy) => {
+              loginBusy = Boolean(busy);
+              if (loginSubmitBtn) {
+                loginSubmitBtn.disabled = loginBusy;
+                loginSubmitBtn.setAttribute("aria-busy", loginBusy ? "true" : "false");
+              }
+              if (loginForm) {
+                loginForm.dataset.busy = loginBusy ? "1" : "";
+              }
+            };
+
+            const setRecoveryBusyState = (btn, busy) => {
+              if (!btn) return;
+              const baseLabel = String(btn.dataset.baseLabel || btn.textContent || "Recuperar acceso").trim() || "Recuperar acceso";
+              btn.dataset.baseLabel = baseLabel;
+              btn.disabled = Boolean(busy);
+              btn.setAttribute("aria-busy", busy ? "true" : "false");
+              btn.textContent = busy ? "Preparando..." : baseLabel;
+            };
+
+            const ensureRecoveryButton = () => {
+              if (window.__authRecoveryBtn && window.__authRecoveryBtn.isConnected) return window.__authRecoveryBtn;
+              if (!loginStatus || !loginStatus.parentElement) return null;
+              const btn = document.createElement("button");
+              btn.type = "button";
+              btn.className = "secondary-btn";
+              btn.textContent = "Recuperar acceso";
+              btn.dataset.baseLabel = btn.textContent;
+              btn.style.display = "none";
+              btn.style.marginLeft = "8px";
+              btn.addEventListener("click", async () => {
+                if (recoveryBusy || btn.disabled) return;
+                const login = String(btn.dataset.login || "").trim();
+                if (!login) return;
+                recoveryBusy = true;
+                setRecoveryBusyState(btn, true);
+                setStatus("Preparando recuperación de acceso...");
+                try {
+                  const res = await fetch("/api/auth_request_access_recovery", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "same-origin",
+                    body: JSON.stringify({ login }),
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  if (!res.ok || data?.error) {
+                    setStatus(data?.error || "No se pudo preparar la recuperación.");
+                    return;
+                  }
+                  const main = String(data?.message || "Recuperación preparada.").trim();
+                  const hint = String(data?.recovery_message || "").trim();
+                  setStatus(`${main} ${hint}`.trim());
+                } catch {
+                  setStatus("Error de conexión al preparar la recuperación.");
+                } finally {
+                  recoveryBusy = false;
+                  setRecoveryBusyState(btn, false);
+                }
+              });
+              loginStatus.parentElement.appendChild(btn);
+              window.__authRecoveryBtn = btn;
+              return btn;
+            };
+
+            const hideRecoveryButton = () => {
+              const btn = window.__authRecoveryBtn;
+              if (!btn) return;
+              btn.style.display = "none";
+              btn.dataset.login = "";
+              setRecoveryBusyState(btn, false);
+            };
+
+            const showRecoveryButton = (login) => {
+              const btn = ensureRecoveryButton();
+              if (!btn) return;
+              if (!btn.dataset.baseLabel) {
+                btn.dataset.baseLabel = btn.textContent || "Recuperar acceso";
+              }
+              btn.dataset.login = String(login || "").trim();
+              btn.style.display = btn.dataset.login ? "" : "none";
+              setRecoveryBusyState(btn, false);
             };
 
             // Si el body se queda en auth-pending, garantizamos que se vea el login.
@@ -12145,6 +12231,10 @@
                 if (window.__APP_JS_LOADED && window.CRMAppAuth) {
                   return;
                 }
+                if (loginBusy) {
+                  event.preventDefault();
+                  return;
+                }
                 event.preventDefault();
                 const usuario = String(loginUser.value || "").trim();
                 const password = String(loginPass.value || "");
@@ -12152,6 +12242,8 @@
                   setStatus("Introduce usuario/email y contraseña.");
                   return;
                 }
+                setLoginBusyState(true);
+                hideRecoveryButton();
                 setStatus("Accediendo…");
                 await waitHealthOnce();
                 try {
@@ -12163,9 +12255,16 @@
                   });
                   const data = await res.json().catch(() => ({}));
                   if (!res.ok || data?.error) {
-                    setStatus(data?.error || "No se pudo iniciar sesión.");
+                    const baseMessage = data?.error || "No se pudo iniciar sesión.";
+                    const recoveryAvailable = Boolean(data?.recovery_available && (data?.recovery_login || usuario));
+                    const recoveryHint = String(data?.recovery_message || "").trim();
+                    setStatus(recoveryAvailable
+                      ? `${baseMessage} ${recoveryHint || "Puedes recuperar el acceso."}`.trim()
+                      : baseMessage);
+                    if (recoveryAvailable) showRecoveryButton(data?.recovery_login || usuario);
                     return;
                   }
+                  hideRecoveryButton();
                   // Verifica que la cookie funciona (session_state debe devolver usuario).
                   const me = await fetchMe();
                   const user = data?.user || me;
@@ -12179,6 +12278,8 @@
                   setTimeout(() => window.location.assign(nextUrl), 200);
                 } catch {
                   setStatus("Error de conexión al iniciar sesión.");
+                } finally {
+                  setLoginBusyState(false);
                 }
               }, { passive: false });
             }
