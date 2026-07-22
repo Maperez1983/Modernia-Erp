@@ -825,8 +825,43 @@ a.pill:hover {
 }
 
 .home-guidance-primary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
   align-self: flex-start;
   white-space: nowrap;
+}
+
+.home-year-toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 210px;
+}
+
+.home-year-copy {
+  display: grid;
+  gap: 2px;
+}
+
+.home-year-label {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+
+.home-year-hint {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.home-year-toolbar select {
+  min-width: 180px;
 }
 
 .home-guidance-search {
@@ -2477,6 +2512,12 @@ body.theme-operativa #holdingSection .workspace-central-layout {
   top: calc(var(--safe-top, 0px) + 88px);
   max-height: calc(100vh - (var(--safe-top, 0px) + 112px));
   overflow: auto;
+  padding: 18px;
+  border: 1px solid rgba(11, 29, 51, 0.1);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 249, 252, 0.98)),
+    #fff;
+  box-shadow: 0 14px 28px rgba(11, 29, 51, 0.05);
 }
 
 .workspace-tenant-summary-context {
@@ -2520,6 +2561,50 @@ body.theme-operativa #holdingSection .workspace-central-layout {
   flex-wrap: wrap;
   gap: 10px;
   align-self: start;
+}
+
+.workspace-company-editor-context {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(242, 193, 78, 0.2);
+  background:
+    linear-gradient(135deg, rgba(255, 253, 244, 0.98), rgba(247, 249, 252, 0.96)),
+    #fff;
+}
+
+.workspace-company-editor-context-label {
+  display: inline-flex;
+  width: fit-content;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(242, 193, 78, 0.16);
+  color: rgba(var(--ink-rgb), 0.82);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.workspace-company-editor-context strong {
+  display: block;
+  margin-top: 4px;
+  font-size: 18px;
+  line-height: 1.15;
+}
+
+.workspace-company-editor-context .muted {
+  margin-top: 4px;
+  max-width: 60ch;
+}
+
+.workspace-company-editor-context-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
 }
 
 .workspace-chip span {
@@ -8267,6 +8352,10 @@ body.crm-context-inmo #inmuebleDetail .inmueble-advanced {
     width: 100%;
   }
 
+  .workspace-company-editor-context {
+    grid-template-columns: 1fr;
+  }
+
   .workspace-list-toolbar-actions {
     width: 100%;
   }
@@ -13297,6 +13386,16 @@ body.theme-operativa .auth-login-card {
 
   .home-guidance-primary-action {
     width: 100%;
+  }
+
+  .home-year-toolbar {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .home-year-toolbar select {
+    width: 100%;
+    min-width: 0;
   }
 }
 

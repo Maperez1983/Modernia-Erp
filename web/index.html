@@ -62,19 +62,22 @@
             <div class="hero-shell">
               <div class="hero-copy app-lightning-topbar">
                 <div>
-                  <h2>CRM 360 <span class="pill">Beta</span></h2>
-                  <p>Entrada limpia por workspace, empresa y módulo con acceso directo al trabajo diario.</p>
+                  <h2>CRM 360</h2>
+                  <p>Entrada limpia por workspace, empresa y módulo. Ve a lo importante sin ruido.</p>
                 </div>
-                <div class="toolbar" id="tableToolbar">
-                  <span class="pill">Año</span>
-                  <select id="yearSelect"></select>
+                <div class="toolbar home-year-toolbar" id="tableToolbar">
+                  <div class="home-year-copy">
+                    <span class="home-year-label">Año operativo</span>
+                    <span class="home-year-hint">Filtra listados y métricas del inicio</span>
+                  </div>
+                  <select id="yearSelect" aria-label="Año operativo"></select>
                 </div>
               </div>
               <aside id="homeHeroAside" class="hero-aside" aria-label="Accesos rápidos de inicio"></aside>
             </div>
             <div class="home-block">
-              <h3>Accesos principales</h3>
-              <p class="muted">CRM operativo para inmobiliaria, gestoría, seguros y financiación con una home pensada para continuar el trabajo sin fricción.</p>
+              <h3>Accesos directos</h3>
+              <p class="muted">Atajos esenciales para entrar rápido sin saturar la pantalla inicial.</p>
               <div id="coreCards" class="grid"></div>
             </div>
           </div>
@@ -132,19 +135,19 @@
 		            </button>
 		          </div>
 	          <div class="crm-workspace-view" data-workspace-view="tenant">
-		            <div class="crm-workspace-tabs tc-modulebar tc-modulebar--micro crm-lightning-subbar" id="workspaceTenantTabs">
-	              <button class="tab tc-module active" type="button" data-workspace-tenant-tab="general" title="General">
+	            <div class="crm-workspace-tabs tc-modulebar tc-modulebar--micro crm-lightning-subbar" id="workspaceTenantTabs">
+	              <button class="tab tc-module active" type="button" data-workspace-tenant-tab="empresas" title="Empresas">
 	                <span class="tc-mod-ico" aria-hidden="true">
-				                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-clipboard"></use></svg>
-			                </span>
-			                <span class="tc-mod-label">General</span>
-			              </button>
-			              <button class="tab tc-module" type="button" data-workspace-tenant-tab="empresas" title="Empresas">
-			                <span class="tc-mod-ico" aria-hidden="true">
-			                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-building-gear"></use></svg>
-			                </span>
-			                <span class="tc-mod-label">Empresas</span>
-		              </button>
+	                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-building-gear"></use></svg>
+	                </span>
+	                <span class="tc-mod-label">Empresas</span>
+	              </button>
+	              <button class="tab tc-module" type="button" data-workspace-tenant-tab="general" title="General">
+	                <span class="tc-mod-ico" aria-hidden="true">
+	                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-clipboard"></use></svg>
+	                </span>
+	                <span class="tc-mod-label">General</span>
+	              </button>
 		              <button class="tab tc-module" type="button" data-workspace-tenant-tab="usuarios" title="Usuarios">
 		                <span class="tc-mod-ico" aria-hidden="true">
 		                  <svg viewBox="0 0 24 24" aria-hidden="true"><use href="#ico-users"></use></svg>
@@ -331,6 +334,16 @@
                 </div>
                 <div class="toolbar">
                   <button type="button" id="workspaceCompanyEditorClose" class="secondary ghost">Cerrar</button>
+                </div>
+              </div>
+              <div class="workspace-company-editor-context">
+                <div>
+                  <span class="workspace-company-editor-context-label">Panel contextual</span>
+                  <strong id="workspaceCompanyEditorContextName">Selecciona una empresa</strong>
+                  <p id="workspaceCompanyEditorContextMeta" class="muted">El editor se quedará fijo a la vista mientras ajustas los datos de la empresa activa.</p>
+                </div>
+                <div class="workspace-company-editor-context-actions">
+                  <button type="button" id="workspaceCompanyEditorOpenFicha" class="secondary ghost">Abrir ficha</button>
                 </div>
               </div>
               <form id="workspaceCompanyForm" class="form-grid">

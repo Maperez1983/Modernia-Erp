@@ -2430,9 +2430,12 @@ const workspaceCustomerModules = document.getElementById("workspaceCustomerModul
 const workspaceCustomerCancelBtn = document.getElementById("workspaceCustomerCancelBtn");
 const workspaceCustomerCreateBtn = document.getElementById("workspaceCustomerCreateBtn");
 		const workspaceCompanies = document.getElementById("workspaceCompanies");
-		const workspaceCompanyEditor = document.getElementById("workspaceCompanyEditor");
-		const workspaceCompanyEditorClose = document.getElementById("workspaceCompanyEditorClose");
-		const workspaceCompanyFicha = document.getElementById("workspaceCompanyFicha");
+const workspaceCompanyEditor = document.getElementById("workspaceCompanyEditor");
+const workspaceCompanyEditorClose = document.getElementById("workspaceCompanyEditorClose");
+const workspaceCompanyEditorContextName = document.getElementById("workspaceCompanyEditorContextName");
+const workspaceCompanyEditorContextMeta = document.getElementById("workspaceCompanyEditorContextMeta");
+const workspaceCompanyEditorOpenFicha = document.getElementById("workspaceCompanyEditorOpenFicha");
+const workspaceCompanyFicha = document.getElementById("workspaceCompanyFicha");
 		const workspaceCompanyFichaTitle = document.getElementById("workspaceCompanyFichaTitle");
 		const workspaceCompanyFichaSubtitle = document.getElementById("workspaceCompanyFichaSubtitle");
 		const workspaceCompanyFichaClose = document.getElementById("workspaceCompanyFichaClose");
@@ -7582,11 +7585,11 @@ const renderHomeGuidance = () => {
           <span class="muted">${escapeHtml(lastActivityDetail)}${lastAccessLabel ? ` · ${escapeHtml(lastAccessLabel)}` : ""}</span>
         </div>
       </div>
-      <a class="secondary home-guidance-primary-action" href="${escapeHtml(primaryActionHref)}" data-home-action="${escapeHtml(guidance.action?.type === "workspace" ? "continue-workspace" : guidance.action?.type === "service" ? "open-service" : guidance.action?.type === "holding" ? "open-workspaces" : "open-panel")}" ${guidance.action?.service ? `data-home-value="${escapeHtml(String(guidance.action.service || ""))}"` : ""}>${escapeHtml(primaryActionLabel)}</a>
+      <a class="btn home-guidance-primary-action" href="${escapeHtml(primaryActionHref)}" data-home-action="${escapeHtml(guidance.action?.type === "workspace" ? "continue-workspace" : guidance.action?.type === "service" ? "open-service" : guidance.action?.type === "holding" ? "open-workspaces" : "open-panel")}" ${guidance.action?.service ? `data-home-value="${escapeHtml(String(guidance.action.service || ""))}"` : ""}>${escapeHtml(primaryActionLabel)}</a>
     </div>
     <div class="home-guidance-search">
       <div class="home-guidance-search-head">
-        <label for="homeModuleSearch">Buscar módulo o vista</label>
+        <label for="homeModuleSearch">Buscar módulo, vista o servicio</label>
         <span class="muted">Encuentra áreas, accesos y servicios en segundos.</span>
       </div>
       <input id="homeModuleSearch" type="search" inputmode="search" autocomplete="off" placeholder="Hipotecas, Gestoría, RRHH, Documental..." data-home-module-search />
@@ -9046,13 +9049,13 @@ const setWorkspaceView = (view = "overview", options = {}) => {
   }
 
   if (normalized === "tenant") {
-    let desired = "general";
+    let desired = "empresas";
     try {
       desired = normalizeTenantSectionKey(localStorage.getItem("crm.workspaceTenantSection") || "");
     } catch {
-      desired = "general";
+      desired = "empresas";
     }
-    setWorkspaceTenantSection(state.currentWorkspaceTenantSection || desired, { persist: false });
+    setWorkspaceTenantSection(state.currentWorkspaceTenantSection || desired || "empresas", { persist: false });
   }
   if (normalized === "motores") {
     ensureWorkspaceEngineGroupBoot();
@@ -12604,6 +12607,48 @@ const resolveWorkspaceCompanyRowIds = (company = {}) => {
   };
 };
 
+const setWorkspaceCompanyEditorContext = (company = null) => {
+  const contextNameEl =
+    typeof workspaceCompanyEditorContextName !== "undefined" && workspaceCompanyEditorContextName
+      ? workspaceCompanyEditorContextName
+      : null;
+  const contextMetaEl =
+    typeof workspaceCompanyEditorContextMeta !== "undefined" && workspaceCompanyEditorContextMeta
+      ? workspaceCompanyEditorContextMeta
+      : null;
+  const openFichaBtn =
+    typeof workspaceCompanyEditorOpenFicha !== "undefined" && workspaceCompanyEditorOpenFicha
+      ? workspaceCompanyEditorOpenFicha
+      : null;
+  if (contextNameEl) {
+    contextNameEl.textContent = company
+      ? String(company.nombre || company.razon_social || "Empresa").trim() || "Empresa"
+      : "Selecciona una empresa";
+  }
+  if (contextMetaEl) {
+    if (!company) {
+      contextMetaEl.textContent = "El editor se quedará fijo a la vista mientras ajustas los datos de la empresa activa.";
+      return;
+    }
+    const parts = [];
+    const { legacyEmpresaId, workspaceCompanyId } = resolveWorkspaceCompanyRowIds(company);
+    const companyId = String(workspaceCompanyId || legacyEmpresaId || "").trim();
+    if (companyId) parts.push(`ID ${companyId}`);
+    if (company?.nif) parts.push(`CIF/NIF: ${company.nif}`);
+    if (company?.sector) parts.push(String(company.sector));
+    if (company?.convenio_nombre) parts.push(String(company.convenio_nombre));
+    contextMetaEl.textContent = parts.length
+      ? parts.join(" · ")
+      : "Edita dirección, contacto, sector, convenio, CNAE y branding.";
+  }
+  if (openFichaBtn) {
+    openFichaBtn.disabled = !company;
+    openFichaBtn.dataset.workspaceCompanyOpen = company
+      ? String(resolveWorkspaceCompanyRowIds(company).rowId || "")
+      : "";
+  }
+};
+
 const prefillWorkspaceCompanyEditorFromRow = (company) => {
   if (!workspaceCompanyEditor || !workspaceCompanyForm) return;
   const { legacyEmpresaId, workspaceCompanyId } = resolveWorkspaceCompanyRowIds(company);
@@ -12642,6 +12687,7 @@ const prefillWorkspaceCompanyEditorFromRow = (company) => {
     const src = String(company?.logo_url || "").trim();
     workspaceCompanyLogoPreview.src = src ? buildPhotoSrc(src) : "";
   }
+  setWorkspaceCompanyEditorContext(company);
   workspaceCompanyEditor.classList.remove("hidden");
 };
 
@@ -13420,6 +13466,10 @@ const renderWorkspaceCompanies = (rows = []) => {
 	      const workspaceCompanyId = String(button.dataset.workspaceCompanyEditWorkspaceId || "").trim();
 	      const companyId = legacyCompanyId || workspaceCompanyId;
 	      if (!companyId) return;
+        const companyRow =
+          items.find((row) => String(resolveWorkspaceCompanyRowIds(row).rowId || "") === String(companyId || ""))
+          || getWorkspaceCompanyById(companyId)
+          || null;
 	      workspaceCompanyEditor.classList.remove("hidden");
 	      if (workspaceCompanyFormStatus) workspaceCompanyFormStatus.textContent = "";
 	      const set = (name, value) => {
@@ -13458,6 +13508,11 @@ const renderWorkspaceCompanies = (rows = []) => {
 	          workspaceCompanyLogoPreview.src = safeSrc;
 	          workspaceCompanyLogoPreview.classList.toggle("hidden", !safeSrc);
 	        }
+        setWorkspaceCompanyEditorContext(companyRow || {
+          nombre: String(button.dataset.workspaceCompanyEditName || ""),
+          razon_social: String(button.dataset.workspaceCompanyEditRazon || ""),
+          nif: String(button.dataset.workspaceCompanyEditNif || ""),
+        });
 		      if (typeof workspaceCompanyEditor.scrollIntoView === "function") {
 		        workspaceCompanyEditor.scrollIntoView({ behavior: "smooth", block: "start" });
 		      }
@@ -25992,10 +26047,12 @@ const clearCurrentWorkspaceUi = () => {
   state.currentWorkspaceClientId = "";
   state.currentWorkspaceClientData = null;
   state.currentWorkspaceClients = [];
+  state.currentWorkspaceTenantSection = "";
   state.currentWorkspaceData = {};
   state.workspaceTimeUsers = [];
   state.workspaceTimeEmployees = [];
   state.workspaceTimeSummary = null;
+  setWorkspaceCompanyEditorContext(null);
   fillWorkspaceForm({});
   renderWorkspaceHealth({});
   renderWorkspaceCommercialPack({}, {});
@@ -84615,6 +84672,15 @@ if (workspaceCompanyEditorClose && workspaceCompanyEditor) {
     if (workspaceCompanyLogoStatus) workspaceCompanyLogoStatus.textContent = "";
     if (workspaceCompanyLogoPreview) workspaceCompanyLogoPreview.src = "";
     if (workspaceCompanyLogoFile) workspaceCompanyLogoFile.value = "";
+    setWorkspaceCompanyEditorContext(null);
+  });
+}
+
+if (workspaceCompanyEditorOpenFicha) {
+  workspaceCompanyEditorOpenFicha.addEventListener("click", () => {
+    const companyId = String(workspaceCompanyEditorOpenFicha.dataset.workspaceCompanyOpen || "").trim();
+    if (!companyId) return;
+    openWorkspaceCompanyFicha(companyId, "dashboard").catch(() => {});
   });
 }
 
