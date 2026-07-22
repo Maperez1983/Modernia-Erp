@@ -4991,6 +4991,8 @@ const normalizeWorkspaceServiceKey = (value) => {
   if (!raw) return "";
   if (raw === "hipotecas" || raw === "financiacion") return "financiaciones";
   if (raw === "administracion fincas" || raw === "administracion de fincas" || raw === "admin de fincas") return "fincas";
+  if (raw === "comunidades" || raw === "comunidad") return "fincas";
+  if (raw.includes("comunidad")) return "fincas";
   if (raw.includes("fincas")) return "fincas";
   return raw;
 };
@@ -5013,6 +5015,7 @@ const resolveWorkspaceModuleKeyFromAdminServiceLabel = (label = "") => {
   if (normalized.includes("seguros")) return "seguros";
   if (normalized.includes("inmobiliaria")) return "inmobiliaria";
   if (normalized.includes("financi") || normalized.includes("hipotec")) return "financiacion";
+  if (normalized.includes("comunidad")) return "fincas";
   if (normalized.includes("fincas")) return "fincas";
   if (normalized.includes("reformas") || normalized.includes("obras")) return "reformas";
   return "";
@@ -5062,6 +5065,7 @@ const parseAdminServices = (value) => {
   keys.forEach((key) => {
     if (key === "hipotecas") key = "financiaciones";
     if (key === "administracion de fincas") key = "administracion fincas";
+    if (key === "comunidades" || key === "comunidad" || key.includes("comunidad")) key = "fincas";
     if (["administracion fincas", "administracion de fincas", "admin de fincas"].includes(key)) key = "fincas";
     const label = ADMIN_SERVICE_BY_KEY[key] || getServiceLabelFromNormalized(key) || key;
     if (label && !ordered.includes(label)) {
@@ -5112,6 +5116,7 @@ const expandServiceAliases = (services) => {
     if (key.includes("inmobili")) set.add("inmobiliaria");
     if (key.includes("seguro")) set.add("seguros");
     if (key.includes("gestor")) set.add("gestoria");
+    if (key.includes("comunidad")) set.add("fincas");
     if (key.includes("finca")) set.add("fincas");
     if (key.includes("hipotec") || key.includes("financi")) set.add("financiaciones");
   });
@@ -19605,7 +19610,7 @@ const stringifyWorkspaceBudgetLines = (lines = []) =>
     .join("\n");
 
 const computeWorkspaceBudgetTotals = ({ servicio = "", subtotal = "", impuestos = "", lineas = [], num_vecinos = "", num_locales = "", num_trasteros = "", num_aparcamientos = "" } = {}) => {
-  const normalizedService = String(servicio || "").trim().toLowerCase();
+  const normalizedService = normalizeBudgetServiceKey(servicio || "");
   const lineSubtotal = (Array.isArray(lineas) ? lineas : []).reduce((sum, line) => {
     const cantidad = Number(line.cantidad || 0) || 0;
     const precio = Number(line.precio_unitario || 0) || 0;
@@ -19675,13 +19680,13 @@ const renderWorkspaceBudgetSummary = (rows = []) => {
 };
 
 const getWorkspaceBudgetTemplatesForService = (service) => {
-  const key = String(service || "").trim().toLowerCase();
+  const key = normalizeBudgetServiceKey(service || "");
   return WORKSPACE_BUDGET_TEMPLATES[key] || WORKSPACE_BUDGET_TEMPLATES.gestoria;
 };
 
 const applyWorkspaceBudgetServiceMode = () => {
   if (!workspaceBudgetForm) return;
-  const service = String(workspaceBudgetForm.querySelector('[name="servicio"]')?.value || "gestoria").trim().toLowerCase();
+  const service = normalizeBudgetServiceKey(workspaceBudgetForm.querySelector('[name="servicio"]')?.value || "gestoria");
   const templates = getWorkspaceBudgetTemplatesForService(service);
   if (workspaceBudgetTemplateSelect) {
     const current = String(workspaceBudgetTemplateSelect.value || "").trim();
@@ -19710,7 +19715,7 @@ const applyWorkspaceBudgetServiceMode = () => {
 
 const applyWorkspaceBudgetTemplate = ({ force = false } = {}) => {
   if (!workspaceBudgetForm || !workspaceBudgetTemplateSelect) return;
-  const service = String(workspaceBudgetForm.querySelector('[name="servicio"]')?.value || "gestoria").trim().toLowerCase();
+  const service = normalizeBudgetServiceKey(workspaceBudgetForm.querySelector('[name="servicio"]')?.value || "gestoria");
   const templates = getWorkspaceBudgetTemplatesForService(service);
   const template = templates.find((item) => item.key === String(workspaceBudgetTemplateSelect.value || "").trim()) || templates[0];
   if (!template) return;
@@ -19804,7 +19809,7 @@ const renderWorkspaceBudgetList = (rows = []) => {
             <span>${row.estado || "Borrador"}</span>
             <a class="secondary ghost button-inline" href="/api/workspace_presupuesto_pdf?id=${encodeURIComponent(row.id || "")}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}" target="_blank" rel="noreferrer">PDF</a>
             ${normalizeSimple(row.estado || "") === "aceptado" ? `<a class="secondary ghost button-inline" href="/api/workspace_presupuesto_encargo_pdf?id=${encodeURIComponent(row.id || "")}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}" target="_blank" rel="noreferrer">Encargo</a>` : ""}
-            ${normalizeSimple(row.estado || "") === "aceptado" && normalizeSimple(row.servicio || "") === "fincas" ? `<button type="button" class="secondary ghost" data-budget-contract="${row.id}">Contrato</button>` : ""}
+            ${normalizeSimple(row.estado || "") === "aceptado" && normalizeBudgetServiceKey(row.servicio || "") === "fincas" ? `<button type="button" class="secondary ghost" data-budget-contract="${row.id}">Contrato</button>` : ""}
             ${normalizeSimple(row.estado || "") !== "estudio" ? `<button type="button" class="secondary ghost" data-budget-status="${row.id}" data-budget-next="Estudio">Estudio</button>` : ""}
             ${normalizeSimple(row.estado || "") !== "aceptado" ? `<button type="button" class="secondary ghost" data-budget-status="${row.id}" data-budget-next="Aceptado">Aceptar</button>` : ""}
             ${normalizeSimple(row.estado || "") !== "rechazado" ? `<button type="button" class="secondary ghost" data-budget-status="${row.id}" data-budget-next="Rechazado">Rechazar</button>` : ""}
@@ -23806,6 +23811,7 @@ const normalizeBudgetServiceKey = (value = "") => {
   if (!raw) return "";
   if (raw.includes("fincas")) return "fincas";
   if (raw.includes("administracion") && raw.includes("finc")) return "fincas";
+  if (raw.includes("comunidad")) return "fincas";
   if (raw.includes("gestoria")) return "gestoria";
   if (raw.includes("seguro")) return "seguros";
   if (raw.includes("inmo")) return "inmobiliaria";
@@ -40905,7 +40911,8 @@ const updateGestoriaModuleTabsFromForm = () => {
 
 const syncEmpresaFromServicio = (service) => {
   if (!clientesEmpresaSelect || !service) return;
-  const matrixDefaultId = getWorkspaceDefaultCompanyIdForServiceKey(normalizeWorkspaceServiceKey(service));
+  const serviceKey = normalizeWorkspaceServiceKey(service);
+  const matrixDefaultId = getWorkspaceDefaultCompanyIdForServiceKey(serviceKey);
   if (matrixDefaultId) {
     const matchById = state.empresas.find((e) => String(e.id || "") === String(matrixDefaultId));
     if (matchById) {
@@ -40913,7 +40920,7 @@ const syncEmpresaFromServicio = (service) => {
       return;
     }
   }
-  const targetName = SERVICE_COMPANY_MAP[service];
+  const targetName = SERVICE_COMPANY_MAP[getServiceLabelFromNormalized(serviceKey) || service];
   if (!targetName) return;
   const match = state.empresas.find((e) => e.nombre === targetName);
   if (match) {
@@ -40932,7 +40939,8 @@ const populateEmpresasSelect = (selectEl) => {
 
 const syncAssignEmpresaFromServicio = (service) => {
   if (!clienteAssignEmpresa || !service) return;
-  const matrixDefaultId = getWorkspaceDefaultCompanyIdForServiceKey(normalizeWorkspaceServiceKey(service));
+  const serviceKey = normalizeWorkspaceServiceKey(service);
+  const matrixDefaultId = getWorkspaceDefaultCompanyIdForServiceKey(serviceKey);
   if (matrixDefaultId) {
     const matchById = state.empresas.find((e) => String(e.id || "") === String(matrixDefaultId));
     if (matchById) {
@@ -40940,7 +40948,7 @@ const syncAssignEmpresaFromServicio = (service) => {
       return;
     }
   }
-  const targetName = SERVICE_COMPANY_MAP[service];
+  const targetName = SERVICE_COMPANY_MAP[getServiceLabelFromNormalized(serviceKey) || service];
   if (!targetName) return;
   const match = state.empresas.find((e) => e.nombre === targetName);
   if (match) {

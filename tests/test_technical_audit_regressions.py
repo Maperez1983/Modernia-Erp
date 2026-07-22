@@ -573,8 +573,510 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
         self.assertEqual(facturacion_calls[0]["ejercicio"], "2026")
         self.assertEqual(
             facturacion_calls[1]["servicio_keys"],
-            {"administracion fincas", "administración fincas"},
+            {
+                "fincas",
+                "administracion fincas",
+                "administración fincas",
+                "administracion de fincas",
+                "administración de fincas",
+                "admin fincas",
+                "admin de fincas",
+            },
         )
+
+    def test_compute_workspace_rrhh_productividad_facturacion_anual_matches_real_fincas_label(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE workspace_registro_personal (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              nombre TEXT,
+              usuario_id TEXT
+            );
+            CREATE TABLE usuarios (
+              id TEXT PRIMARY KEY,
+              usuario TEXT,
+              email TEXT,
+              nombre TEXT,
+              apellido TEXT
+            );
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              nombre TEXT,
+              nif TEXT,
+              captado_por_user_id TEXT,
+              procedencia_canal TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              captado_por_user_id TEXT,
+              procedencia_canal TEXT
+            );
+            CREATE TABLE workspace_facturacion (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              empresa_id TEXT NOT NULL,
+              cliente_id TEXT,
+              servicio TEXT,
+              fecha_emision TEXT,
+              responsable TEXT,
+              subtotal REAL,
+              cobrada INTEGER
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO workspace_registro_personal (id, workspace_id, nombre, usuario_id) VALUES (?, ?, ?, ?)",
+            ("p-1", "ws-1", "Persona Demo", "u-1"),
+        )
+        conn.execute(
+            "INSERT INTO usuarios (id, usuario, email, nombre, apellido) VALUES (?, ?, ?, ?, ?)",
+            ("u-1", "mper", "mper@example.com", "Miguel", "Perez"),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, nombre, nif, captado_por_user_id, procedencia_canal) VALUES (?, ?, ?, ?, ?)",
+            ("c-fincas", "Cliente Fincas", "22222222B", "u-1", "web"),
+        )
+        conn.execute(
+            "INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio, captado_por_user_id, procedencia_canal) VALUES (?, ?, ?, ?, ?, ?)",
+            ("ce-fincas", "c-fincas", "emp-1", "Administración de fincas", "u-1", "web"),
+        )
+        conn.execute(
+            """
+            INSERT INTO workspace_facturacion (
+              id, workspace_id, empresa_id, cliente_id, servicio, fecha_emision, responsable, subtotal, cobrada
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("f-fincas", "ws-1", "emp-1", "c-fincas", "Administración de fincas", "2026-02-20", "", 200.0, 0),
+        )
+
+        try:
+            result = server.compute_workspace_rrhh_productividad(
+                conn,
+                "ws-1",
+                "emp-1",
+                "p-1",
+                "administración fincas",
+                ejercicio="2026",
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual(result["kpis"]["clientes"], 1)
+        self.assertEqual(result["kpis"]["facturado_total"], 200.0)
+        self.assertEqual(result["kpis"]["comision_total"], 20.0)
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["items"][0]["cliente_nombre"], "Cliente Fincas")
+
+    def test_compute_workspace_rrhh_productividad_facturacion_anual_matches_commercial_fincas_label(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE workspace_registro_personal (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              nombre TEXT,
+              usuario_id TEXT
+            );
+            CREATE TABLE usuarios (
+              id TEXT PRIMARY KEY,
+              usuario TEXT,
+              email TEXT,
+              nombre TEXT,
+              apellido TEXT
+            );
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              nombre TEXT,
+              nif TEXT,
+              captado_por_user_id TEXT,
+              procedencia_canal TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              captado_por_user_id TEXT,
+              procedencia_canal TEXT
+            );
+            CREATE TABLE workspace_facturacion (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              empresa_id TEXT NOT NULL,
+              cliente_id TEXT,
+              servicio TEXT,
+              fecha_emision TEXT,
+              responsable TEXT,
+              subtotal REAL,
+              cobrada INTEGER
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO workspace_registro_personal (id, workspace_id, nombre, usuario_id) VALUES (?, ?, ?, ?)",
+            ("p-1", "ws-1", "Persona Demo", "u-1"),
+        )
+        conn.execute(
+            "INSERT INTO usuarios (id, usuario, email, nombre, apellido) VALUES (?, ?, ?, ?, ?)",
+            ("u-1", "mper", "mper@example.com", "Miguel", "Perez"),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, nombre, nif, captado_por_user_id, procedencia_canal) VALUES (?, ?, ?, ?, ?)",
+            ("c-admin-fincas", "Cliente Alias", "33333333C", "u-1", "web"),
+        )
+        conn.execute(
+            "INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio, captado_por_user_id, procedencia_canal) VALUES (?, ?, ?, ?, ?, ?)",
+            ("ce-admin-fincas", "c-admin-fincas", "emp-1", "Administracion Fincas Velazquez", "u-1", "web"),
+        )
+        conn.execute(
+            """
+            INSERT INTO workspace_facturacion (
+              id, workspace_id, empresa_id, cliente_id, servicio, fecha_emision, responsable, subtotal, cobrada
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("f-admin-fincas", "ws-1", "emp-1", "c-admin-fincas", "Administracion Fincas Velazquez", "2026-03-20", "", 150.0, 1),
+        )
+
+        try:
+            result = server.compute_workspace_rrhh_productividad(
+                conn,
+                "ws-1",
+                "emp-1",
+                "p-1",
+                "admin fincas",
+                ejercicio="2026",
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual(result["kpis"]["clientes"], 1)
+        self.assertEqual(result["kpis"]["facturado_total"], 150.0)
+        self.assertEqual(result["kpis"]["comision_total"], 15.0)
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["items"][0]["cliente_nombre"], "Cliente Alias")
+
+    def test_compute_workspace_rrhh_productividad_facturacion_anual_uses_clientes_empresas_capture_for_commercial_fincas_label(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE workspace_registro_personal (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              nombre TEXT,
+              usuario_id TEXT
+            );
+            CREATE TABLE usuarios (
+              id TEXT PRIMARY KEY,
+              usuario TEXT,
+              email TEXT,
+              nombre TEXT,
+              apellido TEXT
+            );
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              nombre TEXT,
+              nif TEXT,
+              captado_por_user_id TEXT,
+              procedencia_canal TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              captado_por_user_id TEXT,
+              procedencia_canal TEXT
+            );
+            CREATE TABLE workspace_facturacion (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              empresa_id TEXT NOT NULL,
+              cliente_id TEXT,
+              servicio TEXT,
+              fecha_emision TEXT,
+              responsable TEXT,
+              subtotal REAL,
+              cobrada INTEGER
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO workspace_registro_personal (id, workspace_id, nombre, usuario_id) VALUES (?, ?, ?, ?)",
+            ("p-1", "ws-1", "Persona Demo", "u-1"),
+        )
+        conn.execute(
+            "INSERT INTO usuarios (id, usuario, email, nombre, apellido) VALUES (?, ?, ?, ?, ?)",
+            ("u-1", "mper", "mper@example.com", "Miguel", "Perez"),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, nombre, nif, captado_por_user_id, procedencia_canal) VALUES (?, ?, ?, ?, ?)",
+            ("c-admin-fincas", "Cliente Alias", "44444444D", None, "web"),
+        )
+        conn.execute(
+            "INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio, captado_por_user_id, procedencia_canal) VALUES (?, ?, ?, ?, ?, ?)",
+            ("ce-admin-fincas", "c-admin-fincas", "emp-1", "Administracion Fincas Velazquez", "u-1", "web"),
+        )
+        conn.execute(
+            """
+            INSERT INTO workspace_facturacion (
+              id, workspace_id, empresa_id, cliente_id, servicio, fecha_emision, responsable, subtotal, cobrada
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("f-admin-fincas", "ws-1", "emp-1", "c-admin-fincas", "Administracion Fincas Velazquez", "2026-03-20", "", 150.0, 1),
+        )
+
+        try:
+            result = server.compute_workspace_rrhh_productividad(
+                conn,
+                "ws-1",
+                "emp-1",
+                "p-1",
+                "admin fincas",
+                ejercicio="2026",
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual(result["kpis"]["clientes"], 1)
+        self.assertEqual(result["kpis"]["facturado_total"], 150.0)
+        self.assertEqual(result["kpis"]["comision_total"], 15.0)
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["items"][0]["cliente_nombre"], "Cliente Alias")
+
+    def test_compute_workspace_rrhh_productividad_facturacion_anual_matches_community_alias_label(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE workspace_registro_personal (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              nombre TEXT,
+              usuario_id TEXT
+            );
+            CREATE TABLE usuarios (
+              id TEXT PRIMARY KEY,
+              usuario TEXT,
+              email TEXT,
+              nombre TEXT,
+              apellido TEXT
+            );
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              nombre TEXT,
+              nif TEXT,
+              captado_por_user_id TEXT,
+              procedencia_canal TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              captado_por_user_id TEXT,
+              procedencia_canal TEXT
+            );
+            CREATE TABLE workspace_facturacion (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              empresa_id TEXT NOT NULL,
+              cliente_id TEXT,
+              servicio TEXT,
+              fecha_emision TEXT,
+              responsable TEXT,
+              subtotal REAL,
+              cobrada INTEGER
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO workspace_registro_personal (id, workspace_id, nombre, usuario_id) VALUES (?, ?, ?, ?)",
+            ("p-1", "ws-1", "Persona Demo", "u-1"),
+        )
+        conn.execute(
+            "INSERT INTO usuarios (id, usuario, email, nombre, apellido) VALUES (?, ?, ?, ?, ?)",
+            ("u-1", "mper", "mper@example.com", "Miguel", "Perez"),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, nombre, nif, captado_por_user_id, procedencia_canal) VALUES (?, ?, ?, ?, ?)",
+            ("c-comunidades", "Cliente Comunidad", "55555555E", None, "web"),
+        )
+        conn.execute(
+            "INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio, captado_por_user_id, procedencia_canal) VALUES (?, ?, ?, ?, ?, ?)",
+            ("ce-comunidades", "c-comunidades", "emp-1", "Comunidad de propietarios Velazquez", "u-1", "web"),
+        )
+        conn.execute(
+            """
+            INSERT INTO workspace_facturacion (
+              id, workspace_id, empresa_id, cliente_id, servicio, fecha_emision, responsable, subtotal, cobrada
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("f-comunidades", "ws-1", "emp-1", "c-comunidades", "Comunidad de propietarios Velazquez", "2026-04-10", "", 180.0, 1),
+        )
+
+        try:
+            result = server.compute_workspace_rrhh_productividad(
+                conn,
+                "ws-1",
+                "emp-1",
+                "p-1",
+                "fincas",
+                ejercicio="2026",
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual(result["kpis"]["clientes"], 1)
+        self.assertEqual(result["kpis"]["facturado_total"], 180.0)
+        self.assertEqual(result["kpis"]["comision_total"], 18.0)
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["items"][0]["cliente_nombre"], "Cliente Comunidad")
+
+    def test_compute_workspace_rrhh_productividad_facturacion_anual_uses_clientes_empresas_capture_for_community_label(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE workspace_registro_personal (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              nombre TEXT,
+              usuario_id TEXT
+            );
+            CREATE TABLE usuarios (
+              id TEXT PRIMARY KEY,
+              usuario TEXT,
+              email TEXT,
+              nombre TEXT,
+              apellido TEXT
+            );
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              nombre TEXT,
+              nif TEXT,
+              captado_por_user_id TEXT,
+              procedencia_canal TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              servicio TEXT,
+              captado_por_user_id TEXT,
+              procedencia_canal TEXT
+            );
+            CREATE TABLE workspace_facturacion (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              empresa_id TEXT NOT NULL,
+              cliente_id TEXT,
+              servicio TEXT,
+              fecha_emision TEXT,
+              responsable TEXT,
+              subtotal REAL,
+              cobrada INTEGER
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO workspace_registro_personal (id, workspace_id, nombre, usuario_id) VALUES (?, ?, ?, ?)",
+            ("p-1", "ws-1", "Persona Demo", "u-1"),
+        )
+        conn.execute(
+            "INSERT INTO usuarios (id, usuario, email, nombre, apellido) VALUES (?, ?, ?, ?, ?)",
+            ("u-1", "mper", "mper@example.com", "Miguel", "Perez"),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, nombre, nif, captado_por_user_id, procedencia_canal) VALUES (?, ?, ?, ?, ?)",
+            ("c-comunidades", "Cliente Comunidad", "55555555E", None, "web"),
+        )
+        conn.execute(
+            "INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio, captado_por_user_id, procedencia_canal) VALUES (?, ?, ?, ?, ?, ?)",
+            ("ce-comunidades", "c-comunidades", "emp-1", "Comunidades Velazquez", "u-1", "web"),
+        )
+        conn.execute(
+            """
+            INSERT INTO workspace_facturacion (
+              id, workspace_id, empresa_id, cliente_id, servicio, fecha_emision, responsable, subtotal, cobrada
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("f-comunidades", "ws-1", "emp-1", "c-comunidades", "Comunidades Velazquez", "2026-04-10", "", 180.0, 1),
+        )
+
+        try:
+            result = server.compute_workspace_rrhh_productividad(
+                conn,
+                "ws-1",
+                "emp-1",
+                "p-1",
+                "fincas",
+                ejercicio="2026",
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual(result["kpis"]["clientes"], 1)
+        self.assertEqual(result["kpis"]["facturado_total"], 180.0)
+        self.assertEqual(result["kpis"]["comision_total"], 18.0)
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["items"][0]["cliente_nombre"], "Cliente Comunidad")
+
+    def test_gestoria_service_sql_condition_matches_full_fincas_label(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              servicio TEXT
+            );
+            """
+        )
+        conn.executemany(
+            "INSERT INTO clientes_empresas (id, servicio) VALUES (?, ?)",
+            [
+                ("ce-1", "gestoria"),
+                ("ce-2", "administración de fincas"),
+                ("ce-3", "Administracion Fincas Velazquez"),
+            ],
+        )
+
+        clause = server.gestoria_service_sql_condition("ce")
+        row = conn.execute(
+            f"SELECT COUNT(*) AS total FROM clientes_empresas ce WHERE {clause}"
+        ).fetchone()
+        conn.close()
+
+        self.assertEqual(row["total"], 3)
+
+    def test_gestoria_service_sql_condition_matches_community_label(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              servicio TEXT
+            );
+            """
+        )
+        conn.execute("INSERT INTO clientes_empresas (id, servicio) VALUES (?, ?)", ("ce-1", "Comunidades Velazquez"))
+
+        clause = server.gestoria_service_sql_condition("ce")
+        row = conn.execute(
+            f"SELECT COUNT(*) AS total FROM clientes_empresas ce WHERE {clause}"
+        ).fetchone()
+        conn.close()
+
+        self.assertEqual(row["total"], 1)
 
     def test_resolve_seguros_ocr_cliente_id_scopes_nif_and_name_by_empresa(self):
         conn = sqlite3.connect(":memory:")
@@ -923,6 +1425,130 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
 
         self.assertEqual(cliente_id, "c-right")
         self.assertEqual(cliente_nombre, "Cliente Presupuesto")
+
+    def test_workspace_budget_action_service_keeps_fincas_separate_from_gestoria(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE acciones (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              servicio TEXT,
+              cliente_id TEXT,
+              cliente_nombre TEXT,
+              fecha TEXT,
+              tipo TEXT,
+              responsable TEXT,
+              estado TEXT,
+              notas TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+
+        gestoria_service = server.workspace_budget_action_service("gestoria")
+        fincas_service = server.workspace_budget_action_service("administración fincas")
+        self.assertEqual(gestoria_service, "gestoria")
+        self.assertEqual(fincas_service, "fincas")
+
+        action_id = server.upsert_workspace_budget_action(
+            conn,
+            empresa_id="emp-1",
+            servicio=fincas_service,
+            cliente_id="c-1",
+            cliente_nombre="Cliente Fincas",
+            fecha="2026-03-05",
+            tipo="Seguimiento",
+            responsable="Persona Demo",
+            estado="Pendiente",
+            notas="Seguimiento de fincas",
+            now="2026-03-05T10:00:00+00:00",
+        )
+        row = conn.execute("SELECT servicio, cliente_nombre, tipo FROM acciones WHERE id = ?", (action_id,)).fetchone()
+        conn.close()
+
+        self.assertEqual(row["servicio"], "fincas")
+        self.assertEqual(row["cliente_nombre"], "Cliente Fincas")
+        self.assertEqual(row["tipo"], "Seguimiento")
+
+    def test_fetch_empresa_presupuestos_includes_legacy_fincas_labels(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE empresas (
+              id TEXT PRIMARY KEY,
+              nombre TEXT
+            );
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              nombre TEXT
+            );
+            CREATE TABLE workspace_presupuestos (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT,
+              empresa_id TEXT,
+              cliente_id TEXT,
+              servicio TEXT,
+              titulo TEXT,
+              estado TEXT,
+              fecha TEXT,
+              fecha_seguimiento TEXT,
+              encargo_estado TEXT,
+              fecha_encargo TEXT,
+              total REAL,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE workspace_presupuesto_lineas (
+              id TEXT PRIMARY KEY,
+              presupuesto_id TEXT,
+              orden INTEGER,
+              categoria TEXT,
+              concepto TEXT,
+              cantidad REAL,
+              unidad TEXT,
+              precio_unitario REAL,
+              descuento_pct REAL,
+              total_linea REAL,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+        conn.executemany(
+            "INSERT INTO empresas (id, nombre) VALUES (?, ?)",
+            [("emp-1", "Empresa Demo")],
+        )
+        conn.executemany(
+            "INSERT INTO clientes (id, nombre) VALUES (?, ?)",
+            [("c-1", "Cliente Uno"), ("c-2", "Cliente Dos"), ("c-3", "Cliente Tres"), ("c-4", "Cliente Cuatro")],
+        )
+        conn.executemany(
+            """
+            INSERT INTO workspace_presupuestos (
+              id, workspace_id, empresa_id, cliente_id, servicio, titulo, estado, fecha, fecha_seguimiento,
+              encargo_estado, fecha_encargo, total, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                ("p-1", "ws-1", "emp-1", "c-1", "administración de fincas", "Propuesta Acústica", "Estudio", "2026-01-10", "2026-01-11", "", "", 100.0, "2026-01-10", "2026-01-10"),
+                ("p-2", "ws-1", "emp-1", "c-2", "admin de fincas", "Propuesta Alias", "Estudio", "2026-01-12", "2026-01-13", "", "", 200.0, "2026-01-12", "2026-01-12"),
+                ("p-3", "ws-1", "emp-1", "c-3", "Fincas Velazquez", "Propuesta Comercial", "Estudio", "2026-01-14", "2026-01-15", "", "", 300.0, "2026-01-14", "2026-01-14"),
+                ("p-4", "ws-1", "emp-1", "c-4", "Gestoría", "Propuesta Gestoria", "Estudio", "2026-01-16", "2026-01-17", "", "", 400.0, "2026-01-16", "2026-01-16"),
+            ],
+        )
+
+        try:
+            result = server.fetch_empresa_presupuestos(conn, "emp-1", servicio="fincas")
+        finally:
+            conn.close()
+
+        titles = {row["titulo"] for row in result["rows"]}
+        self.assertEqual(titles, {"Propuesta Acústica", "Propuesta Alias", "Propuesta Comercial"})
+        self.assertEqual(len(result["rows"]), 3)
 
     def test_fetch_workspace_company_ids_does_not_backfill_every_company(self):
         conn = sqlite3.connect(":memory:")

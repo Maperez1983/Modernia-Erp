@@ -4019,7 +4019,8 @@ def gestoria_service_sql_condition(alias):
         f"(LOWER(COALESCE({alias}.servicio, '')) IN "
         "('gestoria', 'gestoría', 'administracion fincas', 'administración fincas') "
         f"OR LOWER(COALESCE({alias}.servicio, '')) LIKE '%gestor%' "
-        f"OR LOWER(COALESCE({alias}.servicio, '')) LIKE '%finca%')"
+        f"OR LOWER(COALESCE({alias}.servicio, '')) LIKE '%finca%' "
+        f"OR LOWER(COALESCE({alias}.servicio, '')) LIKE '%comunidad%')"
     )
 
 
@@ -31954,8 +31955,22 @@ def compute_workspace_rrhh_productividad_facturacion_anual(conn, workspace_id, e
         return {"kpis": {}, "items": []}
     placeholders = ",".join(["?"] * len(keys))
 
-    where = ["f.workspace_id = ?", "f.empresa_id = ?", f"LOWER(TRIM(COALESCE(f.servicio,''))) IN ({placeholders})"]
-    values = [*keys, workspace_id, empresa_id, *keys]
+    service_join_clauses = [f"LOWER(TRIM(COALESCE(ce.servicio,''))) IN ({placeholders})"]
+    service_where_clauses = [f"LOWER(TRIM(COALESCE(f.servicio,''))) IN ({placeholders})"]
+    join_values = [*keys]
+    where_values = [*keys]
+    if any("finca" in key for key in keys):
+        service_join_clauses.append("LOWER(TRIM(COALESCE(ce.servicio,''))) LIKE ?")
+        service_where_clauses.append("LOWER(TRIM(COALESCE(f.servicio,''))) LIKE ?")
+        join_values.append("%finca%")
+        where_values.append("%finca%")
+        service_join_clauses.append("LOWER(TRIM(COALESCE(ce.servicio,''))) LIKE ?")
+        service_where_clauses.append("LOWER(TRIM(COALESCE(f.servicio,''))) LIKE ?")
+        join_values.append("%comunidad%")
+        where_values.append("%comunidad%")
+    service_join_sql = "(" + " OR ".join(service_join_clauses) + ")"
+    values = [*join_values, workspace_id, empresa_id, *where_values]
+    where = ["f.workspace_id = ?", "f.empresa_id = ?", "(" + " OR ".join(service_where_clauses) + ")"]
     if ejercicio_val:
         where.append("SUBSTR(NULLIF(f.fecha_emision,''), 1, 4) = ?")
         values.append(ejercicio_val)
@@ -31979,7 +31994,7 @@ def compute_workspace_rrhh_productividad_facturacion_anual(conn, workspace_id, e
         LEFT JOIN clientes_empresas ce
           ON ce.cliente_id = f.cliente_id
          AND ce.empresa_id = f.empresa_id
-         AND LOWER(TRIM(COALESCE(ce.servicio,''))) IN ({placeholders})
+         AND {service_join_sql}
         WHERE {' AND '.join(where)}
           AND COALESCE(f.cliente_id,'') != ''
         GROUP BY f.cliente_id, COALESCE(f.responsable,''), COALESCE(ce.captado_por_user_id, c.captado_por_user_id, '')
@@ -32064,12 +32079,21 @@ def compute_workspace_rrhh_productividad(conn, workspace_id, empresa_id, persona
             ejercicio=ejercicio,
         )
     if service_key in {"fincas", "administracion fincas", "administración fincas"}:
+        fincas_service_keys = {
+            "fincas",
+            "administracion fincas",
+            "administración fincas",
+            "administracion de fincas",
+            "administración de fincas",
+            "admin fincas",
+            "admin de fincas",
+        }
         return compute_workspace_rrhh_productividad_facturacion_anual(
             conn,
             workspace_id,
             empresa_id,
             persona_id,
-            servicio_keys={"administracion fincas", "administración fincas"},
+            servicio_keys=fincas_service_keys,
             ejercicio=ejercicio,
         )
     return {"kpis": {}, "items": []}
@@ -40111,7 +40135,7 @@ def fetch_workspace_gestoria_overview(conn, workspace_id, empresa_id=None):
             LEFT JOIN clientes c ON c.id = p.cliente_id
             WHERE p.workspace_id = ?
               AND p.empresa_id IN ({placeholders})
-              AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
+              AND {gestoria_service_sql_condition("p")}
               AND LOWER(COALESCE(p.estado, '')) = 'estudio'
             ORDER BY COALESCE(p.fecha_seguimiento, p.fecha, p.updated_at) ASC
             LIMIT 12
@@ -44966,8 +44990,10 @@ def workspace_budget_service_label(servicio):
 
 def workspace_budget_action_service(servicio):
     key = normalize_service_key(servicio or "")
-    if key in {"gestoria", "fincas", "administracion fincas"}:
+    if key == "gestoria":
         return "gestoria"
+    if key in {"fincas", "administracion fincas"}:
+        return "fincas"
     return key or "gestoria"
 
 
@@ -45331,7 +45357,21 @@ def fetch_empresa_presupuestos(conn, empresa_id, servicio=None, estado=None, lim
     params = [empresa_id]
     if servicio_key and servicio_key not in {"all", "*"}:
         if servicio_key == "fincas":
-            where.append("LOWER(COALESCE(p.servicio, '')) IN ('fincas', 'administracion fincas', 'administracion de fincas')")
+            where.append(
+                "("
+                "LOWER(COALESCE(p.servicio, '')) IN ("
+                "'fincas', "
+                "'administracion fincas', "
+                "'administracion de fincas', "
+                "'administración fincas', "
+                "'administración de fincas', "
+                "'admin fincas', "
+                "'admin de fincas'"
+                ") "
+                "OR LOWER(COALESCE(p.servicio, '')) LIKE '%finca%' "
+                "OR LOWER(COALESCE(p.servicio, '')) LIKE '%comunidad%'"
+                ")"
+            )
         elif servicio_key == "gestoria":
             where.append("LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'gestoría')")
         else:
@@ -85892,9 +85932,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "empresa_id y cliente_id requeridos"}, status=400)
                 return
             ejercicio_val = ejercicio if re.match(r"^20[0-9]{2}$", ejercicio or "") else ""
-            service_filter = (
-                "LOWER(servicio) IN ('gestoria', 'gestoría', 'administracion fincas', 'administración fincas')"
-            )
+            service_filter = gestoria_service_sql_condition("clientes_empresas")
             cliente_row = conn.execute(
                 "SELECT id, nombre, nif, estado, updated_at, created_at FROM clientes WHERE id = ? LIMIT 1",
                 (cliente_id,),
@@ -86403,7 +86441,7 @@ class Handler(BaseHTTPRequestHandler):
                     FROM workspace_presupuestos p
                     LEFT JOIN clientes c ON c.id = p.cliente_id
                     WHERE p.empresa_id IN ({placeholders_emp})
-                      AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
+                      AND {gestoria_service_sql_condition("p")}
                       AND LOWER(COALESCE(p.estado, '')) = 'estudio'
                     ORDER BY COALESCE(p.fecha_seguimiento, p.fecha, p.updated_at) ASC
                     LIMIT 12
@@ -86425,7 +86463,7 @@ class Handler(BaseHTTPRequestHandler):
                     FROM workspace_presupuestos p
                     LEFT JOIN clientes c ON c.id = p.cliente_id
                     WHERE p.empresa_id IN ({placeholders_emp})
-                      AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
+                      AND {gestoria_service_sql_condition("p")}
                       AND LOWER(COALESCE(p.estado, '')) = 'rechazado'
                     ORDER BY COALESCE(p.fecha_seguimiento, p.updated_at) ASC
                     LIMIT 12
@@ -86446,7 +86484,7 @@ class Handler(BaseHTTPRequestHandler):
                     FROM workspace_presupuestos p
                     LEFT JOIN clientes c ON c.id = p.cliente_id
                     WHERE p.empresa_id IN ({placeholders_emp})
-                      AND LOWER(COALESCE(p.servicio, '')) IN ('gestoria', 'administracion fincas', 'fincas')
+                      AND {gestoria_service_sql_condition("p")}
                       AND LOWER(COALESCE(p.estado, '')) = 'aceptado'
                       AND LOWER(COALESCE(p.encargo_estado, 'pendiente')) != 'firmada'
                     ORDER BY COALESCE(p.fecha_encargo, p.fecha, p.updated_at) ASC

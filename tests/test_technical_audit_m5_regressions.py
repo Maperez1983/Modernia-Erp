@@ -603,6 +603,54 @@ class TechnicalAuditM5RegressionTests(unittest.TestCase):
         self.assertEqual(counting.execute_count, 8)
         conn.close()
 
+    def test_gestoria_overview_counts_presupuestos_de_fincas_labels(self):
+        conn = self._create_overview_conn()
+        conn.execute(
+            "INSERT INTO workspace_presupuestos (id, workspace_id, empresa_id, cliente_id, servicio, referencia_tipo, referencia_id, titulo, estado, fecha, fecha_seguimiento, motivo_estado, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "wp-fincas",
+                "ws-main",
+                "emp-1",
+                "cli-1",
+                "administración de fincas",
+                "cliente",
+                "cli-1",
+                "Propuesta Fincas",
+                "Estudio",
+                FIXED_NOW.date().isoformat(),
+                FIXED_NOW.date().isoformat(),
+                "Esperando docs",
+                FIXED_NOW.isoformat(),
+                FIXED_NOW.isoformat(),
+            ),
+        )
+        conn.execute(
+            "INSERT INTO workspace_presupuestos (id, workspace_id, empresa_id, cliente_id, servicio, referencia_tipo, referencia_id, titulo, estado, fecha, fecha_seguimiento, motivo_estado, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "wp-comunidad",
+                "ws-main",
+                "emp-1",
+                "cli-1",
+                "Comunidades Velazquez",
+                "cliente",
+                "cli-1",
+                "Propuesta Comunidad",
+                "Estudio",
+                FIXED_NOW.date().isoformat(),
+                FIXED_NOW.date().isoformat(),
+                "Esperando docs",
+                FIXED_NOW.isoformat(),
+                FIXED_NOW.isoformat(),
+            ),
+        )
+
+        result = server.fetch_workspace_gestoria_overview(conn, "ws-main")
+        presupuestos = {row["titulo"] for row in result["presupuestos_estudio"]}
+        conn.close()
+
+        self.assertEqual(result["counts"]["presupuestos_estudio"], 3)
+        self.assertEqual(presupuestos, {"Propuesta Gestoria", "Propuesta Fincas", "Propuesta Comunidad"})
+
     def test_overviews_keep_expected_shapes_and_counts(self):
         conn = self._create_overview_conn()
 
