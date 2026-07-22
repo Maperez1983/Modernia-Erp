@@ -68,6 +68,24 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
         conn.commit()
         return conn
 
+    def _make_workspace_rrhh_conn(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        server.ensure_usuarios_schema(conn)
+        server.ensure_workspace_core_tables(conn)
+        server.ensure_workspace_product_tables(conn)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS empresas (
+              id TEXT PRIMARY KEY,
+              nombre TEXT NOT NULL,
+              activo INTEGER NOT NULL DEFAULT 1
+            )
+            """
+        )
+        conn.commit()
+        return conn
+
     def _make_auth_user_conn(self, *, user_id="u-auth-1", usuario="Mperez", email="mperez@example.com", password_hash=None):
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
@@ -1793,6 +1811,132 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
             self.assertEqual(ids, ["emp-1"])
         finally:
             conn.close()
+
+    def test_resolve_workspace_time_toggle_persona_id_allows_manager_targets_and_keeps_self_service(self):
+        conn = self._make_workspace_rrhh_conn()
+        try:
+            conn.execute(
+                """
+                INSERT INTO workspaces (id, nombre, slug, estado, plan, kind, created_at, updated_at)
+                VALUES ('ws-1', 'Workspace 1', 'ws-1', 'Activo', 'Enterprise', 'Directo', datetime('now'), datetime('now'))
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO workspace_companies (id, workspace_id, legacy_empresa_id, nombre, activo, created_at, updated_at)
+                VALUES ('wc-1', 'ws-1', 'emp-1', 'Empresa Uno', 1, datetime('now'), datetime('now'))
+                """
+            )
+            conn.execute("INSERT INTO empresas (id, nombre, activo) VALUES ('emp-1', 'Empresa Uno', 1)")
+            conn.execute(
+                """
+                INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, activo, registro_horario_activo, created_at, updated_at)
+                VALUES ('u-manager', 'Manager', 'User', 'manager', 'manager@example.com', 'Gestoría', 'Administrador', 1, 1, datetime('now'), datetime('now'))
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, activo, registro_horario_activo, created_at, updated_at)
+                VALUES ('u-worker', 'Worker', 'User', 'worker', 'worker@example.com', 'Gestoría', 'Miembro', 1, 1, datetime('now'), datetime('now'))
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
+                VALUES ('wm-worker', 'ws-1', 'u-worker', 'Miembro', datetime('now'), datetime('now'))
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO workspace_registro_personal (
+                  id, workspace_id, empresa_id, empresa_manual, usuario_id, usuario_manual, source,
+                  nombre, activo, created_at, updated_at
+                ) VALUES (
+                  'persona-self', 'ws-1', 'emp-1', 1, 'u-worker', 1, 'manual',
+                  'Persona Worker', 1, datetime('now'), datetime('now')
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO workspace_registro_personal (
+                  id, workspace_id, empresa_id, empresa_manual, usuario_id, usuario_manual, source,
+                  nombre, activo, created_at, updated_at
+                ) VALUES (
+                  'persona-target', 'ws-1', 'emp-1', 1, 'u-target', 1, 'manual',
+                  'Persona Target', 1, datetime('now'), datetime('now')
+                )
+                """
+            )
+            conn.commit()
+
+            manager_session = {"user_id": "u-manager", "rol": "Admin", "usuario": "Manager", "email": "manager@example.com"}
+            worker_session = {"user_id": "u-worker", "rol": "Miembro", "usuario": "Worker", "email": "worker@example.com"}
+
+            self.assertEqual(
+                server.resolve_workspace_time_toggle_persona_id(conn, manager_session, "ws-1", "persona-target"),
+                ("persona-target", ""),
+            )
+            self.assertEqual(
+                server.resolve_workspace_time_toggle_persona_id(conn, worker_session, "ws-1", ""),
+                ("persona-self", ""),
+            )
+            self.assertEqual(
+                server.resolve_workspace_time_toggle_persona_id(conn, worker_session, "ws-1", "persona-target"),
+                ("", "No autorizado"),
+            )
+        finally:
+            conn.close()
+
+    def test_fetch_workspace_personal_and_time_users_include_linked_rows_without_memberships(self):
+        conn = self._make_workspace_rrhh_conn()
+        try:
+            conn.execute(
+                """
+                INSERT INTO workspaces (id, nombre, slug, estado, plan, kind, created_at, updated_at)
+                VALUES ('ws-1', 'Workspace 1', 'ws-1', 'Activo', 'Enterprise', 'Directo', datetime('now'), datetime('now'))
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO workspace_companies (id, workspace_id, legacy_empresa_id, nombre, activo, created_at, updated_at)
+                VALUES ('wc-1', 'ws-1', 'emp-1', 'Empresa Uno', 1, datetime('now'), datetime('now'))
+                """
+            )
+            conn.execute("INSERT INTO empresas (id, nombre, activo) VALUES ('emp-1', 'Empresa Uno', 1)")
+            conn.execute(
+                """
+                INSERT INTO usuarios (id, nombre, apellido, usuario, email, servicio, rol, activo, registro_horario_activo, created_at, updated_at)
+                VALUES ('u-1', 'Persona', 'RRHH', 'u1', 'u1@example.com', 'Gestoría', 'Miembro', 1, 1, datetime('now'), datetime('now'))
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO workspace_registro_personal (
+                  id, workspace_id, empresa_id, empresa_manual, usuario_id, usuario_manual, source,
+                  nombre, activo, created_at, updated_at
+                ) VALUES (
+                  'persona-1', 'ws-1', 'emp-1', 1, 'u-1', 1, 'manual',
+                  'Persona RRHH', 1, datetime('now'), datetime('now')
+                )
+                """
+            )
+            conn.commit()
+
+            personal = server.fetch_workspace_personal(conn, "ws-1", only_active=False, limit=10)
+            time_users = server.fetch_workspace_time_users(conn, "ws-1", only_enabled=False, limit=10)
+        finally:
+            conn.close()
+
+        self.assertEqual(len(personal["rows"]), 1)
+        self.assertEqual(personal["rows"][0]["usuario_id"], "u-1")
+        self.assertEqual(personal["rows"][0]["empresa_id"], "emp-1")
+        self.assertEqual(personal["rows"][0]["empresa_nombre"], "Empresa Uno")
+
+        self.assertEqual(len(time_users["rows"]), 1)
+        self.assertEqual(time_users["rows"][0]["id"], "u-1")
+        self.assertEqual(time_users["rows"][0]["empresa_id"], "emp-1")
+        self.assertEqual(time_users["rows"][0]["empresa_nombre"], "Empresa Uno")
 
     def test_resolve_empresa_id_for_request_rejects_workspace_company_mismatch(self):
         conn = self._make_workspace_scope_conn()

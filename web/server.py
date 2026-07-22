@@ -41932,11 +41932,6 @@ def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=Fa
         "COALESCE(p.source, 'manual') != 'auto'",
     ]
     params = [workspace_id]
-    # Seguridad multi-workspace: si una ficha está vinculada a un usuario del sistema,
-    # ese usuario debe ser miembro del workspace. Esto evita que aparezca personal de otro
-    # workspace por vinculaciones accidentales o por payloads manipulados.
-    join_member = "LEFT JOIN workspace_miembros mem ON mem.workspace_id = p.workspace_id AND mem.usuario_id = p.usuario_id"
-    where.append("(p.usuario_id IS NULL OR TRIM(COALESCE(p.usuario_id, '')) = '' OR mem.usuario_id IS NOT NULL)")
     if requested_company:
         # En vistas por empresa solo consideramos asignaciones confirmadas manualmente.
         if not empresa_ids or requested_company not in {str(x) for x in empresa_ids}:
@@ -41985,7 +41980,6 @@ def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=Fa
           p.updated_at
         FROM workspace_registro_personal p
         LEFT JOIN empresas e ON e.id = p.empresa_id
-        {join_member}
         WHERE {' AND '.join(where)}
         ORDER BY COALESCE(p.activo, 1) DESC, p.nombre COLLATE NOCASE ASC
         LIMIT ?
@@ -41997,33 +41991,42 @@ def fetch_workspace_personal(conn, workspace_id, empresa_id=None, only_active=Fa
 
 def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled=False, limit=200):
     company_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
-    # Importante (multi-tenant): los usuarios visibles en RRHH/Registro horario deben ser
-    # los miembros del workspace, no el listado global del sistema.
-    #
-    # Nota: en algunos entornos legacy puede fallar el conteo de workspaces (por migraciones parciales).
-    # Para evitar mezclar usuarios entre workspaces, priorizamos la tabla `workspace_miembros`
-    # siempre que existan membresías para este workspace.
-    join_sql = ""
-    member_where = ""
-    member_params = []
-    members_count = 0
+    # RRHH/Registro horario se nutre del universo de usuarios del workspace.
+    # Cuando las membresías están incompletas en entornos legacy, completamos el conjunto
+    # con las fichas de `workspace_registro_personal` ya vinculadas al propio workspace.
+    scope_user_ids = []
     try:
         ensure_workspace_core_tables(conn)
-        row = conn.execute(
-            "SELECT COUNT(*) AS total FROM workspace_miembros WHERE workspace_id = ?",
+        member_rows = conn.execute(
+            """
+            SELECT DISTINCT usuario_id
+            FROM workspace_miembros
+            WHERE workspace_id = ? AND COALESCE(TRIM(usuario_id), '') <> ''
+            """,
             (workspace_id,),
-        ).fetchone()
-        members_count = int(row_value(row, "total", 0) or row_value(row, 0) or 0)
+        ).fetchall()
+        scope_user_ids.extend(
+            str(row_value(row, "usuario_id") or row_value(row, 0) or "").strip()
+            for row in (member_rows or [])
+            if str(row_value(row, "usuario_id") or row_value(row, 0) or "").strip()
+        )
+        linked_rows = conn.execute(
+            """
+            SELECT DISTINCT usuario_id
+            FROM workspace_registro_personal
+            WHERE workspace_id = ? AND COALESCE(TRIM(usuario_id), '') <> ''
+            """,
+            (workspace_id,),
+        ).fetchall()
+        scope_user_ids.extend(
+            str(row_value(row, "usuario_id") or row_value(row, 0) or "").strip()
+            for row in (linked_rows or [])
+            if str(row_value(row, "usuario_id") or row_value(row, 0) or "").strip()
+        )
     except Exception:
-        members_count = 0
-    if members_count > 0:
-        join_sql = "JOIN workspace_miembros mem ON mem.usuario_id = u.id"
-        member_where = " AND mem.workspace_id = ?"
-        member_params = [workspace_id]
-    else:
-        # Modo estricto: si el workspace no tiene miembros, NO hacemos fallback al listado global.
-        # Esto evita que RRHH muestre usuarios de otros workspaces por accidente.
-        # La gestión de miembros se realiza en Workspaces → Usuarios (o Admin global).
+        scope_user_ids = []
+    scope_user_ids = list(dict.fromkeys([uid for uid in scope_user_ids if uid]))
+    if not scope_user_ids:
         return {"rows": []}
     company_name_map = {}
     if company_ids:
@@ -42037,9 +42040,9 @@ def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled
         ).fetchall()
         company_name_map = {str(row["id"]): str(row["nombre"] or "") for row in company_rows}
     where = ["COALESCE(u.activo, 1) = 1"]
-    params = list(member_params)
     if only_enabled:
         where.append("COALESCE(u.registro_horario_activo, 0) = 1")
+    placeholders = ",".join("?" for _ in scope_user_ids)
     rows = conn.execute(
         f"""
         SELECT
@@ -42053,12 +42056,12 @@ def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled
           u.activo,
           COALESCE(u.registro_horario_activo, 0) AS registro_horario_activo
         FROM usuarios u
-        {join_sql}
-        WHERE {" AND ".join(where)}{member_where}
+        WHERE {" AND ".join(where)}
+          AND u.id IN ({placeholders})
         ORDER BY u.nombre COLLATE NOCASE ASC, u.apellido COLLATE NOCASE ASC
         LIMIT ?
         """,
-        (*params, max(1, min(int(limit or 200), 500))),
+        (*scope_user_ids, max(1, min(int(limit or 200), 500))),
     ).fetchall()
     default_company_id = str(empresa_id or "").strip() or (company_ids[0] if company_ids else "")
     payload_rows = []
@@ -43883,6 +43886,39 @@ def workspace_persona_id_for_user(conn, workspace_id, user_id):
         return str(row["id"] or "")
     except Exception:
         return str(row[0] or "")
+
+
+def resolve_workspace_time_toggle_persona_id(conn, session, workspace_id, requested_persona_id=""):
+    """
+    Resuelve la ficha de registro horario que debe usar un fichaje.
+
+    - Sin `requested_persona_id`, conserva el flujo self-service y exige una ficha propia.
+    - Con `requested_persona_id`, permite actuar sobre terceros solo a gestores del workspace.
+    """
+    ws_id = str(workspace_id or "").strip()
+    if not ws_id:
+        return "", "workspace_id requerido"
+    if not session:
+        return "", "No autenticado"
+    user_id = session_user_id(session)
+    if not user_id:
+        return "", "No autorizado"
+    ok, err = enforce_workspace_membership(conn, session, ws_id)
+    if not ok:
+        return "", err or "No autorizado"
+
+    requested_id = str(requested_persona_id or "").strip()
+    own_persona_id = workspace_persona_id_for_user(conn, ws_id, user_id) or ""
+    if requested_id:
+        if requested_id != own_persona_id and not workspace_actor_can_manage_workspace(conn, session, ws_id):
+            return "", "No autorizado"
+        return requested_id, ""
+
+    if not own_persona_id:
+        own_persona_id = ensure_workspace_persona_for_self(conn, ws_id, session) or ""
+    if not own_persona_id:
+        return "", "No tienes ficha de registro horario vinculada"
+    return own_persona_id, ""
 
 
 def session_user_id(session):
@@ -63606,13 +63642,16 @@ class Handler(BaseHTTPRequestHandler):
             if not ok:
                 json_response(self, {"error": err or "No autorizado", "detail": "no_workspace_membership"}, status=403)
                 return
-            own_persona_id = workspace_persona_id_for_user(conn, workspace_id, user_id) or ""
-            if not own_persona_id:
-                own_persona_id = ensure_workspace_persona_for_self(conn, workspace_id, session) or ""
-            if not own_persona_id:
-                json_response(self, {"error": "No tienes ficha de registro horario vinculada"}, status=403)
+            requested_persona_id = str(payload.get("persona_id") or "").strip()
+            persona_id, persona_err = resolve_workspace_time_toggle_persona_id(
+                conn,
+                session,
+                workspace_id,
+                requested_persona_id=requested_persona_id,
+            )
+            if not persona_id:
+                json_response(self, {"error": persona_err or "No autorizado"}, status=403)
                 return
-            persona_id = own_persona_id
             persona_row = conn.execute(
                 """
                 SELECT id, empresa_id, usuario_id, nombre, tipo_jornada, horas_pactadas_dia
@@ -63625,13 +63664,13 @@ class Handler(BaseHTTPRequestHandler):
             if not persona_row:
                 json_response(self, {"error": "persona no encontrada"}, status=404)
                 return
-            # Consistencia: si por cualquier motivo la persona resuelta no está vinculada al usuario, no permitimos fichar.
-            # (Este caso debería ser raro: ensure_workspace_persona_for_self() ya vincula usuario_id.)
+            # Consistencia: en self-service la persona resuelta debe seguir vinculada al usuario autenticado.
+            # En fichaje delegado por un gestor, la ficha puede pertenecer a otro trabajador.
             try:
                 bound_user_id = str(persona_row["usuario_id"] or "").strip()
             except Exception:
                 bound_user_id = ""
-            if bound_user_id and bound_user_id != user_id:
+            if not requested_persona_id and bound_user_id and bound_user_id != user_id:
                 json_response(
                     self,
                     {
