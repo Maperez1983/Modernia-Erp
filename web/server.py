@@ -3997,9 +3997,10 @@ def service_sql_match_clause(alias, services):
         elif service == "fincas":
             clauses.append(
                 f"(LOWER(COALESCE({alias}.servicio, '')) LIKE ? "
+                f"OR LOWER(COALESCE({alias}.servicio, '')) LIKE ? "
                 f"OR LOWER(COALESCE({alias}.servicio, '')) LIKE ?)"
             )
-            values.extend(["%finca%", "%administraci%n%"])
+            values.extend(["%finca%", "%administraci%n%", "%comunidad%"])
         elif service == "financiaciones":
             clauses.append(
                 f"(LOWER(COALESCE({alias}.servicio, '')) IN (?, ?) "

@@ -1365,6 +1365,71 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
         self.assertEqual([row["id"] for row in by_workspace], ["c-right"])
         self.assertEqual([row["id"] for row in by_empresa], ["c-right"])
 
+    def test_resolve_clientes_by_nif_rows_matches_commercial_community_label_for_fincas(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(
+            """
+            CREATE TABLE clientes (
+              id TEXT PRIMARY KEY,
+              empresa_id TEXT,
+              nombre TEXT,
+              nif TEXT,
+              telefono TEXT,
+              email TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE TABLE clientes_empresas (
+              id TEXT PRIMARY KEY,
+              cliente_id TEXT,
+              empresa_id TEXT,
+              workspace_id TEXT,
+              servicio TEXT,
+              estado TEXT,
+              fecha_inicio TEXT,
+              fecha_fin TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            """
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, empresa_id, nombre, nif, telefono, email, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("c-community", "emp-1", "Cliente Comunidad", "12345678A", "", "", "2026-03-01", "2026-03-01"),
+        )
+        conn.execute(
+            """
+            INSERT INTO clientes_empresas (
+              id, cliente_id, empresa_id, workspace_id, servicio, estado, fecha_inicio, fecha_fin, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "ce-community",
+                "c-community",
+                "emp-1",
+                "ws-1",
+                "Comunidades Velazquez",
+                "Activo",
+                "2026-03-01",
+                "",
+                "2026-03-01",
+                "2026-03-01",
+            ),
+        )
+
+        try:
+            rows = server.resolve_clientes_by_nif_rows(
+                conn,
+                "12345678A",
+                services=["fincas"],
+                workspace_id="ws-1",
+            )
+        finally:
+            conn.close()
+
+        self.assertEqual([row["id"] for row in rows], ["c-community"])
+
     def test_ensure_workspace_budget_client_scopes_workspace_company_ids_by_workspace(self):
         conn = self._make_workspace_scope_conn()
         conn.row_factory = sqlite3.Row
