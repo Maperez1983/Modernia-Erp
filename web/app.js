@@ -7573,17 +7573,30 @@ const renderHomeGuidance = () => {
     { label: "Empresa", value: companyName, note: guidance.primaryService ? "Acceso directo" : "Activa ahora" },
     { label: "Vista", value: viewName, note: guidance.action?.type === "workspace" ? "Última vista" : "Vista sugerida" },
   ];
+  const hasLastActivity = Boolean(
+    lastActivity
+    && (
+      String(lastActivity.label || "").trim().toLowerCase() !== "sin movimiento reciente"
+      || String(lastActivity.detail || "").trim()
+      || lastActivity.at
+    )
+  );
+  const lastActivityBlock = hasLastActivity
+    ? `
+        <div class="home-guidance-last-action">
+          <span class="pill">Último movimiento</span>
+          <strong>${escapeHtml(lastActivityTitle)}</strong>
+          <span class="muted">${escapeHtml(lastActivityDetail)}${lastAccessLabel ? ` · ${escapeHtml(lastAccessLabel)}` : ""}</span>
+        </div>
+      `
+    : "";
   homeHeroAside.innerHTML = `
     <div class="home-guidance-primary">
       <div class="home-guidance-primary-copy">
         <div class="home-guidance-kicker">Acceso rápido</div>
         <div class="home-guidance-title">${escapeHtml(actionLabel)}</div>
         <div class="home-guidance-copy">${escapeHtml(actionDescription)}</div>
-        <div class="home-guidance-last-action">
-          <span class="pill">Último movimiento</span>
-          <strong>${escapeHtml(lastActivityTitle)}</strong>
-          <span class="muted">${escapeHtml(lastActivityDetail)}${lastAccessLabel ? ` · ${escapeHtml(lastAccessLabel)}` : ""}</span>
-        </div>
+        ${lastActivityBlock}
       </div>
       <a class="btn home-guidance-primary-action" href="${escapeHtml(primaryActionHref)}" data-home-action="${escapeHtml(guidance.action?.type === "workspace" ? "continue-workspace" : guidance.action?.type === "service" ? "open-service" : guidance.action?.type === "holding" ? "open-workspaces" : "open-panel")}" ${guidance.action?.service ? `data-home-value="${escapeHtml(String(guidance.action.service || ""))}"` : ""}>${escapeHtml(primaryActionLabel)}</a>
     </div>

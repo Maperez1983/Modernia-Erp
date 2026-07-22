@@ -661,6 +661,11 @@ a.pill:hover {
   gap: 16px;
 }
 
+#homeSection .grid {
+  align-items: stretch;
+  gap: 14px;
+}
+
 .crm-kpis.grid {
   grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
   gap: 12px;
@@ -670,6 +675,10 @@ a.pill:hover {
   margin-top: 16px;
   display: grid;
   gap: 10px;
+}
+
+#homeSection .grid {
+  gap: 14px;
 }
 
 .home-block h3 {
@@ -796,7 +805,7 @@ a.pill:hover {
   align-items: flex-start;
   justify-content: space-between;
   gap: 14px;
-  padding: 16px 18px;
+  padding: 14px 16px;
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -867,7 +876,7 @@ a.pill:hover {
 .home-guidance-search {
   display: grid;
   gap: 10px;
-  padding: 16px 18px;
+  padding: 14px 16px;
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -942,6 +951,13 @@ a.pill:hover {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.14);
   color: inherit;
+}
+
+#homeSection .company-card {
+  padding: 16px;
+  gap: 8px;
+  height: 100%;
+  align-content: start;
 }
 
 .org-chart {
