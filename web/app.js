@@ -10668,6 +10668,7 @@ const renderWorkspaceTenantSummary = (workspace = {}) => {
           </div>
         </div>
         <div class="workspace-tenant-summary-actions">
+          <button type="button" class="secondary ghost" data-workspace-tenant-jump="general">General</button>
           <button type="button" class="secondary ghost" data-workspace-tenant-jump="empresas">Empresas</button>
           <button type="button" class="secondary ghost" data-workspace-tenant-jump="usuarios">Usuarios</button>
           <button type="button" class="secondary ghost" data-workspace-tenant-jump="modulos">Módulos</button>
@@ -12640,10 +12641,15 @@ const setWorkspaceCompanyEditorContext = (company = null) => {
   }
   if (contextMetaEl) {
     if (!company) {
-      contextMetaEl.textContent = "El editor se quedará fijo a la vista mientras ajustas los datos de la empresa activa.";
+      const workspaceName = String(state.currentWorkspaceName || state.currentWorkspaceTarget || "").trim();
+      contextMetaEl.textContent = workspaceName
+        ? `El editor se quedará fijo a la vista mientras ajustas los datos de la empresa activa dentro de ${workspaceName}.`
+        : "El editor se quedará fijo a la vista mientras ajustas los datos de la empresa activa.";
       return;
     }
     const parts = [];
+    const workspaceName = String(state.currentWorkspaceName || state.currentWorkspaceTarget || "").trim();
+    if (workspaceName) parts.push(`Workspace: ${workspaceName}`);
     const { legacyEmpresaId, workspaceCompanyId } = resolveWorkspaceCompanyRowIds(company);
     const companyId = String(workspaceCompanyId || legacyEmpresaId || "").trim();
     if (companyId) parts.push(`ID ${companyId}`);
@@ -12652,7 +12658,7 @@ const setWorkspaceCompanyEditorContext = (company = null) => {
     if (company?.convenio_nombre) parts.push(String(company.convenio_nombre));
     contextMetaEl.textContent = parts.length
       ? parts.join(" · ")
-      : "Edita dirección, contacto, sector, convenio, CNAE y branding.";
+      : "Edita dirección, contacto, sector, convenio, CNAE y branding dentro del workspace.";
   }
   if (openFichaBtn) {
     openFichaBtn.disabled = !company;
