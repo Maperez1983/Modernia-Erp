@@ -77,6 +77,8 @@ body {
   overflow-x: hidden;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 body.auth-pending main,
@@ -190,6 +192,7 @@ header {
     radial-gradient(circle at 85% 20%, rgba(56, 189, 248, 0.18), transparent 46%),
     linear-gradient(125deg, #0B1D33 0%, #0F2742 56%, #182F55 100%);
   color: #f7f4ee;
+  backdrop-filter: blur(10px) saturate(1.05);
 }
 
 .brand {
@@ -801,12 +804,12 @@ a.pill:hover {
 }
 
 .home-guidance-primary {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 14px 16px;
-  border-radius: 22px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 18px 18px 20px;
+  border-radius: 26px;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -838,8 +841,11 @@ a.pill:hover {
   align-items: center;
   justify-content: center;
   text-decoration: none;
-  align-self: flex-start;
+  justify-self: end;
+  align-self: center;
   white-space: nowrap;
+  min-height: 52px;
+  padding-inline: 18px;
 }
 
 .home-year-toolbar {
@@ -876,8 +882,8 @@ a.pill:hover {
 .home-guidance-search {
   display: grid;
   gap: 10px;
-  padding: 14px 16px;
-  border-radius: 22px;
+  padding: 16px 18px;
+  border-radius: 26px;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.12);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
@@ -944,13 +950,14 @@ a.pill:hover {
 .home-guidance-secondary {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .home-guidance-secondary .secondary.ghost {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 255, 255, 0.14);
   color: inherit;
+  min-height: 40px;
 }
 
 #homeSection .company-card {
@@ -2195,12 +2202,13 @@ body.theme-operativa #holdingSection .workspace-central-layout {
   gap: 12px;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  padding: 14px 16px;
-  border-radius: 18px;
+  padding: 18px 20px;
+  border-radius: 24px;
   border: 1px solid rgba(11, 29, 51, 0.12);
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(245, 247, 251, 0.98)),
     #fff;
+  box-shadow: 0 14px 32px rgba(11, 29, 51, 0.06);
 }
 
 .workspace-company-switcher-copy {
@@ -2221,7 +2229,7 @@ body.theme-operativa #holdingSection .workspace-central-layout {
 .workspace-company-switcher-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 8px;
 }
 
 .workspace-company-pill {
@@ -2231,6 +2239,7 @@ body.theme-operativa #holdingSection .workspace-central-layout {
   border-radius: 999px;
   padding: 8px 14px;
   font-weight: 600;
+  min-height: 40px;
 }
 
 .workspace-company-pill.is-active {
@@ -2534,14 +2543,15 @@ body.theme-operativa #holdingSection .workspace-central-layout {
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 249, 252, 0.98)),
     #fff;
   box-shadow: 0 14px 28px rgba(11, 29, 51, 0.05);
+  border-radius: 24px;
 }
 
 .workspace-tenant-summary-context {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
-  padding: 14px 16px;
-  border-radius: 18px;
+  padding: 16px 18px;
+  border-radius: 20px;
   border: 1px solid rgba(11, 29, 51, 0.08);
   background: rgba(255, 255, 255, 0.76);
 }
@@ -2583,9 +2593,9 @@ body.theme-operativa #holdingSection .workspace-central-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
-  padding: 14px 16px;
+  padding: 16px 18px;
   margin-bottom: 14px;
-  border-radius: 18px;
+  border-radius: 20px;
   border: 1px solid rgba(242, 193, 78, 0.2);
   background:
     linear-gradient(135deg, rgba(255, 253, 244, 0.98), rgba(247, 249, 252, 0.96)),
@@ -4384,7 +4394,7 @@ body.theme-operativa .workspace-home-count {
   overflow: hidden;
   border: 1px solid rgba(15, 23, 42, 0.14);
   background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(12px) saturate(1.02);
 }
 
 .map-box-leaflet-controls button {
@@ -8207,6 +8217,11 @@ body.crm-context-inmo #inmuebleDetail .inmueble-advanced {
   display: grid;
   gap: 14px;
   align-content: start;
+  position: sticky;
+  top: calc(var(--safe-top, 0px) + 88px);
+  max-height: calc(100vh - (var(--safe-top, 0px) + 112px));
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .workspace-config-main {
@@ -8228,14 +8243,16 @@ body.crm-context-inmo #inmuebleDetail .inmueble-advanced {
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(280px, 0.75fr);
   gap: 14px;
-  padding: 18px;
-  border-radius: 24px;
+  padding: 20px;
+  border-radius: 28px;
   border: 1px solid rgba(11, 29, 51, 0.1);
   background:
     radial-gradient(circle at top right, rgba(242, 193, 78, 0.16), transparent 34%),
     linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(246, 248, 251, 0.96)),
     #fff;
   box-shadow: 0 18px 38px rgba(11, 29, 51, 0.07);
+  position: relative;
+  overflow: hidden;
 }
 
 .workspace-tenant-summary-main {
@@ -12571,7 +12588,7 @@ body.auth-pending #authLoginOverlay.auth-login-overlay.hidden {
     radial-gradient(circle at 85% 8%, rgba(56, 189, 248, 0.14), transparent 48%),
     radial-gradient(circle at 72% 100%, rgba(34, 197, 94, 0.12), transparent 52%),
     rgba(245, 247, 251, 0.92);
-  backdrop-filter: blur(6px);
+  backdrop-filter: blur(12px) saturate(1.02);
 }
 
 .auth-login-overlay.hidden {
@@ -12608,17 +12625,19 @@ body.auth-pending #authLoginOverlay.auth-login-overlay.hidden {
 .auth-login-card {
   width: min(460px, 100%);
   min-height: 300px;
+  position: relative;
+  overflow: hidden;
   background: #fff;
   border: 1px solid rgba(226, 232, 240, 0.9);
-  border-radius: 20px;
-  padding: 22px 22px 18px;
-  box-shadow: 0 20px 60px rgba(43, 43, 43, 0.12);
+  border-radius: 28px;
+  padding: 24px 24px 20px;
+  box-shadow: 0 26px 70px rgba(43, 43, 43, 0.14);
 }
 
 .auth-brand {
   display: grid;
-  gap: 6px;
-  margin-bottom: 14px;
+  gap: 8px;
+  margin-bottom: 16px;
 }
 
 .auth-brand img {
@@ -12632,14 +12651,37 @@ body.auth-pending #authLoginOverlay.auth-login-overlay.hidden {
   font-size: 13px;
 }
 
+.auth-brand-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.auth-brand-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(11, 29, 51, 0.06);
+  border: 1px solid rgba(11, 29, 51, 0.08);
+  color: rgba(var(--ink-rgb), 0.76);
+}
+
 .auth-login-card h2 {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
+  font-size: 30px;
+  letter-spacing: -0.02em;
 }
 
 .auth-login-form {
   display: grid;
-  gap: 12px;
-  margin-top: 14px;
+  gap: 14px;
+  margin-top: 16px;
 }
 
 .auth-login-form label {
@@ -12706,7 +12748,7 @@ body.auth-pending #authLoginOverlay.auth-login-overlay.hidden {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .auth-login-actions .muted {
@@ -13007,8 +13049,8 @@ body.theme-operativa #homeSection.hero::before {
 
 body.theme-operativa .hero-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.9fr);
-  gap: 22px;
+  grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.95fr);
+  gap: 24px;
   align-items: stretch;
 }
 
@@ -13041,6 +13083,7 @@ body.theme-operativa .hero .toolbar {
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(8px);
 }
 
 body.theme-operativa .hero .toolbar select {
@@ -13053,11 +13096,13 @@ body.theme-operativa .hero-aside {
   display: grid;
   gap: 14px;
   align-content: start;
-  padding: 18px;
-  border-radius: 24px;
+  padding: 20px;
+  border-radius: 28px;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 16px 34px rgba(16, 33, 43, 0.12);
   position: relative;
   z-index: 1;
 }
@@ -13358,6 +13403,8 @@ body.theme-operativa .auth-login-overlay {
 }
 
 body.theme-operativa .auth-login-card {
+  position: relative;
+  overflow: hidden;
   border-radius: 28px;
   padding: 24px 24px 20px;
   background:
@@ -13365,6 +13412,28 @@ body.theme-operativa .auth-login-card {
     linear-gradient(135deg, rgba(var(--gold-rgb), 0.04), rgba(56, 189, 248, 0.03));
   border: 1px solid rgba(255, 255, 255, 0.84);
   box-shadow: 0 26px 64px rgba(16, 33, 43, 0.14);
+}
+
+body.theme-operativa .auth-login-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 6px;
+  background: linear-gradient(90deg, #c7a24a 0%, #73986f 62%, #d8c06e 100%);
+}
+
+body.theme-operativa .auth-brand-badge {
+  background: rgba(255, 248, 230, 0.92);
+  border-color: rgba(199, 162, 74, 0.18);
+  color: #6c5620;
+}
+
+body.theme-operativa .auth-login-card h2 {
+  color: #213129;
+}
+
+body.theme-operativa .auth-login-card .muted {
+  color: #4b5f55;
 }
 
 @media (max-width: 980px) {
@@ -13397,11 +13466,12 @@ body.theme-operativa .auth-login-card {
 
 @media (max-width: 960px) {
   .home-guidance-primary {
-    flex-direction: column;
+    grid-template-columns: 1fr;
   }
 
   .home-guidance-primary-action {
     width: 100%;
+    justify-self: stretch;
   }
 
   .home-year-toolbar {
