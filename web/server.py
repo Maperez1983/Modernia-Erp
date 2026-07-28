@@ -27,6 +27,11 @@ import imaplib
 import email
 import html
 import xml.etree.ElementTree as ET
+try:
+    # Parseo XML endurecido (XXE / billion laughs). Fallback a stdlib si no está instalado.
+    import defusedxml.ElementTree as SAFE_ET
+except Exception:
+    SAFE_ET = ET
 import calendar
 from collections import defaultdict, OrderedDict
 from decimal import Decimal, ROUND_HALF_UP
@@ -881,8 +886,12 @@ LEGAL_RADAR_AUTO_IMPORT_LIMIT = max(1, min(25, int(os.environ.get("LEGAL_RADAR_A
 LEGAL_RADAR_AUTO_SCAN_STATE = {"last_run_at": "", "last_error": "", "last_created": 0, "last_updated": 0}
 LEGAL_RADAR_AUTO_SCAN_LOCK = threading.Lock()
 APP_SESSION_TTL_SECONDS = max(900, int(os.environ.get("APP_SESSION_TTL_SECONDS", "43200")))
+# Vida máxima ABSOLUTA de sesión (no se renueva). El TTL de arriba es deslizante. 7 días; 0 = sin tope.
+APP_SESSION_MAX_LIFETIME_SECONDS = max(0, int(os.environ.get("APP_SESSION_MAX_LIFETIME_SECONDS", "604800")))
 SESSION_COOKIE_NAME = os.environ.get("APP_SESSION_COOKIE", "crm_session")
-AUTH_ALLOW_FIRST_PASSWORD_SET = os.environ.get("AUTH_ALLOW_FIRST_PASSWORD_SET", "1").strip().lower() not in ("0", "false", "no", "off")
+# SEGURIDAD: desactivado por defecto (antes =1 permitía fijar contraseña en el primer login de una
+# cuenta sin hash -> account takeover pre-activación). El alta va por invitación con token.
+AUTH_ALLOW_FIRST_PASSWORD_SET = os.environ.get("AUTH_ALLOW_FIRST_PASSWORD_SET", "0").strip().lower() not in ("0", "false", "no", "off")
 AUTH_INVITE_TTL_SECONDS = max(1800, int(os.environ.get("AUTH_INVITE_TTL_SECONDS", "172800")))
 INGEST_API_KEY = str(os.environ.get("APP_INGEST_API_KEY") or "").strip()
 AUTH_PUBLIC_GET_ENDPOINTS = {
@@ -919,6 +928,14 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/workspace_kiosk_toggle",
     "/api/ingest_facturas_presign",
     "/api/ingest_facturas_ocr",
+}
+# Endpoints de lectura GET cuyo control de acceso es POR SERVICIO (equipo), no por pertenencia
+# formal al workspace: sirven a todo el equipo del servicio con modos full/limited y ya escapan
+# datos sensibles según el actor. Se excluyen del gate centralizado de pertenencia de workspace
+# (que si no bloquearía a miembros legítimos del servicio que no son miembros formales del ws).
+WORKSPACE_MEMBERSHIP_GET_SERVICE_SCOPED_ENDPOINTS = {
+    "/api/gestoria_dashboard",
+    "/api/catalogo_match",
 }
 AUTH_SESSIONS = {}
 AUTH_SESSIONS_LOCK = threading.Lock()
@@ -1199,13 +1216,19 @@ def open_auth_store_conn(with_row_factory=True):
     return open_sqlite_conn(str(DB_CONFIGURED), with_row_factory=with_row_factory)
 SQLITE_FOREIGN_KEYS_ENABLED = os.environ.get("APP_SQLITE_FOREIGN_KEYS", "1").strip().lower() not in ("0", "false", "no", "off")
 APP_TIMEZONE = (os.environ.get("APP_TIMEZONE") or os.environ.get("APP_TZ") or "Europe/Madrid").strip() or "Europe/Madrid"
-WORKSPACE_MEMBERSHIP_ENFORCE = os.environ.get("APP_WORKSPACE_MEMBERSHIP_ENFORCE", "0").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
-S3_SCOPE_ENFORCE = os.environ.get("APP_S3_SCOPE_ENFORCE", "").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
+# SEGURIDAD (fail-closed): aislamiento multi-tenant ACTIVADO por defecto. Solo se desactiva de forma
+# explícita (APP_WORKSPACE_MEMBERSHIP_ENFORCE=0) para instalaciones single-tenant legacy.
+WORKSPACE_MEMBERSHIP_ENFORCE = os.environ.get("APP_WORKSPACE_MEMBERSHIP_ENFORCE", "1").strip().lower() not in ("0", "false", "no", "off")
+S3_SCOPE_ENFORCE = os.environ.get("APP_S3_SCOPE_ENFORCE", "1").strip().lower() not in ("0", "false", "no", "off")
 S3_SCOPE_ENFORCE = bool(S3_SCOPE_ENFORCE or WORKSPACE_MEMBERSHIP_ENFORCE)
-# Superadmin estricto (allowlist). Si APP_SUPERADMIN_ENFORCE=1, las acciones "global admin"
-# solo se permiten a los usuarios en la allowlist.
+# Superadmin estricto (allowlist). OPT-IN (default off): activarlo por defecto convertiría a los
+# admin de workspace en no-privilegiados globales, lo que rompe la gestión legítima dentro de su
+# propio workspace (el diseño actual trata el rol Administrador como privilegiado). Para cerrar del
+# todo la escalada cross-tenant de C3, pon APP_SUPERADMIN_ENFORCE=1 tras poblar la allowlist.
 APP_SUPERADMIN_ENFORCE = os.environ.get("APP_SUPERADMIN_ENFORCE", "0").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
-APP_SUPERADMIN_USERNAMES = os.environ.get("APP_SUPERADMIN_USERNAMES", "").strip()
+# Allowlist por defecto (override en Render). Incluye "Mperez" para que sea superadmin global tanto en
+# modo compat como estricto.
+APP_SUPERADMIN_USERNAMES = (os.environ.get("APP_SUPERADMIN_USERNAMES", "").strip() or "Mperez")
 APP_SUPERADMIN_EMAILS = os.environ.get("APP_SUPERADMIN_EMAILS", "").strip()
 APP_SUPERADMIN_IDS = os.environ.get("APP_SUPERADMIN_IDS", "").strip()
 COPILOT_WEB_TIMEOUT_SECONDS = max(3, int(os.environ.get("COPILOT_WEB_TIMEOUT_SECONDS", "15")))
@@ -1308,6 +1331,9 @@ def app_now():
 # Anti-fuerza bruta /api/login (persistente en auth store).
 LOGIN_RATE_WINDOW_SECONDS = max(60, int(os.environ.get("APP_LOGIN_RATE_WINDOW_SECONDS", "300")))
 LOGIN_RATE_MAX_ATTEMPTS = max(3, int(os.environ.get("APP_LOGIN_RATE_MAX_ATTEMPTS", "10")))
+# Límite GLOBAL por cuenta (agregado de todas las IPs) para frenar fuerza bruta distribuida
+# contra un mismo usuario desde muchas IPs. Debe ser >= al límite por IP.
+LOGIN_RATE_MAX_ATTEMPTS_ACCOUNT = max(LOGIN_RATE_MAX_ATTEMPTS, int(os.environ.get("APP_LOGIN_RATE_MAX_ATTEMPTS_ACCOUNT", "30")))
 LOGIN_RATE_LOCK_SECONDS = max(60, int(os.environ.get("APP_LOGIN_RATE_LOCK_SECONDS", "600")))
 _LOGIN_RATE_LOCK = threading.Lock()
 DEFAULT_WORKSPACE_NAME = "Verifika²"
@@ -10004,11 +10030,36 @@ def safe_extract_invoice_uploads(files, target_dir: Path) -> tuple[int, list[str
         if not payload:
             continue
         if suffix == ".zip":
+            # Defensa anti "zip bomb": acota nº de miembros y bytes descomprimidos totales,
+            # y rechaza miembros que declaren un tamaño descomprimido desproporcionado.
+            try:
+                zip_max_total = int(os.environ.get("APP_ZIP_MAX_UNCOMPRESSED_BYTES", str(200 * 1024 * 1024)) or (200 * 1024 * 1024))
+            except Exception:
+                zip_max_total = 200 * 1024 * 1024
+            try:
+                zip_max_members = int(os.environ.get("APP_ZIP_MAX_MEMBERS", "2000") or 2000)
+            except Exception:
+                zip_max_members = 2000
+            zip_max_member_bytes = max(1 * 1024 * 1024, min(zip_max_total, 80 * 1024 * 1024))
+            total_uncompressed = 0
+            member_count = 0
             try:
                 with zipfile.ZipFile(BytesIO(payload)) as zf:
                     for member in zf.infolist():
                         if member.is_dir():
                             continue
+                        member_count += 1
+                        if member_count > zip_max_members:
+                            skipped.append(f"{filename}: demasiados ficheros en el ZIP (límite {zip_max_members})")
+                            break
+                        # Tamaño descomprimido declarado en la cabecera del ZIP (barato de comprobar).
+                        declared = int(getattr(member, "file_size", 0) or 0)
+                        if declared > zip_max_member_bytes:
+                            skipped.append(f"{member.filename} (demasiado grande al descomprimir)")
+                            continue
+                        if total_uncompressed + declared > zip_max_total:
+                            skipped.append(f"{filename}: descompresión total excede el límite ({zip_max_total} bytes)")
+                            break
                         member_name = str(member.filename or "").replace("\\", "/")
                         parts = [part for part in member_name.split("/") if part not in {"", ".", ".."}]
                         if not parts or Path(parts[-1]).suffix.lower() not in allowed:
@@ -10019,6 +10070,11 @@ def safe_extract_invoice_uploads(files, target_dir: Path) -> tuple[int, list[str
                         except Exception:
                             skipped.append(member_name)
                             continue
+                        # Comprobación real tras descomprimir (por si file_size venía falseado).
+                        total_uncompressed += len(member_payload)
+                        if total_uncompressed > zip_max_total:
+                            skipped.append(f"{filename}: descompresión total excede el límite ({zip_max_total} bytes)")
+                            break
                         if not register_blob(member_payload, member_name):
                             continue
                         relative_parent = Path(*parts[:-1]) if len(parts) > 1 else Path()
@@ -12601,6 +12657,17 @@ def create_auth_session(user_row):
     return session
 
 
+def _session_absolute_expired(session, now_ts):
+    # Vida máxima absoluta desde created_at (no se renueva con la actividad).
+    if not APP_SESSION_MAX_LIFETIME_SECONDS:
+        return False
+    try:
+        created = float(session.get("created_at") or 0)
+    except Exception:
+        created = 0.0
+    return bool(created) and (now_ts - created) > APP_SESSION_MAX_LIFETIME_SECONDS
+
+
 def get_auth_session(token):
     if not token:
         return None
@@ -12609,7 +12676,7 @@ def get_auth_session(token):
     refresh_db = False
     with AUTH_SESSIONS_LOCK:
         session = AUTH_SESSIONS.get(token) or None
-        if session and float(session.get("expires_at") or 0) <= now_ts:
+        if session and (float(session.get("expires_at") or 0) <= now_ts or _session_absolute_expired(session, now_ts)):
             AUTH_SESSIONS.pop(token, None)
             AUTH_SESSION_DB_REFRESH_AT.pop(token, None)
             session = None
@@ -12643,7 +12710,7 @@ def get_auth_session(token):
             if not row:
                 return None
             session = dict(row)
-            if float(session.get("expires_at") or 0) <= time.time():
+            if float(session.get("expires_at") or 0) <= time.time() or _session_absolute_expired(session, time.time()):
                 try:
                     conn.execute("DELETE FROM auth_sessions WHERE token = ?", [token])
                     conn.commit()
@@ -12686,8 +12753,18 @@ def delete_auth_session(token):
 def _get_client_ip(handler):
     xff = (handler.headers.get("X-Forwarded-For") or "").strip()
     if xff:
-        # Formato: "client, proxy1, proxy2"
-        return xff.split(",")[0].strip()
+        # X-Forwarded-For se construye por la IZQUIERDA con valores que el cliente puede FALSIFICAR.
+        # El proxy de confianza (p.ej. Render) añade la IP real por la DERECHA. Por eso tomamos el
+        # salto de confianza contando desde el final, no el primer valor (que sería spoofeable y
+        # permitía saltarse el rate-limit de login rotando la cabecera).
+        parts = [p.strip() for p in xff.split(",") if p.strip()]
+        if parts:
+            try:
+                hops = int(os.environ.get("APP_TRUSTED_PROXY_HOPS", "1") or 1)
+            except Exception:
+                hops = 1
+            hops = max(1, min(len(parts), hops))
+            return parts[-hops]
     xri = (handler.headers.get("X-Real-IP") or "").strip()
     if xri:
         return xri
@@ -12721,13 +12798,115 @@ def _login_rate_key(ip, username):
     return ""
 
 
+def _login_account_key(username):
+    user = normalize_lookup_text(username or "")
+    return f"acct|{user}" if user else ""
+
+
+def _login_rate_keys(ip, username):
+    # Lista de (key, max_attempts): por (ip, usuario) y GLOBAL por cuenta (todas las IPs).
+    keys = []
+    k_ip = _login_rate_key(ip, username)
+    if k_ip:
+        keys.append((k_ip, LOGIN_RATE_MAX_ATTEMPTS))
+    k_acct = _login_account_key(username)
+    if k_acct:
+        keys.append((k_acct, LOGIN_RATE_MAX_ATTEMPTS_ACCOUNT))
+    return keys
+
+
+def _rate_check_single_db(conn, key, max_attempts, now):
+    # Devuelve (allowed, retry_after) para una clave. Asume tabla creada y lock adquirido.
+    row = conn.execute(
+        "SELECT attempts, window_started_at, locked_until FROM login_rate_limits WHERE key = ? LIMIT 1",
+        [key],
+    ).fetchone()
+    if not row:
+        return True, 0
+    attempts = int(row_value(row, "attempts", 0) or 0)
+    window_started_at = float(row_value(row, "window_started_at", now) or now)
+    locked_until = float(row_value(row, "locked_until", 0) or 0)
+    if (now - window_started_at) > LOGIN_RATE_WINDOW_SECONDS:
+        try:
+            conn.execute("DELETE FROM login_rate_limits WHERE key = ?", [key])
+            conn.commit()
+        except Exception:
+            pass
+        return True, 0
+    if locked_until and locked_until > now:
+        return False, int(max(1, locked_until - now))
+    if attempts >= max_attempts:
+        locked_until = now + LOGIN_RATE_LOCK_SECONDS
+        try:
+            conn.execute(
+                """
+                UPDATE login_rate_limits
+                SET locked_until = ?, updated_at = ?
+                WHERE key = ?
+                """,
+                [float(locked_until), float(now), key],
+            )
+            conn.commit()
+        except Exception:
+            pass
+        return False, LOGIN_RATE_LOCK_SECONDS
+    return True, 0
+
+
+def _rate_register_single_db(conn, key, max_attempts, now, ok):
+    # Registra un intento para una clave. Asume tabla creada y lock adquirido.
+    if ok:
+        try:
+            conn.execute("DELETE FROM login_rate_limits WHERE key = ?", [key])
+            conn.commit()
+        except Exception:
+            pass
+        return
+    row = conn.execute(
+        "SELECT attempts, window_started_at, locked_until FROM login_rate_limits WHERE key = ? LIMIT 1",
+        [key],
+    ).fetchone()
+    attempts = 0
+    window_started_at = now
+    locked_until = 0.0
+    if row:
+        attempts = int(row_value(row, "attempts", 0) or 0)
+        window_started_at = float(row_value(row, "window_started_at", now) or now)
+        locked_until = float(row_value(row, "locked_until", 0) or 0)
+        if (now - window_started_at) > LOGIN_RATE_WINDOW_SECONDS:
+            attempts = 0
+            window_started_at = now
+            locked_until = 0.0
+    attempts += 1
+    if attempts >= max_attempts:
+        locked_until = now + LOGIN_RATE_LOCK_SECONDS
+    try:
+        conn.execute(
+            """
+            INSERT INTO login_rate_limits (
+              key, attempts, window_started_at, locked_until, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+              attempts = excluded.attempts,
+              window_started_at = excluded.window_started_at,
+              locked_until = excluded.locked_until,
+              updated_at = excluded.updated_at
+            """,
+            [key, int(attempts), float(window_started_at), float(locked_until), float(window_started_at), float(now)],
+        )
+        conn.commit()
+    except Exception:
+        pass
+
+
 def check_login_rate_limit(ip, username):
     """
     Devuelve (allowed: bool, retry_after_seconds: int).
-    Limitación persistente para evitar fuerza bruta en /api/login.
+    Aplica DOS límites persistentes: por (ip, usuario) y GLOBAL por cuenta (todas las IPs).
+    El segundo frena fuerza bruta distribuida contra un usuario desde muchas IPs.
     """
-    key = _login_rate_key(ip, username)
-    if not key:
+    keys = _login_rate_keys(ip, username)
+    if not keys:
         return True, 0
     now = time.time()
     with _LOGIN_RATE_LOCK:
@@ -12741,40 +12920,14 @@ def check_login_rate_limit(ip, username):
                 conn.commit()
             except Exception:
                 pass
-            row = conn.execute(
-                "SELECT attempts, window_started_at, locked_until FROM login_rate_limits WHERE key = ? LIMIT 1",
-                [key],
-            ).fetchone()
-            if not row:
-                return True, 0
-            attempts = int(row_value(row, "attempts", 0) or 0)
-            window_started_at = float(row_value(row, "window_started_at", now) or now)
-            locked_until = float(row_value(row, "locked_until", 0) or 0)
-            if (now - window_started_at) > LOGIN_RATE_WINDOW_SECONDS:
-                try:
-                    conn.execute("DELETE FROM login_rate_limits WHERE key = ?", [key])
-                    conn.commit()
-                except Exception:
-                    pass
-                return True, 0
-            if locked_until and locked_until > now:
-                return False, int(max(1, locked_until - now))
-            if attempts >= LOGIN_RATE_MAX_ATTEMPTS:
-                locked_until = now + LOGIN_RATE_LOCK_SECONDS
-                try:
-                    conn.execute(
-                        """
-                        UPDATE login_rate_limits
-                        SET locked_until = ?, updated_at = ?
-                        WHERE key = ?
-                        """,
-                        [float(locked_until), float(now), key],
-                    )
-                    conn.commit()
-                except Exception:
-                    pass
-                return False, LOGIN_RATE_LOCK_SECONDS
-            return True, 0
+            allowed = True
+            worst_retry = 0
+            for key, max_attempts in keys:
+                ok, retry = _rate_check_single_db(conn, key, max_attempts, now)
+                if not ok:
+                    allowed = False
+                    worst_retry = max(worst_retry, retry)
+            return (True, 0) if allowed else (False, worst_retry)
         finally:
             try:
                 conn.close()
@@ -12783,8 +12936,8 @@ def check_login_rate_limit(ip, username):
 
 
 def register_login_attempt(ip, username, ok=False):
-    key = _login_rate_key(ip, username)
-    if not key:
+    keys = _login_rate_keys(ip, username)
+    if not keys:
         return
     now = time.time()
     with _LOGIN_RATE_LOCK:
@@ -12798,48 +12951,8 @@ def register_login_attempt(ip, username, ok=False):
                 conn.commit()
             except Exception:
                 pass
-            if ok:
-                try:
-                    conn.execute("DELETE FROM login_rate_limits WHERE key = ?", [key])
-                    conn.commit()
-                except Exception:
-                    pass
-                return
-            row = conn.execute(
-                "SELECT attempts, window_started_at, locked_until FROM login_rate_limits WHERE key = ? LIMIT 1",
-                [key],
-            ).fetchone()
-            attempts = 0
-            window_started_at = now
-            locked_until = 0.0
-            if row:
-                attempts = int(row_value(row, "attempts", 0) or 0)
-                window_started_at = float(row_value(row, "window_started_at", now) or now)
-                locked_until = float(row_value(row, "locked_until", 0) or 0)
-                if (now - window_started_at) > LOGIN_RATE_WINDOW_SECONDS:
-                    attempts = 0
-                    window_started_at = now
-                    locked_until = 0.0
-            attempts += 1
-            if attempts >= LOGIN_RATE_MAX_ATTEMPTS:
-                locked_until = now + LOGIN_RATE_LOCK_SECONDS
-            try:
-                conn.execute(
-                    """
-                    INSERT INTO login_rate_limits (
-                      key, attempts, window_started_at, locked_until, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(key) DO UPDATE SET
-                      attempts = excluded.attempts,
-                      window_started_at = excluded.window_started_at,
-                      locked_until = excluded.locked_until,
-                      updated_at = excluded.updated_at
-                    """,
-                    [key, int(attempts), float(window_started_at), float(locked_until), float(window_started_at), float(now)],
-                )
-                conn.commit()
-            except Exception:
-                pass
+            for key, max_attempts in keys:
+                _rate_register_single_db(conn, key, max_attempts, now, ok)
         finally:
             try:
                 conn.close()
@@ -19812,6 +19925,28 @@ _html_to_text = runtime_security_utils._html_to_text
 _extract_title = runtime_security_utils._extract_title
 
 
+class _SSRFSafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """
+    Revalida CADA salto de redirección: sin esto, urlopen sigue un 3xx hacia cualquier
+    destino (p.ej. http://169.254.169.254/ metadata o una IP interna) saltándose la
+    allowlist y la comprobación de IP hechas sobre la URL inicial (bypass SSRF).
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        try:
+            parsed = urllib.parse.urlparse(newurl)
+        except Exception:
+            return None
+        if parsed.scheme not in {"http", "https"}:
+            return None
+        if not _domain_is_allowed(parsed.hostname):
+            return None
+        bad, _reason = _hostname_resolves_to_disallowed_ip(parsed.hostname)
+        if bad:
+            return None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def copilot_web_fetch_url(url, *, timeout_seconds=None, max_bytes=None, max_chars=None, now=None):
     raw = str(url or "").strip()
     if not raw:
@@ -19848,8 +19983,10 @@ def copilot_web_fetch_url(url, *, timeout_seconds=None, max_bytes=None, max_char
 
     headers = {"User-Agent": "Verifika2CopilotWeb/1.0"}
     request = urllib.request.Request(raw, headers=headers)
+    # Opener que revalida allowlist + IP en cada redirección (evita bypass SSRF por 3xx).
+    _ssrf_opener = urllib.request.build_opener(_SSRFSafeRedirectHandler())
     try:
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as resp:
+        with _ssrf_opener.open(request, timeout=timeout_seconds) as resp:
             status = int(getattr(resp, "status", 200) or 200)
             full_ct = str(resp.headers.get("Content-Type") or "")
             content_type = full_ct.split(";")[0].strip().lower()
@@ -27027,7 +27164,7 @@ def parse_legal_feed_entries(raw_bytes, source_config):
     if not raw_bytes:
         return entries
     try:
-        root = ET.fromstring(raw_bytes)
+        root = SAFE_ET.fromstring(raw_bytes)
     except Exception:
         return entries
     source_key = str(source_config.get("key") or source_config.get("fuente") or "source").strip()
@@ -28891,7 +29028,7 @@ def _xml_local_name(tag):
 def extract_catastro_candidates_from_xml(xml_text, fallback_label=""):
     if not xml_text:
         return {"candidates": [], "messages": []}
-    root = ET.fromstring(xml_text)
+    root = SAFE_ET.fromstring(xml_text)
     pc1_values = []
     pc2_values = []
     labels = []
@@ -28932,7 +29069,7 @@ def extract_catastro_candidates_from_xml(xml_text, fallback_label=""):
 def extract_catastro_streets_from_xml(xml_text):
     if not xml_text:
         return []
-    root = ET.fromstring(xml_text)
+    root = SAFE_ET.fromstring(xml_text)
     streets = []
     seen = set()
     for calle in root.iter():
@@ -28958,7 +29095,7 @@ def extract_catastro_streets_from_xml(xml_text):
 def extract_catastro_numbers_from_xml(xml_text, *, street_label=""):
     if not xml_text:
         return {"candidates": [], "messages": []}
-    root = ET.fromstring(xml_text)
+    root = SAFE_ET.fromstring(xml_text)
     messages = []
     candidates = []
     seen = set()
@@ -53856,7 +53993,17 @@ def build_inmueble_catastro_sheet_pdf(company, inmueble, catastro_summary):
     return build_company_branded_document_pdf(company, title, subtitle, sections, footer)
 
 
-def send_file(handler, path):
+def send_file(handler, path, filename=None, force_download=False, force_attachment=False):
+    """
+    Sirve un fichero.
+    - `force_download=True`: adjunto con Content-Type neutro (octet-stream). Para ficheros
+      subidos por usuarios de tipo activo (.html, .xml, .js...) para que no se ejecuten en el
+      origen de la app.
+    - `force_attachment=True`: mantiene el Content-Type real pero marca Content-Disposition
+      attachment (usado para .svg: <img> lo sigue renderizando —ignora Content-Disposition— pero
+      la navegación top-level lo descarga en lugar de ejecutar su script).
+    - `filename`: fija el nombre en Content-Disposition.
+    """
     if not path.exists() or not path.is_file():
         handler.send_error(404, "Not found")
         return
@@ -53875,11 +54022,19 @@ def send_file(handler, path):
     elif path.suffix == ".svg":
         content_type = "image/svg+xml"
 
+    if force_download:
+        # Nunca servir contenido subido como HTML/SVG ejecutable: se fuerza descarga.
+        content_type = "application/octet-stream"
+
     try:
         data = path.read_bytes()
         handler.send_response(200)
         handler.send_header("Content-Type", content_type)
-        handler.send_header("X-Content-Type-Options", "nosniff")
+        # X-Content-Type-Options lo emite ahora end_headers() de forma global.
+        if force_download or force_attachment or filename:
+            safe_dl_name = re.sub(r'[^0-9A-Za-z._-]+', "_", str(filename or path.name)).strip("_") or "descarga"
+            disp = "attachment" if (force_download or force_attachment) else "inline"
+            handler.send_header("Content-Disposition", f'{disp}; filename="{safe_dl_name}"')
 
         # Caché: el HTML nunca se cachea (evita pantallas rotas tras deploy).
         # Los assets estáticos sí pueden cachearse fuerte porque van versionados con `?v=...`.
@@ -54304,11 +54459,58 @@ def _sanitize_telemetry_text(text, limit=220):
         return ""
 
 
+# CSP por defecto. Permite lo que la app usa hoy (Leaflet desde unpkg, Google Fonts, tiles de mapas
+# y APIs de geocoding externas) y bloquea el resto. `frame-ancestors 'self'` corta el clickjacking,
+# `object-src 'none'` y `base-uri 'self'` cierran vectores clásicos. Override con APP_CONTENT_SECURITY_POLICY
+# (o "off" para desactivarla).
+DEFAULT_CONTENT_SECURITY_POLICY = (
+    "default-src 'self'; "
+    "base-uri 'self'; "
+    "object-src 'none'; "
+    "frame-ancestors 'self'; "
+    "form-action 'self'; "
+    "script-src 'self' 'unsafe-inline' https://unpkg.com; "
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
+    "font-src 'self' https://fonts.gstatic.com data:; "
+    "img-src 'self' data: blob: https:; "
+    "connect-src 'self' https:; "
+    # La app embebe mapas de Google/OSM en <iframe>: hay que permitirlos explícitamente.
+    "frame-src 'self' https://www.google.com https://maps.google.com https://www.openstreetmap.org; "
+    "worker-src 'self' blob:"
+)
+
+
 class Handler(BaseHTTPRequestHandler):
     db_path = DB_DEFAULT
     ocr_db_path = OCR_DB_DEFAULT
     _db_ready = False
     _db_ready_lock = threading.Lock()
+
+    def _emit_security_headers(self):
+        # Inyecta cabeceras de seguridad en TODA respuesta (se llama desde end_headers).
+        try:
+            self.send_header("X-Content-Type-Options", "nosniff")
+            # SAMEORIGIN (no DENY): la app embebe contenido propio en <iframe>. Sigue bloqueando
+            # el clickjacking desde orígenes externos. frame-ancestors 'self' en la CSP lo refuerza.
+            self.send_header("X-Frame-Options", "SAMEORIGIN")
+            self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
+            self.send_header("Permissions-Policy", "geolocation=(self), camera=(), microphone=(), payment=()")
+            csp = (os.environ.get("APP_CONTENT_SECURITY_POLICY", "").strip() or DEFAULT_CONTENT_SECURITY_POLICY)
+            if csp and csp.lower() not in ("0", "off", "none", "disabled", "false"):
+                self.send_header("Content-Security-Policy", csp)
+            # HSTS solo cuando el cliente está sobre HTTPS (evita romper accesos por HTTP en local).
+            try:
+                if self._session_cookie_secure():
+                    self.send_header("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+            except Exception:
+                pass
+        except Exception:
+            # Nunca romper una respuesta por no poder añadir una cabecera.
+            pass
+
+    def end_headers(self):
+        self._emit_security_headers()
+        super().end_headers()
     _db_ready_last_attempt_at = 0.0
     _db_ready_last_error = ""
     _db_bootstrap_started = False
@@ -54630,6 +54832,50 @@ class Handler(BaseHTTPRequestHandler):
         except Exception:
             return None
         return None
+
+    def _request_host(self):
+        host = (self.headers.get("X-Forwarded-Host") or self.headers.get("Host") or "").strip().lower()
+        host = host.split(",", 1)[0].strip()
+        if ":" in host:
+            host = host.split(":", 1)[0].strip()
+        return host
+
+    def _origin_or_referer_host(self):
+        origin = (self.headers.get("Origin") or "").strip()
+        if origin and origin.lower() != "null":
+            try:
+                return (urllib.parse.urlparse(origin).hostname or "").lower()
+            except Exception:
+                return ""
+        referer = (self.headers.get("Referer") or "").strip()
+        if referer:
+            try:
+                return (urllib.parse.urlparse(referer).hostname or "").lower()
+            except Exception:
+                return ""
+        return ""
+
+    def _is_cross_origin_write(self):
+        """
+        Defensa CSRF: True si la petición trae Origin/Referer de un host distinto al del servidor.
+        Si no hay ninguna de esas cabeceras (clientes no-navegador, apps nativas), no bloqueamos:
+        el navegador siempre envía Origin en un POST cross-site, así que el CSRF clásico se detecta;
+        y SameSite=Lax en la cookie ya cubre el caso navegador.
+        """
+        src_host = self._origin_or_referer_host()
+        if not src_host:
+            return False
+        host = self._request_host()
+        if not host or src_host == host:
+            return False
+        # Permite subdominios del mismo dominio raíz propio (app.verifika2.com <-> crm.verifika2.com).
+        root = (os.environ.get("APP_CSRF_ROOT_DOMAIN") or "verifika2.com").strip().lower()
+        if root:
+            def _under(h):
+                return h == root or h.endswith("." + root)
+            if _under(src_host) and _under(host):
+                return False
+        return True
 
     def _build_session_cookie(self, value, max_age=None):
         parts = [f"{SESSION_COOKIE_NAME}={value}", "Path=/", "HttpOnly", "SameSite=Lax"]
@@ -55557,7 +55803,19 @@ class Handler(BaseHTTPRequestHandler):
             if not safe_path:
                 self.send_error(404, "Not found")
                 return
-            send_file(self, safe_path)
+            # SEGURIDAD (XSS almacenado): los ficheros subidos por usuarios solo se sirven inline
+            # si son tipos seguros de previsualización (PDF/imagen ráster). Los .svg mantienen su
+            # tipo (para que sigan renderizando como logo vía <img>) pero se marcan attachment para
+            # que abrirlos por URL directa los descargue en vez de ejecutar su script. El resto
+            # (.html, .xml, .js, ...) se fuerza a descarga con Content-Type octet-stream.
+            SAFE_INLINE_UPLOAD_SUFFIXES = {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
+            _suffix = safe_path.suffix.lower()
+            if _suffix in SAFE_INLINE_UPLOAD_SUFFIXES:
+                send_file(self, safe_path)
+            elif _suffix in {".svg", ".svgz"}:
+                send_file(self, safe_path, force_attachment=True)
+            else:
+                send_file(self, safe_path, force_download=True)
             return
 
         if parsed.path.startswith("/icons/"):
@@ -55720,6 +55978,15 @@ class Handler(BaseHTTPRequestHandler):
                 length = 0
             if length <= 0:
                 json_response(self, {"error": "Content-Length requerido"}, status=400)
+                return
+            # Límite de tamaño (mismo tope que POST) para evitar agotar el disco.
+            try:
+                max_put_bytes = int(os.environ.get("APP_MAX_POST_BYTES", str(10 * 1024 * 1024)) or (10 * 1024 * 1024))
+            except Exception:
+                max_put_bytes = 10 * 1024 * 1024
+            max_put_bytes = max(64 * 1024, min(50 * 1024 * 1024, max_put_bytes))
+            if length > max_put_bytes:
+                json_response(self, {"error": "Payload demasiado grande", "detail": f"Máximo {max_put_bytes} bytes"}, status=413)
                 return
             content = self.rfile.read(length)
             # Guardamos una copia local bajo UPLOADS para permitir UX sin S3 (dev/test).
@@ -56041,6 +56308,9 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/api/iivtnu_pdf_parse":
             if parsed.path not in AUTH_PUBLIC_POST_ENDPOINTS and not self._require_api_auth():
                 return
+            if self._is_cross_origin_write():
+                json_response(self, {"error": "Origen no permitido"}, status=403)
+                return
             if not self._enforce_service_access(parsed.path, payload={}):
                 return
             try:
@@ -56232,6 +56502,12 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path not in AUTH_PUBLIC_POST_ENDPOINTS and not self._require_api_auth():
+            return
+        # CSRF (defensa en profundidad sobre SameSite=Lax): rechaza POST autenticados cuyo
+        # Origin/Referer sea de otro origen. Los endpoints públicos (webhooks/ingest/portal) se
+        # excluyen porque pueden llamarse legítimamente cross-origin (o desde máquinas sin Origin).
+        if parsed.path not in AUTH_PUBLIC_POST_ENDPOINTS and self._is_cross_origin_write():
+            json_response(self, {"error": "Origen no permitido"}, status=403)
             return
         if not self._enforce_service_access(parsed.path, payload=payload):
             return
@@ -56930,21 +57206,23 @@ class Handler(BaseHTTPRequestHandler):
                     payload["empresa_id"] = eid
                     empresa = {"id": eid}
 
-        # Enforce tenant isolation for workspace write endpoints too (when enabled).
-        # Centralizado para no depender de checks individuales.
-        if WORKSPACE_MEMBERSHIP_ENFORCE and isinstance(payload, dict) and str(parsed.path or "").startswith("/api/workspace_"):
-            # Public workspace endpoints (portal) use tokens instead of session.
-            if parsed.path not in {"/api/workspace_portal_upload", "/api/workspace_portal_presign"}:
-                session = getattr(self, "auth_session", None) or self._current_session()
-                if not session:
-                    json_response(self, {"error": "No autenticado"}, status=401)
+        # Enforce tenant isolation for ALL authenticated write endpoints (fail-closed centralizado),
+        # no solo /api/workspace_*: cierra el hueco de endpoints legacy que aceptaban workspace_id
+        # en el payload sin comprobar pertenencia. Los endpoints públicos (portal/kiosk/webhooks) usan
+        # tokens y quedan excluidos vía AUTH_PUBLIC_POST_ENDPOINTS. Los superadmin hacen bypass dentro
+        # de enforce_workspace_membership.
+        if (
+            WORKSPACE_MEMBERSHIP_ENFORCE
+            and isinstance(payload, dict)
+            and parsed.path not in AUTH_PUBLIC_POST_ENDPOINTS
+        ):
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ws_id = str(payload.get("workspace_id") or (params.get("workspace_id", [""])[0] if params else "") or "").strip()
+            if ws_id and session:
+                ok, err = enforce_workspace_membership(conn, session, ws_id, write=True)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
                     return
-                ws_id = str(payload.get("workspace_id") or (params.get("workspace_id", [""])[0] if params else "") or "").strip()
-                if ws_id:
-                    ok, err = enforce_workspace_membership(conn, session, ws_id, write=True)
-                    if not ok:
-                        json_response(self, {"error": err or "No autorizado"}, status=403)
-                        return
         if parsed.path in ("/api/acciones", "/api/acciones_update", "/api/acciones_delete"):
             # Service-first: en acciones (agenda) la operativa debe depender de workspace+servicio,
             # no de empresa. Aun así, por legacy, la tabla requiere `empresa_id NOT NULL`,
@@ -78634,7 +78912,12 @@ class Handler(BaseHTTPRequestHandler):
             ws_id = ""
             if path == "/api/workspace_detail":
                 ws_id = (params.get("id", [""])[0] or "").strip()
-            elif path.startswith("/api/workspace_"):
+            elif path not in WORKSPACE_MEMBERSHIP_GET_SERVICE_SCOPED_ENDPOINTS:
+                # Fail-closed centralizado: cualquier GET que traiga workspace_id exige pertenencia,
+                # no solo las rutas /api/workspace_*. Cierra el hueco de endpoints legacy que aceptaban
+                # workspace_id sin comprobar el aislamiento en el gate. Se excluyen los endpoints de
+                # lectura "de equipo de servicio" (p.ej. dashboard de Gestoría) cuyo control de acceso
+                # es por servicio (modo full/limited), no por pertenencia formal al workspace.
                 ws_id = (params.get("workspace_id", [""])[0] or "").strip()
             if ws_id:
                 ok, err = enforce_workspace_membership(conn, session, ws_id)
@@ -80830,14 +81113,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/years":
             ttl_s = max(5.0, float(os.environ.get("APP_YEARS_CACHE_SECONDS", "120") or 120))
             now_ts = time.time()
+            # Scope multi-tenant: si viene workspace_id/empresa_id, se filtra por él en las tablas
+            # que tengan esa columna (evita filtrar años de otros inquilinos). La caché es por-scope.
+            scope_ws = str((params.get("workspace_id", [""])[0] or "")).strip()
+            scope_emp = str((params.get("empresa_id", [""])[0] or "")).strip()
+            scope_key = f"ws={scope_ws}|emp={scope_emp}"
             try:
                 with Handler._years_lock:
-                    if (
-                        Handler._years_cached_payload
-                        and (now_ts - float(Handler._years_last_at or 0.0)) < ttl_s
-                    ):
-                        json_response(self, Handler._years_cached_payload)
-                        return
+                    cache = getattr(Handler, "_years_cached_by_scope", None)
+                    if isinstance(cache, dict):
+                        hit = cache.get(scope_key)
+                        if hit and (now_ts - float(hit.get("at") or 0.0)) < ttl_s:
+                            json_response(self, hit.get("payload"))
+                            return
             except Exception:
                 pass
             years = set()
@@ -80857,10 +81145,20 @@ class Handler(BaseHTTPRequestHandler):
             ]
             for table in tables:
                 cols = table_columns(conn, table) or set()
+                # Construye filtro de scope según columnas disponibles de la tabla.
+                scope_sql = ""
+                scope_params = []
+                if scope_ws and "workspace_id" in cols:
+                    scope_sql = " AND workspace_id = ?"
+                    scope_params = [scope_ws]
+                elif scope_emp and "empresa_id" in cols:
+                    scope_sql = " AND empresa_id = ?"
+                    scope_params = [scope_emp]
                 if "anio" in cols:
                     try:
                         for row in conn.execute(
-                            f"SELECT DISTINCT anio AS y FROM {table} WHERE anio IS NOT NULL"
+                            f"SELECT DISTINCT anio AS y FROM {table} WHERE anio IS NOT NULL{scope_sql}",
+                            scope_params,
                         ).fetchall():
                             if row["y"] is not None:
                                 years.add(str(row["y"]))
@@ -80872,8 +81170,9 @@ class Handler(BaseHTTPRequestHandler):
                             f"""
                             SELECT DISTINCT substr(NULLIF(fecha, ''), 1, 4) AS y
                             FROM {table}
-                            WHERE fecha IS NOT NULL AND length(fecha) >= 4
-                            """
+                            WHERE fecha IS NOT NULL AND length(fecha) >= 4{scope_sql}
+                            """,
+                            scope_params,
                         ).fetchall():
                             if row["y"]:
                                 years.add(str(row["y"]))
@@ -80882,8 +81181,14 @@ class Handler(BaseHTTPRequestHandler):
             payload = {"years": sorted(years)}
             try:
                 with Handler._years_lock:
-                    Handler._years_cached_payload = payload
-                    Handler._years_last_at = now_ts
+                    cache = getattr(Handler, "_years_cached_by_scope", None)
+                    if not isinstance(cache, dict):
+                        cache = {}
+                        Handler._years_cached_by_scope = cache
+                    # Evita crecimiento ilimitado de la caché por-scope.
+                    if len(cache) > 256:
+                        cache.clear()
+                    cache[scope_key] = {"payload": payload, "at": now_ts}
             except Exception:
                 pass
             json_response(self, payload)

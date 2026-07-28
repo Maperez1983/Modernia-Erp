@@ -1,4 +1,16 @@
 
+# Entorno / secretos
+.env
+.env.*
+!.env.example
+
+# Datos locales y subidas de usuarios
+web/uploads/
+uploads/
+*.sqlite
+*.sqlite3
+*.db
+
 .DS_Store
 __pycache__/
 *.pyc

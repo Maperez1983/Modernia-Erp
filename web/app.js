@@ -1502,9 +1502,9 @@ const showOcrCompareModal = (rowMap, fields, meta = {}) =>
       .map(
         (row) => `
         <div class="ocr-compare-row">
-          <div class="ocr-compare-label">${row.label}</div>
-          <div class="ocr-compare-val">${getOrDash(row.row)}</div>
-          <div class="ocr-compare-val">${getOrDash(row.ocr)}</div>
+          <div class="ocr-compare-label">${escapeHtml(row.label)}</div>
+          <div class="ocr-compare-val">${escapeHtml(String(getOrDash(row.row)))}</div>
+          <div class="ocr-compare-val">${escapeHtml(String(getOrDash(row.ocr)))}</div>
         </div>
       `
       )
@@ -8156,8 +8156,8 @@ const renderWorkspaceCompanySwitcher = (rows = []) => {
           <button
             type="button"
             class="workspace-company-pill${String(row.id || "") === activeId ? " is-active" : ""}"
-            data-workspace-company-pill="${row.id || ""}"
-          >${row.nombre || "-"}</button>
+            data-workspace-company-pill="${escapeHtml(row.id || "")}"
+          >${escapeHtml(row.nombre || "-")}</button>
         `).join("")}
       </div>
     </div>
@@ -8435,7 +8435,7 @@ const renderFiscalWizardDgtRefs = () => {
       const url = lookup?.url ? String(lookup.url) : "";
       const subtitle = title || summary ? [title, summary].filter(Boolean).join(" · ") : lookup ? "Consulta preparada." : "Sin consultar.";
       const urlHtml = url
-        ? ` · <a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">Abrir</a>`
+        ? ` · <a href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noreferrer">Abrir</a>`
         : "";
       return `
         <div class="crm-focus-link" style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
@@ -10337,7 +10337,7 @@ const syncWorkspaceClientOptions = (rows = []) => {
       const label = `${row.nombre || "-"}${row.nif ? ` · ${row.nif}` : ""}`;
       state.workspaceClientOptionMap.set(label, row);
       state.workspaceClientOptionById.set(String(row.id || ""), row);
-      return `<option value="${label}"></option>`;
+      return `<option value="${escapeHtml(label)}"></option>`;
     })
     .join("");
 };
@@ -10454,8 +10454,8 @@ const renderWorkspaceHealth = (data = {}) => {
                 .map(
                   (item) => `
                     <div class="workspace-check-item${Number(item.done || 0) === 1 ? " is-done" : ""}">
-                      <strong>${item.label || "-"}</strong>
-                      <div class="muted">${item.hint || ""}</div>
+                      <strong>${escapeHtml(item.label || "-")}</strong>
+                      <div class="muted">${escapeHtml(item.hint || "")}</div>
                     </div>
                   `
                 )
@@ -10478,14 +10478,14 @@ const renderWorkspaceHealth = (data = {}) => {
               ${visibleRows
                 .map(
                   (row) => `
-                    <div class="workspace-module-health-row status-${row.status || "disabled"}">
+                    <div class="workspace-module-health-row status-${escapeHtml(row.status || "disabled")}">
                       <div>
-                        <strong>${row.nombre || row.key || "-"}</strong>
-                        <div class="muted">${row.metric_value || 0} ${row.metric_label || ""}</div>
+                        <strong>${escapeHtml(row.nombre || row.key || "-")}</strong>
+                        <div class="muted">${escapeHtml(String(row.metric_value || 0))} ${escapeHtml(row.metric_label || "")}</div>
                       </div>
                       <div class="workspace-module-health-meta">
-                        <span>${row.enabled ? (row.status || "activo") : "desactivado"}</span>
-                        <span>${row.next_step || ""}</span>
+                        <span>${escapeHtml(row.enabled ? (row.status || "activo") : "desactivado")}</span>
+                        <span>${escapeHtml(row.next_step || "")}</span>
                       </div>
                     </div>
                   `
@@ -10525,11 +10525,11 @@ const renderWorkspaceHealth = (data = {}) => {
                     (item) => `
                       <div class="workspace-billing-row">
                         <div>
-                          <strong>${item.label || "-"}</strong>
-                          <div class="muted">Prioridad ${item.priority || "media"}</div>
+                          <strong>${escapeHtml(item.label || "-")}</strong>
+                          <div class="muted">Prioridad ${escapeHtml(item.priority || "media")}</div>
                         </div>
                         <div class="workspace-billing-meta">
-                          <button type="button" class="secondary ghost" data-workspace-jump="${item.target || ""}">Ir</button>
+                          <button type="button" class="secondary ghost" data-workspace-jump="${escapeHtml(item.target || "")}">Ir</button>
                         </div>
                       </div>
                     `
@@ -10585,8 +10585,8 @@ const renderWorkspaceCommercialPack = (workspace = {}, packageData = {}) => {
     <div class="workspace-summary-list">
       <div class="workspace-summary-row">
         <div>
-          <strong>${packageData.label || workspace.plan || "Narrativa comercial"}</strong>
-          <div class="muted">${packageData.pitch || "La propuesta comercial de este workspace todavía no está definida."}</div>
+          <strong>${escapeHtml(packageData.label || workspace.plan || "Narrativa comercial")}</strong>
+          <div class="muted">${escapeHtml(packageData.pitch || "La propuesta comercial de este workspace todavía no está definida.")}</div>
         </div>
         <div class="workspace-summary-metrics">
           <span>${Number(packageData.enabled_focus_total || 0)} focos activos</span>
@@ -10619,8 +10619,8 @@ const renderWorkspacePermissionMatrix = (rows = []) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.perfil || "-"}</strong>
-                <div class="muted">${(row.modules || []).join(" · ") || "Sin módulos"}</div>
+                <strong>${escapeHtml(row.perfil || "-")}</strong>
+                <div class="muted">${escapeHtml((row.modules || []).join(" · ") || "Sin módulos")}</div>
               </div>
               <div class="workspace-billing-meta">
                 <span>${numberFormatter.format(Number(row.modules_total || 0))} módulos</span>
@@ -10733,11 +10733,11 @@ const renderWorkspaceClientBase = (rows = []) => {
       ${items
         .map(
           (row) => `
-            <button type="button" class="workspace-billing-row workspace-client-row${String(row.id || "") === String(state.currentWorkspaceClientId || "") ? " is-active" : ""}" data-workspace-client-id="${row.id || ""}">
+            <button type="button" class="workspace-billing-row workspace-client-row${String(row.id || "") === String(state.currentWorkspaceClientId || "") ? " is-active" : ""}" data-workspace-client-id="${escapeHtml(row.id || "")}">
               <div>
-                <strong>${row.nombre || "-"}</strong>
-                <div class="muted">${row.nif || "Sin DNI/NIF"}${row.telefono ? ` · ${row.telefono}` : ""}${row.email ? ` · ${row.email}` : ""}</div>
-                <div class="muted">${row.servicios || "Sin servicios"}${row.empresas ? ` · ${row.empresas}` : ""}</div>
+                <strong>${escapeHtml(row.nombre || "-")}</strong>
+                <div class="muted">${escapeHtml(row.nif || "Sin DNI/NIF")}${row.telefono ? ` · ${escapeHtml(row.telefono)}` : ""}${row.email ? ` · ${escapeHtml(row.email)}` : ""}</div>
+                <div class="muted">${escapeHtml(row.servicios || "Sin servicios")}${row.empresas ? ` · ${escapeHtml(row.empresas)}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
                 <span>Cliente final</span>
@@ -10782,15 +10782,15 @@ const renderWorkspaceClientDetail = (payload = null) => {
       <div class="workspace-client-hero">
         <div class="workspace-client-hero-head">
           <div>
-            <h3>${cliente.nombre || "Cliente final"}</h3>
-            <div class="muted">${cliente.nif || "Sin DNI/NIF"}${cliente.telefono ? ` · ${cliente.telefono}` : ""}${cliente.email ? ` · ${cliente.email}` : ""}</div>
+            <h3>${escapeHtml(cliente.nombre || "Cliente final")}</h3>
+            <div class="muted">${escapeHtml(cliente.nif || "Sin DNI/NIF")}${cliente.telefono ? ` · ${escapeHtml(cliente.telefono)}` : ""}${cliente.email ? ` · ${escapeHtml(cliente.email)}` : ""}</div>
           </div>
           <div class="workspace-client-actions">
             <button type="button" class="secondary ghost" id="workspaceClientOpenFull">Ficha completa</button>
           </div>
         </div>
         <div class="workspace-client-meta">
-          ${empresas.slice(0, 6).map((row) => `<span>${row.empresa || "-"} · ${row.servicio || "-"}</span>`).join("") || "<span>Sin servicios activos</span>"}
+          ${empresas.slice(0, 6).map((row) => `<span>${escapeHtml(row.empresa || "-")} · ${escapeHtml(row.servicio || "-")}</span>`).join("") || "<span>Sin servicios activos</span>"}
         </div>
         <div class="workspace-mini-kpis">
           <div class="workspace-mini-kpi"><span>Servicios activos</span><strong>${numberFormatter.format(servicios.length)}</strong></div>
@@ -10909,10 +10909,10 @@ const renderWorkspaceGestoriaOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.cliente || "-"}</strong>
-                <div class="muted">${row.modelo || "Modelo"}${row.proxima_fecha ? ` · ${row.proxima_fecha}` : ""}</div>
+                <strong>${escapeHtml(row.cliente || "-")}</strong>
+                <div class="muted">${escapeHtml(row.modelo || "Modelo")}${row.proxima_fecha ? ` · ${escapeHtml(String(row.proxima_fecha))}` : ""}</div>
               </div>
-              <div class="workspace-billing-meta"><span>${row.estado || "Pendiente"}</span></div>
+              <div class="workspace-billing-meta"><span>${escapeHtml(row.estado || "Pendiente")}</span></div>
             </div>
           `,
           "Sin modelos vencidos."
@@ -10925,10 +10925,10 @@ const renderWorkspaceGestoriaOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.cliente || "-"}</strong>
-                <div class="muted">${row.nif || "Sin DNI/NIF"}${row.ejercicio ? ` · ${row.ejercicio}` : ""}</div>
+                <strong>${escapeHtml(row.cliente || "-")}</strong>
+                <div class="muted">${escapeHtml(row.nif || "Sin DNI/NIF")}${row.ejercicio ? ` · ${escapeHtml(String(row.ejercicio))}` : ""}</div>
               </div>
-              <div class="workspace-billing-meta"><span>${row.estado_presentacion || "Borrador"}</span></div>
+              <div class="workspace-billing-meta"><span>${escapeHtml(row.estado_presentacion || "Borrador")}</span></div>
             </div>
           `,
           "Sin campañas de renta pendientes."
@@ -10941,10 +10941,10 @@ const renderWorkspaceGestoriaOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.cliente || "-"}</strong>
-                <div class="muted">${row.tipo || "Acción"}${row.fecha ? ` · ${row.fecha}` : ""}</div>
+                <strong>${escapeHtml(row.cliente || "-")}</strong>
+                <div class="muted">${escapeHtml(row.tipo || "Acción")}${row.fecha ? ` · ${escapeHtml(String(row.fecha))}` : ""}</div>
               </div>
-              <div class="workspace-billing-meta"><span>${row.estado || "Pendiente"}</span></div>
+              <div class="workspace-billing-meta"><span>${escapeHtml(row.estado || "Pendiente")}</span></div>
             </div>
           `,
           "Sin acciones vencidas."
@@ -10957,10 +10957,10 @@ const renderWorkspaceGestoriaOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.cliente || "-"}</strong>
-                <div class="muted">${row.titulo || "Presupuesto"}${row.fecha_seguimiento ? ` · Seguimiento ${row.fecha_seguimiento}` : ""}</div>
+                <strong>${escapeHtml(row.cliente || "-")}</strong>
+                <div class="muted">${escapeHtml(row.titulo || "Presupuesto")}${row.fecha_seguimiento ? ` · Seguimiento ${escapeHtml(String(row.fecha_seguimiento))}` : ""}</div>
               </div>
-              <div class="workspace-billing-meta"><span>${row.motivo_estado || "En estudio"}</span></div>
+              <div class="workspace-billing-meta"><span>${escapeHtml(row.motivo_estado || "En estudio")}</span></div>
             </div>
           `,
           "Sin presupuestos en estudio."
@@ -11004,10 +11004,10 @@ const renderWorkspaceSegurosOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.tomador || "-"}</strong>
-                <div class="muted">${row.compania || "Sin compañía"}${row.ramo ? ` · ${row.ramo}` : ""}${row.poliza_numero ? ` · ${row.poliza_numero}` : ""}${row.prima_total ? ` · ${formatEuros(parseMoneyValue(row.prima_total))}` : ""}</div>
+                <strong>${escapeHtml(row.tomador || "-")}</strong>
+                <div class="muted">${escapeHtml(row.compania || "Sin compañía")}${row.ramo ? ` · ${escapeHtml(row.ramo)}` : ""}${row.poliza_numero ? ` · ${escapeHtml(String(row.poliza_numero))}` : ""}${row.prima_total ? ` · ${formatEuros(parseMoneyValue(row.prima_total))}` : ""}</div>
               </div>
-              <div class="workspace-billing-meta"><span>${row.fecha_efecto || "Sin fecha"}</span></div>
+              <div class="workspace-billing-meta"><span>${escapeHtml(row.fecha_efecto || "Sin fecha")}</span></div>
             </div>
           `,
           "Sin entradas este mes."
@@ -11027,10 +11027,10 @@ const renderWorkspaceSegurosOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.tomador || row.cliente || "-"}</strong>
-                <div class="muted">${row.compania || "Sin compañía"}${row.ramo ? ` · ${row.ramo}` : ""}</div>
+                <strong>${escapeHtml(row.tomador || row.cliente || "-")}</strong>
+                <div class="muted">${escapeHtml(row.compania || "Sin compañía")}${row.ramo ? ` · ${escapeHtml(row.ramo)}` : ""}</div>
               </div>
-              <div class="workspace-billing-meta"><span>${row.fecha_vencimiento || "Sin fecha"}</span></div>
+              <div class="workspace-billing-meta"><span>${escapeHtml(row.fecha_vencimiento || "Sin fecha")}</span></div>
             </div>
           `,
           "Sin renovaciones cercanas."
@@ -11043,10 +11043,10 @@ const renderWorkspaceSegurosOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.cliente || "-"}</strong>
-                <div class="muted">${row.tipo || "Acción"}${row.fecha ? ` · ${row.fecha}` : ""}</div>
+                <strong>${escapeHtml(row.cliente || "-")}</strong>
+                <div class="muted">${escapeHtml(row.tipo || "Acción")}${row.fecha ? ` · ${escapeHtml(String(row.fecha))}` : ""}</div>
               </div>
-              <div class="workspace-billing-meta"><span>${row.estado || "Pendiente"}</span></div>
+              <div class="workspace-billing-meta"><span>${escapeHtml(row.estado || "Pendiente")}</span></div>
             </div>
           `,
           "Sin alertas abiertas."
@@ -11059,7 +11059,7 @@ const renderWorkspaceSegurosOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.label || "Sin compañía"}</strong>
+                <strong>${escapeHtml(row.label || "Sin compañía")}</strong>
                 <div class="muted">${numberFormatter.format(Number(row.total || 0))} pólizas</div>
               </div>
 	              <div class="workspace-billing-meta"><span>${formatEuros(parseMoneyValue(row.prima_total))}</span></div>
@@ -11075,7 +11075,7 @@ const renderWorkspaceSegurosOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.label || "Sin ramo"}</strong>
+                <strong>${escapeHtml(row.label || "Sin ramo")}</strong>
                 <div class="muted">${numberFormatter.format(Number(row.total || 0))} pólizas</div>
               </div>
 	              <div class="workspace-billing-meta"><span>${formatEuros(parseMoneyValue(row.prima_total))}</span></div>
@@ -11139,8 +11139,8 @@ const renderWorkspaceFinOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.cliente || "-"}</strong>
-                <div class="muted">${row.estado || "Pendiente"}${row.fecha ? ` · ${row.fecha}` : ""}</div>
+                <strong>${escapeHtml(row.cliente || "-")}</strong>
+                <div class="muted">${escapeHtml(row.estado || "Pendiente")}${row.fecha ? ` · ${escapeHtml(String(row.fecha))}` : ""}</div>
               </div>
               <div class="workspace-billing-meta"><span>${formatEuros(Number(row.ingresos_conjuntos || 0))}</span></div>
             </div>
@@ -11155,8 +11155,8 @@ const renderWorkspaceFinOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.cliente || "-"}</strong>
-                <div class="muted">${row.banco || "Sin banco"}${row.fecha_firma ? ` · ${row.fecha_firma}` : ""}</div>
+                <strong>${escapeHtml(row.cliente || "-")}</strong>
+                <div class="muted">${escapeHtml(row.banco || "Sin banco")}${row.fecha_firma ? ` · ${escapeHtml(String(row.fecha_firma))}` : ""}</div>
               </div>
               <div class="workspace-billing-meta"><span>${formatEuros(Number(row.comision || 0))}</span></div>
             </div>
@@ -11171,10 +11171,10 @@ const renderWorkspaceFinOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.cliente || "-"}</strong>
-                <div class="muted">${row.tipo || "Acción"}${row.fecha ? ` · ${row.fecha}` : ""}</div>
+                <strong>${escapeHtml(row.cliente || "-")}</strong>
+                <div class="muted">${escapeHtml(row.tipo || "Acción")}${row.fecha ? ` · ${escapeHtml(String(row.fecha))}` : ""}</div>
               </div>
-              <div class="workspace-billing-meta"><span>${row.estado || "Pendiente"}</span></div>
+              <div class="workspace-billing-meta"><span>${escapeHtml(row.estado || "Pendiente")}</span></div>
             </div>
           `,
           "Sin alertas comerciales."
@@ -11187,7 +11187,7 @@ const renderWorkspaceFinOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.label || "Sin banco"}</strong>
+                <strong>${escapeHtml(row.label || "Sin banco")}</strong>
                 <div class="muted">${numberFormatter.format(Number(row.total || 0))} expedientes</div>
               </div>
               <div class="workspace-billing-meta"><span>${formatEuros(Number(row.comision_total || 0))}</span></div>
@@ -11227,8 +11227,8 @@ const renderWorkspaceInmoOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.direccion || "-"}</strong>
-                <div class="muted">${row.propietario ? `${row.propietario}` : "Propietario pendiente"}</div>
+                <strong>${escapeHtml(row.direccion || "-")}</strong>
+                <div class="muted">${row.propietario ? `${escapeHtml(row.propietario)}` : "Propietario pendiente"}</div>
               </div>
               <div class="workspace-billing-meta"><span>${formatEuros(Number(row.precio_objetivo || 0))}</span></div>
             </div>
@@ -11243,8 +11243,8 @@ const renderWorkspaceInmoOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.direccion || "-"}</strong>
-                <div class="muted">${row.tipo_operacion || "Operación"}${row.fecha_operacion ? ` · ${row.fecha_operacion}` : ""}</div>
+                <strong>${escapeHtml(row.direccion || "-")}</strong>
+                <div class="muted">${escapeHtml(row.tipo_operacion || "Operación")}${row.fecha_operacion ? ` · ${escapeHtml(String(row.fecha_operacion))}` : ""}</div>
               </div>
               <div class="workspace-billing-meta"><span>${formatEuros(Number(row.precio_escritura || row.precio_contrato || row.precio_propuesta || 0))}</span></div>
             </div>
@@ -11259,10 +11259,10 @@ const renderWorkspaceInmoOverview = (payload = {}) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.inmueble || "-"}</strong>
-                <div class="muted">${row.cliente || "Sin demanda"}${row.fecha ? ` · ${row.fecha}` : ""}${row.hora ? ` ${row.hora}` : ""}</div>
+                <strong>${escapeHtml(row.inmueble || "-")}</strong>
+                <div class="muted">${escapeHtml(row.cliente || "Sin demanda")}${row.fecha ? ` · ${escapeHtml(String(row.fecha))}` : ""}${row.hora ? ` ${escapeHtml(String(row.hora))}` : ""}</div>
               </div>
-              <div class="workspace-billing-meta"><span>${row.estado || "Pendiente"}</span></div>
+              <div class="workspace-billing-meta"><span>${escapeHtml(row.estado || "Pendiente")}</span></div>
             </div>
           `,
           "Sin visitas programadas."
@@ -11312,12 +11312,12 @@ const renderWorkspaceServiceDesks = (payload = {}) => {
   const renderRow = (row = {}) => `
     <div class="workspace-billing-row">
       <div>
-        <strong>${row.titulo || row.cliente || row.direccion || row.nombre || "-"}</strong>
-        <div class="muted">${[row.subtitulo, row.estado, row.fecha].filter(Boolean).join(" · ") || row.tipo || "-"}</div>
+        <strong>${escapeHtml(row.titulo || row.cliente || row.direccion || row.nombre || "-")}</strong>
+        <div class="muted">${escapeHtml([row.subtitulo, row.estado, row.fecha].filter(Boolean).join(" · ") || row.tipo || "-")}</div>
       </div>
       <div class="workspace-billing-meta">
-        ${row.valor ? `<span>${row.valor}</span>` : ""}
-        ${row.cliente_id ? `<button type="button" class="secondary ghost" data-workspace-row-client="${row.cliente_id}">Cliente</button>` : ""}
+        ${row.valor ? `<span>${escapeHtml(String(row.valor))}</span>` : ""}
+        ${row.cliente_id ? `<button type="button" class="secondary ghost" data-workspace-row-client="${escapeHtml(String(row.cliente_id))}">Cliente</button>` : ""}
       </div>
     </div>
   `;
@@ -11453,11 +11453,11 @@ const renderWorkspaceList = (rows = []) => {
         displayName &&
         normalizeWorkspaceIdentifier(rawName) !== normalizeWorkspaceIdentifier(displayName);
       return `
-        <button type="button" class="workspace-list-item${isActive ? " is-active" : ""}" data-workspace-id="${row.id}">
+        <button type="button" class="workspace-list-item${isActive ? " is-active" : ""}" data-workspace-id="${escapeHtml(String(row.id ?? ""))}">
           <div>
             <strong>${escapeHtml(displayName)}</strong>
-            <div class="muted">${escapeHtml(String(row.kind || "Directo"))} · ${row.plan || "Enterprise"} · ${row.estado || "Activo"}${showLegacyName ? ` · ${escapeHtml(rawName)}` : ""}</div>
-            ${row.descripcion ? `<div class="muted">${row.descripcion}</div>` : ""}
+            <div class="muted">${escapeHtml(String(row.kind || "Directo"))} · ${escapeHtml(String(row.plan || "Enterprise"))} · ${escapeHtml(String(row.estado || "Activo"))}${showLegacyName ? ` · ${escapeHtml(rawName)}` : ""}</div>
+            ${row.descripcion ? `<div class="muted">${escapeHtml(String(row.descripcion))}</div>` : ""}
           </div>
           <div class="workspace-list-meta">
             <span>${Number(row.empresas_total || 0)} empresas</span>
@@ -17313,7 +17313,7 @@ const renderWorkspaceRrhhHub = () => {
                       <strong>${escapeHtml(row.concepto || row.categoria || "Gasto")}</strong>
                       <div class="muted">${escapeHtml(row.persona_nombre || "")}${row.empresa_nombre ? ` · ${escapeHtml(row.empresa_nombre)}` : ""}</div>
                       <div class="muted">${escapeHtml(row.fecha || "")} · ${numberFormatter.format(Number(row.importe || 0))} € · <span class="rrhh-pill">${escapeHtml(estado)}</span></div>
-                      ${row.doc_url ? `<div class="muted"><a href="${escapeHtml(row.doc_url)}" target="_blank" rel="noreferrer">Ver justificante</a></div>` : ""}
+                      ${row.doc_url ? `<div class="muted"><a href="${escapeHtml(safeUrl(row.doc_url))}" target="_blank" rel="noreferrer">Ver justificante</a></div>` : ""}
                     </div>
                     <div class="workspace-rrhh-row-actions">
                       <button type="button" class="secondary ghost button-inline" data-rrhh-gasto-edit="${row.id || ""}">Editar</button>
@@ -18893,7 +18893,7 @@ const renderWorkspaceRrhhHub = () => {
         const link = String(resp?.invite_link || "").trim();
         if (inviteLinkEl) {
           inviteLinkEl.innerHTML = link
-            ? `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`
+            ? `<a href="${escapeHtml(safeUrl(link))}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`
             : "";
         }
         if (accessStatus) accessStatus.textContent = resp?.sent ? "Invitación enviada." : "Invitación generada (no se pudo enviar por email).";
@@ -20169,7 +20169,7 @@ const renderWorkspaceModules = (rows = []) => {
                   return `
                     <label class="workspace-module-card">
                       <div>
-                        <strong>${row.modulo_nombre || row.modulo_key || "-"}</strong>
+                        <strong>${escapeHtml(row.modulo_nombre || row.modulo_key || "-")}</strong>
                         <div class="muted">${meta.family} · ${meta.badge}</div>
                         <div class="muted">${meta.description}</div>
                       </div>
@@ -20254,7 +20254,7 @@ const renderWorkspaceBillingSummary = (data = {}) => {
                 (item) => `
                   <div class="workspace-summary-row">
                     <div>
-                      <strong>${item.servicio || "Sin servicio"}</strong>
+                      <strong>${escapeHtml(item.servicio || "Sin servicio")}</strong>
                       <div class="muted">${numberFormatter.format(Number(item.facturas || 0))} facturas</div>
                     </div>
                     <div class="workspace-summary-metrics">
@@ -20929,21 +20929,21 @@ const renderWorkspaceBudgetList = (rows = []) => {
       ${state.workspaceBudgetRows.map((row) => `
         <div class="workspace-billing-row">
           <div>
-            <strong>${row.titulo || "Presupuesto"}</strong>
-            <div class="muted">${row.empresa_nombre || "-"}${row.cliente_nombre ? ` · ${row.cliente_nombre}` : ""}</div>
-            <div class="muted">${row.servicio || "-"}${row.lineas_total ? ` · ${numberFormatter.format(Number(row.lineas_total || 0))} partidas` : ""}${row.fecha_seguimiento ? ` · seguimiento ${row.fecha_seguimiento}` : ""}</div>
-            ${row.motivo_estado ? `<div class="muted">${row.motivo_estado}</div>` : ""}
+            <strong>${escapeHtml(row.titulo || "Presupuesto")}</strong>
+            <div class="muted">${escapeHtml(row.empresa_nombre || "-")}${row.cliente_nombre ? ` · ${escapeHtml(row.cliente_nombre)}` : ""}</div>
+            <div class="muted">${escapeHtml(row.servicio || "-")}${row.lineas_total ? ` · ${numberFormatter.format(Number(row.lineas_total || 0))} partidas` : ""}${row.fecha_seguimiento ? ` · seguimiento ${escapeHtml(String(row.fecha_seguimiento))}` : ""}</div>
+            ${row.motivo_estado ? `<div class="muted">${escapeHtml(row.motivo_estado)}</div>` : ""}
           </div>
           <div class="workspace-billing-meta">
-            <span>${row.fecha || "Sin fecha"}</span>
+            <span>${escapeHtml(row.fecha || "Sin fecha")}</span>
             <span>${euroFormatter.format(Number(row.total || 0))}</span>
-            <span>${row.estado || "Borrador"}</span>
+            <span>${escapeHtml(row.estado || "Borrador")}</span>
             <a class="secondary ghost button-inline" href="/api/workspace_presupuesto_pdf?id=${encodeURIComponent(row.id || "")}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}" target="_blank" rel="noreferrer">PDF</a>
             ${normalizeSimple(row.estado || "") === "aceptado" ? `<a class="secondary ghost button-inline" href="/api/workspace_presupuesto_encargo_pdf?id=${encodeURIComponent(row.id || "")}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}" target="_blank" rel="noreferrer">Encargo</a>` : ""}
-            ${normalizeSimple(row.estado || "") === "aceptado" && normalizeBudgetServiceKey(row.servicio || "") === "fincas" ? `<button type="button" class="secondary ghost" data-budget-contract="${row.id}">Contrato</button>` : ""}
-            ${normalizeSimple(row.estado || "") !== "estudio" ? `<button type="button" class="secondary ghost" data-budget-status="${row.id}" data-budget-next="Estudio">Estudio</button>` : ""}
-            ${normalizeSimple(row.estado || "") !== "aceptado" ? `<button type="button" class="secondary ghost" data-budget-status="${row.id}" data-budget-next="Aceptado">Aceptar</button>` : ""}
-            ${normalizeSimple(row.estado || "") !== "rechazado" ? `<button type="button" class="secondary ghost" data-budget-status="${row.id}" data-budget-next="Rechazado">Rechazar</button>` : ""}
+            ${normalizeSimple(row.estado || "") === "aceptado" && normalizeBudgetServiceKey(row.servicio || "") === "fincas" ? `<button type="button" class="secondary ghost" data-budget-contract="${escapeHtml(String(row.id))}">Contrato</button>` : ""}
+            ${normalizeSimple(row.estado || "") !== "estudio" ? `<button type="button" class="secondary ghost" data-budget-status="${escapeHtml(String(row.id))}" data-budget-next="Estudio">Estudio</button>` : ""}
+            ${normalizeSimple(row.estado || "") !== "aceptado" ? `<button type="button" class="secondary ghost" data-budget-status="${escapeHtml(String(row.id))}" data-budget-next="Aceptado">Aceptar</button>` : ""}
+            ${normalizeSimple(row.estado || "") !== "rechazado" ? `<button type="button" class="secondary ghost" data-budget-status="${escapeHtml(String(row.id))}" data-budget-next="Rechazado">Rechazar</button>` : ""}
             <button type="button" class="secondary ghost" data-budget-edit="${row.id}">Editar</button>
           </div>
         </div>
@@ -21052,7 +21052,7 @@ const hydrateWorkspaceBillingTargetSelect = () => {
         .map((row) => {
           const ref = [row.serie, row.numero].filter(Boolean).join("-");
           const label = `${ref || "Factura"} · ${row.concepto || "Sin concepto"} · ${euroFormatter.format(Number(row.total || 0))}`;
-          return `<option value="${row.id}">${label}</option>`;
+          return `<option value="${escapeHtml(String(row.id))}">${escapeHtml(label)}</option>`;
         })
         .join("")
     : "<option value=''>Sin facturas</option>";
@@ -21067,7 +21067,7 @@ const hydrateWorkspaceRemittanceTargets = () => {
     ? rows
         .map((row) => {
           const ref = [row.serie, row.numero].filter(Boolean).join("-");
-          return `<option value="${row.id}">${ref || row.id} · ${row.concepto || "Factura"} · ${euroFormatter.format(Number(row.saldo_pendiente || 0))}</option>`;
+          return `<option value="${escapeHtml(String(row.id))}">${escapeHtml(String(ref || row.id))} · ${escapeHtml(row.concepto || "Factura")} · ${euroFormatter.format(Number(row.saldo_pendiente || 0))}</option>`;
         })
         .join("")
     : "<option value=''>Sin pendientes remesables</option>";
@@ -21108,13 +21108,13 @@ const renderWorkspaceCollectionsList = (rows = []) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.factura_concepto || "Cobro"}</strong>
-                <div class="muted">${[row.factura_serie, row.factura_numero].filter(Boolean).join("-") || "Sin numeración"}${row.cliente_nombre ? ` · ${row.cliente_nombre}` : ""}</div>
+                <strong>${escapeHtml(row.factura_concepto || "Cobro")}</strong>
+                <div class="muted">${escapeHtml([row.factura_serie, row.factura_numero].filter(Boolean).join("-") || "Sin numeración")}${row.cliente_nombre ? ` · ${escapeHtml(row.cliente_nombre)}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
-                <span>${row.fecha_cobro || "Sin fecha"}</span>
+                <span>${escapeHtml(row.fecha_cobro || "Sin fecha")}</span>
                 <span>${euroFormatter.format(Number(row.importe || 0))}</span>
-                <span>${row.metodo || "-"}</span>
+                <span>${escapeHtml(row.metodo || "-")}</span>
                 <button type="button" class="secondary ghost" data-collection-edit="${row.id}">Editar</button>
               </div>
             </div>
@@ -21163,14 +21163,14 @@ const renderWorkspaceRemittancesList = (rows = []) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.referencia || "-"}</strong>
-                <div class="muted">${row.empresa_nombre || "-"}${row.servicio ? ` · ${row.servicio}` : ""}</div>
+                <strong>${escapeHtml(row.referencia || "-")}</strong>
+                <div class="muted">${escapeHtml(row.empresa_nombre || "-")}${row.servicio ? ` · ${escapeHtml(row.servicio)}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
-                <span>${row.fecha_cargo || row.fecha_emision || "-"}</span>
+                <span>${escapeHtml(row.fecha_cargo || row.fecha_emision || "-")}</span>
                 <span>${numberFormatter.format(Number(row.facturas_total || 0))} facturas</span>
                 <span>${euroFormatter.format(Number(row.total || 0))}</span>
-                <span>${row.estado || "Preparada"}</span>
+                <span>${escapeHtml(row.estado || "Preparada")}</span>
               </div>
             </div>
           `
@@ -21183,7 +21183,7 @@ const renderWorkspaceRemittancesList = (rows = []) => {
 const hydrateWorkspaceCompanySelects = () => {
   const companies = state.currentWorkspaceDetail?.companies || [];
   const defaultCompanyId = state.currentWorkspaceCompanyId || companies[0]?.id || "";
-  const html = companies.map((row) => `<option value="${row.id}">${row.nombre || "-"}</option>`).join("");
+  const html = companies.map((row) => `<option value="${escapeHtml(String(row.id))}">${escapeHtml(row.nombre || "-")}</option>`).join("");
   [
     workspaceBillingForm,
     workspaceBudgetForm,
@@ -21280,8 +21280,8 @@ const renderWorkspaceInboxList = (rows = []) => {
               <div>
                 <strong>${escapeHtml(row.nombre || "Documento")}</strong>
                 <div class="muted">${escapeHtml(row.empresa_nombre || "-")} · ${escapeHtml(row.servicio || "sin servicio")} · ${escapeHtml(row.estado || "Pendiente")}</div>
-                ${ocrLine ? `<div class="muted">${ocrLine}</div>` : ""}
-                ${ocrErrorLine ? `<div class="workspace-document-suggestion">${ocrErrorLine}</div>` : ""}
+                ${ocrLine ? `<div class="muted">${escapeHtml(ocrLine)}</div>` : ""}
+                ${ocrErrorLine ? `<div class="workspace-document-suggestion">${escapeHtml(ocrErrorLine)}</div>` : ""}
                 ${row.suggested_cliente_nombre ? `<div class="workspace-document-suggestion">Cliente sugerido: ${escapeHtml(row.suggested_cliente_nombre)}</div>` : ""}
                 ${row.requerimiento_titulo ? `<div class="muted">Requerimiento: ${escapeHtml(row.requerimiento_titulo)}</div>` : ""}
               </div>
@@ -21562,12 +21562,12 @@ const renderWorkspaceAutomationLogs = (rows = []) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.automation_nombre || row.trigger_key || "Automatización"}</strong>
-                <div class="muted">${row.trigger_key || "-"}${row.modulo_key ? ` · ${row.modulo_key}` : ""}</div>
+                <strong>${escapeHtml(row.automation_nombre || row.trigger_key || "Automatización")}</strong>
+                <div class="muted">${escapeHtml(row.trigger_key || "-")}${row.modulo_key ? ` · ${escapeHtml(row.modulo_key)}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
-                <span>${row.entity_label || row.cliente_nombre || row.servicio || "-"}</span>
-                <span>${row.created_at || ""}</span>
+                <span>${escapeHtml(row.entity_label || row.cliente_nombre || row.servicio || "-")}</span>
+                <span>${escapeHtml(row.created_at || "")}</span>
               </div>
             </div>
           `
@@ -21650,8 +21650,8 @@ const hydrateWorkspaceTimeUserSelect = () => {
   select.innerHTML = `<option value="">Selecciona usuario</option>${
     users.map((user) => {
       const fullName = `${user.nombre || ""} ${user.apellido || ""}`.trim() || user.usuario || user.email || "Usuario";
-      const suffix = user.servicio ? ` · ${user.servicio}` : "";
-      return `<option value="${user.id || ""}">${fullName}${suffix}</option>`;
+      const suffix = user.servicio ? ` · ${escapeHtml(user.servicio)}` : "";
+      return `<option value="${escapeHtml(user.id || "")}">${escapeHtml(fullName)}${suffix}</option>`;
     }).join("")
   }`;
   if (currentValue && users.some((user) => String(user.id || "") === currentValue)) {
@@ -21750,7 +21750,7 @@ const fillWorkspaceTimeEmployeeForm = (record = null) => {
   if (companySelect) {
     const options = [
       `<option value="">Selecciona empresa</option>`,
-      ...companies.map((row) => `<option value="${row.id}">${row.nombre || "-"}</option>`),
+      ...companies.map((row) => `<option value="${escapeHtml(String(row.id))}">${escapeHtml(row.nombre || "-")}</option>`),
     ].join("");
     companySelect.innerHTML = options;
     companySelect.value = String(payload.empresa_id || "").trim();
@@ -21797,7 +21797,7 @@ const hydrateWorkspaceTimeEmployeeSelect = (rows = []) => {
   if (!select) return;
   const currentValue = String(select.value || "").trim();
   select.innerHTML = `<option value="">Selecciona persona</option>${
-    rows.map((row) => `<option value="${row.id || ""}">${row.nombre || "-"}${row.empresa_nombre ? ` · ${row.empresa_nombre}` : ""}</option>`).join("")
+    rows.map((row) => `<option value="${escapeHtml(row.id || "")}">${escapeHtml(row.nombre || "-")}${row.empresa_nombre ? ` · ${escapeHtml(row.empresa_nombre)}` : ""}</option>`).join("")
   }`;
   if (currentValue && rows.some((row) => String(row.id || "") === currentValue)) {
     select.value = currentValue;
@@ -21873,10 +21873,10 @@ const renderWorkspaceTimeSystemUsers = (rows = []) => {
           const serviceLabel = user.servicio ? `${user.servicio}` : "Sin servicio";
           const companyLabel = user.empresa_nombre || "-";
           return `
-            <div class="workspace-time-userrow" data-time-user-row="${user.id || ""}">
+            <div class="workspace-time-userrow" data-time-user-row="${escapeHtml(user.id || "")}">
               <div>
-                <strong>${fullName}</strong>
-                <small>${companyLabel} · ${serviceLabel}${enabled ? " · Registro horario" : ""}</small>
+                <strong>${escapeHtml(fullName)}</strong>
+                <small>${escapeHtml(companyLabel)} · ${escapeHtml(serviceLabel)}${enabled ? " · Registro horario" : ""}</small>
               </div>
               <button
                 type="button"
@@ -21939,21 +21939,21 @@ const renderWorkspaceTimeEmployeeList = (rows = []) => {
       ${visibleRows
         .map(
           (row) => `
-            <article class="workspace-time-card ${Number(row.activo || 0) === 1 ? "" : "muted"}" data-time-persona="${row.id}">
+            <article class="workspace-time-card ${Number(row.activo || 0) === 1 ? "" : "muted"}" data-time-persona="${escapeHtml(String(row.id))}">
               <header>
-                <strong>${row.nombre || "-"}</strong>
-                <small class="muted">${row.empresa_nombre || "-"} · ${row.tipo_jornada || "Completa"}</small>
+                <strong>${escapeHtml(row.nombre || "-")}</strong>
+                <small class="muted">${escapeHtml(row.empresa_nombre || "-")} · ${escapeHtml(row.tipo_jornada || "Completa")}</small>
               </header>
               <div>
-                <span>${row.email || "-"}</span>
+                <span>${escapeHtml(row.email || "-")}</span>
                 <div class="workspace-time-meta">
-                  ${row.horas_pactadas_dia ? `<span>${row.horas_pactadas_dia} h/día</span>` : ""}
-                  ${row.fecha_alta ? `<span>Alta ${row.fecha_alta}</span>` : ""}
+                  ${row.horas_pactadas_dia ? `<span>${escapeHtml(String(row.horas_pactadas_dia))} h/día</span>` : ""}
+                  ${row.fecha_alta ? `<span>Alta ${escapeHtml(String(row.fecha_alta))}</span>` : ""}
                 </div>
               </div>
               <footer>
-                ${canEdit ? `<button type="button" class="secondary ghost" data-time-employee-edit="${row.id}">Editar</button>` : ""}
-                <button type="button" class="secondary ghost workspace-time-view" data-time-employee-view="${row.id}">Ver ficha</button>
+                ${canEdit ? `<button type="button" class="secondary ghost" data-time-employee-edit="${escapeHtml(String(row.id))}">Editar</button>` : ""}
+                <button type="button" class="secondary ghost workspace-time-view" data-time-employee-view="${escapeHtml(String(row.id))}">Ver ficha</button>
               </footer>
             </article>
           `
@@ -22050,9 +22050,9 @@ const renderWorkspaceNotifications = (rows = []) => {
         .map(
           (row) => `
             <li>
-              <strong>${row.channel}</strong>
-              <span>${row.created_at}</span>
-              <p class="muted">${row.payload || ""}</p>
+              <strong>${escapeHtml(String(row.channel))}</strong>
+              <span>${escapeHtml(String(row.created_at))}</span>
+              <p class="muted">${escapeHtml(row.payload || "")}</p>
             </li>
           `
         )
@@ -22100,9 +22100,9 @@ const renderWorkspaceTimeAudit = (rows = []) => {
           const label = fmtAction(row);
           return `
             <li>
-              <strong>${label}</strong>
-              <span>${when}</span>
-              <p class="muted">${who}</p>
+              <strong>${escapeHtml(String(label))}</strong>
+              <span>${escapeHtml(String(when))}</span>
+              <p class="muted">${escapeHtml(who)}</p>
             </li>
           `;
         })
@@ -22153,9 +22153,9 @@ const renderWorkspaceTimeEmployeePreview = () => {
     <div class="workspace-time-preview">
       <div class="workspace-document-head">
         <span class="workspace-document-total">Vista previa</span>
-        <span class="muted">${employee.nombre || "-"} · ${employee.empresa_nombre || "-"}</span>
+        <span class="muted">${escapeHtml(employee.nombre || "-")} · ${escapeHtml(employee.empresa_nombre || "-")}</span>
       </div>
-      <div class="muted">Hoy: ${label}</div>
+      <div class="muted">Hoy: ${escapeHtml(label)}</div>
       <div class="form-actions" style="margin-top:10px;">
         <button type="button" class="secondary ghost button-inline" data-time-checkin ${canCheckIn ? "" : "disabled"}>Fichar entrada</button>
         <button type="button" class="secondary ghost button-inline" data-time-checkout ${canCheckOut ? "" : "disabled"}>Fichar salida</button>
@@ -22427,13 +22427,13 @@ const renderWorkspaceTimeSummary = (summary = null) => {
         ? rows.map((row) => `
           <div class="workspace-billing-row">
             <div>
-              <strong>${row.persona_nombre || "-"}</strong>
-              <div class="muted">${row.empresa_nombre || "-"} · ${row.tipo_jornada || "Completa"} · ${numberFormatter.format(Number(row.dias_registrados || 0))} días</div>
+              <strong>${escapeHtml(row.persona_nombre || "-")}</strong>
+              <div class="muted">${escapeHtml(row.empresa_nombre || "-")} · ${escapeHtml(row.tipo_jornada || "Completa")} · ${numberFormatter.format(Number(row.dias_registrados || 0))} días</div>
             </div>
             <div class="workspace-billing-meta">
-              <span>Real ${row.horas_trabajadas_hhmm || "00:00"}</span>
-              <span>Pactado ${row.horas_pactadas_hhmm || "00:00"}</span>
-              <span>Desv. ${row.desviacion_hhmm || "00:00"}</span>
+              <span>Real ${escapeHtml(String(row.horas_trabajadas_hhmm || "00:00"))}</span>
+              <span>Pactado ${escapeHtml(String(row.horas_pactadas_hhmm || "00:00"))}</span>
+              <span>Desv. ${escapeHtml(String(row.desviacion_hhmm || "00:00"))}</span>
             </div>
           </div>
         `).join("")
@@ -22494,14 +22494,14 @@ const renderWorkspaceTimeList = (rows = []) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.persona_nombre || "-"}</strong>
-                <div class="muted">${row.empresa_nombre || "-"} · ${row.fecha || "-"}${row.tipo_jornada ? ` · ${row.tipo_jornada}` : ""}</div>
+                <strong>${escapeHtml(row.persona_nombre || "-")}</strong>
+                <div class="muted">${escapeHtml(row.empresa_nombre || "-")} · ${escapeHtml(String(row.fecha || "-"))}${row.tipo_jornada ? ` · ${escapeHtml(row.tipo_jornada)}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
-                <span>${row.hora_inicio || "-"}${row.hora_fin ? ` - ${row.hora_fin}` : ""}</span>
+                <span>${escapeHtml(String(row.hora_inicio || "-"))}${row.hora_fin ? ` - ${escapeHtml(String(row.hora_fin))}` : ""}</span>
                 <span>Pausa ${numberFormatter.format(Number(row.pausa_min || 0))} min</span>
                 <span>${row.minutos_trabajados ? `${Math.floor(Number(row.minutos_trabajados || 0) / 60)}h ${Number(row.minutos_trabajados || 0) % 60}m` : "Pendiente cierre"}</span>
-                <span>${row.estado || "Abierto"}</span>
+                <span>${escapeHtml(row.estado || "Abierto")}</span>
                 ${!row.hora_fin ? `<button type="button" class="secondary ghost" data-time-close="${row.id}">Cerrar</button>` : ""}
                 <button type="button" class="secondary ghost" data-time-edit="${row.id}">Editar</button>
               </div>
@@ -22544,7 +22544,7 @@ const hydrateWorkspaceCommunitySelect = (rows = []) => {
     const select = form?.querySelector('[name="comunidad_id"]');
     if (!select) return;
     const baseOptions = rows.length
-      ? rows.map((row) => `<option value="${row.id}">${row.nombre || "-"}</option>`).join("")
+      ? rows.map((row) => `<option value="${escapeHtml(String(row.id))}">${escapeHtml(row.nombre || "-")}</option>`).join("")
       : "<option value=''>Sin comunidades</option>";
     if (form === workspaceFincasLedgerForm) {
       select.innerHTML = `<option value="">General (sin comunidad)</option>${baseOptions}`;
@@ -22558,7 +22558,7 @@ const hydrateWorkspaceProviderSelect = (rows = []) => {
   const select = workspaceFincasIncidentForm?.querySelector('[name="proveedor_id"]');
   if (!select) return;
   select.innerHTML = ["<option value=''>Sin asignar</option>"]
-    .concat((rows || []).map((row) => `<option value="${row.id}">${row.nombre || "-"}${row.comunidad_nombre ? ` · ${row.comunidad_nombre}` : ""}</option>`))
+    .concat((rows || []).map((row) => `<option value="${escapeHtml(String(row.id))}">${escapeHtml(row.nombre || "-")}${row.comunidad_nombre ? ` · ${escapeHtml(row.comunidad_nombre)}` : ""}</option>`))
     .join("");
 };
 
@@ -23409,7 +23409,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
           listWrap.innerHTML = `
             <div class="workspace-billing-list">
               ${items.map((d) => {
-                const link = d.doc_url ? `<a class="secondary ghost button-inline" href="${escapeHtml(d.doc_url)}" target="_blank" rel="noreferrer">Abrir</a>` : "";
+                const link = d.doc_url ? `<a class="secondary ghost button-inline" href="${escapeHtml(safeUrl(d.doc_url))}" target="_blank" rel="noreferrer">Abrir</a>` : "";
                 const meta = [d.tipo, d.fecha].filter(Boolean).join(" · ");
                 return `
                   <div class="workspace-billing-row">
@@ -24278,7 +24278,7 @@ const openFincasCommunityFichaModal = (record) => {
             listWrap.innerHTML = `
               <div class="workspace-billing-list">
                 ${items.map((d) => {
-                  const link = d.doc_url ? `<a class="secondary ghost button-inline" href="${escapeHtml(d.doc_url)}" target="_blank" rel="noreferrer">Abrir</a>` : "";
+                  const link = d.doc_url ? `<a class="secondary ghost button-inline" href="${escapeHtml(safeUrl(d.doc_url))}" target="_blank" rel="noreferrer">Abrir</a>` : "";
                   const meta = [d.tipo, d.fecha].filter(Boolean).join(" · ");
                   return `
                     <div class="workspace-billing-row">
@@ -24533,14 +24533,14 @@ const renderWorkspaceFincasIncidentList = (rows = []) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.titulo || "-"}</strong>
-                <div class="muted">${row.comunidad_nombre || "-"}${row.proveedor_nombre || row.proveedor ? ` · ${row.proveedor_nombre || row.proveedor}` : ""}</div>
+                <strong>${escapeHtml(row.titulo || "-")}</strong>
+                <div class="muted">${escapeHtml(row.comunidad_nombre || "-")}${row.proveedor_nombre || row.proveedor ? ` · ${escapeHtml(row.proveedor_nombre || row.proveedor)}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
-                <span>${row.fecha_apertura || "Sin fecha"}</span>
-                <span>${row.prioridad || "Normal"}</span>
+                <span>${escapeHtml(row.fecha_apertura || "Sin fecha")}</span>
+                <span>${escapeHtml(row.prioridad || "Normal")}</span>
                 <span>${row.coste_estimado ? euroFormatter.format(Number(row.coste_estimado || 0)) : "-"}</span>
-                <span>${row.estado || "Abierta"}</span>
+                <span>${escapeHtml(row.estado || "Abierta")}</span>
                 <button type="button" class="secondary ghost" data-incident-edit="${row.id}">Editar</button>
               </div>
             </div>
@@ -24594,14 +24594,14 @@ const renderWorkspaceFincasProviderList = (rows = []) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.nombre || "-"}</strong>
-                <div class="muted">${row.tipo_servicio || "-"}${row.comunidad_nombre ? ` · ${row.comunidad_nombre}` : ""}</div>
+                <strong>${escapeHtml(row.nombre || "-")}</strong>
+                <div class="muted">${escapeHtml(row.tipo_servicio || "-")}${row.comunidad_nombre ? ` · ${escapeHtml(row.comunidad_nombre)}` : ""}</div>
               </div>
               <div class="workspace-billing-meta">
-                <span>${row.telefono || row.email || "-"}</span>
+                <span>${escapeHtml(row.telefono || row.email || "-")}</span>
                 <span>${euroFormatter.format(Number(row.tarifa_mensual || 0))}</span>
-                <span>${row.estado || "Activo"}</span>
-                <button type="button" class="secondary ghost" data-provider-edit="${row.id}">Editar</button>
+                <span>${escapeHtml(row.estado || "Activo")}</span>
+                <button type="button" class="secondary ghost" data-provider-edit="${escapeHtml(String(row.id))}">Editar</button>
               </div>
             </div>
           `
@@ -24650,12 +24650,12 @@ const renderWorkspaceFincasMeetingList = (rows = []) => {
           (row) => `
             <div class="workspace-billing-row">
               <div>
-                <strong>${row.comunidad_nombre || "-"}</strong>
-                <div class="muted">${row.tipo || "Junta"} · ${row.fecha || "-"}</div>
+                <strong>${escapeHtml(row.comunidad_nombre || "-")}</strong>
+                <div class="muted">${escapeHtml(row.tipo || "Junta")} · ${escapeHtml(String(row.fecha || "-"))}</div>
               </div>
               <div class="workspace-billing-meta">
-                <span>${row.estado || "Planificada"}</span>
-                <span>${row.proxima_fecha || ""}</span>
+                <span>${escapeHtml(row.estado || "Planificada")}</span>
+                <span>${escapeHtml(String(row.proxima_fecha || ""))}</span>
                 <button type="button" class="secondary ghost" data-meeting-edit="${row.id}">Editar</button>
               </div>
             </div>
@@ -25973,11 +25973,11 @@ const renderWorkspaceDocumentHub = (data = {}) => {
                 return `
                   <div class="workspace-document-row">
                     <div>
-                      <strong>${row.nombre || "Documento"}</strong>
-                      <div class="muted">${subject}</div>
+                      <strong>${escapeHtml(row.nombre || "Documento")}</strong>
+                      <div class="muted">${escapeHtml(subject)}</div>
                       ${
                         row.suggested_cliente
-                          ? `<div class="workspace-document-suggestion">Sugerencia: ${row.suggested_cliente}</div>`
+                          ? `<div class="workspace-document-suggestion">Sugerencia: ${escapeHtml(row.suggested_cliente)}</div>`
                           : ""
                       }
                     </div>
@@ -25994,8 +25994,8 @@ const renderWorkspaceDocumentHub = (data = {}) => {
                               data-doc-table="${row.source_table || ""}"
                               data-doc-cliente="${row.suggested_cliente_id}"
                               data-doc-referencia="${row.referencia_tipo || row.servicio || ""}"
-                              data-doc-tipo="${row.tipo || ""}"
-                              data-doc-estado="${row.estado || ""}"
+                              data-doc-tipo="${escapeHtml(row.tipo || "")}"
+                              data-doc-estado="${escapeHtml(row.estado || "")}"
                             >Aplicar sugerencia</button>
                           `
                           : ""
@@ -26600,11 +26600,11 @@ const renderHoldingOrgChart = () => {
     const item = resumenMap.get(name);
     const lines = item ? buildCompanyMeta(item, selectedYear) : [];
     const metaHtml = lines
-      .map((line) => `<div class="muted">${line}</div>`)
+      .map((line) => `<div class="muted">${escapeHtml(line)}</div>`)
       .join("");
     return `
-      <div class="org-node${isAie ? " org-aie" : ""}" data-empresa="${name}">
-        <h4>${name}</h4>
+      <div class="org-node${isAie ? " org-aie" : ""}" data-empresa="${escapeHtml(name)}">
+        <h4>${escapeHtml(name)}</h4>
         ${metaHtml}
         ${isAie ? '<div class="muted">Subsidiaria AIE</div>' : ""}
         <button type="button">Entrar</button>
@@ -31573,11 +31573,11 @@ const openWorkspacePortalPublic = async (token) => {
                               <div class="workspace-billing-row">
                                 <div>
                                   <strong>${poliza}</strong>
-	                                  <div class="muted">${meta}${vence ? ` · Vence ${vence}` : ""}</div>
+	                                  <div class="muted">${escapeHtml(meta)}${vence ? ` · Vence ${escapeHtml(String(vence))}` : ""}</div>
 	                                </div>
 	                                <div class="workspace-billing-meta">
-	                                  <span>${amount || "-"}</span>
-	                                  <span>${estado || "-"}</span>
+	                                  <span>${escapeHtml(amount || "-")}</span>
+	                                  <span>${escapeHtml(estado || "-")}</span>
 	                                  ${link}
 	                                </div>
 	                              </div>
@@ -31605,11 +31605,11 @@ const openWorkspacePortalPublic = async (token) => {
                             return `
                               <div class="workspace-billing-row">
                                 <div>
-	                                  <strong>${exp}</strong>
-	                                  <div class="muted">${meta}${tipo ? ` · ${tipo}` : ""}${fecha ? ` · ${fecha}` : ""}</div>
+	                                  <strong>${escapeHtml(String(exp))}</strong>
+	                                  <div class="muted">${escapeHtml(meta)}${tipo ? ` · ${escapeHtml(tipo)}` : ""}${fecha ? ` · ${escapeHtml(String(fecha))}` : ""}</div>
 	                                </div>
 	                                <div class="workspace-billing-meta">
-	                                  <span>${estado || "-"}</span>
+	                                  <span>${escapeHtml(estado || "-")}</span>
 	                                </div>
 	                              </div>
 	                            `;
@@ -31635,11 +31635,11 @@ const openWorkspacePortalPublic = async (token) => {
                             return `
                               <div class="workspace-billing-row">
 	                                <div>
-	                                  <strong>${poliza}</strong>
-	                                  <div class="muted">${meta}${vence ? ` · Vence ${vence}` : ""}</div>
+	                                  <strong>${escapeHtml(String(poliza))}</strong>
+	                                  <div class="muted">${escapeHtml(meta)}${vence ? ` · Vence ${escapeHtml(String(vence))}` : ""}</div>
 	                                </div>
 	                                <div class="workspace-billing-meta">
-	                                  <span>${estado || "-"}</span>
+	                                  <span>${escapeHtml(estado || "-")}</span>
 	                                </div>
 	                              </div>
 	                            `;
@@ -32002,9 +32002,9 @@ const openInmobiliariaPortalPublic = async (listingId = "") => {
           ${fotoUrl ? `<img src="${escapeHtml(fotoUrl)}" alt="${escapeHtml(title)}" style="width:100%;max-height:420px;object-fit:cover;border-radius:8px;margin:10px 0;" />` : ""}
           <div class="workspace-mini-kpis">
             <div class="workspace-mini-kpi"><span>Precio</span><strong>${row.precio ? euroFormatter.format(Number(row.precio || 0)) : "-"}</strong></div>
-            <div class="workspace-mini-kpi"><span>Superficie</span><strong>${row.m2 || "-"} m²</strong></div>
-            <div class="workspace-mini-kpi"><span>Dormitorios</span><strong>${row.habitaciones || "-"}</strong></div>
-            <div class="workspace-mini-kpi"><span>Baños</span><strong>${row.banos || "-"}</strong></div>
+            <div class="workspace-mini-kpi"><span>Superficie</span><strong>${escapeHtml(String(row.m2 || "-"))} m²</strong></div>
+            <div class="workspace-mini-kpi"><span>Dormitorios</span><strong>${escapeHtml(String(row.habitaciones || "-"))}</strong></div>
+            <div class="workspace-mini-kpi"><span>Baños</span><strong>${escapeHtml(String(row.banos || "-"))}</strong></div>
             <div class="workspace-mini-kpi"><span>Verificación</span><strong>${row.verificado ? "Verificado" : "Pendiente"}</strong></div>
           </div>
           ${highlights.length ? `<div class="inmueble-summary-badges" style="margin-top:12px;">${highlights.map((item) => `<span class="pill">${escapeHtml(item)}</span>`).join("")}</div>` : ""}
@@ -41179,7 +41179,7 @@ const requestAdminActivationLink = async (login, { statusEl = null, linkEl = nul
     const link = String(data.activar_url || "").trim();
     if (linkEl) {
       linkEl.innerHTML = link
-        ? `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`
+        ? `<a href="${escapeHtml(safeUrl(link))}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`
         : "Sin enlace generado todavía.";
     }
     if (link) {
@@ -41255,9 +41255,9 @@ const renderUsuariosTable = () => {
     item.classList.toggle("active", row.id === state.adminSelectedUserId);
     const name = `${row.nombre || ""} ${row.apellido || ""}`.trim() || row.usuario || "Usuario";
     item.innerHTML = `
-      <div class="admin-user-name">${name}</div>
-      <div class="admin-user-meta">${row.usuario || "-"} · ${row.rol || "Sin rol"}</div>
-      <div class="admin-user-meta">${row.servicio || "Sin servicios"}${Number(row.registro_horario_activo || 0) === 1 ? " · Registro horario" : ""}</div>
+      <div class="admin-user-name">${escapeHtml(name)}</div>
+      <div class="admin-user-meta">${escapeHtml(row.usuario || "-")} · ${escapeHtml(row.rol || "Sin rol")}</div>
+      <div class="admin-user-meta">${escapeHtml(row.servicio || "Sin servicios")}${Number(row.registro_horario_activo || 0) === 1 ? " · Registro horario" : ""}</div>
     `;
     item.addEventListener("click", () => {
       state.adminSelectedUserId = row.id;
@@ -41515,7 +41515,7 @@ const renderAdminUserDetail = () => {
       const linkBox = activationLinkBox.querySelector("[data-admin-user-activation-link]");
       if (linkBox) {
         linkBox.innerHTML = link
-          ? `<a href="${escapeHtml(link)}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`
+          ? `<a href="${escapeHtml(safeUrl(link))}" target="_blank" rel="noreferrer">${escapeHtml(link)}</a>`
           : "Sin enlace generado.";
       }
       if (link) {
@@ -41535,7 +41535,7 @@ const renderAdminUserDetail = () => {
     if (!adminActivationLink) return;
     const value = String(link || "").trim();
     adminActivationLink.innerHTML = value
-      ? `<a href="${escapeHtml(value)}" target="_blank" rel="noreferrer">${escapeHtml(value)}</a>`
+      ? `<a href="${escapeHtml(safeUrl(value))}" target="_blank" rel="noreferrer">${escapeHtml(value)}</a>`
       : "Sin enlace generado todavía.";
   };
 
@@ -43022,6 +43022,15 @@ const escapeHtml = (value) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+const safeUrl = (value) => {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  if (/^(https?:|mailto:|tel:|blob:)/i.test(raw)) return raw;
+  if (/^data:image\//i.test(raw)) return raw;
+  if (/^[\/#?]/.test(raw) || /^\.\.?\//.test(raw)) return raw;
+  return "#";
+};
+
 const getLegalAreaTopics = (area) => {
   const areas = Array.isArray(state.legalCatalog?.areas) ? state.legalCatalog.areas : [];
   return areas.find((item) => item.key === area) || null;
@@ -43181,7 +43190,7 @@ const renderInmoLegalCopilotResponse = (payload = {}) => {
           const t = escapeHtml(String(doc?.title || doc?.url || "Fuente"));
           const u = String(doc?.url || "").trim();
           if (u) {
-            return `<a href="${escapeHtml(u)}" target="_blank" rel="noreferrer">${t}</a>`;
+            return `<a href="${escapeHtml(safeUrl(u))}" target="_blank" rel="noreferrer">${t}</a>`;
           }
           return t;
         })
@@ -43252,7 +43261,7 @@ const loadLegalRadarItems = async () => {
         buttons.push(`<button class="secondary ghost button-inline" data-legal-radar-action="aplicado" data-id="${row.id}">Aplicado</button>`);
       }
       if (row.url) {
-        buttons.push(`<a class="secondary ghost button-inline" href="${escapeHtml(row.url)}" target="_blank" rel="noreferrer">Abrir</a>`);
+        buttons.push(`<a class="secondary ghost button-inline" href="${escapeHtml(safeUrl(row.url))}" target="_blank" rel="noreferrer">Abrir</a>`);
       }
       if (row.auto_detected) {
         buttons.push(`<span class="status-pill status-open">Auto</span>`);
@@ -55166,21 +55175,21 @@ const refreshCurrentInmuebleProfile = () => {
     inmuebleSummaryCard.innerHTML = `
       <div class="inmueble-summary-top">
         <div>
-          <div class="inmueble-summary-kicker">${locality || "Ficha operativa"}</div>
-          <h3>${address}</h3>
-          <div class="inmueble-summary-subline">${secondary || "Pendiente de completar dimensiones"}</div>
+          <div class="inmueble-summary-kicker">${escapeHtml(locality || "Ficha operativa")}</div>
+          <h3>${escapeHtml(address)}</h3>
+          <div class="inmueble-summary-subline">${escapeHtml(secondary || "Pendiente de completar dimensiones")}</div>
         </div>
         <div class="inmueble-summary-badges">${topBadges}</div>
       </div>
       ${pricingHtml}
-      <div class="inmueble-summary-note">${captacion.proxima_accion || inmueble.referencia || "Completa la ficha para convertir esta noticia en expediente vendible."}</div>
+      <div class="inmueble-summary-note">${escapeHtml(captacion.proxima_accion || inmueble.referencia || "Completa la ficha para convertir esta noticia en expediente vendible.")}</div>
       <div class="inmueble-summary-metrics">
         ${metrics
           .map(
             (item) => `
               <div class="inmueble-summary-metric">
-                <span>${item.label}</span>
-                <strong>${item.value}</strong>
+                <span>${escapeHtml(item.label)}</span>
+                <strong>${escapeHtml(item.value)}</strong>
               </div>
             `
           )
@@ -55438,8 +55447,8 @@ const refreshCurrentInmuebleProfile = () => {
                 .map(
                   ([label, value]) => `
                     <div class="inmueble-fact-row">
-                      <span>${label}</span>
-                      <strong>${value === 0 ? "0" : formatDisplayCell(label.toLowerCase(), value)}</strong>
+                      <span>${escapeHtml(String(label ?? ""))}</span>
+                      <strong>${value === 0 ? "0" : escapeHtml(String(formatDisplayCell(label.toLowerCase(), value) ?? ""))}</strong>
                     </div>
                   `
                 )
@@ -55532,10 +55541,10 @@ const buildCrmInmueblesRecentNode = (rows = []) => {
     item.className = "crm-recent-item";
     item.innerHTML = `
       <div>
-        <strong>${row.direccion || "Sin dirección"}</strong>
-        <div class="muted">${row.poblacion || "Población pendiente"}${row.referencia ? ` · ${row.referencia}` : ""}</div>
+        <strong>${escapeHtml(row.direccion || "Sin dirección")}</strong>
+        <div class="muted">${escapeHtml(row.poblacion || "Población pendiente")}${row.referencia ? ` · ${escapeHtml(String(row.referencia))}` : ""}</div>
       </div>
-      <span class="crm-badge">${row.estado || "Sin estado"}</span>
+      <span class="crm-badge">${escapeHtml(String(row.estado || "Sin estado"))}</span>
     `;
     item.addEventListener("click", () => openInmuebleDetail(row.id));
     list.appendChild(item);
@@ -60303,7 +60312,7 @@ const openInmuebleDetail = (id, originView = "", options = {}) => {
           inmuebleDocsList.innerHTML = "<p class='muted'>Sin documentos cargados.</p>";
         } else {
           inmuebleDocsList.innerHTML = docs
-            .map((doc) => `<div class="muted">${doc.nombre || doc.url}</div>`)
+            .map((doc) => `<div class="muted">${escapeHtml(doc.nombre || doc.url)}</div>`)
             .join("");
         }
       }
@@ -61214,7 +61223,7 @@ const renderInmuebleDocs = (rows = []) => {
 
         const tdAction = document.createElement("td");
         tdAction.innerHTML = url
-          ? `<a href="${escapeHtml(url)}" target="_blank" rel="noreferrer">Ver</a>`
+          ? `<a href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noreferrer">Ver</a>`
           : "-";
         tr.appendChild(tdAction);
 
@@ -62760,12 +62769,12 @@ const loadGestoriaCrm = async () => {
         card.className = "crm-mini-card";
         card.innerHTML = `
           <div>
-            <h4>${nombre}</h4>
-            <div class="muted">${tipoVal}${perfilVal ? " · " + perfilVal : ""}</div>
+            <h4>${escapeHtml(nombre)}</h4>
+            <div class="muted">${escapeHtml(tipoVal)}${perfilVal ? " · " + escapeHtml(perfilVal) : ""}</div>
           </div>
           <div class="crm-mini-meta">
-            <div class="crm-badge">${estadoVal}</div>
-            <div class="muted">${cuotaVal}${precioVal ? " · " + formatCell("precio", precioVal) : ""}</div>
+            <div class="crm-badge">${escapeHtml(estadoVal)}</div>
+            <div class="muted">${escapeHtml(cuotaVal)}${precioVal ? " · " + escapeHtml(String(formatCell("precio", precioVal))) : ""}</div>
           </div>
         `;
         card.addEventListener("click", () => {
@@ -65102,7 +65111,7 @@ const loadGestoriaDashboard = () => {
         const cliente = row.cliente || "Cliente";
         const ejercicio = row.ejercicio || "-";
         const estado = row.estado_presentacion || "Borrador";
-        return `<div class="muted">${ejercicio}</div><div>${cliente}</div><div class="muted">${estado} · ${row.doc_count || 0} docs</div>`;
+        return `<div class="muted">${escapeHtml(String(ejercicio))}</div><div>${escapeHtml(cliente)}</div><div class="muted">${escapeHtml(estado)} · ${row.doc_count || 0} docs</div>`;
       },
       (row) => {
         openClienteRentaFromDashboard(row?.cliente_id, { ejercicio: row?.ejercicio });
@@ -65116,7 +65125,7 @@ const loadGestoriaDashboard = () => {
         const fecha = formatCell("fecha", row.fecha_seguimiento || row.fecha) || row.fecha_seguimiento || row.fecha || "-";
         const cliente = row.cliente || "Cliente";
         const titulo = row.titulo || "Presupuesto";
-        return `<div class="muted">${fecha}</div><div>${cliente}</div><div class="muted">${titulo}</div>`;
+        return `<div class="muted">${escapeHtml(fecha)}</div><div>${escapeHtml(cliente)}</div><div class="muted">${escapeHtml(titulo)}</div>`;
       }
     );
     renderAlertList(
@@ -65127,7 +65136,7 @@ const loadGestoriaDashboard = () => {
         const fecha = formatCell("fecha", row.fecha_seguimiento || row.fecha) || row.fecha_seguimiento || row.fecha || "-";
         const cliente = row.cliente || "Cliente";
         const motivo = row.motivo_estado || row.titulo || "Seguimiento comercial";
-        return `<div class="muted">${fecha}</div><div>${cliente}</div><div class="muted">${motivo}</div>`;
+        return `<div class="muted">${escapeHtml(fecha)}</div><div>${escapeHtml(cliente)}</div><div class="muted">${escapeHtml(motivo)}</div>`;
       }
     );
     renderAlertList(
@@ -65138,7 +65147,7 @@ const loadGestoriaDashboard = () => {
         const fecha = formatCell("fecha", row.fecha_encargo || row.fecha) || row.fecha_encargo || row.fecha || "-";
         const cliente = row.cliente || "Cliente";
         const estado = row.encargo_estado || "Pendiente";
-        return `<div class="muted">${fecha}</div><div>${cliente}</div><div class="muted">${row.titulo || "Presupuesto"} · ${estado}</div>`;
+        return `<div class="muted">${escapeHtml(fecha)}</div><div>${escapeHtml(cliente)}</div><div class="muted">${escapeHtml(row.titulo || "Presupuesto")} · ${escapeHtml(estado)}</div>`;
       }
     );
 
@@ -66212,8 +66221,8 @@ const renderSegurosRamosDashboard = () => {
     card.className = "card cliente-ramo-kpi-card";
     if (state.segurosRamoSelected === item.ramo) card.classList.add("active");
     card.innerHTML = `
-      <div class="kpi-label">${item.ramo}</div>
-      <div class="kpi-value">${item.total}</div>
+      <div class="kpi-label">${escapeHtml(item.ramo)}</div>
+      <div class="kpi-value">${escapeHtml(String(item.total))}</div>
       <div class="muted">${euroFormatter.format(item.primaTotal)}</div>
     `;
     card.addEventListener("click", () => {
@@ -69299,7 +69308,7 @@ const loadGestoriaBdt = async () => {
   try {
     const data = await api(`/api/tabla?${params}`);
     if (data?.error) {
-      gestoriaBdtTable.innerHTML = `<p class='muted'>${data.error}</p>`;
+      gestoriaBdtTable.innerHTML = `<p class='muted'>${escapeHtml(data.error)}</p>`;
       gestoriaBdtInfo.textContent = "";
       return;
     }
@@ -70512,7 +70521,7 @@ const loadSegurosOportunidades = (empresaId) => {
     oportunidades.slice(0, 50).forEach((name) => {
       const row = document.createElement("div");
       row.className = "inline-row";
-      row.innerHTML = `<div class="muted">${name}</div>`;
+      row.innerHTML = `<div class="muted">${escapeHtml(name)}</div>`;
       list.appendChild(row);
     });
     segurosCrmOportunidades.innerHTML = "";
@@ -70692,7 +70701,7 @@ const updateFinSelectedSummary = () => {
   const missing = Array.isArray(row.missing_fields) ? row.missing_fields : [];
   const next = getFinRecommendedAction(row);
   hipotecaWorkflowStatus.innerHTML = `
-    <div class="workspace-mini-kpi"><span>Estado</span><strong>${normalizeFinStage(row.estado)}</strong></div>
+    <div class="workspace-mini-kpi"><span>Estado</span><strong>${escapeHtml(String(normalizeFinStage(row.estado) ?? ""))}</strong></div>
     <div class="workspace-mini-kpi"><span>Ingresos conjuntos</span><strong>${formatCell("ingresos_conjuntos", row.ingresos_conjuntos || row.cliente1_ingresos || 0) || "-"}</strong></div>
     <div class="workspace-mini-kpi"><span>Aportación</span><strong>${formatCell("aportacion_cv", row.aportacion_cv || 0) || "-"}</strong></div>
     <div class="workspace-mini-kpi"><span>Próximo paso</span><strong>${next?.type || "Sin sugerencia"}</strong></div>
@@ -71084,7 +71093,7 @@ const loadGestoriaSociedades = async () => {
     const data = await api(`/api/gestoria_sociedades?${params.toString()}`);
     if (data?.error) {
       if (gestoriaSociedadTable) {
-        gestoriaSociedadTable.innerHTML = `<p class='muted'>${data.error}</p>`;
+        gestoriaSociedadTable.innerHTML = `<p class='muted'>${escapeHtml(data.error)}</p>`;
       }
       populateGestoriaSocioSociedadSelect([]);
       populateGestoriaActaSociedadSelect([]);
@@ -71175,7 +71184,7 @@ const loadGestoriaSocios = async (sociedadId = "") => {
   try {
     const data = await api(`/api/gestoria_socios?${params.toString()}`);
     if (data?.error) {
-      gestoriaSocioTable.innerHTML = `<p class='muted'>${data.error}</p>`;
+      gestoriaSocioTable.innerHTML = `<p class='muted'>${escapeHtml(data.error)}</p>`;
       state.gestoriaSociosRows = [];
       return [];
     }
@@ -71358,7 +71367,7 @@ const loadGestoriaSociosCambios = async (sociedadId = "") => {
   try {
     const data = await api(`/api/gestoria_socios_cambios?${params.toString()}`);
     if (data?.error) {
-      gestoriaSocioCambiosTable.innerHTML = `<p class='muted'>${data.error}</p>`;
+      gestoriaSocioCambiosTable.innerHTML = `<p class='muted'>${escapeHtml(data.error)}</p>`;
       state.gestoriaSociosCambiosRows = [];
       return [];
     }
@@ -71431,7 +71440,7 @@ const loadGestoriaActas = async (sociedadId = "") => {
     const data = await api(`/api/gestoria_actas?${params.toString()}`);
     if (data?.error) {
       if (gestoriaActaTable) {
-        gestoriaActaTable.innerHTML = `<p class='muted'>${data.error}</p>`;
+        gestoriaActaTable.innerHTML = `<p class='muted'>${escapeHtml(data.error)}</p>`;
       }
       populateGestoriaActaFirmaActaSelect([]);
       state.gestoriaActasRows = [];
@@ -71505,7 +71514,7 @@ const loadGestoriaActaFirmas = async (actaId = "") => {
   try {
     const data = await api(`/api/gestoria_acta_firmas?${params.toString()}`);
     if (data?.error) {
-      gestoriaActaFirmaTable.innerHTML = `<p class='muted'>${data.error}</p>`;
+      gestoriaActaFirmaTable.innerHTML = `<p class='muted'>${escapeHtml(data.error)}</p>`;
       state.gestoriaActaFirmasRows = [];
       return [];
     }
@@ -72660,13 +72669,13 @@ const renderGestoriaImportDocsTable = (rows = []) => {
     const values = [
       row.fecha_detectada || "-",
       row.archivo_nombre || "-",
-      row.estado_revision || "-",
+      escapeHtml(row.estado_revision || "-"),
       `<span class="ocr-badge ${compatClass}">${compat ? `${compat}%` : "Pend."}</span>`,
-      row.tercero_detectado || row.tercero_nombre || "-",
-      row.numero_detectado || row.factura_numero || "-",
+      escapeHtml(row.tercero_detectado || row.tercero_nombre || "-"),
+      escapeHtml(row.numero_detectado || row.factura_numero || "-"),
       row.total_detectado ? euroFormatter.format(parseMoneyValue(row.total_detectado)) : "-",
       row.asiento_id
-        ? `<button type="button" class="ghost" data-open-asiento="${row.asiento_id}">${row.asiento_referencia || row.asiento_concepto || "Ver asiento"}</button>`
+        ? `<button type="button" class="ghost" data-open-asiento="${escapeHtml(String(row.asiento_id))}">${escapeHtml(row.asiento_referencia || row.asiento_concepto || "Ver asiento")}</button>`
         : "-",
       validado
         ? `<span class="ocr-badge ok">Validado</span>`
@@ -73046,13 +73055,13 @@ const renderGestoriaFacturasGrouped = (container, rows = []) => {
                       ${bucketRows
                         .map((row) => `
                           <tr>
-                            <td>${row.fecha_emision || "-"}</td>
-                            <td>${row.numero || "-"}</td>
-                            <td>${row.tercero || "-"}</td>
+                            <td>${escapeHtml(String(row.fecha_emision || "-"))}</td>
+                            <td>${escapeHtml(String(row.numero || "-"))}</td>
+                            <td>${escapeHtml(row.tercero || "-")}</td>
                             <td>${row.total ? euroFormatter.format(parseMoneyValue(row.total)) : "-"}</td>
                             <td>${row.conciliada ? "Sí" : "No"}</td>
-                            <td>${row.asiento_referencia || row.asiento_concepto || "-"}</td>
-                            <td>${row.doc_key ? `<button type="button" class="secondary" data-open-doc="${row.doc_key}">Ver</button>` : "-"}</td>
+                            <td>${escapeHtml(row.asiento_referencia || row.asiento_concepto || "-")}</td>
+                            <td>${row.doc_key ? `<button type="button" class="secondary" data-open-doc="${escapeHtml(String(row.doc_key))}">Ver</button>` : "-"}</td>
                           </tr>
                         `)
                         .join("")}
@@ -74815,7 +74824,7 @@ const renderGestoriaRentaQuickMatches = (matches = [], ctx = {}) => {
     const card = document.createElement("div");
     card.className = "inline-row";
     const left = document.createElement("div");
-    left.innerHTML = `<strong>${row.nombre || "-"}</strong><div class="muted">${row.nif || "-"}</div>`;
+    left.innerHTML = `<strong>${escapeHtml(row.nombre || "-")}</strong><div class="muted">${escapeHtml(row.nif || "-")}</div>`;
     const right = document.createElement("div");
     right.className = "inline-actions";
     const attachBtn = document.createElement("button");
@@ -75505,16 +75514,16 @@ const renderGestoriaRentaCards = (row = {}) => {
     const result = formatRentaResult(entry.resultado_declaracion);
     card.innerHTML = `
       <div class="renta-card-top">
-        <strong>${entry.ejercicio || "2024"}</strong>
-        <span class="pill">${normalizeRentaPresentacionStatus(entry.estado_presentacion || entry.doc_status || "Presentada")}</span>
+        <strong>${escapeHtml(String(entry.ejercicio || "2024"))}</strong>
+        <span class="pill">${escapeHtml(normalizeRentaPresentacionStatus(entry.estado_presentacion || entry.doc_status || "Presentada"))}</span>
       </div>
-      <h4>${split.apellidos || "-"}</h4>
-      <div>${split.nombre || formatNombreCliente(entry.cliente_nombre || "") || "-"}</div>
-      <div class="muted">${entry.cliente_nif || "-"}</div>
+      <h4>${escapeHtml(split.apellidos || "-")}</h4>
+      <div>${escapeHtml(split.nombre || formatNombreCliente(entry.cliente_nombre || "") || "-")}</div>
+      <div class="muted">${escapeHtml(entry.cliente_nif || "-")}</div>
       <div class="renta-card-meta">
-        <span>Exp. DNI: ${dniMeta.expedicion}</span>
-        <span>${dniMeta.label}: ${dniMeta.value}</span>
-        <span>Hijos: ${entry.hijos_count ?? "-"}</span>
+        <span>Exp. DNI: ${escapeHtml(String(dniMeta.expedicion))}</span>
+        <span>${escapeHtml(String(dniMeta.label))}: ${escapeHtml(String(dniMeta.value))}</span>
+        <span>Hijos: ${escapeHtml(String(entry.hijos_count ?? "-"))}</span>
       </div>
       <div class="renta-card-meta">
         <span>Presentación</span>
@@ -75526,15 +75535,15 @@ const renderGestoriaRentaCards = (row = {}) => {
       </div>
       <div class="renta-card-meta">
         <span>Referencia AEAT</span>
-        <strong>${entry.referencia_hacienda || "-"}</strong>
+        <strong>${escapeHtml(entry.referencia_hacienda || "-")}</strong>
       </div>
       <div class="renta-card-meta">
         <span>Precio</span>
         <strong>${entry.precio_servicio != null ? euroFormatter.format(parseMoneyValue(entry.precio_servicio)) : "-"}</strong>
       </div>
       <div class="renta-card-meta">
-        <span>${formatRentaCobro(entry)}</span>
-        <strong>${entry.responsable || "Sin responsable"}</strong>
+        <span>${escapeHtml(String(formatRentaCobro(entry)))}</span>
+        <strong>${escapeHtml(entry.responsable || "Sin responsable")}</strong>
       </div>
       <div class="renta-result ${result.className}">${result.text}</div>
     `;
@@ -75695,13 +75704,13 @@ const filterGestoriaRentaOverviewRows = (rows = [], queryRaw = "") => {
     card.innerHTML = `
       <div class="gestoria-renta-overview-top">
         <div>
-          <strong>${entry.ejercicio || "2024"}</strong>
+          <strong>${escapeHtml(String(entry.ejercicio || "2024"))}</strong>
           <span class="crm-badge">${cobroBadge}</span>
         </div>
-        <div class="muted">${row.doc_count || 0} PDF · Servicio ${row.estado || "Alta"}</div>
+        <div class="muted">${escapeHtml(String(row.doc_count || 0))} PDF · Servicio ${escapeHtml(row.estado || "Alta")}</div>
       </div>
-      <h4>${formatNombreCliente(row.nombre || "") || "-"}</h4>
-      <div class="muted">${row.nif || "-"}</div>
+      <h4>${escapeHtml(formatNombreCliente(row.nombre || "") || "-")}</h4>
+      <div class="muted">${escapeHtml(row.nif || "-")}</div>
       <div class="gestoria-renta-overview-grid">
         <div>
           <span class="muted">Presentación</span>
@@ -75717,7 +75726,7 @@ const filterGestoriaRentaOverviewRows = (rows = [], queryRaw = "") => {
         </div>
         <div>
           <span class="muted">Referencia AEAT</span>
-          <strong>${entry.referencia_hacienda || "-"}</strong>
+          <strong>${escapeHtml(entry.referencia_hacienda || "-")}</strong>
         </div>
         <div>
           <span class="muted">Resultado</span>
@@ -75737,12 +75746,12 @@ const filterGestoriaRentaOverviewRows = (rows = [], queryRaw = "") => {
         </div>
       </div>
       <div class="gestoria-renta-overview-meta">
-        <span>${entry.estado_civil || "Sin estado civil"}</span>
-        <span>Hijos: ${entry.hijos_count ?? "-"}</span>
-        <span>Exp. DNI: ${dniMeta.expedicion}</span>
-        <span>${dniMeta.label}: ${dniMeta.value}</span>
-        <span>${entry.responsable || "Sin responsable"}</span>
-        <span>${metaLocation}</span>
+        <span>${escapeHtml(entry.estado_civil || "Sin estado civil")}</span>
+        <span>Hijos: ${escapeHtml(String(entry.hijos_count ?? "-"))}</span>
+        <span>Exp. DNI: ${escapeHtml(String(dniMeta.expedicion))}</span>
+        <span>${escapeHtml(String(dniMeta.label))}: ${escapeHtml(String(dniMeta.value))}</span>
+        <span>${escapeHtml(entry.responsable || "Sin responsable")}</span>
+        <span>${escapeHtml(metaLocation)}</span>
       </div>
     `;
     const openClienteGeneric = () => {
@@ -76915,8 +76924,8 @@ const renderClienteRamosDashboard = (rows = [], cliente = null) => {
       card.classList.add("active");
     }
     card.innerHTML = `
-      <div class="kpi-label">${item.ramo}</div>
-      <div class="kpi-value">${item.total}</div>
+      <div class="kpi-label">${escapeHtml(item.ramo)}</div>
+      <div class="kpi-value">${escapeHtml(String(item.total))}</div>
       <div class="muted">${euroFormatter.format(item.primaTotal)}</div>
     `;
     card.addEventListener("click", () => {
@@ -80976,7 +80985,7 @@ if (legalDgtForm) {
       }
       const chunks = [
         `<div class="crm-focus-link"><strong>${escapeHtml(data.title || "Consulta DGT")}</strong><span>${escapeHtml(data.referencia || "")}</span></div>`,
-        `<div class="crm-focus-link"><strong>Fuente oficial</strong><span>${data.url ? `<a href="${escapeHtml(data.url)}" target="_blank" rel="noreferrer">${escapeHtml(data.url)}</a>` : "Sin URL"}</span></div>`,
+        `<div class="crm-focus-link"><strong>Fuente oficial</strong><span>${data.url ? `<a href="${escapeHtml(safeUrl(data.url))}" target="_blank" rel="noreferrer">${escapeHtml(data.url)}</a>` : "Sin URL"}</span></div>`,
       ];
       if (data.page_title || data.summary) {
         chunks.push(`<div class="crm-focus-link"><strong>Resumen</strong><span>${escapeHtml(data.page_title || data.summary || "")}</span></div>`);
