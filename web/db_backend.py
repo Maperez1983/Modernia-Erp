@@ -801,7 +801,9 @@ def ensure_postgres_sqlite_compat(conn):
         RETURNS double precision
         LANGUAGE SQL
         AS $$
-          SELECT CASE WHEN arg1 IS NULL THEN NULL ELSE pg_catalog.round(arg1) END
+          -- Cast a numeric para replicar el redondeo half-away-from-zero de SQLite ROUND()
+          -- (pg_catalog.round(double) usa banker's rounding y divergiría: ROUND(2.5) -> 2 vs 3).
+          SELECT CASE WHEN arg1 IS NULL THEN NULL ELSE pg_catalog.round(arg1::numeric)::double precision END
         $$;
         """
     )

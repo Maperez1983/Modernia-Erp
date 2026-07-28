@@ -37666,6 +37666,16 @@ def ensure_tables(db_path):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_seguros_movimientos_empresa ON seguros_movimientos (empresa_id, created_at)")
     except Exception:
         pass
+    # Rendimiento: índices en las tablas base (antes hacían full-scan en cada dashboard/listado,
+    # reteniendo conexiones del pool hasta statement_timeout y pudiendo saturar Postgres en Render).
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_seguros_empresa ON seguros (empresa_id)")
+    except Exception:
+        pass
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_hipotecas_empresa ON hipotecas (empresa_id)")
+    except Exception:
+        pass
     try:
         ensure_column(conn, "hipotecas", "cliente_id", "cliente_id TEXT")
         ensure_column(conn, "hipotecas", "cliente_inmueble_json", "cliente_inmueble_json TEXT")
@@ -39217,6 +39227,17 @@ def ensure_workspace_product_tables(conn):
     try:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_workspace_rrhh_nominas_ws_persona_year_month ON workspace_rrhh_nominas (workspace_id, persona_id, year, month)"
+        )
+    except Exception:
+        pass
+    # Rendimiento: la tabla de fichajes crece indefinidamente (retención 4 años) y no tenía índices;
+    # cada dashboard de RRHH/fichajes hacía full-scan. Se filtra por workspace + persona/empresa + fecha.
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_registro_horario_ws_persona_fecha ON workspace_registro_horario (workspace_id, persona_id, fecha)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_workspace_registro_horario_ws_empresa_fecha ON workspace_registro_horario (workspace_id, empresa_id, fecha)"
         )
     except Exception:
         pass
