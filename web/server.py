@@ -1221,6 +1221,16 @@ APP_TIMEZONE = (os.environ.get("APP_TIMEZONE") or os.environ.get("APP_TZ") or "E
 WORKSPACE_MEMBERSHIP_ENFORCE = os.environ.get("APP_WORKSPACE_MEMBERSHIP_ENFORCE", "1").strip().lower() not in ("0", "false", "no", "off")
 S3_SCOPE_ENFORCE = os.environ.get("APP_S3_SCOPE_ENFORCE", "1").strip().lower() not in ("0", "false", "no", "off")
 S3_SCOPE_ENFORCE = bool(S3_SCOPE_ENFORCE or WORKSPACE_MEMBERSHIP_ENFORCE)
+# RGPD: borrar el objeto S3 asociado al eliminar un registro (evita documentos huérfanos con datos
+# personales). OPT-IN (default off) porque borra documentos legales de forma IRREVERSIBLE; actívalo
+# con APP_S3_DELETE_ON_RECORD_DELETE=1 cuando quieras que el borrado sea efectivo también en S3.
+S3_DELETE_ON_RECORD_DELETE = os.environ.get("APP_S3_DELETE_ON_RECORD_DELETE", "0").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
+# RGPD: retención de la papelera (crm_trash). Días tras los que se purgan los snapshots de registros
+# borrados. 0 = sin purga (default, para no perder la opción de restaurar hasta que definas política).
+try:
+    TRASH_RETENTION_DAYS = max(0, int(os.environ.get("APP_TRASH_RETENTION_DAYS", "0") or 0))
+except Exception:
+    TRASH_RETENTION_DAYS = 0
 # Superadmin estricto (allowlist). OPT-IN (default off): activarlo por defecto convertiría a los
 # admin de workspace en no-privilegiados globales, lo que rompe la gestión legítima dentro de su
 # propio workspace (el diseño actual trata el rol Administrador como privilegiado). Para cerrar del
@@ -13607,6 +13617,44 @@ def s3_client():
             read_timeout=int(os.environ.get("AWS_READ_TIMEOUT", "5") or 5),
         ),
     )
+
+
+def s3_delete_object_if_unreferenced(conn, doc_key):
+    """
+    RGPD: borra el objeto S3 tras eliminar un registro, PERO solo si ninguna fila
+    (gestoria_docs / gestoria_facturas — las únicas tablas con doc_key) sigue referenciando la key.
+    Evita huérfanos con datos personales sin borrar documentos aún en uso. Best-effort y opt-in.
+    Llamar SIEMPRE después de borrar la fila del registro.
+    """
+    if not S3_DELETE_ON_RECORD_DELETE:
+        return
+    key = str(doc_key or "").strip()
+    if not key:
+        return
+    try:
+        for table in ("gestoria_docs", "gestoria_facturas"):
+            try:
+                row = conn.execute(f"SELECT COUNT(*) AS n FROM {table} WHERE doc_key = ?", (key,)).fetchone()
+            except Exception:
+                # Si no podemos comprobar referencias, NO borramos (conservador).
+                return
+            if int(row_value(row, "n", 0) or 0) > 0:
+                return
+        client = s3_client()
+        if not client:
+            return
+        bucket, _region = s3_config()
+        if not bucket:
+            return
+        client.delete_object(Bucket=bucket, Key=key)
+    except Exception:
+        # Nunca romper el borrado del registro por un fallo al limpiar S3.
+        pass
+
+
+def s3_delete_keys_if_unreferenced(conn, doc_keys):
+    for k in (doc_keys or []):
+        s3_delete_object_if_unreferenced(conn, k)
 
 
 def s3_has_credentials() -> bool:
@@ -38319,6 +38367,22 @@ def ensure_crm_trash_schema(conn):
         conn.execute("CREATE INDEX IF NOT EXISTS idx_crm_trash_empresa ON crm_trash (empresa_id, created_at)")
     except Exception:
         pass
+    # RGPD: purga de la papelera según retención (no-op si APP_TRASH_RETENTION_DAYS=0).
+    purge_crm_trash(conn)
+
+
+def purge_crm_trash(conn):
+    """RGPD: elimina snapshots de crm_trash más antiguos que APP_TRASH_RETENTION_DAYS. 0 = desactivado."""
+    if TRASH_RETENTION_DAYS <= 0:
+        return 0
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=TRASH_RETENTION_DAYS)).isoformat()
+        conn.execute("DELETE FROM crm_trash WHERE created_at IS NOT NULL AND created_at < ?", (cutoff,))
+        conn.commit()
+    except Exception:
+        _rollback_best_effort(conn)
+        return 0
+    return 1
 
 
 def _row_to_dict(row):
@@ -60168,7 +60232,15 @@ class Handler(BaseHTTPRequestHandler):
                 )
             except Exception:
                 pass
+            _doc_key_to_clean = None
+            try:
+                _dk_row = conn.execute("SELECT doc_key FROM gestoria_docs WHERE id = ? LIMIT 1", (doc_id,)).fetchone()
+                _doc_key_to_clean = row_value(_dk_row, "doc_key", None) if _dk_row else None
+            except Exception:
+                _doc_key_to_clean = None
             conn.execute("DELETE FROM gestoria_docs WHERE id = ?", (doc_id,))
+            # RGPD: limpia el objeto S3 si ya no lo referencia ningún registro (opt-in).
+            s3_delete_object_if_unreferenced(conn, _doc_key_to_clean)
             audit("gestoria_doc", doc_id, "eliminar", None, payload.get("usuario"))
         elif parsed.path == "/api/gestoria_import_lotes":
             cliente_id = str(payload.get("cliente_id") or "").strip() or None
