@@ -38385,6 +38385,54 @@ def purge_crm_trash(conn):
     return 1
 
 
+def build_dsar_export(conn, cliente_id):
+    """
+    RGPD (derecho de acceso/portabilidad, art. 15/20): vuelca TODOS los datos de un interesado.
+    Descubre por introspección todas las tablas con columna `cliente_id` y devuelve sus filas,
+    más la ficha del cliente. Solo lectura.
+    """
+    cid = str(cliente_id or "").strip()
+    result = {
+        "cliente_id": cid,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "cliente": {},
+        "tables": {},
+    }
+    if not cid:
+        return result
+    try:
+        row = conn.execute("SELECT * FROM clientes WHERE id = ? LIMIT 1", (cid,)).fetchone()
+        if row:
+            result["cliente"] = _row_to_dict(row)
+    except Exception:
+        _rollback_best_effort(conn)
+    # Lista de tablas del esquema (usa el compat view sqlite_master, disponible en SQLite y Postgres).
+    try:
+        table_rows = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+        names = sorted({str(row_value(r, "name", None) or row_value(r, 0) or "").strip() for r in (table_rows or [])})
+    except Exception:
+        _rollback_best_effort(conn)
+        names = []
+    for name in names:
+        if not name or name == "clientes" or not re.fullmatch(r"[A-Za-z0-9_]+", name):
+            continue
+        try:
+            cols = table_columns(conn, name)
+        except Exception:
+            cols = set()
+        if "cliente_id" not in cols:
+            continue
+        try:
+            rows = conn.execute(f"SELECT * FROM {name} WHERE cliente_id = ?", (cid,)).fetchall()
+            data = [_row_to_dict(r) for r in (rows or [])]
+        except Exception:
+            _rollback_best_effort(conn)
+            data = []
+        if data:
+            result["tables"][name] = data
+    return result
+
+
 def _row_to_dict(row):
     if row is None:
         return {}
@@ -81203,6 +81251,33 @@ class Handler(BaseHTTPRequestHandler):
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
+        if path == "/api/dsar_export":
+            # RGPD: export del derecho de acceso/portabilidad. Solo para actores privilegiados
+            # (admin/superadmin), ya que vuelca datos personales completos de un interesado.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            cid = (params.get("cliente_id", [""])[0] or "").strip()
+            if not cid:
+                json_response(self, {"error": "cliente_id requerido"}, status=400)
+                return
+            try:
+                dsar = build_dsar_export(conn, cid)
+            except Exception as exc:
+                json_response(self, {"error": "No se pudo generar el export", "detail": Handler._safe_exc_detail(exc)}, status=500)
+                return
+            safe_cid = re.sub(r"[^0-9A-Za-z_-]+", "_", cid)[:64] or "cliente"
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Disposition", f'attachment; filename="dsar_{safe_cid}.json"')
+            self.send_header("Cache-Control", "no-store")
+            body = json.dumps(dsar, ensure_ascii=False, default=str).encode("utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if path == "/api/years":
             ttl_s = max(5.0, float(os.environ.get("APP_YEARS_CACHE_SECONDS", "120") or 120))
             now_ts = time.time()
@@ -94301,6 +94376,29 @@ def configure_sentry():
     return True
 
 
+def _warn_missing_fiscal_catalogs():
+    """Aviso ruidoso si faltan los catálogos IIVTNU: sin ellos los cálculos caen a ESTIMACIÓN."""
+    catalogs = {
+        "IIVTNU tipos Málaga": IIVTNU_TIPO_GRAVAMEN_MALAGA_PATH,
+        "IIVTNU tipos Andalucía": IIVTNU_TIPO_GRAVAMEN_ANDALUCIA_PATH,
+        "IIVTNU tipos capitales": IIVTNU_TIPO_GRAVAMEN_CAPITALES_PATH,
+        "IIVTNU params Hacienda": IIVTNU_PARAMS_SPAIN_HACIENDA_EXCEL2022_PATH,
+        "Códigos postales": POSTAL_CATALOG_PATH,
+    }
+    missing = [name for name, p in catalogs.items() if not Path(p).exists()]
+    if missing:
+        msg = (
+            "[WARN] Catálogos fiscales ausentes (" + ", ".join(missing) + "). "
+            "Los cálculos de IIVTNU/plusvalía caerán a ESTIMACIÓN (tipo por defecto). "
+            "Despliega data/catalogos/ para importes exactos."
+        )
+        try:
+            LOGGER.warning(msg)
+        except Exception:
+            pass
+        print(msg)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Verifika² · CRM local server.")
     parser.add_argument("--db", default=str(DB_CONFIGURED), help="SQLite path.")
@@ -94374,6 +94472,7 @@ def main():
         f"Servidor activo en http://{args.host}:{args.port} · db={Path(args.db).resolve()} · "
         f"ocr_db={Path(args.ocr_db).resolve()} · ocr_workers={ocr_workers}"
     )
+    _warn_missing_fiscal_catalogs()
     server.serve_forever()
 
 
