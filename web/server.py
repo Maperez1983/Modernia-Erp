@@ -56139,46 +56139,62 @@ class Handler(BaseHTTPRequestHandler):
         json_response(self, {"error": "endpoint no válido"}, status=404)
         return
 
+    # ------------------------------------------------------------------
+    # Router incremental (deuda técnica): _do_POST es un método monolítico de ~22k líneas con
+    # cientos de ramas `if path == ...` que comparten estado local. Para trocearlo SIN un big-bang
+    # arriesgado, los endpoints self-contained (que no necesitan el setup compartido de empresa) se
+    # registran aquí y se despachan al principio de _do_POST hacia su propio método `_post_*`.
+    # Migración endpoint a endpoint: mover el cuerpo de una rama a un `_post_<x>` y añadirlo al dict.
+    # ------------------------------------------------------------------
+    _POST_EARLY_ROUTES = {
+        "/api/client_error": "_post_client_error",
+    }
+
+    def _post_client_error(self, parsed, params):
+        host = str(self.headers.get("Host") or "").strip()
+        origin = str(self.headers.get("Origin") or "").strip()
+        referer = str(self.headers.get("Referer") or "").strip()
+        same_origin = False
+        for candidate in (origin, referer):
+            if not candidate or not host:
+                continue
+            try:
+                parsed_candidate = urllib.parse.urlsplit(candidate)
+            except Exception:
+                continue
+            if parsed_candidate.netloc and parsed_candidate.netloc == host:
+                same_origin = True
+                break
+        if not same_origin:
+            json_response(self, {"error": "Origen no permitido"}, status=403)
+            return
+        try:
+            content_length = int(self.headers.get("Content-Length") or "0")
+        except Exception:
+            content_length = 0
+        if content_length <= 0:
+            json_response(self, {"error": "Payload requerido"}, status=400)
+            return
+        try:
+            raw_payload = self.rfile.read(min(content_length, 32768))
+        except Exception:
+            raw_payload = b""
+        try:
+            payload = json.loads(raw_payload.decode("utf-8", "replace") or "{}")
+        except Exception:
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        Handler._record_client_error(payload)
+        json_response(self, {"ok": True})
+
     def _do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
-        if parsed.path == "/api/client_error":
-            host = str(self.headers.get("Host") or "").strip()
-            origin = str(self.headers.get("Origin") or "").strip()
-            referer = str(self.headers.get("Referer") or "").strip()
-            same_origin = False
-            for candidate in (origin, referer):
-                if not candidate or not host:
-                    continue
-                try:
-                    parsed_candidate = urllib.parse.urlsplit(candidate)
-                except Exception:
-                    continue
-                if parsed_candidate.netloc and parsed_candidate.netloc == host:
-                    same_origin = True
-                    break
-            if not same_origin:
-                json_response(self, {"error": "Origen no permitido"}, status=403)
-                return
-            try:
-                content_length = int(self.headers.get("Content-Length") or "0")
-            except Exception:
-                content_length = 0
-            if content_length <= 0:
-                json_response(self, {"error": "Payload requerido"}, status=400)
-                return
-            try:
-                raw_payload = self.rfile.read(min(content_length, 32768))
-            except Exception:
-                raw_payload = b""
-            try:
-                payload = json.loads(raw_payload.decode("utf-8", "replace") or "{}")
-            except Exception:
-                payload = {}
-            if not isinstance(payload, dict):
-                payload = {}
-            Handler._record_client_error(payload)
-            json_response(self, {"ok": True})
+        # Router incremental: despacha endpoints self-contained registrados en _POST_EARLY_ROUTES.
+        _early = Handler._POST_EARLY_ROUTES.get(parsed.path)
+        if _early:
+            getattr(self, _early)(parsed, params)
             return
         if parsed.path not in (
             "/api/movimientos",
