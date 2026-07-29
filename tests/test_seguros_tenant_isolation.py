@@ -225,6 +225,52 @@ class SegurosTenantIsolationTests(unittest.TestCase):
 
     # ---------- mismo tenant: debe seguir funcionando ----------
 
+    def test_borrar_poliza_con_hijas_funciona_y_no_deja_huerfanos(self):
+        """Antes fallaba con 500 FOREIGN KEY constraint failed.
+
+        6 tablas hijas tienen FK a seguros(id) y el handler solo borraba
+        seguros_checklist, así que en Postgres (donde las FK siempre se aplican)
+        no se podía borrar ninguna póliza con un solo recibo. Las tablas sin FK
+        quedaban además como huérfanas con datos personales.
+        """
+        poliza_id = "polCascada"
+        self._insert("seguros", {"id": poliza_id, "empresa_id": "empA", "cliente_id": "cliA",
+                                 "tomador": "Tomador cascada", "compania": "AXA", "ramo": "Salud",
+                                 "poliza_numero": "NUM-CASCADA", "prima_total": 121.0,
+                                 "estado": "Presupuesto", "estado_poliza": "activa",
+                                 "created_at": NOW, "updated_at": NOW})
+        hijas = (
+            ("seguros_recibos", "seguro_id", {"id": "recC", "empresa_id": "empA",
+                                              "cliente_id": "cliA", "prima_total": 121.0,
+                                              "estado": "cobrado"}),
+            ("seguros_siniestros", "seguro_id", {"id": "sinC", "empresa_id": "empA",
+                                                 "cliente_id": "cliA", "estado": "Abierto"}),
+            ("seguros_versiones", "seguro_id", {"id": "verC", "version_no": 1,
+                                                "snapshot_json": "{}"}),
+            ("seguros_movimientos", "seguro_id", {"id": "movC", "empresa_id": "empA",
+                                                  "cliente_id": "cliA", "tipo": "emision"}),
+            ("seguros_checklist", "poliza_id", {"id": "chkC", "tarea": "T",
+                                                "estado": "Pendiente"}),
+            ("seguros_reclamaciones", "seguro_id", {"id": "reclC", "empresa_id": "empA",
+                                                    "cliente_id": "cliA", "estado": "Abierta"}),
+            ("seguros_eventos", "seguro_id", {"id": "evC", "empresa_id": "empA",
+                                              "cliente_id": "cliA", "tipo": "alta"}),
+        )
+        for tabla, columna, datos in hijas:
+            self._insert(tabla, {**datos, columna: poliza_id,
+                                 "created_at": NOW, "updated_at": NOW})
+        self.conn.commit()
+
+        status, body, _ = self._as_ana("/api/seguros_delete", {"id": poliza_id})
+        self.assertEqual(status, 200, f"el borrado falló: {body}")
+        self.assertEqual(self._scalar("SELECT COUNT(*) FROM seguros WHERE id=?", (poliza_id,)), 0)
+        for tabla, columna, _datos in hijas:
+            self.assertEqual(
+                self._scalar(f"SELECT COUNT(*) FROM {tabla} WHERE {columna}=?", (poliza_id,)),
+                0,
+                f"{tabla} conserva filas huérfanas con datos personales",
+            )
+
     def test_si_puede_gestionar_oferta_de_su_cliente(self):
         status, _, _ = self._as_ana("/api/seguros_ofertas_update",
                                     {"id": "ofA", "estado": "Aceptada"})

@@ -70884,7 +70884,61 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (record_id,),
             )
+            # Cascada explícita antes de borrar la póliza:
+            #  - 6 tablas hijas tienen FOREIGN KEY a seguros(id) (recibos, siniestros,
+            #    versiones, movimientos, renovaciones, checklist). Al no borrarlas, el
+            #    DELETE fallaba con "FOREIGN KEY constraint failed" (500) para cualquier
+            #    póliza real: en Postgres las FK siempre se aplican, así que no se podía
+            #    borrar una póliza que tuviera aunque fuera un recibo.
+            #  - Las tablas sin FK (eventos, reclamaciones, IPID, IDD) quedaban como
+            #    huérfanas con datos personales, incumpliendo el derecho de supresión.
+            _actor_cascade = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
+            _doc_keys = [str(row_value(row, "poliza_key", "") or "").strip()]
+            for _tabla, _col in (
+                ("seguros_recibos", "seguro_id"),
+                ("seguros_siniestros", "seguro_id"),
+                ("seguros_versiones", "seguro_id"),
+                ("seguros_movimientos", "seguro_id"),
+                ("seguros_renovaciones", "poliza_id"),
+                ("seguros_reclamaciones", "seguro_id"),
+                ("seguros_eventos", "seguro_id"),
+                ("seguros_ipid_log", "seguro_id"),
+                ("seguros_idd_asesoramiento", "seguro_id"),
+            ):
+                try:
+                    _hijas = conn.execute(
+                        f"SELECT * FROM {_tabla} WHERE {_col} = ?", (record_id,)
+                    ).fetchall()
+                except Exception:
+                    continue
+                for _hija in (_hijas or []):
+                    _hija_id = str(row_value(_hija, "id", "") or "").strip()
+                    if _hija_id:
+                        try:
+                            trash_backup_row(
+                                conn,
+                                _tabla,
+                                _hija_id,
+                                deleted_by=_actor_cascade,
+                                reason="cascade:seguros_delete",
+                                now=now,
+                            )
+                        except Exception:
+                            pass
+                    for _key_col in ("doc_key", "documento_key"):
+                        _key = str(row_value(_hija, _key_col, "") or "").strip()
+                        if _key:
+                            _doc_keys.append(_key)
+                try:
+                    conn.execute(f"DELETE FROM {_tabla} WHERE {_col} = ?", (record_id,))
+                except Exception:
+                    pass
             conn.execute("DELETE FROM seguros WHERE id = ?", (record_id,))
+            # RGPD: retira también los documentos del bucket que ya no referencia nadie.
+            try:
+                s3_delete_keys_if_unreferenced(conn, [k for k in _doc_keys if k])
+            except Exception:
+                pass
             json_response(
                 self,
                 {
