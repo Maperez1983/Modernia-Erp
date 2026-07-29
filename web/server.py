@@ -126,6 +126,99 @@ except ImportError:
     import document_pdf as runtime_document_pdf
 
 
+# --- Cifrado a nivel de campo (RGPD): datos sensibles de nóminas en reposo ---
+# Diseño opt-in / privacy-by-default sin romper lo existente:
+#   * Si `cryptography` no está instalada O la variable de entorno
+#     APP_FIELD_ENCRYPTION_KEY no está configurada -> encrypt_field/decrypt_field
+#     hacen PASSTHROUGH (no-op). Los despliegues actuales y los datos legacy en
+#     claro siguen funcionando IDÉNTICOS.
+#   * El cifrado se ACTIVA sólo al poner una clave Fernet válida (base64 urlsafe
+#     de 32 bytes) en APP_FIELD_ENCRYPTION_KEY. A partir de ahí los NUEVOS valores
+#     se guardan cifrados con el prefijo identificable "fenc:v1:" y decrypt_field
+#     reconoce tanto los tokens cifrados como el texto plano legacy (sin prefijo),
+#     de modo que la migración es transparente y sin big-bang.
+try:
+    from cryptography.fernet import Fernet as _FieldFernet
+    _FIELD_CRYPTO_AVAILABLE = True
+except Exception:  # cryptography ausente -> el sistema arranca igual, sin cifrado
+    _FieldFernet = None
+    _FIELD_CRYPTO_AVAILABLE = False
+
+FIELD_ENCRYPTION_PREFIX = "fenc:v1:"
+_FIELD_FERNET_CACHE = {"key": None, "fernet": None}
+
+
+def _field_encryption_fernet():
+    """Devuelve una instancia Fernet si hay clave válida y cryptography disponible.
+
+    Lee la clave desde el entorno en cada llamada (cacheada por valor de clave)
+    para que sea inyectable en tests. Devuelve None cuando el cifrado no está
+    activado (sin librería, sin clave o clave inválida) -> passthrough.
+    """
+    if not _FIELD_CRYPTO_AVAILABLE:
+        return None
+    key = (os.environ.get("APP_FIELD_ENCRYPTION_KEY") or "").strip()
+    if not key:
+        return None
+    if _FIELD_FERNET_CACHE.get("key") == key and _FIELD_FERNET_CACHE.get("fernet") is not None:
+        return _FIELD_FERNET_CACHE["fernet"]
+    try:
+        fernet = _FieldFernet(key.encode("utf-8"))
+    except Exception:
+        # Clave mal formada -> tratamos como no configurada (passthrough) para no romper.
+        _FIELD_FERNET_CACHE["key"] = key
+        _FIELD_FERNET_CACHE["fernet"] = None
+        return None
+    _FIELD_FERNET_CACHE["key"] = key
+    _FIELD_FERNET_CACHE["fernet"] = fernet
+    return fernet
+
+
+def encrypt_field(text):
+    """Cifra un campo sensible antes de persistirlo.
+
+    Passthrough (devuelve el valor tal cual) si: no hay clave/cryptography, el
+    valor es None/vacío o ya viene cifrado. Nunca lanza: ante cualquier error de
+    cifrado devuelve el texto original.
+    """
+    if text is None:
+        return text
+    if not isinstance(text, str):
+        text = str(text)
+    if text == "" or text.startswith(FIELD_ENCRYPTION_PREFIX):
+        return text
+    fernet = _field_encryption_fernet()
+    if fernet is None:
+        return text
+    try:
+        token = fernet.encrypt(text.encode("utf-8")).decode("ascii")
+    except Exception:
+        return text
+    return FIELD_ENCRYPTION_PREFIX + token
+
+
+def decrypt_field(value):
+    """Descifra un campo leído de la BD (best-effort, nunca lanza).
+
+    * Si el valor NO empieza por el prefijo -> texto plano legacy: se devuelve tal
+      cual (compatibilidad con datos en claro previos al cifrado).
+    * Si empieza por el prefijo -> se descifra; si falla (clave ausente/incorrecta
+      o token corrupto) se devuelve "" para no exponer datos ilegibles.
+    """
+    if value is None or not isinstance(value, str):
+        return value
+    if not value.startswith(FIELD_ENCRYPTION_PREFIX):
+        return value
+    token = value[len(FIELD_ENCRYPTION_PREFIX):]
+    fernet = _field_encryption_fernet()
+    if fernet is None:
+        return ""
+    try:
+        return fernet.decrypt(token.encode("ascii")).decode("utf-8")
+    except Exception:
+        return ""
+
+
 def _http_compression_enabled() -> bool:
     value = str(os.environ.get("APP_HTTP_COMPRESSION") or "").strip().lower()
     return value in {"1", "true", "yes", "on"}
@@ -18635,7 +18728,9 @@ def _fetch_rrhh_nominas_ocr(conn, workspace_id: str, persona_id: str, *, ejercic
     out: list[dict] = []
     for row in rows or []:
         payload = dict(row)
-        ocr_json = payload.get("nomina_ocr_json") or ""
+        # Descifrado en reposo (RGPD): passthrough si el valor es texto plano legacy.
+        ocr_json = decrypt_field(payload.get("nomina_ocr_json") or "") or ""
+        payload["nomina_ocr_json"] = ocr_json
         fields = {}
         try:
             parsed = json.loads(ocr_json) if ocr_json else {}
@@ -32981,8 +33076,8 @@ def upsert_workspace_rrhh_nomina(conn, workspace_id, persona_id, payload, *, act
                 doc_url or "",
                 ocr_status or "",
                 float(ocr_confidence or 0.0),
-                (ocr_text or "")[:200000],
-                (ocr_json or "")[:200000],
+                encrypt_field((ocr_text or "")[:200000]),
+                encrypt_field((ocr_json or "")[:200000]),
                 now,
                 rec_id,
                 workspace_id,
@@ -33022,8 +33117,8 @@ def upsert_workspace_rrhh_nomina(conn, workspace_id, persona_id, payload, *, act
             doc_url,
             ocr_status,
             float(ocr_confidence or 0.0),
-            (ocr_text or "")[:200000] if ocr_text else None,
-            (ocr_json or "")[:200000] if ocr_json else None,
+            encrypt_field((ocr_text or "")[:200000]) if ocr_text else None,
+            encrypt_field((ocr_json or "")[:200000]) if ocr_json else None,
             str(actor_user_id or "").strip() or None,
             now,
             now,
@@ -45180,7 +45275,14 @@ def fetch_workspace_rrhh_documentos(conn, workspace_id, *, empresa_id=None, pers
         """,
         (*params, max(1, min(int(limit or 200), 400))),
     ).fetchall()
-    return {"rows": [dict(row) for row in rows]}
+    out_rows = []
+    for row in rows:
+        rec = dict(row)
+        if "nomina_ocr_json" in rec:
+            # Descifrado en reposo (RGPD): passthrough para texto plano legacy.
+            rec["nomina_ocr_json"] = decrypt_field(rec.get("nomina_ocr_json"))
+        out_rows.append(rec)
+    return {"rows": out_rows}
 
 
 def _parse_iso_date(value):
@@ -66463,7 +66565,7 @@ class Handler(BaseHTTPRequestHandler):
                                 nomina_ocr_updated_at = datetime(?), updated_at = datetime(?)
                             WHERE id = ? AND workspace_id = ?
                             """,
-                            (status, confidence, err, ocr_json, now, now, record_id, workspace_id),
+                            (status, confidence, err, encrypt_field(ocr_json), now, now, record_id, workspace_id),
                         )
                         after = conn.execute(
                             "SELECT * FROM workspace_rrhh_documentos WHERE id = ? AND workspace_id = ? LIMIT 1",
@@ -66685,7 +66787,7 @@ class Handler(BaseHTTPRequestHandler):
                                     nomina_ocr_updated_at = datetime(?), updated_at = datetime(?)
                                 WHERE id = ? AND workspace_id = ?
                                 """,
-                                (ocr_status, confidence, err2, ocr_json, now_local, now_local, record_id, workspace_id),
+                                (ocr_status, confidence, err2, encrypt_field(ocr_json), now_local, now_local, record_id, workspace_id),
                             )
                         except Exception:
                             pass
@@ -66793,7 +66895,7 @@ class Handler(BaseHTTPRequestHandler):
                     nomina_ocr_updated_at = datetime(?), updated_at = datetime(?)
                 WHERE id = ? AND workspace_id = ?
                 """,
-                (status, confidence, err, ocr_json, now, now, record_id, workspace_id),
+                (status, confidence, err, encrypt_field(ocr_json), now, now, record_id, workspace_id),
             )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "status": status, "confidence": confidence, "error": err, "fields": ocr_res.get("fields") or {}})
