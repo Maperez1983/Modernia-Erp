@@ -83379,7 +83379,14 @@ class Handler(BaseHTTPRequestHandler):
                 FROM hipotecas h
                 LEFT JOIN clientes c ON c.id = h.cliente_id
                 WHERE h.empresa_id IN ({placeholders})
-                  AND LOWER(TRIM(COALESCE(h.estado, ''))) IN ('encargo', 'encargado', 'encargada')
+                  -- Operaciones ABIERTAS (pre-firma): encargo/estudio/pendiente/presentada.
+                  -- Antes solo 'encargo*', por lo que las convertidas (nacen 'Pendiente') y
+                  -- las 'Estudio' no aparecían en el board del asesor.
+                  AND LOWER(TRIM(COALESCE(h.estado, ''))) IN (
+                    'encargo', 'encargado', 'encargada',
+                    'estudio', 'en estudio', 'en trámite', 'en tramite',
+                    'pendiente', 'presentada'
+                  )
                   AND (h.fecha_firma IS NULL OR TRIM(COALESCE(h.fecha_firma, '')) = '')
                 ORDER BY COALESCE(NULLIF(TRIM(COALESCE(h.fecha_encargo, '')), ''), h.updated_at, h.created_at) DESC
                 LIMIT 500
@@ -91141,7 +91148,9 @@ class Handler(BaseHTTPRequestHandler):
                         "total": current["total"] if current else 0,
                         "porcentaje_medio": current["porcentaje_medio"] if current else 0,
                         "comision_media": current["comision_media"] if current else 0,
-                        "comision_total": conta_year["comision_cliente"],
+                        # comision_total desde la MISMA fuente que comision_media (tabla
+                        # hipotecas), no desde contabilidad, para que media y total cuadren.
+                        "comision_total": current["comision_total"] if current else 0,
                         "volumen_total": current["volumen_total"] if current else 0,
                         "plazo_medio_dias": current["plazo_medio_dias"] if current else 0,
                         "firmadas_anio": firmadas_anio["total"] if firmadas_anio else 0,
@@ -91158,7 +91167,7 @@ class Handler(BaseHTTPRequestHandler):
                         "total": totals["total"] if totals else 0,
                         "porcentaje_medio": totals["porcentaje_medio"] if totals else 0,
                         "comision_media": totals["comision_media"] if totals else 0,
-                        "comision_total": conta_total["comision_cliente"],
+                        "comision_total": totals["comision_total"] if totals else 0,
                         "volumen_total": totals["volumen_total"] if totals else 0,
                         "plazo_medio_dias": totals["plazo_medio_dias"] if totals else 0,
                         "operaciones_estudio": estudio_total["total"] if estudio_total else 0,
