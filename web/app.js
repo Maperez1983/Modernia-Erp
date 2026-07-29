@@ -7761,7 +7761,13 @@ const renderWorkspaceEntryBanner = () => {
         ${mode === "tenant" ? `<span class="pill workspace-entry-status">${escapeHtml(goLiveStatus)}</span>` : ""}
       </div>
       <div>
-        <strong>${escapeHtml(mode === "tenant" ? workspaceName : "Panel de workspaces")}</strong>
+        <strong>${escapeHtml(
+          mode === "tenant"
+            ? workspaceName
+            : (workspaceName && workspaceName !== "Panel de workspaces"
+                ? `Configurando: ${workspaceName}`
+                : "Selecciona un workspace")
+        )}</strong>
         <div class="muted">${escapeHtml(companyName)} · ${escapeHtml(viewLabel)}${loadedAt ? ` · actualizado ${escapeHtml(formatRelativeTime(loadedAt))}` : ""}</div>
       </div>
     </div>
@@ -11401,12 +11407,57 @@ const renderWorkspaceServiceDesks = (payload = {}) => {
   });
 };
 
+const syncWorkspaceColorSwatch = (textInput) => {
+  if (!textInput || !textInput._colorSwatch) return;
+  const raw = String(textInput.value || "").trim();
+  if (/^#[0-9a-f]{6}$/i.test(raw)) {
+    textInput._colorSwatch.value = raw.toLowerCase();
+  } else if (/^#[0-9a-f]{3}$/i.test(raw)) {
+    const r = raw[1], g = raw[2], b = raw[3];
+    textInput._colorSwatch.value = `#${r}${r}${g}${g}${b}${b}`.toLowerCase();
+  }
+  // Si el texto está vacío o no es un hex válido, dejamos el swatch como esté.
+};
+
+// Añade una muestra de color nativa junto a los campos de branding, sincronizada
+// con el input de texto en ambos sentidos. Idempotente (se ejecuta una sola vez).
+const enhanceWorkspaceColorInputs = () => {
+  if (!workspaceForm) return;
+  [
+    ["primary_color", "Elegir color principal"],
+    ["accent_color", "Elegir color acento"],
+  ].forEach(([name, label]) => {
+    const input = workspaceForm.querySelector(`input[name="${name}"]`);
+    if (!input || input._colorSwatch) return;
+    const wrap = document.createElement("div");
+    wrap.className = "workspace-color-field";
+    input.parentNode.insertBefore(wrap, input);
+    wrap.appendChild(input);
+    const swatch = document.createElement("input");
+    swatch.type = "color";
+    swatch.className = "workspace-color-swatch";
+    swatch.setAttribute("aria-label", label);
+    wrap.appendChild(swatch);
+    input._colorSwatch = swatch;
+    syncWorkspaceColorSwatch(input);
+    swatch.addEventListener("input", () => {
+      input.value = swatch.value;
+    });
+    input.addEventListener("input", () => syncWorkspaceColorSwatch(input));
+  });
+};
+
 const fillWorkspaceForm = (workspace = {}) => {
   if (!workspaceForm) return;
   ["id", "nombre", "slug", "estado", "plan", "kind", "descripcion", "logo_url", "primary_color", "accent_color"].forEach((field) => {
     const el = workspaceForm.querySelector(`[name="${field}"]`);
     if (!el) return;
     el.value = workspace[field] || "";
+  });
+  // Mantener las muestras de color en sync tras rellenar el formulario.
+  ["primary_color", "accent_color"].forEach((name) => {
+    const el = workspaceForm.querySelector(`input[name="${name}"]`);
+    if (el) syncWorkspaceColorSwatch(el);
   });
 };
 
@@ -26228,6 +26279,34 @@ const clearCurrentWorkspaceUi = () => {
   } catch (e) {}
 };
 
+const WORKSPACE_SECTION_SKELETON = `
+  <div class="skeleton-block" aria-hidden="true">
+    <div class="skeleton-line is-title"></div>
+    <div class="skeleton-card">
+      <div class="skeleton-line is-wide"></div>
+      <div class="skeleton-line is-short"></div>
+    </div>
+    <div class="skeleton-card">
+      <div class="skeleton-line is-wide"></div>
+      <div class="skeleton-line is-short"></div>
+    </div>
+  </div>
+`;
+// Muestra placeholders de carga en las secciones de configuración mientras llega
+// el detalle. Solo si el contenedor está vacío (evita parpadeo en refrescos), y
+// se reemplaza al renderizar los datos reales.
+const showWorkspaceConfigSkeletons = () => {
+  [
+    typeof workspaceTenantSummary !== "undefined" ? workspaceTenantSummary : null,
+    typeof workspaceCompanies !== "undefined" ? workspaceCompanies : null,
+    typeof workspaceMembers !== "undefined" ? workspaceMembers : null,
+    typeof workspaceModules !== "undefined" ? workspaceModules : null,
+    typeof workspacePermissionMatrix !== "undefined" ? workspacePermissionMatrix : null,
+  ].forEach((el) => {
+    if (el && !String(el.innerHTML || "").trim()) el.innerHTML = WORKSPACE_SECTION_SKELETON;
+  });
+};
+
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
@@ -26259,6 +26338,7 @@ const loadWorkspaceDetail = async (workspaceId) => {
     state.workspaceDetailRetryAttempt = 0;
   }
   hideUiToast();
+  showWorkspaceConfigSkeletons();
   const authUser = getAuthScopeUser();
   const isSuperAdmin = Boolean(authUser && isPrivilegedUser(authUser));
   let canManageWorkspace = Boolean(authUser && canManageCurrentWorkspace());
@@ -85016,6 +85096,7 @@ if (workspaceCompanyCnaeQuery) {
 }
 
 if (workspaceForm) {
+  enhanceWorkspaceColorInputs();
   workspaceForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (workspaceFormStatus) {

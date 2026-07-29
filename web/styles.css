@@ -14561,6 +14561,81 @@ body.theme-operativa .pill {
   opacity: 0.7;
 }
 
+/* Estados de carga (skeleton) reutilizables para las secciones del workspace. */
+.skeleton-block {
+  display: grid;
+  gap: 10px;
+}
+.skeleton-line {
+  height: 14px;
+  border-radius: 8px;
+  background: linear-gradient(90deg, var(--cream) 25%, #e9edf3 37%, var(--cream) 63%);
+  background-size: 400% 100%;
+  animation: skeleton-shimmer 1.4s ease infinite;
+}
+.skeleton-line.is-title { height: 20px; width: 42%; }
+.skeleton-line.is-wide { width: 100%; }
+.skeleton-line.is-short { width: 65%; }
+.skeleton-card {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+  background: var(--cloud);
+}
+@keyframes skeleton-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: 0 0; }
+}
+
+/* Refinamiento de los formularios de configuración del workspace (identidad,
+   empresa). Alcance limitado a .workspace-config-layout para no alterar el
+   .form-grid global del resto de la app. */
+.workspace-config-layout .form-grid label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.workspace-config-layout .form-grid input,
+.workspace-config-layout .form-grid select,
+.workspace-config-layout .form-grid textarea {
+  font-size: 14px;
+  padding: 10px 12px;
+  background: var(--cloud);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.workspace-config-layout .form-grid input:focus,
+.workspace-config-layout .form-grid select:focus,
+.workspace-config-layout .form-grid textarea:focus {
+  outline: none;
+  border-color: var(--gold-deep);
+  box-shadow: 0 0 0 3px var(--gold-soft);
+}
+/* Campo de color con swatch: input de texto + muestra de color sincronizada. */
+.workspace-color-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.workspace-color-field > input:not(.workspace-color-swatch) {
+  flex: 1 1 auto;
+}
+.workspace-color-swatch {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+}
+.workspace-color-swatch::-webkit-color-swatch-wrapper { padding: 3px; }
+.workspace-color-swatch::-webkit-color-swatch { border: none; border-radius: 7px; }
+
 /* a11y: respetar la preferencia del sistema de reducir movimiento (WCAG 2.3.3). */
 @media (prefers-reduced-motion: reduce) {
   *,
