@@ -4924,7 +4924,7 @@ def bootstrap_default_workspace(conn):
     default_slug = normalize_workspace_slug(DEFAULT_WORKSPACE_NAME)
     default_logo_url = "/assets/verifika2/verifika2_wordmark_check_green_transparent.png"
     default_primary = "#0B1D33"
-    default_accent = "#F2C14E"
+    default_accent = "#16A34A"
     workspace = conn.execute(
         "SELECT id FROM workspaces WHERE nombre = ? OR slug = ? LIMIT 1",
         (DEFAULT_WORKSPACE_NAME, default_slug),
@@ -6715,7 +6715,7 @@ def build_hipotecas_firmadas_excel_workbook(items, selected_year=None, brand_nam
     summary["A1"].font = Font(color="FFFFFF", bold=True, size=16) if Font else summary["A1"].font
     summary["A1"].fill = PatternFill("solid", fgColor="123024") if PatternFill else summary["A1"].fill
     summary["A1"].alignment = Alignment(horizontal="left", vertical="center") if Alignment else summary["A1"].alignment
-    summary["A1"].border = Border(bottom=Side(style="thin", color="C8A24A")) if Border and Side else summary["A1"].border
+    summary["A1"].border = Border(bottom=Side(style="thin", color="16A34A")) if Border and Side else summary["A1"].border
 
     if Border and Side and PatternFill and Font and Alignment:
         soft_fill = PatternFill("solid", fgColor="F8FAFC")
@@ -7475,8 +7475,8 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
     :root {{
       --ink: #15191f;
       --muted: #6e747b;
-      --gold: #c8a24a;
-      --gold-strong: #a9852d;
+      --gold: #16A34A;
+      --gold-strong: #15803D;
       --paper: #f6f3eb;
       --line: rgba(22, 27, 43, 0.10);
       --shadow: 0 18px 40px rgba(22, 27, 43, 0.10);
@@ -7518,7 +7518,7 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
       position: absolute;
       inset: 0 0 auto 0;
       height: 8px;
-      background: linear-gradient(90deg, var(--gold) 0%, #d5b15c 48%, #8b8f7e 100%);
+      background: linear-gradient(90deg, var(--gold) 0%, #4ADE80 48%, #8b8f7e 100%);
     }}
     .hero img {{
       width: 150px;
@@ -52036,7 +52036,7 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
     w, h = (595.27, 841.89)  # A4
     margin = 42
     sidebar_w = 16
-    accent = rl_colors.HexColor("#C8A24A")
+    accent = rl_colors.HexColor("#16A34A")
     ink = rl_colors.HexColor("#111827")
     muted = rl_colors.HexColor("#4B5563")
     line = rl_colors.HexColor("#D1D5DB")
@@ -52339,7 +52339,7 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
     logo = _load_brand_logo(logo_url, max_width=340)
 
     # Paleta aproximada del template Modernia.
-    gold = (200, 162, 74)
+    gold = (22, 163, 74)  # verde de marca (antes oro 200,162,74) — identidad verifika²
     olive = (116, 125, 106)
     ink = (25, 28, 31)
     muted = (110, 116, 120)
@@ -52658,7 +52658,7 @@ def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=
                     _draw_card_box(
                         draw,
                         (chip_x, chip_y, chip_x + chip_w, chip_y + chip_row_h),
-                        outline=(200, 162, 74),
+                        outline=(22, 163, 74),
                         fill=(252, 248, 235),
                         width=2,
                         radius=14,
@@ -53619,7 +53619,7 @@ def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
     w, h = (595.27, 841.89)
     margin = 42
     sidebar_w = 16
-    accent = rl_colors.HexColor("#C8A24A")
+    accent = rl_colors.HexColor("#16A34A")
     ink = rl_colors.HexColor("#111827")
     muted = rl_colors.HexColor("#4B5563")
     line = rl_colors.HexColor("#D1D5DB")
@@ -54194,7 +54194,7 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
     form = c.acroForm
     try:
         primary = rl_colors.HexColor("#0B1D33")
-        accent = rl_colors.HexColor("#C8A24A")
+        accent = rl_colors.HexColor("#16A34A")
         ink = rl_colors.HexColor("#121826")
         muted = rl_colors.HexColor("#6B7280")
         line = rl_colors.HexColor("#D7DCE3")
