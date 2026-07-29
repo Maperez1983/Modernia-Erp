@@ -84523,22 +84523,41 @@ class Handler(BaseHTTPRequestHandler):
                 (*values, today),
             ).fetchall()
 
-            pending_liq_total = 0.0
-            pending_liq_count = 0
-            for r in pendientes_liquidacion:
-                try:
-                    pending_liq_total += float(r["comision"] or 0.0)
-                    pending_liq_count += 1
-                except Exception:
-                    pass
-            pending_impago_total = 0.0
-            pending_impago_count = 0
-            for r in pendientes_impago:
-                try:
-                    pending_impago_total += float(r["prima_total"] or 0.0)
-                    pending_impago_count += 1
-                except Exception:
-                    pass
+            # Los KPIs se agregan en SQL sobre TODAS las filas que cumplen el filtro.
+            # Antes se sumaban recorriendo `pendientes_liquidacion`/`pendientes_impago`,
+            # que están limitadas a 80/120 filas para el listado: con más recibos que el
+            # límite, el importe mostrado sub-reportaba dinero de forma silenciosa
+            # (verificado: 85 recibos -> se ocultaban 5 y 50,35 EUR de comisión).
+            pending_liq_agg = conn.execute(
+                f"""
+                SELECT COUNT(*) AS total, SUM(COALESCE(r.comision, 0)) AS comision
+                FROM seguros_recibos r
+                LEFT JOIN clientes c ON c.id = r.cliente_id
+                WHERE {where_clause}
+                  AND LOWER(COALESCE(r.estado,'')) = 'cobrado'
+                  AND COALESCE(r.comision, 0) > 0
+                  AND COALESCE(r.importe_liquidacion, 0) <= 0
+                """,
+                values,
+            ).fetchone()
+            pending_liq_count = int(row_value(pending_liq_agg, "total", 0) or 0)
+            pending_liq_total = float(row_value(pending_liq_agg, "comision", 0.0) or 0.0)
+
+            pending_impago_agg = conn.execute(
+                f"""
+                SELECT COUNT(*) AS total, SUM(COALESCE(r.prima_total, 0)) AS prima
+                FROM seguros_recibos r
+                LEFT JOIN clientes c ON c.id = r.cliente_id
+                WHERE {where_clause}
+                  AND LOWER(COALESCE(r.estado,'')) IN ('emitido', 'pendiente')
+                  AND NULLIF(TRIM(COALESCE(r.fecha_vencimiento,'')), '') IS NOT NULL
+                  AND DATE(r.fecha_vencimiento) < DATE(?)
+                  AND (r.fecha_cobro IS NULL OR TRIM(COALESCE(r.fecha_cobro,'')) = '')
+                """,
+                (*values, today),
+            ).fetchone()
+            pending_impago_count = int(row_value(pending_impago_agg, "total", 0) or 0)
+            pending_impago_total = float(row_value(pending_impago_agg, "prima", 0.0) or 0.0)
 
             reglas = conn.execute(
                 """
@@ -84662,6 +84681,12 @@ class Handler(BaseHTTPRequestHandler):
                         "comision_real_total": round(float(comision_real_total or 0.0), 2),
                         "comision_missing_count": int(comision_missing or 0),
                         "comision_desviacion_count": int(len(desviaciones)),
+                        # La conciliación esperado/real necesita aplicar las reglas de
+                        # comisión fila a fila, así que recorre como máximo COBRADO_SCAN_LIMIT
+                        # recibos. Se expone el alcance para no presentar un total parcial
+                        # como si fuera el de toda la cartera.
+                        "comision_muestra_filas": int(len(cobrado_rows)),
+                        "comision_muestra_truncada": bool(len(cobrado_rows) >= 800),
                     },
                 },
             )
