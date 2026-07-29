@@ -1,12 +1,21 @@
 :root {
-  --gold: #F2C14E;
-  --gold-deep: #B9892B;
-  --gold-soft: #FFF3C4;
+  /* Acento primario = VERDE DE MARCA (el color del check de verifika²). Antes era oro.
+     Se mantienen los nombres --gold* porque son el "acento del sistema" (~179 usos);
+     el oro real queda en --premium* para reservarlo a hitos/badges. Reversible: basta
+     devolver estos 4 valores a #F2C14E / #B9892B / #FFF3C4 / 242,193,78. */
+  --gold: #16A34A;
+  --gold-deep: #15803D;
+  --gold-soft: #DCFCE7;
+  /* Oro real, reservado a "premium" (hitos, KPIs destacados, badges). */
+  --premium: #F2C14E;
+  --premium-deep: #B9892B;
+  --premium-soft: #FFF3C4;
+  --premium-rgb: 242, 193, 78;
   --black: #0B1D33;
   --charcoal: #0B1D33;
   --ink: #0B1D33;
   --ink-rgb: 11, 29, 51;
-  --gold-rgb: 242, 193, 78;
+  --gold-rgb: 22, 163, 74;
   --sage-rgb: 34, 197, 94;
   --ink-soft: #334155;
   --paper: #F5F7FB;
@@ -9285,7 +9294,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
   position: absolute;
   inset: 0 0 auto 0;
   height: 4px;
-  background: #f2c14e;
+  background: var(--gold);
 }
 
 .inmueble-finance-card.tone-good::before {
@@ -9293,7 +9302,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
 }
 
 .inmueble-finance-card.tone-warning::before {
-  background: #f2c14e;
+  background: var(--gold);
 }
 
 .inmueble-finance-card.tone-alert::before {
@@ -9413,7 +9422,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
 .inmueble-finance-card.tone-warning .inmueble-finance-score {
   background:
     radial-gradient(circle at center, #0b1d33 0 54%, transparent 55%),
-    conic-gradient(#f2c14e calc(var(--score) * 1%), rgba(255, 255, 255, 0.14) 0);
+    conic-gradient(var(--gold) calc(var(--score) * 1%), rgba(255, 255, 255, 0.14) 0);
 }
 
 .inmueble-finance-card.tone-alert .inmueble-finance-score {
@@ -9518,7 +9527,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
 
 .inmueble-finance-bar-segment.down,
 .inmueble-finance-legend i.down {
-  background: #f2c14e;
+  background: var(--gold);
 }
 
 .inmueble-finance-bar-segment.costs,
@@ -11850,7 +11859,7 @@ body.crm-context-gestoria #gestoriaDashboardSection .dashboard-kpis.grid {
 .progress-bar span {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, #F2C14E, #0B1D33);
+  background: linear-gradient(90deg, var(--gold), var(--ink));
   border-radius: 999px;
 }
 
@@ -13537,9 +13546,9 @@ body.theme-operativa .auth-login-card .muted {
 }
 
 body.theme-operativa {
-  --gold: #c7a24a;
-  --gold-deep: #a88327;
-  --gold-soft: #f4ecd5;
+  --gold: #16A34A;
+  --gold-deep: #15803D;
+  --gold-soft: #DCFCE7;
   --black: #1d241f;
   --charcoal: #1d241f;
   --ink: #213129;
