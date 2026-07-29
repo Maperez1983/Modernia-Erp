@@ -33963,7 +33963,7 @@ const createWordmarkLogoDataUri = (label, options = {}) => {
     bg = "#f7f4eb",
     bg2 = "#eef3ea",
     text = "#213129",
-    accent = "#c7a24a",
+    accent = "#16A34A",
   } = options;
   const safeLabel = String(label || "")
     .replace(/&/g, "&amp;")
@@ -44130,7 +44130,7 @@ const getHipotecaPrintBrandContext = ({ filters = {}, title = "" } = {}) => {
       bg: "#f8fafc",
       bg2: "#eef4ff",
       text: "#123024",
-      accent: "#c8a24a",
+      accent: "#16A34A",
     });
   const chips = [];
   const year = String(filters.year || "").trim();
@@ -44174,7 +44174,7 @@ const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}, br
       <style>
         .hipoteca-print-shell{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:linear-gradient(180deg,#f8fafc 0%,#eef4ff 100%);padding:24px;color:#102131;}
         .hipoteca-print-card{background:#fff;border:1px solid #dbe3ed;border-radius:24px;box-shadow:0 20px 42px rgba(15,23,42,.08);overflow:hidden;}
-        .hipoteca-print-hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;padding:24px 28px;background:linear-gradient(135deg,#0f172a 0%,#1d4f63 58%,#c8a24a 100%);color:#fff;}
+        .hipoteca-print-hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;padding:24px 28px;background:linear-gradient(135deg,#0f172a 0%,#15803d 58%,#16A34A 100%);color:#fff;}
         .hipoteca-print-brand{display:flex;gap:16px;align-items:center;min-width:0;}
         .hipoteca-print-brand-logo{width:220px;max-width:34vw;max-height:70px;object-fit:contain;filter:drop-shadow(0 8px 20px rgba(0,0,0,.18));}
         .hipoteca-print-eyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:10px;font-weight:700;opacity:.82;margin-bottom:4px;}
@@ -44240,7 +44240,7 @@ const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}, br
     <style>
       .hipoteca-print-shell{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:linear-gradient(180deg,#f8fafc 0%,#eef4ff 100%);padding:24px;color:#102131;}
       .hipoteca-print-card{background:#fff;border:1px solid #dbe3ed;border-radius:24px;box-shadow:0 20px 42px rgba(15,23,42,.08);overflow:hidden;}
-      .hipoteca-print-hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;padding:24px 28px;background:linear-gradient(135deg,#0f172a 0%,#1d4f63 58%,#c8a24a 100%);color:#fff;}
+      .hipoteca-print-hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;padding:24px 28px;background:linear-gradient(135deg,#0f172a 0%,#15803d 58%,#16A34A 100%);color:#fff;}
       .hipoteca-print-brand{display:flex;gap:16px;align-items:center;min-width:0;}
       .hipoteca-print-brand-logo{width:220px;max-width:34vw;max-height:70px;object-fit:contain;filter:drop-shadow(0 8px 20px rgba(0,0,0,.18));}
       .hipoteca-print-eyebrow{text-transform:uppercase;letter-spacing:.14em;font-size:10px;font-weight:700;opacity:.82;margin-bottom:4px;}
@@ -85087,7 +85087,7 @@ if (workspaceNewBtn) {
 	      plan: "Enterprise",
 	      descripcion: "",
 	      primary_color: "#0B1D33",
-	      accent_color: "#F2C14E",
+	      accent_color: "#16A34A",
 	    });
     renderWorkspaceHealth({});
     renderWorkspaceCommercialPack({}, {});
