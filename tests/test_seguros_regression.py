@@ -150,25 +150,15 @@ class SegurosComisionHelperTests(unittest.TestCase):
         self.assertEqual(seguros_comision_tipo_from_produccion(""), "nueva produccion")
         self.assertEqual(seguros_comision_tipo_from_produccion("Alta nueva"), "nueva produccion")
 
-    def test_produccion_cambio_current_behaviour(self):
-        # POSIBLE BUG: `seguros_comision_tipo_from_produccion` normaliza el texto con
-        # normalize_lookup_text(), que lo pasa a MAYÚSCULAS ("CAMBIO DE COMPANIA"),
-        # pero luego busca la subcadena en minúsculas `"cambio"`. Nunca coincide, por
-        # lo que la rama "cartera" es CÓDIGO MUERTO y siempre devuelve
-        # "nueva produccion". Este test fija el comportamiento ACTUAL (real) del
-        # código; el comportamiento *pretendido* se documenta en el test
-        # expectedFailure de abajo.
+    def test_produccion_cambio_es_cartera(self):
+        # Un cambio de compañía se clasifica como "cartera" (antes era un bug: la comparación
+        # mayúsc/minúsc dejaba la rama muerta y devolvía "nueva produccion"). Ya corregido.
         self.assertEqual(
             seguros_comision_tipo_from_produccion("Cambio de compañía"),
-            "nueva produccion",
+            "cartera",
         )
-
-    @unittest.expectedFailure
-    def test_produccion_cambio_intended_behaviour_BUG(self):
-        # Comportamiento PRETENDIDO (hoy roto): un cambio de compañía debería
-        # clasificarse como "cartera". Falla contra el código actual -> expectedFailure.
         self.assertEqual(
-            seguros_comision_tipo_from_produccion("Cambio de compañía"),
+            seguros_comision_tipo_from_produccion("CAMBIO DE COMPAÑIA"),
             "cartera",
         )
 

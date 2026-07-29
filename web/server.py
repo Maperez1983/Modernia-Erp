@@ -2763,8 +2763,11 @@ def infer_ramo_from_source_hint(source_hint: str) -> str:
     canonical_keys = {normalize_lookup_text(item) for item in LEGAL_RAMOS_CANONICAL}
     return guessed if normalize_lookup_text(guessed) in canonical_keys else ""
 def seguros_comision_tipo_from_produccion(produccion):
+    # normalize_lookup_text() devuelve MAYÚSCULAS; comparar contra "cambio" en minúsculas nunca
+    # casaba (rama muerta), por lo que un cambio de compañía se clasificaba como "nueva produccion"
+    # y usaba la regla de comisión equivocada. Se compara en mayúsculas.
     value = normalize_lookup_text(produccion or "")
-    if "cambio" in value:
+    if "CAMBIO" in value:
         return "cartera"
     return "nueva produccion"
 
@@ -2802,11 +2805,13 @@ def score_seguros_comision_match(rule, compania_key, ramo_key, tipo_key):
             score += 35
         else:
             score -= 20
+    # row_tipo está en MAYÚSCULAS (normalize_lookup_text); comparar contra minúsculas eran ramas
+    # muertas (una regla de tipo "general"/"variable" nunca recibía su bonus de score).
     if row_tipo == tipo_key and row_tipo:
         score += 30
-    elif "general" in row_tipo:
+    elif "GENERAL" in row_tipo:
         score += 10
-    elif "variable" in row_tipo:
+    elif "VARIABLE" in row_tipo:
         score += 5
     elif row_tipo:
         score -= 10
