@@ -50,12 +50,10 @@ class SeguroEstadoNormalizationTests(unittest.TestCase):
         self.assertEqual(normalize_seguro_estado_value("proyecto"), "Presupuesto")
         self.assertEqual(normalize_seguro_estado_value("PENDIENTE"), "Presupuesto")
 
-    def test_presupuestos_plural_not_normalized_current_behaviour(self):
-        # POSIBLE BUG (inconsistencia): `seguro_estado_bucket_value` / la expresión
-        # SQL tratan el plural "PRESUPUESTOS" como bucket 'presupuesto', pero
-        # `normalize_seguro_estado_value` NO reconoce el plural y devuelve el texto
-        # tal cual. Este test fija el comportamiento ACTUAL (real).
-        self.assertEqual(normalize_seguro_estado_value("Presupuestos"), "Presupuestos")
+    def test_presupuestos_plural_normalized(self):
+        # El plural "Presupuestos" se normaliza a "Presupuesto" (antes era inconsistente con
+        # seguro_estado_bucket_value / la expresión SQL, que sí lo trataban como presupuesto).
+        self.assertEqual(normalize_seguro_estado_value("Presupuestos"), "Presupuesto")
 
     def test_contratada_case_and_gender_variants(self):
         self.assertEqual(normalize_seguro_estado_value("contratado"), "Contratada")

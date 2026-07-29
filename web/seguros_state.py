@@ -22,7 +22,7 @@ def normalize_seguro_estado_value(value):
     key = _normalize_lookup_text(value)
     if not key:
         return ""
-    if key in ("PRESUPUESTO", "PROYECTO", "PENDIENTE"):
+    if key in ("PRESUPUESTO", "PRESUPUESTOS", "PROYECTO", "PENDIENTE"):
         return "Presupuesto"
     if key in ("RECHAZADA", "RECHAZADO", "NO ACEPTADA", "NO ACEPTADO", "DENEGADA", "DENEGADO"):
         return "Rechazada"

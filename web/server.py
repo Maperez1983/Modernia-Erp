@@ -80505,7 +80505,10 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "No autorizado"}, status=403)
                     return
             if can_manage and not persona_id:
-                json_response(self, {"error": "persona_id requerido"}, status=400)
+                # Un gestor abre RRHH antes de seleccionar empleado: devolvemos perfil vacío (200)
+                # en vez de 400. Antes esto generaba un error 400 + "Workspace API failed" en la
+                # consola en CADA apertura de RRHH (el frontend pide el perfil sin persona_id).
+                json_response(self, {"row": {}})
                 return
             json_response(self, {"row": fetch_workspace_rrhh_profile(conn, workspace_id, persona_id) or {}})
             return
