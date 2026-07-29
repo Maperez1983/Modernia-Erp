@@ -55535,6 +55535,33 @@ class Handler(BaseHTTPRequestHandler):
             return self._service_from_tabla(tabla)
         return ""
 
+    def _enforce_row_empresa_scope(self, conn, row, label="Registro", empresa_id=None):
+        """Aislamiento multi-tenant POR FILA.
+
+        El gate central (Fase 5) solo valida el `empresa_id` que viaja en el payload,
+        no que la fila objetivo pertenezca a esa empresa. Sin esta comprobación, un
+        actor legítimo de la empresa A podía leer/modificar/borrar filas de la empresa B
+        pasando el id ajeno (IDOR verificado en seguros: update/delete/anular/movimientos/
+        snapshot y borrado de recibos, siniestros y reclamaciones).
+
+        Devuelve True si la operación puede continuar; si no, responde 403 y devuelve False.
+        """
+        eid = str(empresa_id if empresa_id is not None else row_value(row, "empresa_id", "") or "").strip()
+        if not eid:
+            # Sin columna de tenant no hay nada que comparar (catálogos globales).
+            return True
+        session = getattr(self, "auth_session", None) or self._current_session()
+        try:
+            if workspace_actor_is_privileged(conn, session):
+                return True
+        except Exception:
+            pass
+        ok, err = enforce_empresa_membership(conn, session, eid, write=True)
+        if not ok:
+            json_response(self, {"error": err or f"{label} fuera de tu ámbito de empresa"}, status=403)
+            return False
+        return True
+
     def _enforce_service_access(self, path, params=None, payload=None):
         public_paths = {
             "/api/login",
@@ -70349,6 +70376,8 @@ class Handler(BaseHTTPRequestHandler):
             if not current_row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
+            if not self._enforce_row_empresa_scope(conn, current_row, "Póliza"):
+                return
             actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
             updates = {}
             for key in (
@@ -70554,6 +70583,8 @@ class Handler(BaseHTTPRequestHandler):
             if not seguro_row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
+            if not self._enforce_row_empresa_scope(conn, seguro_row, "Póliza"):
+                return
             actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
             motivo = str(payload.get("motivo") or payload.get("reason") or "snapshot_manual").strip() or "snapshot_manual"
             try:
@@ -70573,6 +70604,8 @@ class Handler(BaseHTTPRequestHandler):
             seguro_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (seguro_id,)).fetchone()
             if not seguro_row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, seguro_row, "Póliza"):
                 return
             actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
             try:
@@ -70613,6 +70646,8 @@ class Handler(BaseHTTPRequestHandler):
             row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
             if not row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, row, "Póliza"):
                 return
             actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
             fecha_cambio = (payload.get("fecha_cambio") or payload.get("fecha") or now[:10]).strip()
@@ -70802,6 +70837,8 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
+            if not self._enforce_row_empresa_scope(conn, row, "Póliza"):
+                return
             log_seguro_event(conn, row, "eliminacion", now, payload={"origen": "api/seguros_delete"})
             try:
                 trash_backup_row(
@@ -70868,6 +70905,8 @@ class Handler(BaseHTTPRequestHandler):
             row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
             if not row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, row, "Póliza"):
                 return
             actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
             if action in ("CONTRATAR", "CONTRATADA", "CONVERTIR CONTRATADA", "CONVERTIR A CONTRATADA"):
@@ -71063,6 +71102,9 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id or not empresa_id:
                 json_response(self, {"error": "cliente_id y empresa_id requeridos"}, status=400)
                 return
+            # El empresa_id puede venir heredado de la póliza: valida que sea del actor.
+            if not self._enforce_row_empresa_scope(conn, None, "Reclamación", empresa_id=empresa_id):
+                return
             cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=empresa_id)
             if cliente_access == "missing":
                 json_response(self, {"error": "cliente no encontrado"}, status=404)
@@ -71113,6 +71155,8 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Reclamación no encontrada"}, status=404)
                 return
+            if not self._enforce_row_empresa_scope(conn, row, "Reclamación"):
+                return
             updates = {}
             for key in ("estado", "canal", "fecha_apertura", "fecha_cierre", "asunto", "detalle", "resolucion"):
                 if key in payload:
@@ -71140,6 +71184,8 @@ class Handler(BaseHTTPRequestHandler):
             row = conn.execute("SELECT * FROM seguros_reclamaciones WHERE id = ?", (rec_id,)).fetchone()
             if not row:
                 json_response(self, {"error": "Reclamación no encontrada"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, row, "Reclamación"):
                 return
             conn.execute("DELETE FROM seguros_reclamaciones WHERE id = ?", (rec_id,))
             if row["seguro_id"]:
@@ -71294,6 +71340,8 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Recibo no encontrado"}, status=404)
                 return
+            if not self._enforce_row_empresa_scope(conn, row, "Recibo"):
+                return
             allowed = (
                 "seguro_id",
                 "cliente_id",
@@ -71412,9 +71460,11 @@ class Handler(BaseHTTPRequestHandler):
             if not rec_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            row = conn.execute("SELECT id FROM seguros_recibos WHERE id = ?", (rec_id,)).fetchone()
+            row = conn.execute("SELECT id, empresa_id FROM seguros_recibos WHERE id = ?", (rec_id,)).fetchone()
             if not row:
                 json_response(self, {"error": "Recibo no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, row, "Recibo"):
                 return
             conn.execute("DELETE FROM seguros_recibos WHERE id = ?", (rec_id,))
             try:
@@ -71523,6 +71573,8 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Siniestro no encontrado"}, status=404)
                 return
+            if not self._enforce_row_empresa_scope(conn, row, "Siniestro"):
+                return
             allowed = (
                 "seguro_id",
                 "cliente_id",
@@ -71573,9 +71625,11 @@ class Handler(BaseHTTPRequestHandler):
             if not sin_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            row = conn.execute("SELECT id FROM seguros_siniestros WHERE id = ?", (sin_id,)).fetchone()
+            row = conn.execute("SELECT id, empresa_id FROM seguros_siniestros WHERE id = ?", (sin_id,)).fetchone()
             if not row:
                 json_response(self, {"error": "Siniestro no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, row, "Siniestro"):
                 return
             conn.execute("DELETE FROM seguros_siniestros WHERE id = ?", (sin_id,))
             json_response(self, {"ok": True, "id": sin_id})
@@ -71589,6 +71643,8 @@ class Handler(BaseHTTPRequestHandler):
             row = conn.execute("SELECT * FROM seguros WHERE id = ?", (seguro_id,)).fetchone()
             if not row:
                 json_response(self, {"error": "Póliza no encontrada"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, row, "Póliza"):
                 return
             ipid_id = os.urandom(16).hex()
             fecha_entrega = (payload.get("fecha_entrega") or payload.get("fecha") or now[:10]).strip()
@@ -71789,6 +71845,8 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Registro no encontrado"}, status=404)
                 return
+            if not self._enforce_row_empresa_scope(conn, row, "Póliza"):
+                return
             allowed = (
                 "cliente_id",
                 "tomador",
@@ -71963,6 +72021,8 @@ class Handler(BaseHTTPRequestHandler):
             if not seguro_row:
                 json_response(self, {"error": "Póliza no encontrada"}, status=404)
                 return
+            if not self._enforce_row_empresa_scope(conn, seguro_row, "Póliza"):
+                return
             actor = (
                 _session_user_label(getattr(self, "auth_session", None) or self._current_session())
                 or str(payload.get("usuario") or "").strip()
@@ -72103,6 +72163,9 @@ class Handler(BaseHTTPRequestHandler):
                 cliente_id = str(seguro_row["cliente_id"] or "").strip()
             if not empresa_id or not cliente_id:
                 json_response(self, {"error": "empresa_id y cliente_id requeridos (o seguro_id)"}, status=400)
+                return
+            # empresa_id puede venir heredado de la póliza: valida que sea del actor.
+            if not self._enforce_row_empresa_scope(conn, None, "Consentimiento", empresa_id=empresa_id):
                 return
             cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=empresa_id)
             if cliente_access == "missing":
@@ -72360,6 +72423,12 @@ class Handler(BaseHTTPRequestHandler):
             if not poliza_id:
                 json_response(self, {"error": "poliza_id requerido"}, status=400)
                 return
+            _chk_poliza = conn.execute("SELECT id, empresa_id FROM seguros WHERE id = ?", (poliza_id,)).fetchone()
+            if not _chk_poliza:
+                json_response(self, {"error": "Póliza no encontrada"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _chk_poliza, "Póliza"):
+                return
             conn.execute("DELETE FROM seguros_checklist WHERE poliza_id = ?", (poliza_id,))
             tasks = [
                 "Póliza firmada",
@@ -72388,12 +72457,29 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
+            conn.commit()
             json_response(self, {"ok": True})
             return
         elif parsed.path == "/api/seguros_checklist_update":
             record_id = payload.get("id")
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            # La tarea hereda el ámbito de su póliza: sin esto se podía editar el
+            # checklist de una póliza de otra empresa pasando el id de la tarea.
+            _chk_row = conn.execute(
+                """
+                SELECT c.id AS id, s.empresa_id AS empresa_id
+                FROM seguros_checklist c
+                LEFT JOIN seguros s ON s.id = c.poliza_id
+                WHERE c.id = ?
+                """,
+                (record_id,),
+            ).fetchone()
+            if not _chk_row:
+                json_response(self, {"error": "Tarea no encontrada"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _chk_row, "Tarea"):
                 return
             updates = {}
             for key in ("estado", "responsable", "fecha_limite"):
@@ -72408,6 +72494,10 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE seguros_checklist SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
+            # Antes hacía `return` sin responder ni commitear: el navegador veía un
+            # error de red y en sqlite el cambio no persistía.
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/seguros_renovaciones_update":
             record_id = (payload.get("id") or "").strip()
