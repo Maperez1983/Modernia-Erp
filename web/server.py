@@ -844,6 +844,10 @@ WORKSPACE_TIME_SWEEP_ENABLED = (
 )
 WORKSPACE_TIME_SWEEP_INTERVAL_SECONDS = max(60, int(os.environ.get("WORKSPACE_TIME_SWEEP_INTERVAL_SECONDS", "300")))
 WORKSPACE_TIME_RETENTION_YEARS = max(4, int(os.environ.get("WORKSPACE_TIME_RETENTION_YEARS", "4")))
+# RGPD (privacy by default, art. 25 RGPD / art. 90 LOPDGDD): la geolocalización del fichaje NO se
+# captura ni almacena salvo activación explícita. Geolocalizar a la plantilla exige informar,
+# proporcionalidad y base legal (idealmente EIPD); por eso viene DESACTIVADA por defecto.
+TIME_GEOLOCATION_ENABLED = os.environ.get("APP_TIME_GEOLOCATION_ENABLED", "0").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
 WORKSPACE_TIME_SWEEP_STATE = {
     "last_run_at": "",
     "last_error": "",
@@ -39269,6 +39273,9 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_registro_audit", "action", "action TEXT")
     ensure_column(conn, "workspace_registro_audit", "actor_user_id", "actor_user_id TEXT")
     ensure_column(conn, "workspace_registro_audit", "actor_nombre", "actor_nombre TEXT")
+    # Inmutabilidad tamper-evident: hash encadenado (cada registro incluye el hash del anterior).
+    ensure_column(conn, "workspace_registro_audit", "integrity_hash", "integrity_hash TEXT")
+    ensure_column(conn, "workspace_registro_audit", "prev_hash", "prev_hash TEXT")
     ensure_column(conn, "workspace_registro_audit", "before_json", "before_json TEXT")
     ensure_column(conn, "workspace_registro_audit", "after_json", "after_json TEXT")
     conn.execute(
@@ -43165,6 +43172,7 @@ def build_workspace_time_xlsx(rows, workspace=None, company=None, persona=None, 
             "Pausa (min)",
             "Minutos trabajados",
             "Horas (HH:MM)",
+            "Horas extra",
             "Método",
             "Geo entrada",
             "Geo salida",
@@ -43190,6 +43198,7 @@ def build_workspace_time_xlsx(rows, workspace=None, company=None, persona=None, 
                 int(row.get("pausa_min") or 0),
                 minutos,
                 format_minutes_hhmm(minutos),
+                format_minutes_hhmm(max(0, minutos - int(round(float(row.get("horas_pactadas_dia") or 0) * 60)))),
                 row.get("metodo_registro") or "",
                 geo_in,
                 geo_out,
@@ -44811,29 +44820,98 @@ def log_workspace_registro_audit(conn, workspace_id, *, empresa_id=None, persona
     record_id = os.urandom(16).hex()
     before_json = json.dumps(before, ensure_ascii=False) if before is not None else None
     after_json = json.dumps(after, ensure_ascii=False) if after is not None else None
+    # Inmutabilidad tamper-evident: cadena de hashes. Cada registro incluye el hash del anterior del
+    # mismo workspace, de modo que alterar/borrar un registro pasado rompe la cadena y es detectable
+    # (verificable con verify_workspace_registro_audit_chain).
+    prev_hash = ""
+    try:
+        prow = conn.execute(
+            "SELECT integrity_hash FROM workspace_registro_audit WHERE workspace_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+            (workspace_id,),
+        ).fetchone()
+        if prow:
+            prev_hash = str(row_value(prow, "integrity_hash", None) or row_value(prow, 0) or "")
+    except Exception:
+        _rollback_best_effort(conn)
+        prev_hash = ""
+    entity_type_val = str(entity_type or "").strip() or "registro"
+    entity_id_val = str(entity_id or "").strip() or None
+    action_val = str(action or "").strip() or "update"
+    empresa_val = str(empresa_id or "").strip() or None
+    persona_val = str(persona_id or "").strip() or None
+    chain_payload = "|".join([
+        prev_hash, record_id, str(workspace_id or ""), str(empresa_val or ""), str(persona_val or ""),
+        entity_type_val, str(entity_id_val or ""), action_val, str(actor_user_id or ""),
+        before_json or "", after_json or "", now_ts,
+    ])
+    integrity_hash = hashlib.sha256(chain_payload.encode("utf-8")).hexdigest()
     conn.execute(
         """
         INSERT INTO workspace_registro_audit (
           id, workspace_id, empresa_id, persona_id, entity_type, entity_id, action,
-          actor_user_id, actor_nombre, before_json, after_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          actor_user_id, actor_nombre, before_json, after_json, created_at, prev_hash, integrity_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             record_id,
             workspace_id,
-            str(empresa_id or "").strip() or None,
-            str(persona_id or "").strip() or None,
-            str(entity_type or "").strip() or "registro",
-            str(entity_id or "").strip() or None,
-            str(action or "").strip() or "update",
+            empresa_val,
+            persona_val,
+            entity_type_val,
+            entity_id_val,
+            action_val,
             actor_user_id,
             actor_nombre,
             before_json,
             after_json,
             now_ts,
+            prev_hash,
+            integrity_hash,
         ),
     )
     return record_id
+
+
+def verify_workspace_registro_audit_chain(conn, workspace_id):
+    """
+    Verifica la cadena de integridad de la auditoría de fichajes de un workspace.
+    Devuelve {"ok": bool, "checked": n, "broken_at": id|None}. Detecta manipulación/borrado.
+    """
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, empresa_id, persona_id, entity_type, entity_id, action, actor_user_id,
+                   before_json, after_json, created_at, prev_hash, integrity_hash
+            FROM workspace_registro_audit
+            WHERE workspace_id = ?
+            ORDER BY created_at ASC, id ASC
+            """,
+            (workspace_id,),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return {"ok": False, "checked": 0, "broken_at": None, "error": "no se pudo leer la auditoría"}
+    prev = ""
+    checked = 0
+    for r in rows or []:
+        stored = str(row_value(r, "integrity_hash", None) or "")
+        rec_prev = str(row_value(r, "prev_hash", None) or "")
+        if rec_prev != prev:
+            return {"ok": False, "checked": checked, "broken_at": row_value(r, "id", None)}
+        payload = "|".join([
+            prev, str(row_value(r, "id", "") or ""), str(workspace_id or ""),
+            str(row_value(r, "empresa_id", "") or ""), str(row_value(r, "persona_id", "") or ""),
+            str(row_value(r, "entity_type", "") or ""), str(row_value(r, "entity_id", "") or ""),
+            str(row_value(r, "action", "") or ""), str(row_value(r, "actor_user_id", "") or ""),
+            str(row_value(r, "before_json", "") or ""), str(row_value(r, "after_json", "") or ""),
+            str(row_value(r, "created_at", "") or ""),
+        ])
+        calc = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        if calc != stored:
+            return {"ok": False, "checked": checked, "broken_at": row_value(r, "id", None)}
+        prev = stored
+        checked += 1
+    return {"ok": True, "checked": checked, "broken_at": None}
 
 
 def fetch_workspace_registro_audit(conn, workspace_id, *, persona_id=None, limit=60):
@@ -45695,6 +45773,7 @@ def build_workspace_time_pdf(persona, workspace, company, rows):
                 ("Jornada", persona.get("tipo_jornada") or "-"),
                 ("Horas pactadas", persona.get("horas_pactadas_hhmm") or "-"),
                 ("Horas reales", persona.get("horas_trabajadas_hhmm") or "-"),
+                ("Horas extra", persona.get("horas_extra_hhmm") or "-"),
                 ("Desviación", persona.get("desviacion_hhmm") or "-"),
             ],
         ),
@@ -45704,6 +45783,7 @@ def build_workspace_time_pdf(persona, workspace, company, rows):
                 (
                     f"{row.get('fecha') or '-'} · Entrada {row.get('hora_inicio') or '-'} · Salida {row.get('hora_fin') or '-'}"
                     f" · Pausa {int(row.get('pausa_min') or 0)}m · Trabajado {format_minutes_hhmm(row.get('minutos_trabajados') or 0)}"
+                    f" · Extra {format_minutes_hhmm(max(0, int(row.get('minutos_trabajados') or 0) - int(round(float(row.get('horas_pactadas_dia') or 0) * 60))))}"
                     f" · Método {row.get('metodo_registro') or '-'} · Estado {row.get('estado') or '-'}"
                 ).strip()
                 for row in (rows or [])
@@ -64287,7 +64367,8 @@ class Handler(BaseHTTPRequestHandler):
             workspace_id = str(payload.get("workspace_id") or "").strip()
             persona_id = str(payload.get("persona_id") or "").strip()
             action = normalize_action_key(payload.get("action") or "")
-            geo = payload.get("geo") if isinstance(payload, dict) else None
+            # RGPD: solo se captura geo si está explícitamente habilitado (privacy by default).
+            geo = payload.get("geo") if (isinstance(payload, dict) and TIME_GEOLOCATION_ENABLED) else None
             if not isinstance(geo, dict):
                 geo = {}
             def _geo_float(key):
@@ -64592,7 +64673,8 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path == "/api/workspace_kiosk_toggle":
             token = str(payload.get("token") or "").strip()
             pin = str(payload.get("pin") or "").strip()
-            geo = payload.get("geo") if isinstance(payload, dict) else None
+            # RGPD: solo se captura geo si está explícitamente habilitado (privacy by default).
+            geo = payload.get("geo") if (isinstance(payload, dict) and TIME_GEOLOCATION_ENABLED) else None
             if not isinstance(geo, dict):
                 geo = {}
             def _geo_float(key):

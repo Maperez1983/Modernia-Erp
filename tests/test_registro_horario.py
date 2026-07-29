@@ -1,9 +1,13 @@
+import sqlite3
 import unittest
 
+from web import server
 from web.server import (
     compute_worked_minutes,
     build_workspace_time_summary,
     build_workspace_time_csv,
+    log_workspace_registro_audit,
+    verify_workspace_registro_audit_chain,
 )
 
 
@@ -60,6 +64,59 @@ class OvertimeSummaryTests(unittest.TestCase):
         self.assertIn("horas_extra", header)
         # La fila de 9h/8h debe reflejar 01:00 de exceso.
         self.assertIn("01:00", text.splitlines()[1])
+
+
+class AuditChainTests(unittest.TestCase):
+    def setUp(self):
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.row_factory = sqlite3.Row
+        # Tabla mínima con las columnas de la cadena de integridad.
+        self.conn.executescript(
+            """
+            CREATE TABLE workspace_registro_audit (
+              id TEXT PRIMARY KEY, workspace_id TEXT, empresa_id TEXT, persona_id TEXT,
+              entity_type TEXT, entity_id TEXT, action TEXT, actor_user_id TEXT, actor_nombre TEXT,
+              before_json TEXT, after_json TEXT, created_at TEXT, prev_hash TEXT, integrity_hash TEXT
+            );
+            """
+        )
+        self.conn.commit()
+
+    def _add(self, i):
+        log_workspace_registro_audit(
+            self.conn, "ws-1", persona_id="p1", entity_type="fichaje", entity_id=f"f{i}",
+            action="update", actor={"user_id": "u1", "usuario": "admin"},
+            before={"x": i}, after={"x": i + 1}, now=f"2026-07-29 10:0{i}:00",
+        )
+
+    def test_chain_valida_tras_varios_registros(self):
+        for i in range(1, 4):
+            self._add(i)
+        self.conn.commit()
+        res = verify_workspace_registro_audit_chain(self.conn, "ws-1")
+        self.assertTrue(res["ok"])
+        self.assertEqual(res["checked"], 3)
+
+    def test_detecta_manipulacion_de_un_registro(self):
+        for i in range(1, 4):
+            self._add(i)
+        self.conn.commit()
+        # Manipular el contenido de un registro pasado (sin recalcular su hash) rompe la cadena.
+        self.conn.execute("UPDATE workspace_registro_audit SET after_json = ? WHERE entity_id = 'f2'", ('{"x": 999}',))
+        self.conn.commit()
+        res = verify_workspace_registro_audit_chain(self.conn, "ws-1")
+        self.assertFalse(res["ok"])
+        self.assertIsNotNone(res["broken_at"])
+
+    def test_detecta_borrado_de_un_registro(self):
+        for i in range(1, 4):
+            self._add(i)
+        self.conn.commit()
+        # Borrar un registro intermedio rompe el encadenamiento prev_hash.
+        self.conn.execute("DELETE FROM workspace_registro_audit WHERE entity_id = 'f2'")
+        self.conn.commit()
+        res = verify_workspace_registro_audit_chain(self.conn, "ws-1")
+        self.assertFalse(res["ok"])
 
 
 if __name__ == "__main__":

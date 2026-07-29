@@ -22440,6 +22440,7 @@ const renderWorkspaceTimeSummary = (summary = null) => {
       <div class="workspace-mini-kpi"><span>Parciales</span><strong>${numberFormatter.format(Number(summary.personas_parciales || 0))}</strong></div>
       <div class="workspace-mini-kpi"><span>Horas reales</span><strong>${summary.horas_totales_hhmm || "00:00"}</strong></div>
       <div class="workspace-mini-kpi"><span>Horas pactadas</span><strong>${summary.horas_pactadas_hhmm || "00:00"}</strong></div>
+      <div class="workspace-mini-kpi"><span>Horas extra</span><strong>${summary.horas_extra_hhmm || "00:00"}</strong></div>
       <div class="workspace-mini-kpi"><span>Desviación</span><strong>${summary.desviacion_hhmm || "00:00"}</strong></div>
       <div class="workspace-mini-kpi"><span>Fichajes abiertos</span><strong>${numberFormatter.format(Number(summary.entradas_abiertas || 0))}</strong></div>
     </div>
@@ -22454,6 +22455,7 @@ const renderWorkspaceTimeSummary = (summary = null) => {
             <div class="workspace-billing-meta">
               <span>Real ${escapeHtml(String(row.horas_trabajadas_hhmm || "00:00"))}</span>
               <span>Pactado ${escapeHtml(String(row.horas_pactadas_hhmm || "00:00"))}</span>
+              <span>Extra ${escapeHtml(String(row.horas_extra_hhmm || "00:00"))}</span>
               <span>Desv. ${escapeHtml(String(row.desviacion_hhmm || "00:00"))}</span>
             </div>
           </div>
