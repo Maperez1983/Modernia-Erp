@@ -13208,8 +13208,8 @@ const renderWorkspaceCompanies = (rows = []) => {
               <strong>${escapeHtml(String(activeCompany.nombre || activeCompany.razon_social || "Sin nombre"))}</strong>
               <p class="muted">${
                 [
-                  activeCompany.nif ? `CIF/NIF: ${activeCompany.nif}` : "",
-                  activeCompany.direccion || activeCompany.direccion_fiscal || "",
+                  activeCompany.nif ? `CIF/NIF: ${escapeHtml(String(activeCompany.nif))}` : "",
+                  escapeHtml(String(activeCompany.direccion || activeCompany.direccion_fiscal || "")),
                 ]
                   .filter(Boolean)
                   .join(" · ") || "Abre la ficha para entrar, presupuestos, facturación o ajustes."
@@ -13287,19 +13287,19 @@ const renderWorkspaceCompanies = (rows = []) => {
                 <button
                   type="button"
                   class="secondary ghost"
-                  data-workspace-company-focus="${rowId}"
+                  data-workspace-company-focus="${escapeHtml(String(rowId))}"
                 >${rowId === activeId ? "Contexto activo" : "Activar contexto"}</button>
                 <button
                   type="button"
                   class="secondary ghost"
-                  data-workspace-company-enter="${rowId}"
+                  data-workspace-company-enter="${escapeHtml(String(rowId))}"
                 >Abrir ficha</button>
                 <button
                   type="button"
                   class="secondary ghost"
-                  data-workspace-company-edit="${ids.legacyEmpresaId}"
-                  data-workspace-company-edit-workspace-id="${ids.workspaceCompanyId}"
-                  data-workspace-company-edit-legacy-id="${ids.legacyEmpresaId}"
+                  data-workspace-company-edit="${escapeHtml(String(ids.legacyEmpresaId))}"
+                  data-workspace-company-edit-workspace-id="${escapeHtml(String(ids.workspaceCompanyId))}"
+                  data-workspace-company-edit-legacy-id="${escapeHtml(String(ids.legacyEmpresaId))}"
                   data-workspace-company-edit-name="${escapeHtml(String(row.nombre || ""))}"
                   data-workspace-company-edit-logo="${escapeHtml(String(row.logo_url || ""))}"
                   data-workspace-company-edit-razon="${escapeHtml(String(row.razon_social || ""))}"
@@ -13331,24 +13331,24 @@ const renderWorkspaceCompanies = (rows = []) => {
                     <button
                       type="button"
                       class="secondary ghost"
-                      data-workspace-company-budgets="${rowId}"
+                      data-workspace-company-budgets="${escapeHtml(String(rowId))}"
                     >Presupuestos</button>
                     <button
                       type="button"
                       class="secondary ghost"
-                      data-workspace-company-billing="${rowId}"
+                      data-workspace-company-billing="${escapeHtml(String(rowId))}"
                     >Facturación</button>
                     <button
                       type="button"
                       class="secondary ghost"
-                      data-workspace-company-unlink="${ids.legacyEmpresaId}"
+                      data-workspace-company-unlink="${escapeHtml(String(ids.legacyEmpresaId))}"
                       ${canEdit ? "" : "disabled"}
                     >Desvincular</button>
                     <button
                       type="button"
                       class="secondary ghost danger"
-                      data-workspace-company-archive="${ids.workspaceCompanyId}"
-                      data-workspace-company-archive-legacy="${ids.legacyEmpresaId}"
+                      data-workspace-company-archive="${escapeHtml(String(ids.workspaceCompanyId))}"
+                      data-workspace-company-archive-legacy="${escapeHtml(String(ids.legacyEmpresaId))}"
                       ${canEdit ? "" : "disabled"}
                     >Archivar</button>
                   </div>

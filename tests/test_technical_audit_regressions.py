@@ -2728,12 +2728,13 @@ class GestoriaServerRouteRegressionTests(unittest.TestCase):
         session = {"user_id": "u-1", "rol": "Miembro", "servicio": "Gestoría"}
         self.assertFalse(server.workspace_actor_is_privileged(self.conn, session))
         self.assertTrue(server.workspace_actor_can_manage_workspace(self.conn, session, "ws-1"))
+        # PNG real (firma \x89PNG...): "iVBORw0KGgo=" son los 8 bytes de cabecera PNG.
         payload = {
             "workspace_id": "ws-1",
             "empresa_id": "emp-1",
             "filename": "logo.png",
             "content_type": "image/png",
-            "file_base64": "data:image/png;base64,AA==",
+            "file_base64": "data:image/png;base64,iVBORw0KGgo=",
         }
         dummy_client = SimpleNamespace(put_object=lambda **_kwargs: None)
         with mock.patch.object(server, "s3_client", return_value=dummy_client), \
@@ -2747,6 +2748,46 @@ class GestoriaServerRouteRegressionTests(unittest.TestCase):
         response = json.loads(body.decode("utf-8"))
         self.assertTrue(response["ok"])
         self.assertTrue(response["logo_url"].startswith("s3://"))
+
+    def test_workspace_company_logo_upload_rejects_svg_xss(self):
+        # Seguridad: un SVG (con posible <script>) declarado como image/svg+xml NO debe
+        # aceptarse: la validación es por firma binaria, no por el MIME del cliente.
+        server.ensure_workspace_core_tables(self.conn)
+        now = "2026-07-22T10:00:00+00:00"
+        try:
+            self.conn.execute("ALTER TABLE empresas ADD COLUMN logo_url TEXT")
+        except Exception:
+            pass
+        self.conn.execute(
+            "INSERT OR REPLACE INTO empresas (id, nombre, activo, logo_url) VALUES (?, ?, ?, ?)",
+            ("emp-1", "Empresa Uno", 1, ""),
+        )
+        self.conn.execute(
+            "INSERT OR REPLACE INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            ("wm-admin2", "ws-1", "u-1", "Admin", now, now),
+        )
+        self.conn.execute(
+            "INSERT OR REPLACE INTO workspace_empresas (id, workspace_id, empresa_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            ("we-1", "ws-1", "emp-1", now, now),
+        )
+        self.conn.commit()
+        session = {"user_id": "u-1", "rol": "Miembro", "servicio": "Gestoría"}
+        import base64 as _b64
+        svg = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+        payload = {
+            "workspace_id": "ws-1",
+            "empresa_id": "emp-1",
+            "filename": "logo.svg",
+            "content_type": "image/svg+xml",
+            "file_base64": "data:image/svg+xml;base64," + _b64.b64encode(svg).decode("ascii"),
+        }
+        dummy_client = SimpleNamespace(put_object=lambda **_kwargs: None)
+        with mock.patch.object(server, "s3_client", return_value=dummy_client), \
+            mock.patch.object(server, "s3_config", return_value=("bucket", "region")), \
+            mock.patch.object(server, "S3_BOTO3_AVAILABLE", True), \
+            mock.patch.object(server, "_s3_grant_key", return_value=None):
+            status, _headers, _body = self._call_gestoria_post_route("/api/workspace_company_logo_upload", payload, session)
+        self.assertEqual(status, 400)
 
     def test_workspace_service_matrix_upsert_and_delete_allow_workspace_admins(self):
         server.ensure_workspace_core_tables(self.conn)

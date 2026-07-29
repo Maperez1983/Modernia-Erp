@@ -43975,7 +43975,9 @@ def _normalize_workspace_member_role(value):
         return "Lectura"
     if raw in {"MIEMBRO", "MEMBER"}:
         return "Miembro"
-    return (str(value or "").strip() or "Miembro")
+    # Cualquier valor no reconocido (typo tipo "Onwer") -> "Miembro" (fail-closed),
+    # en vez de persistir un rol inválido verbatim.
+    return "Miembro"
 
 
 def workspace_member_can_write(role):
@@ -44033,7 +44035,9 @@ def normalize_workspace_kind(value):
         return "Gestoría"
     if raw in {"CLIENTE", "DIRECTO", "DIRECT"}:
         return "Directo"
-    return (str(value or "").strip() or "Directo")
+    # Valor no reconocido -> default seguro "Directo" (evita kinds arbitrarios como
+    # "Partner" que sacarían el workspace de los flujos que filtran por Gestoría/Directo).
+    return "Directo"
 
 
 def normalize_workspace_link_type(value):
@@ -61927,13 +61931,20 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_empresa_link":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             workspace_id = str(payload.get("workspace_id") or "").strip()
             empresa_id = str(payload.get("empresa_id") or "").strip()
             if not workspace_id or not empresa_id:
                 json_response(self, {"error": "workspace_id y empresa_id requeridos"}, status=400)
+                return
+            # Autorización ACOTADA al workspace destino (antes usaba privilegio GLOBAL,
+            # que permitía vincular empresas a workspaces ajenos). Requiere gestionar ESE
+            # workspace; con APP_SUPERADMIN_ENFORCE=1 el rol de sesión no da acceso global.
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
                 return
             rol = str(payload.get("rol") or "operativa").strip() or "operativa"
             conn.execute(
@@ -61987,13 +61998,19 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_empresa_unlink":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             workspace_id = str(payload.get("workspace_id") or "").strip()
             empresa_id = str(payload.get("empresa_id") or "").strip()
             if not workspace_id or not empresa_id:
                 json_response(self, {"error": "workspace_id y empresa_id requeridos"}, status=400)
+                return
+            # Autorización ACOTADA al workspace (antes usaba privilegio GLOBAL, que
+            # permitía desvincular empresas de workspaces ajenos).
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
                 return
             conn.execute(
                 "DELETE FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ?",
@@ -62242,9 +62259,24 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Logo demasiado grande (máx. 6MB)"}, status=413)
                 return
 
-            effective_type = (mime_from_data_uri or content_type or "").strip().lower()
-            if not effective_type.startswith("image/"):
-                json_response(self, {"error": "Solo se permiten imágenes"}, status=400)
+            # Validación por FIRMA BINARIA (magic bytes), no por el MIME declarado por
+            # el cliente. Rechaza SVG (vector de XSS almacenado, se sirve inline en el
+            # endpoint público de logo) y cualquier contenido que no sea una imagen
+            # raster real. El content-type se deriva del contenido verificado.
+            def _detect_raster_image_type(data: bytes) -> str:
+                if data[:8] == b"\x89PNG\r\n\x1a\n":
+                    return "image/png"
+                if data[:3] == b"\xff\xd8\xff":
+                    return "image/jpeg"
+                if data[:6] in (b"GIF87a", b"GIF89a"):
+                    return "image/gif"
+                if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+                    return "image/webp"
+                return ""
+
+            effective_type = _detect_raster_image_type(raw_bytes)
+            if not effective_type:
+                json_response(self, {"error": "Formato no permitido: sube PNG, JPG, GIF o WEBP"}, status=400)
                 return
 
             client = s3_client()
@@ -62753,23 +62785,26 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "slug ya en uso"}, status=409)
                 return
             if workspace_id:
-                # Preservar logo_url/kind si el cliente no los envía: el formulario de
-                # identidad del workspace NO incluye esos campos, así que sobrescribirlos
-                # a "" / "Directo" en cada guardado borraba el logo y degradaba el tipo
-                # (p.ej. una Gestoría pasaba a "Directo" y desaparecía de los vínculos).
-                update_kind = kind_value
-                update_logo = str(payload.get("logo_url") or "")
-                if not (kind_provided and logo_provided):
-                    prev = conn.execute(
-                        "SELECT logo_url, kind FROM workspaces WHERE id = ? LIMIT 1",
-                        (workspace_id,),
-                    ).fetchone()
-                    prev_logo = (prev[0] if prev and prev[0] is not None else "")
-                    prev_kind = (prev[1] if prev and prev[1] is not None else "")
-                    if not logo_provided:
-                        update_logo = str(prev_logo or "")
-                    if not kind_provided:
-                        update_kind = normalize_workspace_kind(str(prev_kind or "") or "Directo")
+                # Preservar los campos OPCIONALES que el cliente no envía. El formulario
+                # de identidad no incluye todos, así que sobrescribirlos a defaults en
+                # cada guardado borraba logo/marca y degradaba tipo/plan/estado. Regla:
+                # si la clave viene en el payload se usa (permite vaciar), si no, se
+                # conserva el valor previo.
+                prev = conn.execute(
+                    "SELECT estado, plan, kind, descripcion, logo_url, primary_color, accent_color FROM workspaces WHERE id = ? LIMIT 1",
+                    (workspace_id,),
+                ).fetchone()
+
+                def _prev_val(idx):
+                    return (prev[idx] if prev and prev[idx] is not None else "")
+
+                update_estado = (str(payload.get("estado")) if "estado" in payload else str(_prev_val(0))) or "Activo"
+                update_plan = (str(payload.get("plan")) if "plan" in payload else str(_prev_val(1))) or "Enterprise"
+                update_kind = kind_value if kind_provided else normalize_workspace_kind(str(_prev_val(2) or "") or "Directo")
+                update_desc = str(payload.get("descripcion") or "") if "descripcion" in payload else str(_prev_val(3))
+                update_logo = str(payload.get("logo_url") or "") if logo_provided else str(_prev_val(4))
+                update_primary = str(payload.get("primary_color") or "") if "primary_color" in payload else str(_prev_val(5))
+                update_accent = str(payload.get("accent_color") or "") if "accent_color" in payload else str(_prev_val(6))
                 conn.execute(
                     """
                     UPDATE workspaces
@@ -62780,13 +62815,13 @@ class Handler(BaseHTTPRequestHandler):
                     (
                         nombre,
                         slug_value,
-                        payload.get("estado") or "Activo",
-                        payload.get("plan") or "Enterprise",
+                        update_estado,
+                        update_plan,
                         update_kind,
-                        payload.get("descripcion") or "",
+                        update_desc,
                         update_logo,
-                        payload.get("primary_color") or "",
-                        payload.get("accent_color") or "",
+                        update_primary,
+                        update_accent,
                         now,
                         workspace_id,
                     ),
@@ -62866,8 +62901,11 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Workspace protegido: no se puede borrar."}, status=409)
                 return
 
+            # Nota: workspace_presupuesto_lineas NO está aquí porque no tiene columna
+            # workspace_id (se relaciona por presupuesto_id); se purga por subconsulta
+            # más abajo, antes de borrar los presupuestos.
             purge_tables = [
-                "workspace_presupuesto_lineas",
+                "workspace_presupuesto_shares",
                 "workspace_presupuestos",
                 "workspace_facturacion_cobros",
                 "workspace_facturacion_remesas",
@@ -62887,19 +62925,34 @@ class Handler(BaseHTTPRequestHandler):
                 "workspace_rrhh_ausencias",
                 "workspace_rrhh_gastos",
                 "workspace_rrhh_documentos",
+                "workspace_rrhh_nominas",
+                "workspace_rrhh_productividad_manual",
                 "workspace_rrhh_profile",
                 "workspace_registro_personal",
                 "workspace_fincas_contabilidad",
                 "workspace_fincas_incidencias",
                 "workspace_fincas_juntas",
                 "workspace_fincas_proveedores",
+                "workspace_fincas_vecinos",
+                "workspace_fincas_documentos",
                 "workspace_fincas_comunidades",
                 "workspace_contratos",
                 "workspace_servicio_empresas",
+                "workspace_companies",
                 "workspace_modulos",
                 "workspace_empresas",
                 "workspace_miembros",
             ]
+            # Tablas que guardan doc_key: al borrarlas hay que purgar también el
+            # objeto en S3 (RGPD), no solo la fila.
+            doc_key_tables = {
+                "workspace_documentos_inbox",
+                "workspace_rrhh_documentos",
+                "workspace_rrhh_nominas",
+                "workspace_contratos",
+                "workspace_fincas_documentos",
+            }
+            collected_doc_keys = []
             result = {"workspace_id": workspace_id, "workspace_nombre": ws_name, "workspace_slug": ws_slug, "dry_run": dry_run, "tables": {}}
 
             def _table_exists(name: str) -> bool:
@@ -62910,6 +62963,26 @@ class Handler(BaseHTTPRequestHandler):
                     return False
 
             try:
+                # workspace_presupuesto_lineas no tiene workspace_id: se purga por
+                # subconsulta sobre los presupuestos del workspace, ANTES de borrarlos.
+                if _table_exists("workspace_presupuesto_lineas") and _table_exists("workspace_presupuestos"):
+                    _lineas_sub = "presupuesto_id IN (SELECT id FROM workspace_presupuestos WHERE workspace_id = ?)"
+                    try:
+                        row = conn.execute(
+                            f"SELECT COUNT(*) AS total FROM workspace_presupuesto_lineas WHERE {_lineas_sub}",
+                            (workspace_id,),
+                        ).fetchone()
+                        total = int(row_value(row, "total") or row_value(row, 0) or 0)
+                    except Exception:
+                        total = 0
+                    result["tables"]["workspace_presupuesto_lineas"] = {"exists": True, "rows": total, "deleted": 0}
+                    if (not dry_run) and total:
+                        conn.execute(
+                            f"DELETE FROM workspace_presupuesto_lineas WHERE {_lineas_sub}",
+                            (workspace_id,),
+                        )
+                        result["tables"]["workspace_presupuesto_lineas"]["deleted"] = total
+
                 for table in purge_tables:
                     if not _table_exists(table):
                         result["tables"][table] = {"exists": False, "rows": 0, "deleted": 0}
@@ -62921,6 +62994,14 @@ class Handler(BaseHTTPRequestHandler):
                         total = 0
                     result["tables"][table] = {"exists": True, "rows": total, "deleted": 0}
                     if (not dry_run) and total:
+                        if table in doc_key_tables:
+                            try:
+                                for dref in conn.execute(f"SELECT doc_key FROM {table} WHERE workspace_id = ?", (workspace_id,)).fetchall():
+                                    dk = str(row_value(dref, "doc_key") or row_value(dref, 0) or "").strip()
+                                    if dk:
+                                        collected_doc_keys.append(dk)
+                            except Exception:
+                                pass
                         conn.execute(f"DELETE FROM {table} WHERE workspace_id = ?", (workspace_id,))
                         result["tables"][table]["deleted"] = total
 
@@ -62944,6 +63025,13 @@ class Handler(BaseHTTPRequestHandler):
                 if not dry_run:
                     conn.execute("DELETE FROM workspaces WHERE id = ?", (workspace_id,))
                     conn.commit()
+                    # RGPD: purga best-effort de los objetos S3 de los documentos
+                    # borrados (opt-in vía S3_DELETE_ON_RECORD_DELETE). No rompe el borrado.
+                    try:
+                        s3_delete_keys_if_unreferenced(conn, collected_doc_keys)
+                    except Exception:
+                        pass
+                    result["s3_keys_purged"] = len(collected_doc_keys)
             except Exception as exc:
                 try:
                     conn.rollback()
@@ -79839,6 +79927,13 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
+            # Defensa en profundidad: exige pertenencia al workspace (el gate GET
+            # centralizado solo actúa con sesión; esto cierra también el caso sin sesión).
+            _sm_session = getattr(self, "auth_session", None) or self._current_session()
+            _sm_ok, _sm_err = enforce_workspace_membership(conn, _sm_session, workspace_id)
+            if not _sm_ok:
+                json_response(self, {"error": _sm_err or "No autorizado"}, status=403)
+                return
             json_response(self, fetch_workspace_service_matrix(conn, workspace_id))
             return
 
@@ -79846,6 +79941,14 @@ class Handler(BaseHTTPRequestHandler):
             workspace_id = params.get("id", [""])[0]
             if not workspace_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            # Defensa en profundidad: exige pertenencia antes de servir la ficha
+            # (empresas con IBAN/BIC/NIF). El gate GET centralizado ya cubre el caso
+            # con sesión; esto cierra también el acceso sin sesión.
+            _wd_session = getattr(self, "auth_session", None) or self._current_session()
+            _wd_ok, _wd_err = enforce_workspace_membership(conn, _wd_session, workspace_id)
+            if not _wd_ok:
+                json_response(self, {"error": _wd_err or "No autorizado"}, status=403)
                 return
             payload = fetch_workspace_detail(conn, workspace_id)
             if not payload:
