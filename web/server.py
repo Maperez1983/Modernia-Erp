@@ -70292,7 +70292,7 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 audit("hipoteca", record_id, "eliminar", None, payload.get("usuario"))
                 conn.commit()
-                json_response(self, self._ok({"deleted": True}))
+                json_response(self, {"ok": True, "deleted": True})
                 return
             except Exception as exc:
                 try:

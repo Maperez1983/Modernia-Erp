@@ -2865,9 +2865,30 @@ class GestoriaServerRouteRegressionTests(unittest.TestCase):
             self.assertEqual(s3, 400)
             s4, _h, _b4 = self._call_gestoria_post_route("/api/empresa_delete", {**base, "purge": "1", "purge_confirm": "PURGAR"}, session)
             self.assertEqual(s4, 200)
-        # El dato asociado (cliente) se ha suprimido en cascada.
-        self.assertIsNone(self.conn.execute("SELECT 1 FROM clientes WHERE empresa_id = 'emp-1'").fetchone())
+        # El dato asociado se ha suprimido en cascada.
+        self.assertIsNone(self.conn.execute("SELECT 1 FROM gestoria_trabajos WHERE empresa_id = 'emp-1'").fetchone())
         self.assertIsNone(self.conn.execute("SELECT 1 FROM empresas WHERE id = 'emp-1'").fetchone())
+
+    def test_hipotecas_delete_returns_ok_not_500(self):
+        # Regresión: hipotecas_delete llamaba a self._ok (método inexistente) y crasheaba
+        # con 500 "'Handler' object has no attribute '_ok'" AUNQUE ya había borrado la fila
+        # (delete_hipoteca_record + commit ocurren antes). El usuario veía "No se pudo borrar".
+        server.ensure_workspace_core_tables(self.conn)
+        self.conn.execute("INSERT OR REPLACE INTO empresas (id, nombre, activo) VALUES ('emp-1', 'Empresa Uno', 1)")
+        self.conn.execute("CREATE TABLE IF NOT EXISTS hipotecas (id TEXT PRIMARY KEY, empresa_id TEXT, cliente TEXT)")
+        self.conn.execute("INSERT OR REPLACE INTO hipotecas (id, empresa_id, cliente) VALUES ('h1', 'emp-1', 'Cliente Uno')")
+        # La tabla 'auditoria' existe en producción; el borrado registra un evento.
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS auditoria (id TEXT PRIMARY KEY, empresa_id TEXT, entidad TEXT, entidad_id TEXT, accion TEXT, usuario TEXT, detalles TEXT, created_at TEXT)"
+        )
+        self.conn.commit()
+        session = {"user_id": "u-1", "rol": "ADMINISTRADOR", "servicio": "Financiaciones"}
+        status, _h, body = self._call_gestoria_post_route("/api/hipotecas_delete", {"id": "h1", "empresa_id": "emp-1"}, session)
+        self.assertEqual(status, 200)
+        data = json.loads(body.decode("utf-8"))
+        self.assertTrue(data.get("ok"))
+        self.assertTrue(data.get("deleted"))
+        self.assertIsNone(self.conn.execute("SELECT 1 FROM hipotecas WHERE id='h1'").fetchone())
 
     def test_workspace_service_matrix_upsert_and_delete_allow_workspace_admins(self):
         server.ensure_workspace_core_tables(self.conn)
