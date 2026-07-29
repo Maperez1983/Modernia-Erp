@@ -2789,6 +2789,49 @@ class GestoriaServerRouteRegressionTests(unittest.TestCase):
             status, _headers, _body = self._call_gestoria_post_route("/api/workspace_company_logo_upload", payload, session)
         self.assertEqual(status, 400)
 
+    def test_empresa_delete_scoped_to_workspace_for_managers(self):
+        # Multi-tenant: un Owner/Admin de workspace puede archivar SU empresa (acotado al
+        # workspace), pero NO una empresa de otro workspace, y debe indicar workspace_id.
+        server.ensure_workspace_core_tables(self.conn)
+        now = "2026-07-22T10:00:00+00:00"
+        try:
+            self.conn.execute("ALTER TABLE empresas ADD COLUMN updated_at TEXT")
+        except Exception:
+            pass
+        for eid, name in (("emp-1", "Empresa Uno"), ("emp-2", "Empresa Dos")):
+            self.conn.execute("INSERT OR REPLACE INTO empresas (id, nombre, activo) VALUES (?, ?, 1)", (eid, name))
+        self.conn.execute(
+            "INSERT OR REPLACE INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            ("wm-1", "ws-1", "u-1", "Admin", now, now),
+        )
+        self.conn.execute(
+            "INSERT OR REPLACE INTO workspace_empresas (id, workspace_id, empresa_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            ("we-1", "ws-1", "emp-1", now, now),
+        )
+        # emp-2 pertenece a otro workspace (ajeno al actor).
+        self.conn.execute(
+            "INSERT OR REPLACE INTO workspace_empresas (id, workspace_id, empresa_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            ("we-2", "ws-otro", "emp-2", now, now),
+        )
+        self.conn.commit()
+        session = {"user_id": "u-1", "rol": "Miembro", "servicio": "Gestoría"}
+        self.assertFalse(server.workspace_actor_is_privileged(self.conn, session))
+
+        # 1) Archiva su empresa vinculada -> 200 y queda desvinculada de ws-1.
+        status, _h, _b = self._call_gestoria_post_route("/api/empresa_delete", {"workspace_id": "ws-1", "empresa_id": "emp-1"}, session)
+        self.assertEqual(status, 200)
+        self.assertIsNone(self.conn.execute("SELECT 1 FROM workspace_empresas WHERE workspace_id='ws-1' AND empresa_id='emp-1'").fetchone())
+
+        # 2) NO puede archivar una empresa de otro workspace -> 403.
+        status2, _h2, _b2 = self._call_gestoria_post_route("/api/empresa_delete", {"workspace_id": "ws-1", "empresa_id": "emp-2"}, session)
+        self.assertEqual(status2, 403)
+        # emp-2 sigue vinculada a su workspace ajeno.
+        self.assertIsNotNone(self.conn.execute("SELECT 1 FROM workspace_empresas WHERE workspace_id='ws-otro' AND empresa_id='emp-2'").fetchone())
+
+        # 3) Sin workspace_id (no superadmin) -> 400.
+        status3, _h3, _b3 = self._call_gestoria_post_route("/api/empresa_delete", {"empresa_id": "emp-1"}, session)
+        self.assertEqual(status3, 400)
+
     def test_workspace_service_matrix_upsert_and_delete_allow_workspace_admins(self):
         server.ensure_workspace_core_tables(self.conn)
         now = "2026-07-22T10:00:00+00:00"

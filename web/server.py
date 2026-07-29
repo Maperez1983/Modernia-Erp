@@ -61860,15 +61860,35 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/empresa_delete":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             empresa_id = str(payload.get("id") or payload.get("empresa_id") or "").strip()
             workspace_id = str(payload.get("workspace_id") or "").strip()
             hard = str(payload.get("hard") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
             if not empresa_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            # Autorización: un superadmin puede operar global; cualquier otro gestor debe
+            # indicar SU workspace, gestionarlo y que la empresa esté vinculada a él
+            # (antes exigía privilegio global -> ni los Owner/Admin podían archivar y un
+            # rol de sesión "global" podía tocar empresas de otros tenants).
+            is_super = bool(session and workspace_actor_is_privileged(conn, session))
+            if not is_super:
+                if not workspace_id:
+                    json_response(self, {"error": "workspace_id requerido"}, status=400)
+                    return
+                ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+                if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                linked = conn.execute(
+                    "SELECT 1 FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ? LIMIT 1",
+                    (workspace_id, empresa_id),
+                ).fetchone()
+                if not linked:
+                    json_response(self, {"error": "La empresa no pertenece a este workspace"}, status=403)
+                    return
 
             def _count(table, where_sql, params):
                 try:
@@ -61910,24 +61930,62 @@ class Handler(BaseHTTPRequestHandler):
                         status=409,
                     )
                     return
-                conn.execute("DELETE FROM workspace_empresas WHERE empresa_id = ?", (empresa_id,))
-                conn.execute("DELETE FROM empresas WHERE id = ?", (empresa_id,))
+                if workspace_id:
+                    conn.execute("DELETE FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ?", (workspace_id, empresa_id))
+                else:
+                    conn.execute("DELETE FROM workspace_empresas WHERE empresa_id = ?", (empresa_id,))
+                remaining = _count("workspace_empresas", "empresa_id = ?", (empresa_id,))
+                deleted_global = False
+                if remaining == 0:
+                    # Ya no queda vinculada a ningún workspace: borrado global + limpieza
+                    # de fichas v2 huérfanas (workspace_companies referencia por legacy_empresa_id).
+                    conn.execute("DELETE FROM empresas WHERE id = ?", (empresa_id,))
+                    try:
+                        conn.execute("DELETE FROM workspace_companies WHERE legacy_empresa_id = ?", (empresa_id,))
+                    except Exception:
+                        pass
+                    deleted_global = True
+                elif workspace_id:
+                    try:
+                        conn.execute("DELETE FROM workspace_companies WHERE workspace_id = ? AND legacy_empresa_id = ?", (workspace_id, empresa_id))
+                    except Exception:
+                        pass
                 conn.commit()
-                json_response(self, {"ok": True, "deleted": True, "id": empresa_id})
+                json_response(self, {"ok": True, "deleted": deleted_global, "id": empresa_id, "remaining_links": remaining})
                 return
 
-            # Soft delete: archiva (mantiene histórico).
-            conn.execute(
-                "UPDATE empresas SET activo = 0, updated_at = datetime(?) WHERE id = ?",
-                (now, empresa_id),
-            )
-            if workspace_id:
+            # Soft delete = archivar (mantiene histórico).
+            if not workspace_id:
+                # Sin workspace (solo superadmin llega aquí): archivado GLOBAL legacy.
                 conn.execute(
-                    "DELETE FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ?",
-                    (workspace_id, empresa_id),
+                    "UPDATE empresas SET activo = 0, updated_at = datetime(?) WHERE id = ?",
+                    (now, empresa_id),
+                )
+                conn.commit()
+                json_response(self, {"ok": True, "archived": True, "id": empresa_id})
+                return
+            # ACOTADO al workspace: desvincula y desactiva la ficha v2 de ESE workspace.
+            # Solo se archiva globalmente si ya no queda vinculada a ningún otro workspace,
+            # para no ocultar la empresa a otros tenants que la comparten.
+            conn.execute(
+                "DELETE FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ?",
+                (workspace_id, empresa_id),
+            )
+            try:
+                conn.execute(
+                    "UPDATE workspace_companies SET activo = 0, updated_at = datetime(?) WHERE workspace_id = ? AND legacy_empresa_id = ?",
+                    (now, workspace_id, empresa_id),
+                )
+            except Exception:
+                pass
+            remaining = _count("workspace_empresas", "empresa_id = ?", (empresa_id,))
+            if remaining == 0:
+                conn.execute(
+                    "UPDATE empresas SET activo = 0, updated_at = datetime(?) WHERE id = ?",
+                    (now, empresa_id),
                 )
             conn.commit()
-            json_response(self, {"ok": True, "archived": True, "id": empresa_id})
+            json_response(self, {"ok": True, "archived": True, "id": empresa_id, "remaining_links": remaining})
             return
         elif parsed.path == "/api/workspace_empresa_link":
             session = getattr(self, "auth_session", None) or self._current_session()
