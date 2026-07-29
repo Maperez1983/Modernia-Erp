@@ -721,8 +721,8 @@ a.pill:hover {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: rgba(74, 95, 85, 0.9);
-  background: rgba(199, 162, 74, 0.08);
-  border: 1px solid rgba(199, 162, 74, 0.16);
+  background: rgba(var(--gold-rgb), 0.08);
+  border: 1px solid rgba(var(--gold-rgb), 0.16);
 }
 
 .home-section-header h4,
@@ -2230,9 +2230,9 @@ body.theme-operativa #holdingSection .workspace-central-layout {
 }
 
 #holdingSection .home-section-kicker {
-  color: #6c5620;
-  background: rgba(199, 162, 74, 0.08);
-  border-color: rgba(199, 162, 74, 0.16);
+  color: var(--gold-deep);
+  background: rgba(var(--gold-rgb), 0.08);
+  border-color: rgba(var(--gold-rgb), 0.16);
 }
 
 .workspace-company-switcher-actions {
@@ -2756,9 +2756,9 @@ body.theme-operativa #holdingSection .workspace-company-switcher-card {
 }
 
 body.theme-operativa #holdingSection .workspace-entry-banner-context .pill {
-  background: rgba(199, 162, 74, 0.10);
-  color: #6c5620;
-  border-color: rgba(199, 162, 74, 0.18);
+  background: rgba(var(--gold-rgb), 0.10);
+  color: var(--gold-deep);
+  border-color: rgba(var(--gold-rgb), 0.18);
 }
 
 body.theme-operativa #holdingSection .workspace-entry-banner-metric {
@@ -2767,7 +2767,7 @@ body.theme-operativa #holdingSection .workspace-entry-banner-metric {
 }
 
 body.theme-operativa #holdingSection .workspace-entry-banner-metric .label {
-  color: #6c5620;
+  color: var(--gold-deep);
 }
 
 body.theme-operativa #holdingSection .workspace-entry-banner-metric strong {
@@ -2779,9 +2779,9 @@ body.theme-operativa #holdingSection .workspace-entry-banner-metric .muted {
 }
 
 body.theme-operativa #holdingSection .workspace-company-switcher-copy .home-section-kicker {
-  color: #6c5620;
-  background: rgba(199, 162, 74, 0.08);
-  border-color: rgba(199, 162, 74, 0.16);
+  color: var(--gold-deep);
+  background: rgba(var(--gold-rgb), 0.08);
+  border-color: rgba(var(--gold-rgb), 0.16);
 }
 
 body.theme-operativa #holdingSection .workspace-company-switcher-copy .muted {
@@ -13428,13 +13428,13 @@ body.theme-operativa .auth-login-card::before {
   position: absolute;
   inset: 0 0 auto 0;
   height: 6px;
-  background: linear-gradient(90deg, #c7a24a 0%, #73986f 62%, #d8c06e 100%);
+  background: linear-gradient(90deg, #22C55E 0%, #73986f 62%, #4ADE80 100%);
 }
 
 body.theme-operativa .auth-brand-badge {
   background: rgba(255, 248, 230, 0.92);
-  border-color: rgba(199, 162, 74, 0.18);
-  color: #6c5620;
+  border-color: rgba(var(--gold-rgb), 0.18);
+  color: var(--gold-deep);
 }
 
 body.theme-operativa .auth-login-card h2 {
@@ -13561,7 +13561,7 @@ body.theme-operativa {
   --sage: #73986f;
   --shadow: rgba(33, 49, 41, 0.16);
   background:
-    radial-gradient(circle at top left, rgba(199, 162, 74, 0.2), transparent 26%),
+    radial-gradient(circle at top left, rgba(var(--gold-rgb), 0.2), transparent 26%),
     radial-gradient(circle at 100% 0%, rgba(115, 152, 111, 0.16), transparent 30%),
     radial-gradient(circle at 50% 100%, rgba(147, 168, 103, 0.12), transparent 34%),
     linear-gradient(180deg, #f7f3e8 0%, #eef2ea 46%, #f7f7f2 100%);
@@ -13570,14 +13570,14 @@ body.theme-operativa {
 body.theme-operativa header {
   background:
     radial-gradient(circle at top left, rgba(247, 240, 214, 0.15), transparent 32%),
-    radial-gradient(circle at 80% 12%, rgba(199, 162, 74, 0.22), transparent 20%),
-    linear-gradient(135deg, #1b211d 0%, #34483d 28%, #6f8f68 66%, #c7a24a 100%);
+    radial-gradient(circle at 80% 12%, rgba(var(--gold-rgb), 0.22), transparent 20%),
+    linear-gradient(135deg, #1b211d 0%, #34483d 28%, #6f8f68 66%, #22C55E 100%);
 }
 
 body.theme-operativa .brand img {
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.12), rgba(255, 255, 255, 0.04)),
-    radial-gradient(circle at top left, rgba(199, 162, 74, 0.24), transparent 62%);
+    radial-gradient(circle at top left, rgba(var(--gold-rgb), 0.24), transparent 62%);
 }
 
 body.theme-operativa .brand-kicker {
@@ -13606,7 +13606,7 @@ body.theme-operativa .brand-system::before {
   width: 40px;
   height: 1px;
   margin-right: 12px;
-  background: linear-gradient(90deg, rgba(199, 162, 74, 0.95), rgba(115, 152, 111, 0.7));
+  background: linear-gradient(90deg, rgba(var(--gold-rgb), 0.95), rgba(115, 152, 111, 0.7));
 }
 
 body.theme-operativa .meta {
@@ -13636,18 +13636,18 @@ body.theme-operativa .ui-context-bar {
 body.theme-operativa section {
   background:
     linear-gradient(180deg, rgba(255, 252, 246, 0.9), rgba(255, 255, 255, 0.72)),
-    linear-gradient(135deg, rgba(199, 162, 74, 0.05), rgba(115, 152, 111, 0.06));
+    linear-gradient(135deg, rgba(var(--gold-rgb), 0.05), rgba(115, 152, 111, 0.06));
 }
 
 body.theme-operativa section::before {
-  background: radial-gradient(circle, rgba(199, 162, 74, 0.08), transparent 70%);
+  background: radial-gradient(circle, rgba(var(--gold-rgb), 0.08), transparent 70%);
 }
 
 body.theme-operativa .hero {
   background:
-    radial-gradient(circle at 82% 18%, rgba(199, 162, 74, 0.34), transparent 20%),
+    radial-gradient(circle at 82% 18%, rgba(var(--gold-rgb), 0.34), transparent 20%),
     radial-gradient(circle at top left, rgba(255, 244, 217, 0.14), transparent 28%),
-    linear-gradient(135deg, #1b211d 0%, #385044 34%, #76946d 68%, #c7a24a 100%);
+    linear-gradient(135deg, #1b211d 0%, #385044 34%, #76946d 68%, #22C55E 100%);
 }
 
 body.theme-operativa .hero::after {
@@ -13715,9 +13715,9 @@ body.theme-operativa .hero-metric strong {
 }
 
 body.theme-operativa section:not(.hero) .pill {
-  background: rgba(199, 162, 74, 0.08);
+  background: rgba(var(--gold-rgb), 0.08);
   color: #4f6a5f;
-  border-color: rgba(199, 162, 74, 0.18);
+  border-color: rgba(var(--gold-rgb), 0.18);
 }
 
 body.theme-operativa .card,
@@ -13732,7 +13732,7 @@ body.theme-operativa .renta-detail-card,
 body.theme-operativa .agenda-side {
   background:
     linear-gradient(180deg, rgba(255, 252, 246, 0.94), rgba(247, 249, 245, 0.9)),
-    linear-gradient(135deg, rgba(199, 162, 74, 0.04), rgba(115, 152, 111, 0.04));
+    linear-gradient(135deg, rgba(var(--gold-rgb), 0.04), rgba(115, 152, 111, 0.04));
 }
 
 body.theme-operativa .company-card,
@@ -13749,7 +13749,7 @@ body.theme-operativa .company-summary::before {
   position: absolute;
   inset: 0 auto 0 0;
   width: 5px;
-  background: linear-gradient(180deg, #c7a24a 0%, #73986f 100%);
+  background: linear-gradient(180deg, #22C55E 0%, #73986f 100%);
   opacity: 0.9;
 }
 
@@ -13759,7 +13759,7 @@ body.theme-operativa .toolbar button,
 body.theme-operativa .form-actions button,
 body.theme-operativa .inline-row button,
 body.theme-operativa .crm-pipeline button.active {
-  background: linear-gradient(135deg, #c7a24a 0%, #73986f 100%);
+  background: linear-gradient(135deg, #22C55E 0%, #73986f 100%);
   color: #fffdf7;
   box-shadow: 0 14px 26px rgba(138, 135, 67, 0.2);
 }
@@ -13787,13 +13787,13 @@ body.theme-operativa .tab {
 }
 
 body.theme-operativa .tab.active {
-  background: linear-gradient(135deg, #263a30 0%, #73986f 55%, #c7a24a 100%);
+  background: linear-gradient(135deg, #263a30 0%, #73986f 55%, #22C55E 100%);
   color: #fffdf5;
 }
 
 body.theme-operativa .dashboard-kpis .card::before,
 body.theme-operativa .crm-kpis .card::before {
-  background: linear-gradient(90deg, #c7a24a 0%, #93a867 40%, #73986f 100%);
+  background: linear-gradient(90deg, #22C55E 0%, #93a867 40%, #73986f 100%);
 }
 
 body.theme-operativa .kpi-value {
@@ -13806,7 +13806,7 @@ body.theme-operativa .crm-pipeline button {
 }
 
 body.theme-operativa .data-table th {
-  background: linear-gradient(180deg, rgba(199, 162, 74, 0.12), rgba(115, 152, 111, 0.08));
+  background: linear-gradient(180deg, rgba(var(--gold-rgb), 0.12), rgba(115, 152, 111, 0.08));
   color: #355046;
 }
 
@@ -13816,7 +13816,7 @@ body.theme-operativa .alert {
 
 body.theme-operativa .auth-login-overlay {
   background:
-    radial-gradient(circle at 15% 10%, rgba(199, 162, 74, 0.18), transparent 45%),
+    radial-gradient(circle at 15% 10%, rgba(var(--gold-rgb), 0.18), transparent 45%),
     radial-gradient(circle at 85% 20%, rgba(115, 152, 111, 0.18), transparent 42%),
     rgba(245, 241, 231, 0.92);
 }
@@ -13824,20 +13824,20 @@ body.theme-operativa .auth-login-overlay {
 body.theme-operativa .auth-login-card {
   background:
     linear-gradient(180deg, rgba(255, 252, 246, 0.96), rgba(247, 249, 245, 0.92)),
-    linear-gradient(135deg, rgba(199, 162, 74, 0.04), rgba(115, 152, 111, 0.04));
+    linear-gradient(135deg, rgba(var(--gold-rgb), 0.04), rgba(115, 152, 111, 0.04));
 }
 
 /* Home contrast fix: keep the landing section readable regardless of theme block order. */
 body.theme-operativa #homeSection.hero {
   background:
-    radial-gradient(circle at 8% 0%, rgba(199, 162, 74, 0.12), transparent 30%),
+    radial-gradient(circle at 8% 0%, rgba(var(--gold-rgb), 0.12), transparent 30%),
     radial-gradient(circle at 92% 20%, rgba(115, 152, 111, 0.12), transparent 24%),
     linear-gradient(135deg, rgba(255, 252, 246, 0.96) 0%, rgba(241, 246, 242, 0.94) 52%, rgba(250, 248, 241, 0.96) 100%);
   color: #213129;
 }
 
 body.theme-operativa #homeSection.hero::before {
-  background: radial-gradient(circle, rgba(199, 162, 74, 0.1), transparent 70%);
+  background: radial-gradient(circle, rgba(var(--gold-rgb), 0.1), transparent 70%);
 }
 
 body.theme-operativa #homeSection .hero-copy h2,
@@ -13851,9 +13851,9 @@ body.theme-operativa #homeSection .home-section-header {
 }
 
 body.theme-operativa #homeSection .home-section-kicker {
-  color: #6c5620;
-  background: rgba(199, 162, 74, 0.08);
-  border-color: rgba(199, 162, 74, 0.16);
+  color: var(--gold-deep);
+  background: rgba(var(--gold-rgb), 0.08);
+  border-color: rgba(var(--gold-rgb), 0.16);
 }
 
 body.theme-operativa #homeSection .company-card h3 {
@@ -13869,9 +13869,9 @@ body.theme-operativa #homeSection .company-meta {
 }
 
 body.theme-operativa #homeSection .hero .pill {
-  background: rgba(199, 162, 74, 0.12);
+  background: rgba(var(--gold-rgb), 0.12);
   color: #5f4b1d;
-  border-color: rgba(199, 162, 74, 0.22);
+  border-color: rgba(var(--gold-rgb), 0.22);
 }
 
 body.theme-operativa #homeSection .hero .toolbar {
@@ -13893,9 +13893,9 @@ body.theme-operativa #homeSection .hero-aside {
 }
 
 body.theme-operativa #homeSection .hero-chip {
-  background: rgba(199, 162, 74, 0.1);
-  color: #6c5620;
-  border-color: rgba(199, 162, 74, 0.18);
+  background: rgba(var(--gold-rgb), 0.1);
+  color: var(--gold-deep);
+  border-color: rgba(var(--gold-rgb), 0.18);
 }
 
 body.theme-operativa #homeSection .hero-badge {
@@ -13908,7 +13908,7 @@ body.theme-operativa #homeSection .hero-metric {
 }
 
 body.theme-operativa #homeSection .hero-metric strong {
-  color: #6c5620;
+  color: var(--gold-deep);
 }
 
 body.theme-operativa #homeSection .hero-metric span {
@@ -13934,7 +13934,7 @@ body.theme-operativa #homeSection .home-guidance-last-action {
 
 body.theme-operativa #homeSection .home-guidance-kicker,
 body.theme-operativa #homeSection .home-guidance-search-head label {
-  color: #6c5620;
+  color: var(--gold-deep);
 }
 
 body.theme-operativa #homeSection .home-guidance-title {
@@ -13971,9 +13971,9 @@ body.theme-operativa #homeSection .home-guidance-secondary .secondary.ghost {
 }
 
 body.theme-operativa #homeSection .home-guidance-last-action .pill {
-  background: rgba(199, 162, 74, 0.10);
-  color: #6c5620;
-  border-color: rgba(199, 162, 74, 0.18);
+  background: rgba(var(--gold-rgb), 0.10);
+  color: var(--gold-deep);
+  border-color: rgba(var(--gold-rgb), 0.18);
 }
 
 body.theme-operativa .meta {
@@ -14000,7 +14000,7 @@ body.theme-operativa .meta-user select {
   min-width: 0;
   background: rgba(255, 252, 245, 0.94);
   color: #213129;
-  border-color: rgba(199, 162, 74, 0.18);
+  border-color: rgba(var(--gold-rgb), 0.18);
 }
 
 body.theme-operativa #authLogoutBtn {
