@@ -26071,7 +26071,9 @@ const safeWorkspaceApi = async (path, fallback) => {
       at: new Date().toISOString(),
     };
     state.lastApiError = payload;
-    console.error("Workspace API failed:", payload);
+    // Mensaje legible como texto (antes se logueaba el objeto -> "[object Object]" en logs planos),
+    // más el payload estructurado para inspección en DevTools.
+    console.error(`Workspace API failed: ${payload.path} · HTTP ${payload.status} · ${payload.message}`, payload);
     return fallback;
   }
 };
