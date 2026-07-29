@@ -70248,7 +70248,7 @@ const loadFinAsesoramientos = (empresaId) => {
       });
       const convertBtn = document.createElement("button");
       convertBtn.type = "button";
-      convertBtn.textContent = "Convertir";
+      convertBtn.textContent = "Convertir a hipoteca";
       convertBtn.addEventListener("click", () => {
         const ok = window.confirm("¿Convertir este asesoramiento en hipoteca?");
         if (!ok) return;
@@ -83841,13 +83841,9 @@ if (segurosUpdateButton) {
   });
 }
 
-if (finCrmSearch) {
-  finCrmSearch.addEventListener("input", () => {
-    scheduleSave("fin-crm-search", () => {
-      loadFinHipotecasRegistradas();
-    }, 300);
-  });
-}
+// (Eliminado el segundo binding duplicado de finCrmSearch: el elemento no existe en
+// el HTML — listado legacy sustituido por hipotecaBdt — y el listener ya se registra
+// más arriba; era código muerto que ocultaba el doble binding.)
 
 if (holdingBackBtn) {
   holdingBackBtn.addEventListener("click", () => {
