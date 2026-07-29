@@ -18391,21 +18391,34 @@ def _parse_nomina_pdf_fields(text: str) -> dict:
     upper = raw.upper()
     fields: dict[str, object] = {}
 
+    amount_re = r"[-]?(?:\d{1,3}(?:[.\s]\d{3})*(?:,\d{2})|\d+(?:,\d{2}))"
+
     def _find_amount_near(label_patterns) -> float:
         pats = label_patterns if isinstance(label_patterns, (list, tuple)) else [label_patterns]
         for pat in pats:
             for m in re.finditer(pat, raw, flags=re.IGNORECASE):
-                # recorta un contexto corto (misma línea o 200 chars).
-                start = max(0, m.start() - 60)
-                end = min(len(raw), m.end() + 220)
-                ctx = raw[start:end]
-                # Busca el último importe plausible del contexto.
-                candidates = re.findall(r"[-]?(?:\d{1,3}(?:[.\s]\d{3})*(?:,\d{2})|\d+(?:,\d{2}))", ctx)
-                if not candidates:
-                    continue
-                amt = parse_money_value(candidates[-1])
-                if amt > 0:
-                    return round(float(amt), 2)
+                # 1) Preferir el importe de la MISMA línea que la etiqueta. Con
+                #    `pdftotext -layout` la etiqueta y su importe van juntos:
+                #    "LÍQUIDO A PERCIBIR ......... 1.551,35". Tomamos el ÚLTIMO
+                #    importe de la línea (así descartamos p.ej. el "(6,35%)").
+                line_end = raw.find("\n", m.end())
+                if line_end == -1:
+                    line_end = len(raw)
+                same_line = raw[m.end():line_end]
+                candidates = re.findall(amount_re, same_line)
+                if candidates:
+                    amt = parse_money_value(candidates[-1])
+                    if amt > 0:
+                        return round(float(amt), 2)
+                # 2) Fallback: importe en columna/línea siguiente. Tomamos el
+                #    PRIMER importe tras la etiqueta (no el último) para no
+                #    colarnos en filas posteriores no relacionadas.
+                tail = raw[m.end():m.end() + 140]
+                candidates = re.findall(amount_re, tail)
+                if candidates:
+                    amt = parse_money_value(candidates[0])
+                    if amt > 0:
+                        return round(float(amt), 2)
         return 0.0
 
     # Periodo: MM/YYYY o MesNombre YYYY
@@ -18443,16 +18456,38 @@ def _parse_nomina_pdf_fields(text: str) -> dict:
             except Exception:
                 pass
 
-    # NIF/DNI del empleado: prioriza etiquetas.
+    # NIF/DNI del empleado. En una nómina conviven el CIF de la EMPRESA
+    # (letra + 7 díg + control) y el DNI/NIE del TRABAJADOR (8 díg + letra, o
+    # [XYZ] + 7 díg + letra). Hay que quedarse con el del trabajador y NO con el
+    # CIF de la empresa (que suele aparecer antes, en la cabecera).
+    person_inner = r"(?:\d{8}[A-Z]|[XYZ]\d{7}[A-Z])"
+    person_nif_re = r"\b" + person_inner + r"\b"
+    company_cif_re = r"\b[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]\b"
     nif = ""
-    m3 = re.search(r"\b(?:DNI|NIF|N\.I\.F\.|NIF/NIE|NIE)\b\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\.\s]{6,20})", upper)
+    # 1) Etiqueta explícita del trabajador (DNI/NIF/NIE, con o sin puntos).
+    m3 = re.search(
+        r"\b(?:D\.?\s*N\.?\s*I\.?|N\.?\s*I\.?\s*F\.?|N\.?\s*I\.?\s*E\.?)\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-\.\s]{6,20})",
+        upper,
+    )
     if m3:
-        nif_primary, _nif_list = _find_best_nif_in_text(m3.group(1))
-        nif = normalize_nif(nif_primary or m3.group(1))
+        seg = m3.group(1)
+        mp = re.search(person_nif_re, seg)
+        if mp:
+            nif = normalize_nif(mp.group(0))
+        else:
+            nif_primary, _nif_list = _find_best_nif_in_text(seg)
+            nif = normalize_nif(nif_primary or seg)
+    # 2) Si la etiqueta no dio un DNI/NIE de persona, busca el primer DNI/NIE del
+    #    documento (así se evita coger el CIF de la empresa como NIF del empleado).
+    if not re.fullmatch(person_inner, nif or ""):
+        mp = re.search(person_nif_re, upper)
+        if mp:
+            nif = normalize_nif(mp.group(0))
+    # 3) Último recurso: cualquier identificador (incluido el CIF de empresa).
     if not nif:
-        # fallback: primer candidato de NIF en el texto.
-        nifs = re.findall(r"\b(?:[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J]|\d{8}[A-Z])\b", upper, flags=re.IGNORECASE)
-        nif = normalize_nif(nifs[0]) if nifs else ""
+        mc = re.search(company_cif_re, upper)
+        if mc:
+            nif = normalize_nif(mc.group(0))
     if nif:
         fields["empleado_nif"] = nif
 
@@ -18469,8 +18504,26 @@ def _parse_nomina_pdf_fields(text: str) -> dict:
             candidate = f"{mname.group(1)} {mname.group(2)}"
         else:
             candidate = mname.group(1)
-        candidate = re.sub(r"\\s+", " ", str(candidate or "")).strip()
-        candidate = re.split(r"\b(?:NIF|DNI|NIE)\b", candidate, flags=re.IGNORECASE)[0].strip()
+        candidate = re.sub(r"\s+", " ", str(candidate or "")).strip()
+        # 1) Corta en el primer token identificador (DNI/NIE/CIF): el nombre
+        #    termina donde empieza el número. Evita usar \b(?:NIF|DNI|NIE)\b, que
+        #    no captura formas con puntos ("D.N.I.") ni pegadas ("_NIF").
+        mcut = re.search(
+            r"\b(?:\d{8}[A-Z]|[XYZ]\d{7}[A-Z]|[ABCDEFGHJNPQRSUVW]\d{7}[0-9A-J])\b",
+            candidate,
+            flags=re.IGNORECASE,
+        )
+        if mcut:
+            candidate = candidate[:mcut.start()]
+        # 2) Quita una etiqueta de identificador colgando al FINAL (con puntos y/o
+        #    pegada, tipo "... D.N.I.:" o "... _NIF:"). Anclada en $ para no tocar
+        #    nombres que contengan "NIE"/"NIF" (p.ej. "MARÍA NIEVES", "DANIEL").
+        candidate = re.sub(
+            r"(?i)[\s_,;:.\-]*(?:D\.?\s*N\.?\s*I\.?|N\.?\s*I\.?\s*F\.?|N\.?\s*I\.?\s*E\.?|C\.?\s*I\.?\s*F\.?)\s*[:\-]?\s*$",
+            "",
+            candidate,
+        )
+        candidate = candidate.strip(" ,;:.-_").strip()
         if len(candidate) >= 6:
             name = candidate
             break
@@ -18520,7 +18573,7 @@ def _parse_nomina_pdf_fields(text: str) -> dict:
         pass
 
     # IRPF %.
-    m_irpf = re.search(r"\bIRPF\b[^\n\r]{0,80}?([0-9]{1,2}(?:[\.,][0-9]{1,2})?)\s*%", raw, flags=re.IGNORECASE)
+    m_irpf = re.search(r"\bI\.?\s*R\.?\s*P\.?\s*F\.?[^\n\r]{0,80}?([0-9]{1,2}(?:[\.,][0-9]{1,2})?)\s*%", raw, flags=re.IGNORECASE)
     if m_irpf:
         try:
             fields["irpf_pct"] = round(parse_money_value(m_irpf.group(1)), 4)
