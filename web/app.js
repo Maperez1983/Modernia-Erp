@@ -7758,7 +7758,7 @@ const renderWorkspaceEntryBanner = () => {
     <div class="workspace-entry-banner-context">
       <div>
         <span class="pill">${escapeHtml(mode === "tenant" ? "Workspace activo" : "Configuración de workspaces")}</span>
-        <span class="pill workspace-entry-status">${escapeHtml(goLiveStatus)}</span>
+        ${mode === "tenant" ? `<span class="pill workspace-entry-status">${escapeHtml(goLiveStatus)}</span>` : ""}
       </div>
       <div>
         <strong>${escapeHtml(mode === "tenant" ? workspaceName : "Panel de workspaces")}</strong>
@@ -10634,6 +10634,12 @@ const renderWorkspacePermissionMatrix = (rows = []) => {
     return;
   }
   workspacePermissionMatrix.innerHTML = `
+    <div class="workspace-context-strip">
+      <div>
+        <strong>Plantillas de acceso por perfil</strong>
+        <div class="muted">Vista informativa (solo lectura). Los accesos se ajustan activando módulos y asignando roles a cada miembro.</div>
+      </div>
+    </div>
     <div class="workspace-billing-list">
       ${rows
         .map(
@@ -10738,6 +10744,16 @@ const renderWorkspaceTenantSummary = (workspace = {}) => {
     button.addEventListener("click", () => {
       const target = String(button.dataset.workspaceTenantJump || "general").trim();
       setWorkspaceTenantSection(target || "general", { scroll: true });
+    });
+  });
+  // "Abrir empresa": se cablea aquí, donde se pinta el botón. (Antes vivía en
+  // renderWorkspaceLinks, que hace return temprano para no-managers y se pinta
+  // más tarde, dejando el botón inerte.)
+  workspaceTenantSummary.querySelectorAll("[data-workspace-company-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const companyId = String(button.dataset.workspaceCompanyOpen || "").trim();
+      if (!companyId) return;
+      openWorkspaceCompanyFicha(companyId, "dashboard").catch(() => {});
     });
   });
 };
@@ -12893,6 +12909,18 @@ const renderWorkspaceCompanies = (rows = []) => {
       return false;
     }
   })();
+  // Crear/vincular empresa exige superadmin en el backend (workspace_company_create /
+  // workspace_empresa_link). Mostramos esos paneles solo a quien puede completarlos,
+  // para no ofrecer formularios que devolverían 403. Editar/archivar una empresa ya
+  // vinculada sí lo permite un Owner/Admin (canEdit).
+  const canCreateOrLink = (() => {
+    try {
+      const authUser = getAuthScopeUser();
+      return Boolean(authUser && isPrivilegedUser(authUser));
+    } catch (error) {
+      return false;
+    }
+  })();
   const items = Array.isArray(rows) ? rows : [];
   const activeId = String(state.currentWorkspaceCompanyWsId || state.currentWorkspaceCompanyId || items[0]?.id || "");
   const linkedIds = new Set();
@@ -12920,7 +12948,7 @@ const renderWorkspaceCompanies = (rows = []) => {
       return `<option value="${escapeHtml(label)}" data-company-id="${escapeHtml(String(row.id || ""))}"></option>`;
     })
     .join("");
-  const createPanelHtml = canEdit
+  const createPanelHtml = canCreateOrLink
     ? `
       <div class="form-card" style="margin-bottom: 12px;">
         <div class="section-head">
@@ -12948,7 +12976,7 @@ const renderWorkspaceCompanies = (rows = []) => {
       </div>
     `
     : "";
-  const linkPanelHtml = canEdit
+  const linkPanelHtml = canCreateOrLink
     ? `
       <div class="form-card" style="margin-bottom: 12px;">
         <div class="section-head">
@@ -13814,15 +13842,31 @@ const renderWorkspaceMembers = (rows = []) => {
     workspaceMembers.innerHTML = "<p class='muted'>Solo visible para administración.</p>";
     return;
   }
+  const memberRoleOptions = ["Owner", "Admin", "Miembro", "Lectura"];
   const listHtml = (rows || [])
     .map((row) => {
       const fullName = `${row.nombre || ""} ${row.apellido || ""}`.trim() || "-";
+      const login = String(row.usuario || row.email || "").trim();
+      const currentRole = String(row.rol || "Miembro").trim();
+      const currentRoleNorm = normalizeSimple(currentRole);
+      // Selector de rol inline (workspace_member_upsert acepta el cambio). Solo si
+      // hay login con el que identificar al usuario; si no, mostramos el rol fijo.
+      const roleControl = login
+        ? `<label class="workspace-member-role" title="Cambiar rol">
+             <span class="muted">Rol</span>
+             <select data-workspace-member-role="${escapeHtml(login)}" data-prev-role="${escapeHtml(currentRole)}" aria-label="Rol de ${escapeHtml(fullName)}">
+               ${memberRoleOptions
+                 .map((opt) => `<option${normalizeSimple(opt) === currentRoleNorm ? " selected" : ""}>${escapeHtml(opt)}</option>`)
+                 .join("")}
+             </select>
+           </label>`
+        : `<div class="muted">Rol: ${escapeHtml(currentRole)}</div>`;
       return `
         <div class="workspace-chip workspace-company-chip">
           <div>
             <strong>${escapeHtml(fullName)}</strong>
             <div class="muted">${escapeHtml(row.usuario || "-")}${row.email ? ` · ${escapeHtml(row.email)}` : ""}</div>
-            <div class="muted">Rol: ${escapeHtml(row.rol || "Miembro")}</div>
+            ${roleControl}
           </div>
           <div class="workspace-company-chip-actions">
             ${canOpenAdmin ? `<button type="button" class="secondary ghost" data-workspace-member-view="${escapeHtml(String(row.usuario_id || ""))}">Ver ficha</button>` : ""}
@@ -13950,6 +13994,32 @@ const renderWorkspaceMembers = (rows = []) => {
       }
     });
   }
+  workspaceMembers.querySelectorAll("[data-workspace-member-role]").forEach((sel) => {
+    sel.addEventListener("change", async () => {
+      const login = String(sel.dataset.workspaceMemberRole || "").trim();
+      const role = String(sel.value || "Miembro").trim();
+      const prevRole = String(sel.dataset.prevRole || "").trim();
+      if (!login) return;
+      try {
+        if (status) status.textContent = "Actualizando rol...";
+        sel.disabled = true;
+        await postJsonWithDbRetry("/api/workspace_member_upsert", {
+          workspace_id: state.currentWorkspaceId,
+          login,
+          role,
+        });
+        const members = await safeWorkspaceApi(`/api/workspace_members?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, { rows: [] });
+        state.currentWorkspaceMembers = members.rows || [];
+        renderWorkspaceMembers(state.currentWorkspaceMembers);
+        if (status) status.textContent = "Rol actualizado.";
+      } catch (error) {
+        // Revertir el selector al rol anterior si falla.
+        if (prevRole) sel.value = prevRole;
+        sel.disabled = false;
+        if (status) status.textContent = error?.message || "No se pudo cambiar el rol.";
+      }
+    });
+  });
   workspaceMembers.querySelectorAll("[data-workspace-member-remove]").forEach((btn) => {
     btn.addEventListener("click", async () => {
       const usuarioId = String(btn.dataset.workspaceMemberRemove || "").trim();
@@ -14086,13 +14156,6 @@ const renderWorkspaceLinks = (rows = []) => {
       } catch (error) {
         alert(error?.message || "No se pudo eliminar.");
       }
-    });
-  });
-  workspaceTenantSummary.querySelectorAll("[data-workspace-company-open]").forEach((button) => {
-    button.addEventListener("click", () => {
-      const companyId = String(button.dataset.workspaceCompanyOpen || "").trim();
-      if (!companyId) return;
-      openWorkspaceCompanyFicha(companyId, "dashboard").catch(() => {});
     });
   });
 };
@@ -20157,6 +20220,8 @@ const renderWorkspaceRrhhHub = () => {
 
 const renderWorkspaceModules = (rows = []) => {
   if (!workspaceModules) return;
+  const moduleAuthUser = getAuthScopeUser();
+  const canManageModules = Boolean(moduleAuthUser && canManageCurrentWorkspace());
   if (!rows.length) {
     workspaceModules.innerHTML = "<p class='muted'>Sin módulos configurados.</p>";
     return;
@@ -20210,7 +20275,7 @@ const renderWorkspaceModules = (rows = []) => {
                         <div class="muted">${meta.family} · ${meta.badge}</div>
                         <div class="muted">${meta.description}</div>
                       </div>
-                      <input type="checkbox" data-module-id="${row.id}" ${Number(row.enabled || 0) === 1 ? "checked" : ""} />
+                      <input type="checkbox" data-module-id="${row.id}" ${Number(row.enabled || 0) === 1 ? "checked" : ""}${canManageModules ? "" : " disabled"} />
                     </label>
                   `;
                 })
@@ -20230,26 +20295,24 @@ const renderWorkspaceModules = (rows = []) => {
       }
     });
   });
-  workspaceModules.querySelectorAll("[data-module-id]").forEach((input) => {
-    input.addEventListener("change", async () => {
-      const moduleId = input.dataset.moduleId || "";
-      const enabled = input.checked ? 1 : 0;
-      try {
-        const data = await fetch("/api/workspace_module_update", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: moduleId, enabled }),
-        }).then((res) => res.json());
-        if (data?.error) {
-          throw new Error(data.error);
+  if (canManageModules) {
+    workspaceModules.querySelectorAll("[data-module-id]").forEach((input) => {
+      input.addEventListener("change", async () => {
+        const moduleId = input.dataset.moduleId || "";
+        const enabled = input.checked ? 1 : 0;
+        try {
+          input.disabled = true;
+          await postJsonWithDbRetry("/api/workspace_module_update", { id: moduleId, enabled });
+          loadWorkspaceCentral().catch(() => {});
+        } catch (error) {
+          input.checked = !enabled;
+          alert(error.message || "No se pudo actualizar el módulo.");
+        } finally {
+          input.disabled = false;
         }
-        loadWorkspaceCentral().catch(() => {});
-      } catch (error) {
-        input.checked = !enabled;
-        alert(error.message || "No se pudo actualizar el módulo.");
-      }
+      });
     });
-  });
+  }
 };
 
 const renderWorkspaceBillingSummary = (data = {}) => {
@@ -84961,11 +85024,7 @@ if (workspaceForm) {
     const formData = new FormData(workspaceForm);
     const payload = Object.fromEntries(formData.entries());
     try {
-      const data = await fetch("/api/workspace_update", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }).then((res) => res.json());
+      const data = await postJsonWithDbRetry("/api/workspace_update", payload);
       if (data?.error) {
         throw new Error(data.error);
       }

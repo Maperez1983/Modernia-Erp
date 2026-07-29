@@ -14535,6 +14535,32 @@ body.theme-operativa .pill {
   margin-top: 14px;
 }
 
+/* Selector de rol inline en la lista de miembros del workspace. */
+.workspace-member-role {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.workspace-member-role > span {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.workspace-member-role select {
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--cloud);
+  color: var(--ink);
+  font-size: 13px;
+  cursor: pointer;
+}
+.workspace-member-role select:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
 /* a11y: respetar la preferencia del sistema de reducir movimiento (WCAG 2.3.3). */
 @media (prefers-reduced-motion: reduce) {
   *,

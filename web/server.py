@@ -62727,6 +62727,8 @@ class Handler(BaseHTTPRequestHandler):
             workspace_id = str(payload.get("id") or "").strip()
             nombre = str(payload.get("nombre") or "").strip()
             slug_value = normalize_workspace_slug(payload.get("slug") or nombre)
+            kind_provided = ("kind" in payload) or ("workspace_kind" in payload)
+            logo_provided = ("logo_url" in payload)
             kind_value = normalize_workspace_kind(payload.get("kind") or payload.get("workspace_kind") or "Directo")
             if not nombre:
                 json_response(self, {"error": "nombre requerido"}, status=400)
@@ -62747,6 +62749,23 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "slug ya en uso"}, status=409)
                 return
             if workspace_id:
+                # Preservar logo_url/kind si el cliente no los envía: el formulario de
+                # identidad del workspace NO incluye esos campos, así que sobrescribirlos
+                # a "" / "Directo" en cada guardado borraba el logo y degradaba el tipo
+                # (p.ej. una Gestoría pasaba a "Directo" y desaparecía de los vínculos).
+                update_kind = kind_value
+                update_logo = str(payload.get("logo_url") or "")
+                if not (kind_provided and logo_provided):
+                    prev = conn.execute(
+                        "SELECT logo_url, kind FROM workspaces WHERE id = ? LIMIT 1",
+                        (workspace_id,),
+                    ).fetchone()
+                    prev_logo = (prev[0] if prev and prev[0] is not None else "")
+                    prev_kind = (prev[1] if prev and prev[1] is not None else "")
+                    if not logo_provided:
+                        update_logo = str(prev_logo or "")
+                    if not kind_provided:
+                        update_kind = normalize_workspace_kind(str(prev_kind or "") or "Directo")
                 conn.execute(
                     """
                     UPDATE workspaces
@@ -62759,9 +62778,9 @@ class Handler(BaseHTTPRequestHandler):
                         slug_value,
                         payload.get("estado") or "Activo",
                         payload.get("plan") or "Enterprise",
-                        kind_value,
+                        update_kind,
                         payload.get("descripcion") or "",
-                        payload.get("logo_url") or "",
+                        update_logo,
                         payload.get("primary_color") or "",
                         payload.get("accent_color") or "",
                         now,
