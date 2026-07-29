@@ -13,7 +13,7 @@
   --cream: #EEF2F6;
   --cloud: #FFFFFF;
   --line: #E2E8F0;
-  --muted: #64748B;
+  --muted: #556070; /* a11y: oscurecido para pasar WCAG AA (>=4.5:1) sobre crema/paper (antes #64748B ~4.2:1) */
   --oxblood: #0B1D33;
   --sage: #22C55E;
   --shadow: rgba(11, 29, 51, 0.16);
@@ -14533,4 +14533,16 @@ body.theme-operativa .pill {
 
 .u-mt-14 {
   margin-top: 14px;
+}
+
+/* a11y: respetar la preferencia del sistema de reducir movimiento (WCAG 2.3.3). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
