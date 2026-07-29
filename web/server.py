@@ -71931,6 +71931,21 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            # seguros_ofertas no tiene empresa_id: el tenant se deriva del cliente.
+            _of_row = conn.execute(
+                """
+                SELECT o.id AS id, c.empresa_id AS empresa_id
+                FROM seguros_ofertas o
+                LEFT JOIN clientes c ON c.id = o.cliente_id
+                WHERE o.id = ?
+                """,
+                (record_id,),
+            ).fetchone()
+            if not _of_row:
+                json_response(self, {"error": "Oferta no encontrada"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _of_row, "Oferta"):
+                return
             allowed = ("ramo", "compania", "propuesta", "estado", "motivo", "fecha", "responsable", "notas", "cliente_id")
             updates = {}
             for key in allowed:
@@ -71950,6 +71965,21 @@ class Handler(BaseHTTPRequestHandler):
             record_id = payload.get("id")
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            # seguros_ofertas no tiene empresa_id: el tenant se deriva del cliente.
+            _of_row = conn.execute(
+                """
+                SELECT o.id AS id, c.empresa_id AS empresa_id
+                FROM seguros_ofertas o
+                LEFT JOIN clientes c ON c.id = o.cliente_id
+                WHERE o.id = ?
+                """,
+                (record_id,),
+            ).fetchone()
+            if not _of_row:
+                json_response(self, {"error": "Oferta no encontrada"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _of_row, "Oferta"):
                 return
             conn.execute("DELETE FROM seguros_ofertas WHERE id = ?", (record_id,))
         elif parsed.path == "/api/seguros_preferencias":

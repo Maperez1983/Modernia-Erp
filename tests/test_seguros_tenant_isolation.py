@@ -111,6 +111,18 @@ class SegurosTenantIsolationTests(unittest.TestCase):
         cls._insert("seguros_checklist", {"id": "chkB", "poliza_id": "polB", "tarea": "Tarea B",
                                           "estado": "Pendiente", "created_at": NOW,
                                           "updated_at": NOW})
+
+        # seguros_ofertas no tiene empresa_id: el tenant sale del cliente.
+        cls._insert("clientes", {"id": "cliA", "empresa_id": "empA", "nombre": "Cliente de A",
+                                 "created_at": NOW, "updated_at": NOW})
+        cls._insert("clientes", {"id": "cliB", "empresa_id": "empB", "nombre": "Cliente de B",
+                                 "created_at": NOW, "updated_at": NOW})
+        for oferta_id, cliente_id in (("ofA", "cliA"), ("ofB", "cliB"), ("ofB2", "cliB")):
+            cls._insert("seguros_ofertas", {"id": oferta_id, "cliente_id": cliente_id,
+                                            "ramo": "Hogar", "compania": "AXA",
+                                            "propuesta": f"Propuesta {oferta_id}",
+                                            "estado": "Abierta", "created_at": NOW,
+                                            "updated_at": NOW})
         cls.conn.commit()
 
     @classmethod
@@ -198,7 +210,27 @@ class SegurosTenantIsolationTests(unittest.TestCase):
         self.assertEqual(self._scalar("SELECT estado FROM seguros_checklist WHERE id='chkB'"),
                          "Pendiente")
 
+    def test_no_puede_modificar_oferta_de_cliente_ajeno(self):
+        """seguros_ofertas no tiene empresa_id; el ámbito se deriva de clientes.empresa_id."""
+        status, _, _ = self._as_ana("/api/seguros_ofertas_update",
+                                    {"id": "ofB", "estado": "Manipulada"})
+        self.assertEqual(status, 403)
+        self.assertEqual(self._scalar("SELECT estado FROM seguros_ofertas WHERE id='ofB'"),
+                         "Abierta")
+
+    def test_no_puede_borrar_oferta_de_cliente_ajeno(self):
+        status, _, _ = self._as_ana("/api/seguros_ofertas_delete", {"id": "ofB2"})
+        self.assertEqual(status, 403)
+        self.assertEqual(self._scalar("SELECT COUNT(*) FROM seguros_ofertas WHERE id='ofB2'"), 1)
+
     # ---------- mismo tenant: debe seguir funcionando ----------
+
+    def test_si_puede_gestionar_oferta_de_su_cliente(self):
+        status, _, _ = self._as_ana("/api/seguros_ofertas_update",
+                                    {"id": "ofA", "estado": "Aceptada"})
+        self.assertEqual(status, 200)
+        self.assertEqual(self._scalar("SELECT estado FROM seguros_ofertas WHERE id='ofA'"),
+                         "Aceptada")
 
     def test_si_puede_modificar_su_propia_poliza(self):
         status, _, _ = self._as_ana("/api/seguros_update", {"id": "polA", "tomador": "Legitimo"})
