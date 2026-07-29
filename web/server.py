@@ -61920,16 +61920,48 @@ class Handler(BaseHTTPRequestHandler):
                     if "empresa_id" in cols:
                         usage[t] = _count(t, "empresa_id = ?", (empresa_id,))
                 blocking = {k: v for k, v in usage.items() if int(v or 0) > 0}
-                if blocking:
+                purge = str(payload.get("purge") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
+                purge_confirm = str(payload.get("purge_confirm") or "").strip().upper()
+                purge_doc_keys = []
+                purged = {}
+                if blocking and not purge:
                     json_response(
                         self,
                         {
-                            "error": "La empresa tiene datos asociados. Archívala o desvincúlala del workspace en lugar de borrarla.",
+                            "error": "La empresa tiene datos asociados. Archívala, desvincúlala, o usa purge=1 (supresión RGPD) para borrarla en cascada.",
                             "usage": blocking,
                         },
                         status=409,
                     )
                     return
+                if blocking:
+                    # Supresión RGPD (art. 17): borrado en CASCADA de todos los datos de la
+                    # empresa. Destructivo e irreversible -> solo superadmin + confirmación.
+                    if not is_super:
+                        json_response(self, {"error": "La supresión total (purge) requiere superadmin"}, status=403)
+                        return
+                    if purge_confirm != "PURGAR":
+                        json_response(self, {"error": "Confirma la supresión con purge_confirm=PURGAR"}, status=400)
+                        return
+                    for t in tables_to_check:
+                        cols = table_columns(conn, t) or set()
+                        if "empresa_id" not in cols:
+                            continue
+                        if "doc_key" in cols:
+                            try:
+                                for r in conn.execute(f"SELECT doc_key FROM {t} WHERE empresa_id = ?", (empresa_id,)).fetchall():
+                                    dk = str(row_value(r, "doc_key") or row_value(r, 0) or "").strip()
+                                    if dk:
+                                        purge_doc_keys.append(dk)
+                            except Exception:
+                                pass
+                        try:
+                            n = int(usage.get(t) or 0)
+                            conn.execute(f"DELETE FROM {t} WHERE empresa_id = ?", (empresa_id,))
+                            if n:
+                                purged[t] = n
+                        except Exception:
+                            pass
                 if workspace_id:
                     conn.execute("DELETE FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ?", (workspace_id, empresa_id))
                 else:
@@ -61951,7 +61983,20 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
                 conn.commit()
-                json_response(self, {"ok": True, "deleted": deleted_global, "id": empresa_id, "remaining_links": remaining})
+                # RGPD: purga best-effort de los objetos S3 de los documentos suprimidos.
+                if purge_doc_keys:
+                    try:
+                        s3_delete_keys_if_unreferenced(conn, purge_doc_keys)
+                    except Exception:
+                        pass
+                json_response(self, {
+                    "ok": True,
+                    "deleted": deleted_global,
+                    "id": empresa_id,
+                    "remaining_links": remaining,
+                    "purged": purged,
+                    "purged_s3_keys": len(purge_doc_keys),
+                })
                 return
 
             # Soft delete = archivar (mantiene histórico).
@@ -88548,13 +88593,19 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_error(404, "Not found")
                 return
             lower = logo_url.lower()
+            download_name = None
             if lower.endswith(".jpg") or lower.endswith(".jpeg"):
                 content_type = "image/jpeg"
             elif lower.endswith(".svg"):
+                # Defensa: los SVG legacy se sirven como ADJUNTO (Content-Disposition:
+                # attachment) para que una navegación directa a la URL no ejecute scripts
+                # inline. En <img> siguen mostrándose (la cabecera se ignora en
+                # subrecursos). Las subidas nuevas de SVG ya están bloqueadas (magic bytes).
                 content_type = "image/svg+xml"
+                download_name = "logo.svg"
             elif lower.endswith(".webp"):
                 content_type = "image/webp"
-            binary_response(self, raw_bytes, content_type=content_type)
+            binary_response(self, raw_bytes, content_type=content_type, filename=download_name)
             return
 
         if path == "/api/inmueble_portal_feed":

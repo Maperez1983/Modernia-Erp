@@ -2832,6 +2832,43 @@ class GestoriaServerRouteRegressionTests(unittest.TestCase):
         status3, _h3, _b3 = self._call_gestoria_post_route("/api/empresa_delete", {"empresa_id": "emp-1"}, session)
         self.assertEqual(status3, 400)
 
+    def test_empresa_delete_rgpd_purge_guarded_and_cascades(self):
+        # Supresión RGPD (purge): bloquea si hay datos salvo purge=1 de superadmin con
+        # confirmación explícita; entonces borra en cascada los datos de la empresa.
+        server.ensure_workspace_core_tables(self.conn)
+        now = "2026-07-22T10:00:00+00:00"
+        self.conn.execute("INSERT OR REPLACE INTO empresas (id, nombre, activo) VALUES (?, ?, 1)", ("emp-1", "Empresa Uno"))
+        self.conn.execute(
+            "INSERT OR REPLACE INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            ("wm-1", "ws-1", "u-1", "Admin", now, now),
+        )
+        self.conn.execute(
+            "INSERT OR REPLACE INTO workspace_empresas (id, workspace_id, empresa_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            ("we-1", "ws-1", "emp-1", now, now),
+        )
+        # Dato asociado que bloquea el hard-delete normal (tabla de tables_to_check).
+        self.conn.execute("CREATE TABLE IF NOT EXISTS gestoria_trabajos (id TEXT PRIMARY KEY, empresa_id TEXT)")
+        self.conn.execute("INSERT OR REPLACE INTO gestoria_trabajos (id, empresa_id) VALUES ('g1', 'emp-1')")
+        self.conn.commit()
+        session = {"user_id": "u-1", "rol": "Miembro", "servicio": "Gestoría"}
+        base = {"workspace_id": "ws-1", "empresa_id": "emp-1", "hard": "1"}
+
+        # 1) hard sin purge, con datos -> 409.
+        s1, _h, _b = self._call_gestoria_post_route("/api/empresa_delete", dict(base), session)
+        self.assertEqual(s1, 409)
+        # 2) purge de un NO superadmin -> 403.
+        s2, _h, _b = self._call_gestoria_post_route("/api/empresa_delete", {**base, "purge": "1", "purge_confirm": "PURGAR"}, session)
+        self.assertEqual(s2, 403)
+        # 3) superadmin: purge sin confirmación -> 400; con confirmación -> 200 y cascada.
+        with mock.patch.object(server, "workspace_actor_is_privileged", return_value=True):
+            s3, _h, _b = self._call_gestoria_post_route("/api/empresa_delete", {**base, "purge": "1"}, session)
+            self.assertEqual(s3, 400)
+            s4, _h, _b4 = self._call_gestoria_post_route("/api/empresa_delete", {**base, "purge": "1", "purge_confirm": "PURGAR"}, session)
+            self.assertEqual(s4, 200)
+        # El dato asociado (cliente) se ha suprimido en cascada.
+        self.assertIsNone(self.conn.execute("SELECT 1 FROM clientes WHERE empresa_id = 'emp-1'").fetchone())
+        self.assertIsNone(self.conn.execute("SELECT 1 FROM empresas WHERE id = 'emp-1'").fetchone())
+
     def test_workspace_service_matrix_upsert_and_delete_allow_workspace_admins(self):
         server.ensure_workspace_core_tables(self.conn)
         now = "2026-07-22T10:00:00+00:00"
