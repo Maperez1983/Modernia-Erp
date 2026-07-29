@@ -8,6 +8,7 @@ from web.server import (
     build_workspace_time_csv,
     log_workspace_registro_audit,
     verify_workspace_registro_audit_chain,
+    log_rrhh_read_access,
 )
 
 
@@ -117,6 +118,23 @@ class AuditChainTests(unittest.TestCase):
         self.conn.commit()
         res = verify_workspace_registro_audit_chain(self.conn, "ws-1")
         self.assertFalse(res["ok"])
+
+    def test_log_lectura_registra_acceso_rgpd(self):
+        # RGPD accountability: un acceso de lectura crea un registro con action='lectura'.
+        log_rrhh_read_access(
+            self.conn, "ws-1", {"user_id": "u1", "usuario": "gestor"},
+            entity_type="ficha_rrhh", entity_id="p1", persona_id="p1",
+        )
+        self.conn.commit()
+        row = self.conn.execute(
+            "SELECT action, entity_type, actor_user_id, persona_id FROM workspace_registro_audit WHERE workspace_id = 'ws-1' ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["action"], "lectura")
+        self.assertEqual(row["entity_type"], "ficha_rrhh")
+        self.assertEqual(row["actor_user_id"], "u1")
+        # El acceso de lectura también entra en la cadena tamper-evident.
+        self.assertTrue(verify_workspace_registro_audit_chain(self.conn, "ws-1")["ok"])
 
 
 if __name__ == "__main__":

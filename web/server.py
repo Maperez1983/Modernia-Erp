@@ -848,6 +848,10 @@ WORKSPACE_TIME_RETENTION_YEARS = max(4, int(os.environ.get("WORKSPACE_TIME_RETEN
 # captura ni almacena salvo activación explícita. Geolocalizar a la plantilla exige informar,
 # proporcionalidad y base legal (idealmente EIPD); por eso viene DESACTIVADA por defecto.
 TIME_GEOLOCATION_ENABLED = os.environ.get("APP_TIME_GEOLOCATION_ENABLED", "0").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
+# RGPD (accountability, art. 5.2 / 24 RGPD): registrar los ACCESOS DE LECTURA a datos personales
+# sensibles de RRHH (ficha del trabajador, documentos/nóminas). Activado por defecto; desactivable con
+# APP_RRHH_ACCESS_LOG=0 si el volumen fuera un problema.
+RRHH_ACCESS_LOG_ENABLED = os.environ.get("APP_RRHH_ACCESS_LOG", "1").strip().lower() not in ("0", "false", "no", "off")
 WORKSPACE_TIME_SWEEP_STATE = {
     "last_run_at": "",
     "last_error": "",
@@ -44872,6 +44876,33 @@ def log_workspace_registro_audit(conn, workspace_id, *, empresa_id=None, persona
     return record_id
 
 
+def log_rrhh_read_access(conn, workspace_id, session, *, entity_type, entity_id=None, empresa_id=None, persona_id=None):
+    """
+    RGPD (accountability): registra un ACCESO DE LECTURA a datos personales de RRHH (ficha, nómina,
+    documento). Reutiliza la auditoría tamper-evident. No-op si APP_RRHH_ACCESS_LOG=0.
+    """
+    if not RRHH_ACCESS_LOG_ENABLED:
+        return
+    if not workspace_id or not session:
+        return
+    try:
+        log_workspace_registro_audit(
+            conn,
+            workspace_id,
+            empresa_id=empresa_id,
+            persona_id=persona_id,
+            entity_type=str(entity_type or "ficha_rrhh"),
+            entity_id=str(entity_id or persona_id or ""),
+            action="lectura",
+            actor=session,
+            before=None,
+            after=None,
+        )
+        conn.commit()
+    except Exception:
+        _rollback_best_effort(conn)
+
+
 def verify_workspace_registro_audit_chain(conn, workspace_id):
     """
     Verifica la cadena de integridad de la auditoría de fichajes de un workspace.
@@ -80613,7 +80644,12 @@ class Handler(BaseHTTPRequestHandler):
                 # consola en CADA apertura de RRHH (el frontend pide el perfil sin persona_id).
                 json_response(self, {"row": {}})
                 return
-            json_response(self, {"row": fetch_workspace_rrhh_profile(conn, workspace_id, persona_id) or {}})
+            _profile_row = fetch_workspace_rrhh_profile(conn, workspace_id, persona_id) or {}
+            # RGPD (accountability): registra el acceso de lectura a la ficha de un empleado concreto.
+            if persona_id:
+                _empresa_for_log = str(_profile_row.get("empresa_id") or params.get("empresa_id", [""])[0] or "").strip() or None
+                log_rrhh_read_access(conn, workspace_id, session, entity_type="ficha_rrhh", entity_id=persona_id, empresa_id=_empresa_for_log, persona_id=persona_id)
+            json_response(self, {"row": _profile_row})
             return
 
         if path == "/api/workspace_rrhh_turnos":
@@ -80702,6 +80738,9 @@ class Handler(BaseHTTPRequestHandler):
                 if not persona_id:
                     json_response(self, {"rows": []})
                     return
+            # RGPD (accountability): registra el acceso de lectura a los documentos de un empleado concreto.
+            if persona_id:
+                log_rrhh_read_access(conn, workspace_id, session, entity_type="documentos_rrhh", entity_id=persona_id, empresa_id=(str(empresa_id or "").strip() or None), persona_id=persona_id)
             json_response(self, fetch_workspace_rrhh_documentos(conn, workspace_id, empresa_id=empresa_id, persona_id=persona_id or None))
             return
         if path == "/api/workspace_registro_horario_xml":
