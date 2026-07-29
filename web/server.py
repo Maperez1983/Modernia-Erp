@@ -42961,6 +42961,7 @@ def build_workspace_time_summary(rows, month=""):
     grouped = {}
     total_minutes = 0
     total_expected = 0
+    total_extra = 0
     open_entries = 0
     partial_people = set()
     for row in rows:
@@ -42983,14 +42984,20 @@ def build_workspace_time_summary(rows, month=""):
                 "dias_registrados": 0,
                 "minutos_trabajados": 0,
                 "minutos_pactados": 0,
+                "minutos_extra": 0,
                 "minutos_pausa": 0,
                 "incidencias": 0,
                 "entradas_abiertas": 0,
             },
         )
+        # Horas extra = exceso diario sobre la jornada pactada del día (art. 35 ET). Se computa por día
+        # y se suma; un día corto no compensa un día largo (interpretación conservadora para el registro).
+        dia_extra = max(0, worked - expected)
         bucket["dias_registrados"] += 1
         bucket["minutos_trabajados"] += worked
         bucket["minutos_pactados"] += expected
+        bucket["minutos_extra"] += dia_extra
+        total_extra += dia_extra
         bucket["minutos_pausa"] += int(row.get("pausa_min") or 0)
         if normalize_lookup_text(row.get("estado")) == "incidencia":
             bucket["incidencias"] += 1
@@ -43002,6 +43009,7 @@ def build_workspace_time_summary(rows, month=""):
     for item in people:
         item["horas_trabajadas_hhmm"] = format_minutes_hhmm(item["minutos_trabajados"])
         item["horas_pactadas_hhmm"] = format_minutes_hhmm(item["minutos_pactados"])
+        item["horas_extra_hhmm"] = format_minutes_hhmm(item["minutos_extra"])
         item["desviacion_hhmm"] = format_minutes_hhmm(item["minutos_trabajados"] - item["minutos_pactados"])
     return {
         "month": month,
@@ -43010,6 +43018,8 @@ def build_workspace_time_summary(rows, month=""):
         "entradas_abiertas": open_entries,
         "horas_totales_hhmm": format_minutes_hhmm(total_minutes),
         "horas_pactadas_hhmm": format_minutes_hhmm(total_expected),
+        "horas_extra_hhmm": format_minutes_hhmm(total_extra),
+        "minutos_extra": total_extra,
         "desviacion_hhmm": format_minutes_hhmm(total_minutes - total_expected),
         "rows": people,
     }
@@ -43032,6 +43042,7 @@ def build_workspace_time_csv(rows):
         "minutos_trabajados",
         "horas_trabajadas",
         "horas_pactadas_dia",
+        "horas_extra",
         "metodo_registro",
         "geo_in_lat",
         "geo_in_lon",
@@ -43073,6 +43084,7 @@ def build_workspace_time_csv(rows):
                 int(row.get("minutos_trabajados") or 0),
                 format_minutes_hhmm(row.get("minutos_trabajados") or 0),
                 row.get("horas_pactadas_dia") or "",
+                format_minutes_hhmm(max(0, int(row.get("minutos_trabajados") or 0) - int(round(float(row.get("horas_pactadas_dia") or 0) * 60)))),
                 row.get("metodo_registro") or "",
                 row.get("geo_in_lat") if row.get("geo_in_lat") not in (None, "") else "",
                 row.get("geo_in_lon") if row.get("geo_in_lon") not in (None, "") else "",
