@@ -92,8 +92,10 @@ def ocr_image_external(image_bytes, *, resolver=None):
         url = "https://vision.googleapis.com/v1/images:annotate"
         headers = {"Content-Type": "application/json", "Authorization": auth_header}
     else:
-        url = f"https://vision.googleapis.com/v1/images:annotate?key={api_key}"
-        headers = {"Content-Type": "application/json"}
+        # La API key va en cabecera (X-Goog-Api-Key), NO en la query string, para que no
+        # acabe en logs de proxies/servidores intermedios.
+        url = "https://vision.googleapis.com/v1/images:annotate"
+        headers = {"Content-Type": "application/json", "X-Goog-Api-Key": api_key}
     req = urllib.request.Request(url, data=data, headers=headers)
     try:
         # Endpoint HTTPS fijo; la URL no depende de entrada del usuario.

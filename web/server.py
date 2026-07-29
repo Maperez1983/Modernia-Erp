@@ -68927,13 +68927,6 @@ class Handler(BaseHTTPRequestHandler):
                     ocr_mode = "hybrid"
                 elif docai_available():
                     ocr_mode = "docai"
-            if external_ocr_available() and not use_external:
-                use_external = True
-            if not ocr_mode:
-                if external_ocr_available() and docai_available():
-                    ocr_mode = "hybrid"
-                elif docai_available():
-                    ocr_mode = "docai"
             mime = ""
             if "," in data_uri:
                 header, data_uri = data_uri.split(",", 1)
@@ -69001,13 +68994,11 @@ class Handler(BaseHTTPRequestHandler):
                         ai_fields, ai_err = call_openai_extract_fin(text)
                         if ai_fields:
                             fields = merge_many_fields(fields, ai_fields)
+                    # El template rellena solo los huecos que OpenAI dejó vacíos. (Antes
+                    # había una segunda llamada idéntica a OpenAI aquí: PII y coste duplicados.)
                     for key, value in template_fields.items():
                         if not str(fields.get(key, "") or "").strip() and str(value or "").strip():
                             fields[key] = value
-                    if openai_available() and text:
-                        ai_fields, ai_err = call_openai_extract_fin(text)
-                        if ai_fields:
-                            fields = merge_many_fields(fields, ai_fields)
                 else:
                     text, err_detail, method = extract_pdf_text(tmp_path)
                     if not text:
@@ -69767,7 +69758,7 @@ class Handler(BaseHTTPRequestHandler):
                           ingresos_conjuntos, entidades_financieras, avalistas, aportacion_cv, sim_params_json,
                           notas, notas_ocr, calidad_ocr, campos_ocr, created_at, updated_at
                     ) VALUES (
-                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                     )
                     """,
                     (
@@ -69792,12 +69783,12 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("cliente1_profesion"),
                         payload.get("cliente1_tipo_contrato"),
                         payload.get("cliente1_tiempo_contrato"),
-                        payload.get("cliente1_ingresos"),
+                        parse_optional_float(payload.get("cliente1_ingresos")),
                         payload.get("cliente1_patrimonio"),
                         payload.get("cliente1_prestamos"),
                         payload.get("cliente1_prestamo_activo"),
                         payload.get("cliente1_prestamo_entidad"),
-                        payload.get("cliente1_prestamo_resto"),
+                        parse_optional_float(payload.get("cliente1_prestamo_resto")),
                         cliente2_id,
                         payload.get("cliente2_nombre"),
                         payload.get("cliente2_dni"),
@@ -69810,16 +69801,16 @@ class Handler(BaseHTTPRequestHandler):
                         payload.get("cliente2_profesion"),
                         payload.get("cliente2_tipo_contrato"),
                         payload.get("cliente2_tiempo_contrato"),
-                        payload.get("cliente2_ingresos"),
+                        parse_optional_float(payload.get("cliente2_ingresos")),
                         payload.get("cliente2_patrimonio"),
                         payload.get("cliente2_prestamos"),
                         payload.get("cliente2_prestamo_activo"),
                         payload.get("cliente2_prestamo_entidad"),
-                        payload.get("cliente2_prestamo_resto"),
-                            payload.get("ingresos_conjuntos"),
+                        parse_optional_float(payload.get("cliente2_prestamo_resto")),
+                            parse_optional_float(payload.get("ingresos_conjuntos")),
                             payload.get("entidades_financieras"),
                             payload.get("avalistas"),
-                            payload.get("aportacion_cv"),
+                            parse_optional_float(payload.get("aportacion_cv")),
                             payload.get("sim_params_json"),
                             payload.get("notas"),
                             payload.get("notas_ocr"),
@@ -69843,6 +69834,9 @@ class Handler(BaseHTTPRequestHandler):
                 missing,
                 now,
             )
+            # Persistir: sqlite no autocommitea (Postgres sí). Sin esto, el alta/edición
+            # de asesoramiento no se guardaba en el backend sqlite.
+            conn.commit()
             json_response(
                 self,
                 {
@@ -69948,6 +69942,13 @@ class Handler(BaseHTTPRequestHandler):
                     "campos_ocr",
             )
             updates = {key: payload.get(key) for key in allowed if key in payload}
+            # Normaliza los campos numéricos REAL: Postgres rechaza "" y cadenas no
+            # numéricas en columnas REAL (500), y SQLite guardaría texto que rompe los
+            # agregados (SUM/AVG de ingresos, ratios, KPIs). Igual que hipotecas_update.
+            for _numk in ("cliente1_ingresos", "cliente1_prestamo_resto", "cliente2_ingresos",
+                          "cliente2_prestamo_resto", "ingresos_conjuntos", "aportacion_cv"):
+                if _numk in updates:
+                    updates[_numk] = parse_optional_float(updates[_numk])
             if not row_empresa_id:
                 updates["empresa_id"] = empresa["id"]
             if cliente1_id:
@@ -70045,6 +70046,14 @@ class Handler(BaseHTTPRequestHandler):
             if (not row_empresa_id) and (not req_empresa_id):
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
+            # Aislamiento robusto: no confiar solo en el empresa_id del cliente (que se puede
+            # omitir). La hipoteca destino debe pertenecer a una empresa del actor.
+            _upd_session = getattr(self, "auth_session", None) or self._current_session()
+            if row_empresa_id and not workspace_actor_is_privileged(conn, _upd_session):
+                ok_m, err_m = enforce_empresa_membership(conn, _upd_session, row_empresa_id, write=True)
+                if not ok_m:
+                    json_response(self, {"error": err_m or "No autorizado"}, status=403)
+                    return
             aliases = {
                 "entidad": "banco",
                 "inmobiliaria": "inmobiliaria_compra",
@@ -70119,7 +70128,10 @@ class Handler(BaseHTTPRequestHandler):
                     if raw_year in (None, ""):
                         updates["anio"] = None
                     else:
-                        updates["anio"] = int(str(raw_year).strip())
+                        # parse_optional_int no lanza: ante basura ("dos mil") deja None en
+                        # vez de escribir la cadena cruda en la columna INTEGER (500 en PG /
+                        # texto en SQLite que rompe orden y filtros por año).
+                        updates["anio"] = parse_optional_int(raw_year)
             except Exception:
                 pass
 
@@ -70285,6 +70297,14 @@ class Handler(BaseHTTPRequestHandler):
             if row_empresa_id and req_empresa_id and row_empresa_id != req_empresa_id:
                 json_response(self, {"error": "Hipoteca fuera del scope de empresa"}, status=403)
                 return
+            # Aislamiento robusto: la hipoteca debe pertenecer a una empresa del actor
+            # (no confiar solo en el empresa_id del cliente, que se puede omitir).
+            _del_session = getattr(self, "auth_session", None) or self._current_session()
+            if row_empresa_id and not workspace_actor_is_privileged(conn, _del_session):
+                ok_m, err_m = enforce_empresa_membership(conn, _del_session, row_empresa_id, write=True)
+                if not ok_m:
+                    json_response(self, {"error": err_m or "No autorizado"}, status=403)
+                    return
             try:
                 deleted = delete_hipoteca_record(conn, record_id)
                 if not deleted:
@@ -79480,6 +79500,20 @@ class Handler(BaseHTTPRequestHandler):
             if not hipoteca_id or not fecha_firma:
                 json_response(self, {"error": "id y fecha_firma requeridos"}, status=400)
                 return
+            # Aislamiento: firmar una hipoteca modifica su estado/contabilidad, así que la
+            # hipoteca destino debe pertenecer a una empresa del actor (antes se actualizaba
+            # cualquier id sin comprobar empresa/workspace: IDOR cross-tenant).
+            _sign_session = getattr(self, "auth_session", None) or self._current_session()
+            _sign_row = conn.execute("SELECT empresa_id FROM hipotecas WHERE id = ? LIMIT 1", (hipoteca_id,)).fetchone()
+            if not _sign_row:
+                json_response(self, {"error": "Hipoteca no encontrada"}, status=404)
+                return
+            _sign_emp = str(row_value(_sign_row, "empresa_id") or "").strip()
+            if _sign_emp and not workspace_actor_is_privileged(conn, _sign_session):
+                ok, err = enforce_empresa_membership(conn, _sign_session, _sign_emp, write=True)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
             conn.execute(
                 """
                 UPDATE hipotecas SET
@@ -79623,10 +79657,13 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if not workspace_actor_is_privileged(conn, session):
                     eid = (params.get("empresa_id", [""])[0] or "").strip()
-                    # Service-first: si llega workspace_id, el endpoint debe acotarse por workspace,
-                    # no por empresa legacy (evita que usuarios tenant sin selección de empresa vean 403).
-                    has_ws_scope = bool((params.get("workspace_id", [""])[0] or "").strip() or ws_id)
-                    if eid and not has_ws_scope:
+                    # Si el cliente indica una empresa concreta, SIEMPRE exigimos pertenencia
+                    # a un workspace vinculado a esa empresa, aunque también venga workspace_id.
+                    # (Antes, tener un workspace_id propio desactivaba esta comprobación, y como
+                    # empresa_id tiene precedencia en la resolución, permitía leer datos de la
+                    # empresa de OTRO tenant: fuga de DNI/ingresos/patrimonio.) Un usuario
+                    # legítimo de su propia empresa pasa; solo se bloquea la empresa ajena.
+                    if eid:
                         ok, err = enforce_empresa_membership(conn, session, eid, write=False)
                         if not ok:
                             json_response(self, {"error": err or "No autorizado"}, status=403)
@@ -83560,7 +83597,7 @@ class Handler(BaseHTTPRequestHandler):
                 """
                 SELECT compania, ramo,
                        AVG(COALESCE(prima_total, 0)) AS avg_prima,
-                       AVG(COALESCE(comision, 0)) AS avg_comision
+                       AVG(comision) AS avg_comision
                 FROM seguros
                 WHERE compania IS NOT NULL
                   AND TRIM(compania) <> ''
@@ -90579,7 +90616,7 @@ class Handler(BaseHTTPRequestHandler):
                       ELSE NULL
                     END
                   ) AS porcentaje_medio,
-                  AVG(COALESCE(comision, 0)) AS comision_media
+                  AVG(comision) AS comision_media
                 FROM hipotecas h
                 WHERE """
                 + scope_clause
@@ -90769,7 +90806,7 @@ class Handler(BaseHTTPRequestHandler):
                       ELSE NULL
                     END
                   ) AS porcentaje_medio,
-                  AVG(COALESCE(comision, 0)) AS comision_media,
+                  AVG(comision) AS comision_media,
                   SUM(COALESCE(comision, 0)) AS comision_total,
                   SUM(COALESCE(importe_hipoteca, 0)) AS volumen_total,
                   AVG("""
@@ -90800,7 +90837,7 @@ class Handler(BaseHTTPRequestHandler):
                       ELSE NULL
                     END
                   ) AS porcentaje_medio,
-                  AVG(COALESCE(comision, 0)) AS comision_media,
+                  AVG(comision) AS comision_media,
                   SUM(COALESCE(comision, 0)) AS comision_total,
                   SUM(COALESCE(importe_hipoteca, 0)) AS volumen_total,
                   AVG("""
