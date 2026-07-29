@@ -65719,6 +65719,15 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "persona no encontrada"}, status=404)
                 return
             empresa_id = str(payload.get("empresa_id") or persona_row["empresa_id"] or "").strip() or None
+            # Integridad de la ficha: la fecha de fin de contrato no puede ser anterior a la de inicio.
+            _fi = str(payload.get("fecha_inicio") or "").strip()
+            _ff = str(payload.get("fecha_fin") or "").strip()
+            if _fi and _ff:
+                _di = parse_iso_date(_fi)
+                _df = parse_iso_date(_ff)
+                if _di and _df and _df < _di:
+                    json_response(self, {"error": "La fecha de fin no puede ser anterior a la de inicio."}, status=400)
+                    return
             prev = fetch_workspace_rrhh_profile(conn, workspace_id, persona_id)
             record = conn.execute(
                 "SELECT id FROM workspace_rrhh_profile WHERE workspace_id = ? AND persona_id = ? LIMIT 1",
