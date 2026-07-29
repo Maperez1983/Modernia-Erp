@@ -21136,6 +21136,12 @@ def extract_pdf_text(pdf_path):
     text, err = pdftotext_extract(pdf_path, pages=None)
     if text and len(text.strip()) >= 30:
         return text, "", "pdftotext"
+    # Fallback puro-Python (pypdf): funciona SIN binarios de sistema (poppler).
+    # Imprescindible en Render nativo, donde puede no haber `pdftotext`: cubre las
+    # nóminas/PDFs DIGITALES (con capa de texto) sin depender de OCR de imagen.
+    ptext, _perr = pypdf_extract_text(pdf_path, pages=None)
+    if ptext and len(ptext.strip()) >= 30:
+        return ptext, "", "pypdf"
     if OCR_USE_OCRMYPDF:
         ocr_text, ocr_err = ocrmypdf_extract_text(pdf_path)
         if ocr_text and len(ocr_text.strip()) >= 30:
