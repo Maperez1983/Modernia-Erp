@@ -333,7 +333,7 @@ const safeOpenUrl = useSharedOrFallback("safeOpenUrl", fallbackSafeOpenUrl);
 const openBlobInNewTab = useSharedOrFallback("openBlobInNewTab", fallbackOpenBlobInNewTab);
 const fetchBlobFromGet = useSharedOrFallback("fetchBlobFromGet", fallbackFetchBlobFromGet);
 
-const api = async (path, options = {}) => {
+const apiRaw = async (path, options = {}) => {
   // Fase 5: en modo tenant, evita depender de `empresa_id` global y adjunta `workspace_id`/`workspace_company_id`
   // a llamadas GET que aún van por querystring.
   try {
@@ -434,6 +434,27 @@ const api = async (path, options = {}) => {
   }
   if (lastError) throw lastError;
   throw new Error("No se pudo completar la petición.");
+};
+
+// Coalescing de peticiones GET en vuelo: en el arranque, varios caminos de init pedían los mismos
+// endpoints 3-6 veces (health, workspace_boot, contratos, usuarios...). Si una GET idéntica ya está
+// en curso, reutilizamos su promesa en lugar de lanzar otra petición. Solo GETs idempotentes; los
+// POST/PUT/DELETE nunca se coalescen. La entrada se limpia al resolverse/rechazarse (no cachea en el
+// tiempo, solo une peticiones concurrentes).
+const _apiInflight = new Map();
+const api = (path, options = {}) => {
+  const method = String((options && options.method) || "GET").toUpperCase();
+  if (method !== "GET") return apiRaw(path, options);
+  const key = "GET " + String(path || "");
+  const existing = _apiInflight.get(key);
+  if (existing) return existing;
+  const promise = apiRaw(path, options);
+  _apiInflight.set(key, promise);
+  promise.then(
+    () => _apiInflight.delete(key),
+    () => _apiInflight.delete(key),
+  );
+  return promise;
 };
 
 function attachEmpresaIdForServiceRequest(url, payload) {
