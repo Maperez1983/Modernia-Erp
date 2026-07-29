@@ -17136,6 +17136,22 @@ const renderWorkspaceRrhhHub = () => {
             Fecha fin
             <input type="date" name="fecha_fin" value="${escapeHtml(profile.fecha_fin || "")}" />
           </label>
+          ${(() => {
+            // Aviso de fin de contrato: rojo si ya venció, ámbar si vence en <= 30 días.
+            const ff = String(profile.fecha_fin || "").slice(0, 10);
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(ff)) return "";
+            const end = new Date(ff + "T00:00:00");
+            const today = new Date(); today.setHours(0, 0, 0, 0);
+            const days = Math.round((end - today) / 86400000);
+            if (isNaN(days)) return "";
+            if (days < 0) {
+              return `<div class="span-2" style="padding:8px 12px;border-radius:8px;background:#fdecea;color:#8a1c1c;font-weight:600;">⚠️ Contrato vencido hace ${Math.abs(days)} día(s) · ${escapeHtml(ff)}</div>`;
+            }
+            if (days <= 30) {
+              return `<div class="span-2" style="padding:8px 12px;border-radius:8px;background:#fff4e0;color:#7a4a00;font-weight:600;">⏳ El contrato vence en ${days} día(s) · ${escapeHtml(ff)}</div>`;
+            }
+            return "";
+          })()}
           <label class="span-2">
             Notas
             <textarea name="notas" rows="3">${escapeHtml(profile.notas || "")}</textarea>
