@@ -9,7 +9,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=277" />
+	    <link rel="stylesheet" href="styles.css?v=278" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -6466,7 +6466,7 @@
               </button>
 	            <button class="tab tc-module" type="button" data-seguros-tab="renovaciones" title="Renovaciones">
 	              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-clock"></use></svg></span>
-	              <span class="tc-mod-label">Renov.</span>
+	              <span class="tc-mod-label">Renovaciones</span>
 	            </button>
 	            <button class="tab tc-module" type="button" data-seguros-tab="bdt" title="Pólizas cargadas">
 	              <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-layers"></use></svg></span>
@@ -6486,7 +6486,7 @@
             </button>
             <button class="tab tc-module" type="button" data-seguros-tab="contabilidad" title="Contabilidad">
               <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-coins"></use></svg></span>
-              <span class="tc-mod-label">Conta</span>
+              <span class="tc-mod-label">Contabilidad</span>
             </button>
             <button class="tab tc-module" type="button" data-seguros-tab="recibos" title="Recibos">
               <span class="tc-mod-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file"></use></svg></span>
@@ -6689,6 +6689,35 @@
           <div class="form-card">
             <div class="section-head">
               <div>
+                <h3>Pólizas</h3>
+                <p class="muted">Listado por asegurado, compañía o estado.</p>
+              </div>
+              <div class="crm-actions">
+                <div class="quick-search">
+                  <input id="segurosCrmClienteInput" list="segurosCrmClientes" placeholder="Buscar cliente..." autocomplete="off" />
+                  <input id="segurosCrmClienteId" type="hidden" />
+                  <datalist id="segurosCrmClientes"></datalist>
+                </div>
+                <button type="button" id="segurosCrmClienteOpen" class="secondary">Abrir ficha</button>
+                <input id="segurosCrmSearch" placeholder="Buscar póliza..." />
+              </div>
+            </div>
+            <div class="table-tools">
+              <label>
+                Estado póliza
+                <select id="segurosEstadoFilter">
+                  <option value="all">Todas</option>
+                  <option value="en_vigor">En vigor</option>
+                  <option value="no_vigor">No en vigor</option>
+                </select>
+              </label>
+            </div>
+            <div id="segurosCrmTable"></div>
+            <div class="footer" id="segurosCrmInfo"></div>
+          </div>
+          <div class="form-card">
+            <div class="section-head">
+              <div>
                 <h3>Asociar póliza OCR a registro</h3>
                 <p class="muted">Sube el PDF, localiza el registro y completa lo que falte.</p>
               </div>
@@ -6772,35 +6801,6 @@
               <button type="button" id="segurosBdtOcrLink">Vincular registro</button>
             </div>
           </div>
-          <div class="form-card">
-            <div class="section-head">
-              <div>
-                <h3>Pólizas</h3>
-                <p class="muted">Listado por asegurado, compañía o estado.</p>
-              </div>
-              <div class="crm-actions">
-                <div class="quick-search">
-                  <input id="segurosCrmClienteInput" list="segurosCrmClientes" placeholder="Buscar cliente..." autocomplete="off" />
-                  <input id="segurosCrmClienteId" type="hidden" />
-                  <datalist id="segurosCrmClientes"></datalist>
-                </div>
-                <button type="button" id="segurosCrmClienteOpen" class="secondary">Abrir ficha</button>
-                <input id="segurosCrmSearch" placeholder="Buscar póliza..." />
-              </div>
-            </div>
-            <div class="table-tools">
-              <label>
-                Estado póliza
-                <select id="segurosEstadoFilter">
-                  <option value="all">Todas</option>
-                  <option value="en_vigor">En vigor</option>
-                  <option value="no_vigor">No en vigor</option>
-                </select>
-              </label>
-            </div>
-            <div id="segurosCrmTable"></div>
-            <div class="footer" id="segurosCrmInfo"></div>
-          </div>
           </div>
 		          <div class="seguros-tab active" data-seguros-tab="dashboard">
 		          <div class="form-card">
@@ -6809,7 +6809,7 @@
 		            <div id="segurosKpis"></div>
 		          </div>
 	          <div class="form-card">
-	            <h3>Cumplimiento (IDD/GDPR)</h3>
+	            <h3>Cumplimiento · Indicadores</h3>
 	            <p class="muted">IPID, asesoramiento y consentimientos.</p>
 	            <div id="segurosComplianceKpis"></div>
 	          </div>
@@ -6992,7 +6992,7 @@
 	          <div class="form-card">
 	            <div class="section-head">
 	              <div>
-	                <h3>Cumplimiento IDD/GDPR</h3>
+	                <h3>Cumplimiento · Registro IDD/GDPR</h3>
 	                <p class="muted">Trazabilidad de asesoramiento y consentimientos por póliza.</p>
 	              </div>
 	              <div class="form-actions">
@@ -7591,6 +7591,25 @@
             <div class="form-card">
               <h3>Recibos · Seguros</h3>
               <p class="muted">Registro de recibos/cobros para controlar impagos y comisiones.</p>
+	              <div class="table-tools">
+	                <input id="segurosRecibosSearch" placeholder="Filtrar recibos..." />
+	                <select id="segurosRecibosEstadoFilter" title="Estado">
+	                  <option value="">Estado (todos)</option>
+	                  <option value="emitido">Emitido</option>
+	                  <option value="cobrado">Cobrado</option>
+	                  <option value="pendiente">Pendiente</option>
+	                  <option value="impagado">Impagado</option>
+	                  <option value="anulado">Anulado</option>
+	                </select>
+	                <input id="segurosRecibosFrom" type="date" title="Desde" />
+	                <input id="segurosRecibosTo" type="date" title="Hasta" />
+	                <button type="button" id="segurosRecibosExportBtn" class="secondary">Exportar CSV</button>
+	              </div>
+	              <div id="segurosRecibosSummary"></div>
+	              <div id="segurosRecibosAlerts"></div>
+	              <div id="segurosRecibosTable"></div>
+	              <div class="footer" id="segurosRecibosInfo"></div>
+              <h4 class="seguros-form-heading">Añadir recibo</h4>
               <form id="segurosRecibosForm" class="form-grid">
 	                <label>
 	                  Fecha emisión
@@ -7645,24 +7664,6 @@
                   <span id="segurosRecibosStatus" class="muted"></span>
                 </div>
 	              </form>
-	              <div class="table-tools">
-	                <input id="segurosRecibosSearch" placeholder="Filtrar recibos..." />
-	                <select id="segurosRecibosEstadoFilter" title="Estado">
-	                  <option value="">Estado (todos)</option>
-	                  <option value="emitido">Emitido</option>
-	                  <option value="cobrado">Cobrado</option>
-	                  <option value="pendiente">Pendiente</option>
-	                  <option value="impagado">Impagado</option>
-	                  <option value="anulado">Anulado</option>
-	                </select>
-	                <input id="segurosRecibosFrom" type="date" title="Desde" />
-	                <input id="segurosRecibosTo" type="date" title="Hasta" />
-	                <button type="button" id="segurosRecibosExportBtn" class="secondary">Exportar CSV</button>
-	              </div>
-	              <div id="segurosRecibosSummary"></div>
-	              <div id="segurosRecibosAlerts"></div>
-	              <div id="segurosRecibosTable"></div>
-	              <div class="footer" id="segurosRecibosInfo"></div>
 	            </div>
 	          </div>
           <div class="seguros-tab" data-seguros-tab="historial">
@@ -11958,7 +11959,7 @@
                 });
               })();
             </script>
-            <script src="app-auth.js?v=16"></script>
+            <script src="app-auth.js?v=17"></script>
         <script>
           (function () {
             if (window.__APP_SHELL_BOOTSTRAP__) return;
@@ -11972,7 +11973,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=801",
+              "app.js?v=802",
             ];
 
             const getParams = () => {
@@ -12301,7 +12302,7 @@
                     const recoveryAvailable = Boolean(data?.recovery_available && (data?.recovery_login || usuario));
                     const recoveryHint = String(data?.recovery_message || "").trim();
                     setStatus(recoveryAvailable
-                      ? `${baseMessage} ${recoveryHint || "Puedes recuperar el acceso."}`.trim()
+                      ? `${baseMessage.replace(/[.:;\s]+$/, "")}. ${recoveryHint || "Puedes recuperar el acceso."}`
                       : baseMessage);
                     if (recoveryAvailable) showRecoveryButton(data?.recovery_login || usuario);
                     return;

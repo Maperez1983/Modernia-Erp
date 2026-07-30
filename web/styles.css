@@ -5652,6 +5652,28 @@ body.tc-resizing {
   height: 0;
 }
 
+/* Seguros tiene 11 pestañas: a 92px cada una no caben en una fila, y como la barra
+   lleva overflow-x con la barra de scroll oculta, las últimas quedaban cortadas sin
+   ninguna señal de que hubiera más. Aquí envuelven en dos filas: nada oculto y sin
+   necesidad de descubrir un scroll horizontal invisible. */
+#segurosTabs {
+  flex-wrap: wrap;
+  overflow-x: visible;
+  row-gap: 8px;
+}
+
+/* Separa el formulario de alta de los datos que ahora van encima. */
+.seguros-form-heading {
+  margin: 22px 0 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .tc-modulebar button {
   box-shadow: none;
 }

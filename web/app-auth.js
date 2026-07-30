@@ -88,7 +88,9 @@
         if (deps.authLoginStatus) {
           const main = String(data?.message || "Recuperación preparada.").trim();
           const hint = String(data?.recovery_message || "").trim();
-          deps.authLoginStatus.textContent = `${main} ${hint}`.trim();
+          // Punto entre las dos frases: sin el, salia "…incorrectos Si la cuenta existe…".
+          const mainLimpio = main.replace(/[.:;\s]+$/, "");
+          deps.authLoginStatus.textContent = hint ? `${mainLimpio}. ${hint}` : mainLimpio;
         }
       } catch {
         if (deps.authLoginStatus) deps.authLoginStatus.textContent = "Error de conexión al preparar la recuperación.";
@@ -381,7 +383,7 @@
         const recoveryHint = String(data?.recovery_message || "").trim();
         if (deps.authLoginStatus) {
           deps.authLoginStatus.textContent = recoveryAvailable
-            ? `${baseMessage} ${recoveryHint || "Puedes recuperar el acceso."}`.trim()
+            ? `${baseMessage.replace(/[.:;\s]+$/, "")}. ${recoveryHint || "Puedes recuperar el acceso."}`
             : baseMessage;
         }
         if (recoveryAvailable) showRecoveryButton(deps, data?.recovery_login || usuario);
