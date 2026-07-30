@@ -4709,7 +4709,11 @@ const quantityFormatter = new Intl.NumberFormat("es-ES", {
 
 const formatPercent = (value) => {
   const num = Number(value) || 0;
-  const normalized = num > 0 && num <= 1 ? num * 100 : num;
+  // Unos valores llegan como fracción (0,25 = 25%) y otros ya en escala de
+  // porcentaje (80 = 80%). El umbral se mide sobre el valor ABSOLUTO: con
+  // `num > 0` los ratios negativos no se convertían, así que una rentabilidad
+  // de -0,7879 (perder el 78,79%) se pintaba como "-0.79%".
+  const normalized = num !== 0 && Math.abs(num) <= 1 ? num * 100 : num;
   return `${normalized.toFixed(2)}%`;
 };
 
@@ -79625,6 +79629,11 @@ const showAuthOverlay = (message = "") => {
   if (authActivateOverlay) authActivateOverlay.classList.add("hidden");
   document.body.classList.add("auth-locked");
   setAuthUi(null);
+  // `autofocus` no dispara aquí: el overlay está oculto al parsear y se revela
+  // por JS, así que hay que poner el foco a mano o se entra siempre con un clic.
+  try {
+    if (authLoginUser && !authLoginUser.value) authLoginUser.focus();
+  } catch (e) {}
   try {
     debugLog("showAuthOverlay()", message || "");
   } catch (e) {}

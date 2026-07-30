@@ -98,6 +98,15 @@ body.auth-locked main {
   min-height: 610px;
 }
 
+/* El bar de contexto cuelga del `body`, no de `main`, así que la guarda de
+   arriba no lo cubría: con el overlay de acceso puesto sus botones seguían en
+   el orden de tabulación y en el árbol de accesibilidad. Quedaban tapados a la
+   vista, pero alcanzables con teclado o lector de pantalla antes de entrar. */
+body.auth-pending #uiContextBar,
+body.auth-locked #uiContextBar {
+  visibility: hidden;
+}
+
 /* Cuando el usuario está dentro de un CRM vertical queremos "modo app":
    sin header global, sin alertas generales y sin el explorador legacy. */
 body.crm-context-vertical header {
@@ -442,6 +451,15 @@ button.secondary,
   color: var(--ink);
   border: 1px solid var(--line);
   box-shadow: none;
+}
+
+/* Sin esta regla, `class="danger"` heredaba el degradado primario de marca: los
+   botones de borrado (p. ej. Eliminar hipoteca) se veían como la acción
+   recomendada. Las variantes .secondary/.ghost ya tienen su propio tratamiento. */
+button.danger:not(.secondary):not(.ghost),
+.btn.danger:not(.secondary):not(.ghost) {
+  background: linear-gradient(135deg, #b3261e 0%, #8d1f1f 100%);
+  color: #fdf2f2;
 }
 
 .catastro-button {
@@ -981,6 +999,10 @@ a.pill:hover {
   justify-content: center;
   align-items: flex-start;
   padding: 8px 0;
+  /* El organigrama crece con el nº de empresas: que scrolle en su propia caja
+     en vez de ensanchar la página (donde el desbordamiento queda recortado). */
+  max-width: 100%;
+  overflow-x: auto;
 }
 
 .org-chart ul {
@@ -4570,6 +4592,7 @@ body.theme-operativa .workspace-home-count {
 .crm-workspace-shell {
   display: grid;
   gap: 16px;
+  min-width: 0;
 }
 
 .crm-workspace-tabs {
@@ -4643,7 +4666,10 @@ body.theme-operativa .workspace-home-count {
 
 .app-lightning-shell--sidebar {
   display: grid;
-  grid-template-columns: 110px 1fr;
+  /* minmax(0, 1fr) y no 1fr: con `1fr` la pista no baja del min-content del
+     contenido, así que un panel ancho (p. ej. el organigrama) estira el shell
+     y empuja el resto fuera del área visible, que además está recortada. */
+  grid-template-columns: 110px minmax(0, 1fr);
   gap: 14px;
   align-items: start;
 }
@@ -4757,6 +4783,7 @@ body.theme-operativa .workspace-home-count {
   display: grid;
   gap: 16px;
   align-items: start;
+  min-width: 0;
 }
 
 .app-lightning-topbar {
@@ -8435,6 +8462,7 @@ body.crm-context-inmo #inmuebleDetail .inmueble-advanced {
   display: grid;
   gap: 14px;
   align-content: start;
+  min-width: 0;
 }
 
 .crm-workspace-view + .crm-workspace-view {
