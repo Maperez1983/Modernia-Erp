@@ -71980,8 +71980,10 @@ class Handler(BaseHTTPRequestHandler):
                 now,
                 payload={"ipid_id": ipid_id, "fecha": fecha_entrega, "usuario": _ipid_actor},
             )
-            json_response(self, {"ok": True, "id": ipid_id})
+            # Commit antes de responder: la evidencia de entrega del IPID tiene valor
+            # probatorio, así que no se anuncia como registrada hasta que es durable.
             conn.commit()
+            json_response(self, {"ok": True, "id": ipid_id})
             return
         elif parsed.path == "/api/seguros_backfill_s3":
             session = getattr(self, "auth_session", None) or self._current_session()
