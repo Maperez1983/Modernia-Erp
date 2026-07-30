@@ -5,20 +5,22 @@
  * - Never caches /api or /uploads
  */
 
-const CACHE_VERSION = "v373";
+const CACHE_VERSION = "v374";
 const SHELL_CACHE = `verifika2-shell-${CACHE_VERSION}`;
 const RUNTIME_CACHE = `verifika2-runtime-${CACHE_VERSION}`;
 const FONTS_CACHE = `verifika2-fonts-${CACHE_VERSION}`;
 
+// Estas versiones tienen que ir con las que pide `index.html`: si se quedan atrás,
+// el shell precacheado apunta a bundles distintos de los que carga la página.
 const SHELL_URLS = [
   "/",
   "/index.html",
-  "/styles.css?v=269",
-  "/ui-foundation.js?v=4",
-  "/app-auth.js?v=16",
+  "/styles.css?v=281",
+  "/ui-foundation.js?v=5",
+  "/app-auth.js?v=17",
   "/app-routing.js?v=13",
   "/app_shared.js?v=2",
-  "/app.js?v=793",
+  "/app.js?v=804",
   "/manifest.webmanifest?v=18",
   "/assets/verifika2/verifika2_wordmark_dark.svg",
   "/icons/catastro.png?v=28",
@@ -134,8 +136,13 @@ self.addEventListener("fetch", (event) => {
       (async () => {
         try {
           const fresh = await fetch(req);
-          const cache = await caches.open(SHELL_CACHE);
-          cache.put("/index.html", fresh.clone());
+          // Solo el shell raíz sirve de fallback offline, y solo si la respuesta es
+          // buena: cachear un 500 (o el HTML de otra ruta) lo dejaba pegado como
+          // "/index.html" para todas las navegaciones posteriores sin red.
+          if (fresh && fresh.ok && (url.pathname === "/" || url.pathname === "/index.html")) {
+            const cache = await caches.open(SHELL_CACHE);
+            cache.put("/index.html", fresh.clone());
+          }
           return fresh;
         } catch {
           const cache = await caches.open(SHELL_CACHE);

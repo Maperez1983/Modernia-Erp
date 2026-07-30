@@ -12333,91 +12333,74 @@
 		    <script>
 					      (function () {
 					        if (!("serviceWorker" in navigator)) return;
-				        const TARGET_SW = "/sw.js?v=373";
+				        const TARGET_SW = "/sw.js?v=374";
+				        // Marca de la limpieza de rescate. Súbela para forzar una purga nueva
+				        // en todos los navegadores tras un despliegue problemático.
+				        const HEAL_KEY = "verifika2:sw-heal:v374";
+
+				        const purge = () =>
+				          Promise.allSettled([
+				            navigator.serviceWorker.getRegistrations().then((regs) => Promise.allSettled(regs.map((r) => r.unregister()))),
+				            (typeof caches !== "undefined" && caches && caches.keys)
+				              ? caches.keys().then((keys) => Promise.allSettled(
+				                  keys
+				                    .filter((k) => String(k || "").startsWith("verifika2-") || String(k || "").startsWith("liv-"))
+				                    .map((k) => caches.delete(k))
+				                ))
+				              : Promise.resolve(),
+				          ]);
+
 				        try {
 				          const params = new URLSearchParams(window.location.search || "");
-              const keepSw = (params.get("keep_sw") || "").trim() === "1";
 		          const disableSw = (params.get("sw") || "").trim() === "0" || (params.get("nosw") || "").trim() === "1";
 		          const cleared = (params.get("swcleared") || "").trim() === "1";
 
-              // Safety: algunos navegadores se quedan con JS corrupto en cache del SW y provocan bucles de login.
-              // Por defecto desactivamos el SW y limpiamos caches una vez. Se puede reactivar con `?keep_sw=1`.
-              if (!keepSw && !cleared) {
-                Promise.allSettled([
-                  navigator.serviceWorker.getRegistrations().then((regs) => Promise.allSettled(regs.map((r) => r.unregister()))),
-                  (typeof caches !== "undefined" && caches && caches.keys)
-                    ? caches.keys().then((keys) => Promise.allSettled(
-                        keys
-                          .filter((k) => String(k || "").startsWith("verifika2-") || String(k || "").startsWith("liv-"))
-                          .map((k) => caches.delete(k))
-                      ))
-                    : Promise.resolve(),
-                ]).finally(() => {
-                  params.set("swcleared", "1");
-                  params.delete("sw");
-                  params.delete("nosw");
-                  const url = new URL(window.location.href);
-                  url.search = params.toString();
-                  window.location.replace(url.toString());
+              // `localStorage` puede lanzar con el almacenamiento restringido. Si no podemos
+              // leer la marca damos la limpieza por hecha: repetirla en cada carga es justo
+              // el bucle de redirecciones que esto viene a quitar.
+              let healed = true;
+              try {
+                healed = localStorage.getItem(HEAL_KEY) === "1";
+              } catch {}
+
+              const markHealed = () => {
+                try {
+                  localStorage.setItem(HEAL_KEY, "1");
+                } catch {}
+              };
+              const reloadCleared = () => {
+                params.set("swcleared", "1");
+                params.delete("sw");
+                params.delete("nosw");
+                const url = new URL(window.location.href);
+                url.search = params.toString();
+                window.location.replace(url.toString());
+              };
+
+              // Salida explícita: `?sw=0` / `?nosw=1` deja el navegador sin SW.
+              if (disableSw) {
+                purge().finally(() => {
+                  markHealed();
+                  reloadCleared();
                 });
                 return;
               }
 
-              if (!keepSw) return;
-	          if (disableSw) {
-	            Promise.allSettled([
-	              navigator.serviceWorker.getRegistrations().then((regs) => Promise.allSettled(regs.map((r) => r.unregister()))),
-	              (typeof caches !== "undefined" && caches && caches.keys)
-	                ? caches.keys().then((keys) => Promise.allSettled(
-	                    keys
-	                      .filter((k) => String(k || "").startsWith("verifika2-") || String(k || "").startsWith("liv-"))
-	                      .map((k) => caches.delete(k))
-	                  ))
-	                : Promise.resolve(),
-	            ]).finally(() => {
-	              params.delete("sw");
-	              params.delete("nosw");
-	              params.set("swcleared", "1");
-	              const url = new URL(window.location.href);
-	              url.search = params.toString();
-	              window.location.replace(url.toString());
-	            });
-	            return;
-	          }
-	          // Auto-heal: si hay un SW activo viejo, lo desregistramos y limpiamos caches para evitar que se "quede pegado"
-	          // a una UI anterior. Esto pasa especialmente en PWAs instaladas o tras cambios grandes de estilos.
-	          if (!cleared) {
-	            Promise.resolve()
-	              .then(() => navigator.serviceWorker.getRegistrations())
-	              .then((regs) => {
-	                const mismatch = regs.some((r) => {
-	                  try {
-	                    const url = String(r?.active?.scriptURL || "");
-	                    return url && !url.includes(TARGET_SW);
-	                  } catch {
-	                    return false;
-	                  }
-	                });
-	                if (!mismatch) return;
-	                return Promise.allSettled([
-	                  Promise.allSettled(regs.map((r) => r.unregister())),
-	                  (typeof caches !== "undefined" && caches && caches.keys)
-	                    ? caches.keys().then((keys) => Promise.allSettled(
-	                        keys
-	                          .filter((k) => String(k || "").startsWith("verifika2-") || String(k || "").startsWith("liv-"))
-	                          .map((k) => caches.delete(k))
-	                      ))
-	                    : Promise.resolve(),
-	                ]).finally(() => {
-	                  params.set("swcleared", "1");
-	                  const url = new URL(window.location.href);
-	                  url.search = params.toString();
-	                  window.location.replace(url.toString());
-	                });
-	              })
-	              .catch(function () {});
-	          }
+              // Rescate: algunos navegadores se quedaron con JS corrupto en la caché del SW
+              // y entraban en bucles de login. Ahora corre UNA vez por navegador y no en cada
+              // carga, que costaba dos documentos completos por visita y además hacía que el
+              // `register()` de abajo no se alcanzase nunca, dejando la PWA muerta.
+              if (!healed && !cleared) {
+                purge().finally(() => {
+                  markHealed();
+                  reloadCleared();
+                });
+                return;
+              }
+              markHealed();
 	        } catch {}
+	        // Registrar la versión actual sustituye a cualquier SW anterior del mismo scope,
+	        // así que no hace falta desregistrar a mano los que no coincidan.
 	        window.addEventListener("load", function () {
 			          navigator.serviceWorker.register(TARGET_SW).catch(function () {});
 	        });
