@@ -2702,11 +2702,34 @@ def guess_poliza_from_filename(filename):
     return normed[0]
 
 def normalize_company_key(value):
+    """Clave canónica de aseguradora.
+
+    Resuelve primero el nombre comercial contra COMPANY_ALIAS_PATTERNS. Los PDF y el
+    OCR traen "Allianz", "Allianz Seguros" o "ALLIANZ SEGUROS S.A." para la misma
+    entidad, y compararlas al pie de la letra tenía dos consecuencias: la
+    deduplicación de pólizas no saltaba (se creaba una póliza repetida) y la póliza
+    tampoco casaba con su regla de comisión, así que la comisión esperada salía sin
+    calcular.
+
+    El número de póliza sigue siendo el criterio principal de fusión; esta clave solo
+    hace de guarda para no fusionar pólizas de aseguradoras realmente distintas que
+    compartan numeración.
+    """
     if not value:
         return ""
-    text = normalize_company_name(value).upper()
-    text = re.sub(r"[^A-Z0-9]", "", text)
-    return text
+    base = normalize_company_name(value)
+    canonico = ""
+    try:
+        cleaned = normalize_lookup_text(base)
+        if cleaned:
+            for pattern, name in COMPANY_ALIAS_PATTERNS:
+                if re.search(pattern, cleaned, re.IGNORECASE):
+                    canonico = name
+                    break
+    except Exception:
+        canonico = ""
+    text = (canonico or base).upper()
+    return re.sub(r"[^A-Z0-9]", "", text)
 
 
 LEGAL_RAMOS_CANONICAL = (

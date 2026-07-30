@@ -555,9 +555,29 @@ class NormalizeCompanyKeyTests(unittest.TestCase):
     def test_basic_uppercasing(self):
         self.assertEqual(normalize_company_key("Mapfre"), "MAPFRE")
 
-    def test_strips_punctuation_and_spaces(self):
-        self.assertEqual(normalize_company_key("MAPFRE, S.A."), "MAPFRESA")
-        self.assertEqual(normalize_company_key("Allianz Seguros"), "ALLIANZSEGUROS")
+    def test_resuelve_el_alias_comercial_de_la_aseguradora(self):
+        """El nombre comercial se resuelve a la entidad canónica.
+
+        Antes se comparaba literalmente, así que "Allianz Seguros" y "ALLIANZ" daban
+        claves distintas: la deduplicación de pólizas no saltaba y la póliza tampoco
+        casaba con su regla de comisión. Decisión de negocio (2026-07-30): no
+        distinguimos razones sociales, Allianz es Allianz.
+        """
+        self.assertEqual(normalize_company_key("MAPFRE, S.A."), "MAPFRE")
+        self.assertEqual(normalize_company_key("Allianz Seguros"), "ALLIANZ")
+        self.assertEqual(normalize_company_key("ALLIANZ SEGUROS S.A."), "ALLIANZ")
+        self.assertEqual(normalize_company_key("Allianz Seguros"), normalize_company_key("ALLIANZ"))
+
+    def test_no_fusiona_aseguradoras_distintas(self):
+        """La clave sigue haciendo de guarda: Mapfre y AXA no pueden confundirse."""
+        self.assertNotEqual(normalize_company_key("MAPFRE"), normalize_company_key("AXA"))
+
+    def test_sin_alias_conocido_solo_normaliza_el_texto(self):
+        """Una compañía que no está en el catálogo mantiene el comportamiento previo:
+        mayúsculas y fuera todo lo que no sea A-Z0-9 (los acentos se eliminan, no se
+        transliteran, de ahí CORREDURA)."""
+        self.assertEqual(normalize_company_key("Aseguradora Rara, S.L."), "ASEGURADORARARASL")
+        self.assertEqual(normalize_company_key("Correduría Rara"), "CORREDURARARA")
 
     def test_empty_value(self):
         self.assertEqual(normalize_company_key(""), "")
