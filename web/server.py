@@ -82993,15 +82993,21 @@ class Handler(BaseHTTPRequestHandler):
                 where = ["s.cliente_id IS NOT NULL"]
                 values = []
                 seguros_cols = table_columns(conn, "seguros") or set()
-                if workspace_id and "workspace_id" in seguros_cols:
-                    where.append("COALESCE(s.workspace_id, '') = ?")
-                    values.append(workspace_id)
-                elif workspace_id:
+                if workspace_id:
+                    # Mismo caso que en la lista genérica: `seguros.workspace_id` existe pero
+                    # está vacío en lo anterior a la migración, y el `elif` de abajo nunca se
+                    # alcanzaba precisamente porque la columna sí existe. Se combinan los dos
+                    # vínculos con el workspace en vez de excluirse.
+                    scope_parts = []
+                    if "workspace_id" in seguros_cols:
+                        scope_parts.append("COALESCE(s.workspace_id, '') = ?")
+                        values.append(workspace_id)
                     empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
                     if empresa_ids:
                         placeholders = ",".join(["?"] * len(empresa_ids))
-                        where.append(f"s.empresa_id IN ({placeholders})")
+                        scope_parts.append(f"s.empresa_id IN ({placeholders})")
                         values.extend(empresa_ids)
+                    where.append("(" + " OR ".join(scope_parts) + ")" if scope_parts else "1 = 0")
                 elif empresa_id:
                     where.append("s.empresa_id = ?")
                     values.append(empresa_id)
@@ -83101,11 +83107,36 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchall()
             else:
                 c_cols = table_columns(conn, "clientes") or set()
-                if workspace_id and "workspace_id" in c_cols:
-                    rows = conn.execute(
-                        f"SELECT {cliente_list_cols} FROM clientes c WHERE COALESCE(c.workspace_id, '') = ? ORDER BY c.nombre",
-                        (workspace_id,),
-                    ).fetchall()
+                if workspace_id:
+                    # El scoping va por workspace, pero `clientes.workspace_id` llegó con una
+                    # migración y los clientes anteriores lo tienen vacío. Filtrar solo por esa
+                    # columna los dejaba a TODOS fuera: la lista de cualquier CRM salía a cero
+                    # mientras los clientes seguían en la tabla. Aceptamos también al cliente
+                    # que cuelga de una empresa del workspace, que es el mismo vínculo que ya
+                    # usa la rama de gestoría y no cruza tenants.
+                    scope_parts = []
+                    values = []
+                    if "workspace_id" in c_cols:
+                        scope_parts.append("COALESCE(c.workspace_id, '') = ?")
+                        values.append(workspace_id)
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if empresa_ids:
+                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                        scope_parts.append(
+                            "EXISTS (SELECT 1 FROM clientes_empresas ce"
+                            f" WHERE ce.cliente_id = c.id AND ce.empresa_id IN ({placeholders_ws}))"
+                        )
+                        values.extend(empresa_ids)
+                    if scope_parts:
+                        rows = conn.execute(
+                            f"SELECT {cliente_list_cols} FROM clientes c"
+                            f" WHERE {' OR '.join(scope_parts)} ORDER BY c.nombre",
+                            values,
+                        ).fetchall()
+                    else:
+                        # Sin forma de acotar por workspace no devolvemos todo: sería enseñar
+                        # clientes de otros tenants.
+                        rows = []
                 else:
                     rows = conn.execute(f"SELECT {cliente_list_cols} FROM clientes c ORDER BY c.nombre").fetchall()
             json_response(self, [dict(r) for r in rows])
@@ -88944,15 +88975,21 @@ class Handler(BaseHTTPRequestHandler):
                 values = []
                 empresa_id = str(empresa_id or "").strip()
                 seguros_cols = table_columns(conn, "seguros") or set()
-                if workspace_id and "workspace_id" in seguros_cols:
-                    where.append("COALESCE(s.workspace_id, '') = ?")
-                    values.append(workspace_id)
-                elif workspace_id:
+                if workspace_id:
+                    # Mismo caso que en la lista genérica: `seguros.workspace_id` existe pero
+                    # está vacío en lo anterior a la migración, y el `elif` de abajo nunca se
+                    # alcanzaba precisamente porque la columna sí existe. Se combinan los dos
+                    # vínculos con el workspace en vez de excluirse.
+                    scope_parts = []
+                    if "workspace_id" in seguros_cols:
+                        scope_parts.append("COALESCE(s.workspace_id, '') = ?")
+                        values.append(workspace_id)
                     empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
                     if empresa_ids:
                         placeholders = ",".join(["?"] * len(empresa_ids))
-                        where.append(f"s.empresa_id IN ({placeholders})")
+                        scope_parts.append(f"s.empresa_id IN ({placeholders})")
                         values.extend(empresa_ids)
+                    where.append("(" + " OR ".join(scope_parts) + ")" if scope_parts else "1 = 0")
                 elif empresa_id:
                     where.append("s.empresa_id = ?")
                     values.append(empresa_id)
