@@ -70939,6 +70939,10 @@ class Handler(BaseHTTPRequestHandler):
                 s3_delete_keys_if_unreferenced(conn, [k for k in _doc_keys if k])
             except Exception:
                 pass
+            # Commit ANTES de responder: al revés se anunciaba el borrado como hecho
+            # mientras la transacción seguía abierta, así que un lector inmediato (o un
+            # fallo justo después) podía ver la póliza todavía viva pese al "ok".
+            conn.commit()
             json_response(
                 self,
                 {
@@ -70948,7 +70952,6 @@ class Handler(BaseHTTPRequestHandler):
                     "empresa_id": row["empresa_id"],
                 },
             )
-            conn.commit()
             return
         elif parsed.path == "/api/seguros_poliza_accion":
             record_id = payload.get("id")

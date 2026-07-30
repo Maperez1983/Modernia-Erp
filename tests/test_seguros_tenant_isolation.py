@@ -35,8 +35,14 @@ class SegurosTenantIsolationTests(unittest.TestCase):
         cls.conn = S.open_sqlite_conn(str(cls.db_path), with_row_factory=True)
         cls._seed()
 
+        # `Handler.db_path` es atributo de clase compartido: guardamos el valor previo
+        # para restaurarlo y evitar que estos tests contaminen a los demás (y viceversa,
+        # reafirmándolo en setUp).
+        cls._prev_db_path = getattr(S.Handler, "db_path", None)
+        cls._prev_ocr_db_path = getattr(S.Handler, "ocr_db_path", None)
+        cls.ocr_db_path = Path(cls.tmp.name) / "ocr.sqlite"
         S.Handler.db_path = str(cls.db_path)
-        S.Handler.ocr_db_path = str(Path(cls.tmp.name) / "ocr.sqlite")
+        S.Handler.ocr_db_path = str(cls.ocr_db_path)
         cls.httpd = S.ThreadingHTTPServer(("127.0.0.1", 0), S.Handler)
         cls.base = f"http://127.0.0.1:{cls.httpd.server_address[1]}"
         cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
@@ -50,7 +56,16 @@ class SegurosTenantIsolationTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.httpd.shutdown()
         cls.conn.close()
+        if cls._prev_db_path is not None:
+            S.Handler.db_path = cls._prev_db_path
+        if cls._prev_ocr_db_path is not None:
+            S.Handler.ocr_db_path = cls._prev_ocr_db_path
         cls.tmp.cleanup()
+
+    def setUp(self):
+        # Otra clase de test puede haber reapuntado el atributo de clase entre medias.
+        S.Handler.db_path = str(self.db_path)
+        S.Handler.ocr_db_path = str(self.ocr_db_path)
 
     # ---------- utilidades ----------
 

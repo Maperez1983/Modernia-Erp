@@ -66955,7 +66955,11 @@ const loadSegurosReclamaciones = (empresaId) => {
               estado: "cerrada",
               fecha_cierre: formatAgendaDate(new Date()),
             }).catch((err) => ({ error: err?.message || "Error" }));
-            if (resp?.error) return;
+            if (resp?.error) {
+              // Antes se descartaba el error sin avisar: el usuario creia que se habia guardado.
+              if (segurosReclamacionStatus) segurosReclamacionStatus.textContent = resp.error;
+              return;
+            }
             loadSegurosReclamaciones(empresaId);
             loadSegurosComplianceKpis(empresaId);
           });
@@ -67139,7 +67143,11 @@ const renderSegurosRecibosAlerts = (summary) => {
         id: row.id,
         importe_liquidacion: value,
       }).catch((err) => ({ error: err?.message || "Error" }));
-      if (resp?.error) return;
+      if (resp?.error) {
+        // Antes se descartaba el error sin avisar: el usuario creia que se habia guardado.
+        if (segurosRecibosStatus) segurosRecibosStatus.textContent = resp.error;
+        return;
+      }
       loadSegurosRecibos();
     });
     actionTd.appendChild(btn);
@@ -67162,7 +67170,11 @@ const renderSegurosRecibosAlerts = (summary) => {
       const resp = await postJsonWithDbRetry("/api/seguros_recibos_update", { id: row.id, estado: "impagado" }).catch((err) => ({
         error: err?.message || "Error",
       }));
-      if (resp?.error) return;
+      if (resp?.error) {
+        // Antes se descartaba el error sin avisar: el usuario creia que se habia guardado.
+        if (segurosRecibosStatus) segurosRecibosStatus.textContent = resp.error;
+        return;
+      }
       loadSegurosRecibos();
     });
     actionTd.appendChild(impagoBtn);
@@ -67176,7 +67188,11 @@ const renderSegurosRecibosAlerts = (summary) => {
         estado: "cobrado",
         fecha_cobro: formatAgendaDate(new Date()),
       }).catch((err) => ({ error: err?.message || "Error" }));
-      if (resp?.error) return;
+      if (resp?.error) {
+        // Antes se descartaba el error sin avisar: el usuario creia que se habia guardado.
+        if (segurosRecibosStatus) segurosRecibosStatus.textContent = resp.error;
+        return;
+      }
       loadSegurosRecibos();
     });
     actionTd.appendChild(cobradoBtn);
@@ -67203,7 +67219,11 @@ const renderSegurosRecibosAlerts = (summary) => {
       const resp = await postJsonWithDbRetry("/api/seguros_recibos_update", { id: row.id, comision: value }).catch((err) => ({
         error: err?.message || "Error",
       }));
-      if (resp?.error) return;
+      if (resp?.error) {
+        // Antes se descartaba el error sin avisar: el usuario creia que se habia guardado.
+        if (segurosRecibosStatus) segurosRecibosStatus.textContent = resp.error;
+        return;
+      }
       loadSegurosRecibos();
     });
     actionTd.appendChild(setBtn);
@@ -67224,7 +67244,11 @@ const renderSegurosRecibosAlerts = (summary) => {
       const resp = await postJsonWithDbRetry("/api/seguros_recibos_update", { id: row.id, comision: row.comision_esperada }).catch((err) => ({
         error: err?.message || "Error",
       }));
-      if (resp?.error) return;
+      if (resp?.error) {
+        // Antes se descartaba el error sin avisar: el usuario creia que se habia guardado.
+        if (segurosRecibosStatus) segurosRecibosStatus.textContent = resp.error;
+        return;
+      }
       loadSegurosRecibos();
     });
     actionTd.appendChild(fillBtn);
@@ -67315,7 +67339,11 @@ const loadSegurosRecibos = () => {
               estado: "cobrado",
               fecha_cobro: formatAgendaDate(new Date()),
             }).catch((err) => ({ error: err?.message || "Error" }));
-            if (resp?.error) return;
+            if (resp?.error) {
+              // Antes se descartaba el error sin avisar: el usuario creia que se habia guardado.
+              if (segurosRecibosStatus) segurosRecibosStatus.textContent = resp.error;
+              return;
+            }
             loadSegurosRecibos();
           });
           actionTd.appendChild(cobradoBtn);
@@ -67330,7 +67358,11 @@ const loadSegurosRecibos = () => {
               id: row.id,
               estado: "impagado",
             }).catch((err) => ({ error: err?.message || "Error" }));
-            if (resp?.error) return;
+            if (resp?.error) {
+              // Antes se descartaba el error sin avisar: el usuario creia que se habia guardado.
+              if (segurosRecibosStatus) segurosRecibosStatus.textContent = resp.error;
+              return;
+            }
             loadSegurosRecibos();
           });
           actionTd.appendChild(impagoBtn);
@@ -67348,7 +67380,11 @@ const loadSegurosRecibos = () => {
               id: row.id,
               importe_liquidacion: value,
             }).catch((err) => ({ error: err?.message || "Error" }));
-            if (resp?.error) return;
+            if (resp?.error) {
+              // Antes se descartaba el error sin avisar: el usuario creia que se habia guardado.
+              if (segurosRecibosStatus) segurosRecibosStatus.textContent = resp.error;
+              return;
+            }
             loadSegurosRecibos();
           });
           actionTd.appendChild(liqBtn);
@@ -67363,7 +67399,11 @@ const loadSegurosRecibos = () => {
           const resp = await postJsonWithDbRetry("/api/seguros_recibos_delete", { id: row.id }).catch((err) => ({
             error: err?.message || "Error",
           }));
-          if (resp?.error) return;
+          if (resp?.error) {
+            // Antes se descartaba el error sin avisar: el usuario creia que se habia guardado.
+            if (segurosRecibosStatus) segurosRecibosStatus.textContent = resp.error;
+            return;
+          }
           loadSegurosRecibos();
         });
         actionTd.appendChild(delBtn);
@@ -67455,7 +67495,11 @@ const loadSegurosSiniestros = () => {
             const resp = await postJsonWithDbRetry("/api/seguros_siniestros_update", { id: row.id, estado: next }).catch((err) => ({
               error: err?.message || "Error",
             }));
-            if (resp?.error) return;
+            if (resp?.error) {
+              // Antes se descartaba el error sin avisar: el usuario creia que se habia guardado.
+              if (segurosSiniestrosStatus) segurosSiniestrosStatus.textContent = resp.error;
+              return;
+            }
             loadSegurosSiniestros();
           });
           actionTd.appendChild(nextBtn);
@@ -67469,7 +67513,11 @@ const loadSegurosSiniestros = () => {
               estado: "cerrado",
               fecha_cierre: formatAgendaDate(new Date()),
             }).catch((err) => ({ error: err?.message || "Error" }));
-            if (resp?.error) return;
+            if (resp?.error) {
+              // Antes se descartaba el error sin avisar: el usuario creia que se habia guardado.
+              if (segurosSiniestrosStatus) segurosSiniestrosStatus.textContent = resp.error;
+              return;
+            }
             loadSegurosSiniestros();
           });
           actionTd.appendChild(closeBtn);
@@ -67484,7 +67532,11 @@ const loadSegurosSiniestros = () => {
           const resp = await postJsonWithDbRetry("/api/seguros_siniestros_delete", { id: row.id }).catch((err) => ({
             error: err?.message || "Error",
           }));
-          if (resp?.error) return;
+          if (resp?.error) {
+            // Antes se descartaba el error sin avisar: el usuario creia que se habia guardado.
+            if (segurosSiniestrosStatus) segurosSiniestrosStatus.textContent = resp.error;
+            return;
+          }
           loadSegurosSiniestros();
         });
         actionTd.appendChild(delBtn);
@@ -67535,7 +67587,14 @@ const loadSegurosAlertas = () => {
       const isEntradaVigor = normalizeSimple(row.alert_type || "") === "entrada_vigor";
       const fecha = isEntradaVigor ? (row.fecha_efecto || "-") : (row.fecha_vencimiento || "-");
       const texto = isEntradaVigor ? `entra en vigor ${fecha}` : `vence ${fecha}`;
-      title.innerHTML = `<strong>${tomador}</strong><div class="muted">${poliza} · ${texto}</div>`;
+      // Nodos en vez de innerHTML: `tomador` y `poliza` vienen de la BD (alta manual,
+      // OCR o importación), así que interpolarlos era XSS almacenado.
+      const titleStrong = document.createElement("strong");
+      titleStrong.textContent = tomador;
+      const titleMeta = document.createElement("div");
+      titleMeta.className = "muted";
+      titleMeta.textContent = `${poliza} · ${texto}`;
+      title.replaceChildren(titleStrong, titleMeta);
       const actions = document.createElement("div");
       actions.className = "inline-actions";
       const btn = document.createElement("button");
@@ -67868,7 +67927,13 @@ const loadSegurosChecklist = (polizaId) => {
     segurosChecklistTable.innerHTML = "";
     segurosChecklistTable.appendChild(table);
     segurosChecklistInfo.textContent = `Mostrando ${rows.length} tareas.`;
-  });
+  })
+    .catch(() => {
+      // Sin .catch la tabla conservaba los datos del cliente/empresa anterior,
+      // mostrandolos como si fueran los actuales.
+      segurosChecklistTable.innerHTML = "<p class='muted'>No se pudieron cargar el checklist.</p>";
+      if (segurosChecklistInfo) segurosChecklistInfo.textContent = "";
+    });
 };
 
 const loadSegurosOfertas = (clienteId = "") => {
@@ -67922,7 +67987,13 @@ const loadSegurosOfertas = (clienteId = "") => {
     segurosOfertasTable.innerHTML = "";
     segurosOfertasTable.appendChild(table);
     segurosOfertasInfo.textContent = `Mostrando ${rows.length} ofrecimientos.`;
-  });
+  })
+    .catch(() => {
+      // Sin .catch la tabla conservaba los datos del cliente/empresa anterior,
+      // mostrandolos como si fueran los actuales.
+      segurosOfertasTable.innerHTML = "<p class='muted'>No se pudieron cargar las ofertas.</p>";
+      if (segurosOfertasInfo) segurosOfertasInfo.textContent = "";
+    });
 };
 
 const loadSegurosPreferencias = (clienteId) => {
@@ -67975,7 +68046,13 @@ const loadSegurosReferidos = () => {
     segurosReferidosTable.innerHTML = "";
     segurosReferidosTable.appendChild(table);
     segurosReferidosInfo.textContent = `Mostrando ${rows.length} registros.`;
-  });
+  })
+    .catch(() => {
+      // Sin .catch la tabla conservaba los datos del cliente/empresa anterior,
+      // mostrandolos como si fueran los actuales.
+      segurosReferidosTable.innerHTML = "<p class='muted'>No se pudieron cargar los referidos.</p>";
+      if (segurosReferidosInfo) segurosReferidosInfo.textContent = "";
+    });
 };
 
 const loadSegurosCampanas = () => {
@@ -68026,13 +68103,15 @@ const loadSegurosCampanas = () => {
         const col = cols[idx];
         if (cols[idx] === "url" && row.url) {
           const a = document.createElement("a");
-          a.href = row.url;
+          // safeUrl: la URL de la campaña se edita a mano o llega por importación CSV,
+          // así que sin filtrar admitía esquemas como javascript:.
+          a.href = safeUrl(row.url);
           a.target = "_blank";
           a.textContent = "Ver";
           td.appendChild(a);
         } else if (cols[idx] === "adjunto" && row.adjunto_url) {
           const a = document.createElement("a");
-          a.href = row.adjunto_url;
+          a.href = safeUrl(row.adjunto_url);
           a.target = "_blank";
           a.textContent = row.adjunto_nombre || "PDF";
           td.appendChild(a);
@@ -68056,7 +68135,13 @@ const loadSegurosCampanas = () => {
     segurosCampanasTable.innerHTML = "";
     segurosCampanasTable.appendChild(table);
     segurosCampanasInfo.textContent = `Mostrando ${rows.length} campañas.`;
-  });
+  })
+    .catch(() => {
+      // Sin .catch la tabla conservaba los datos del cliente/empresa anterior,
+      // mostrandolos como si fueran los actuales.
+      segurosCampanasTable.innerHTML = "<p class='muted'>No se pudieron cargar las campanas.</p>";
+      if (segurosCampanasInfo) segurosCampanasInfo.textContent = "";
+    });
 };
 
 const loadSegurosRecomendacion = () => {
@@ -68108,7 +68193,7 @@ const loadSegurosRecomendacion = () => {
             applyCompanyCell(td, "compania", row.compania, { compact: true });
           } else if (i === 2 && row.url) {
             const a = document.createElement("a");
-            a.href = row.url;
+            a.href = safeUrl(row.url);
             a.target = "_blank";
             a.textContent = row.nombre || "Campaña";
             td.appendChild(a);
@@ -68279,7 +68364,13 @@ const loadSegurosComisiones = () => {
     segurosComisionesTable.innerHTML = "";
     segurosComisionesTable.appendChild(table);
     segurosComisionesInfo.textContent = `Mostrando ${rows.length} comisiones.`;
-  });
+  })
+    .catch(() => {
+      // Sin .catch la tabla conservaba los datos del cliente/empresa anterior,
+      // mostrandolos como si fueran los actuales.
+      segurosComisionesTable.innerHTML = "<p class='muted'>No se pudieron cargar las comisiones.</p>";
+      if (segurosComisionesInfo) segurosComisionesInfo.textContent = "";
+    });
 };
 
 const loadSegurosInsights = (empresaId) => {
@@ -68913,6 +69004,16 @@ const resetSegurosOcrAggregator = (options = {}) => {
   clearValue(seguroOcrPrimaNeta);
   clearValue(seguroOcrPrimaTotal);
   clearValue(seguroOcrColaborador);
+  // Procedencia/canal: se leen al crear el cliente, así que si no se limpian el
+  // siguiente cliente dado de alta hereda el referidor o captador del anterior
+  // (afecta a la atribución de referidos y comisiones). El `change` deja que
+  // bindCanalProcedenciaControls recalcule qué desplegables se muestran.
+  clearValue(segurosOcrCanalCliente);
+  clearValue(segurosOcrCanalUser);
+  if (segurosOcrCanal) {
+    segurosOcrCanal.value = "";
+    segurosOcrCanal.dispatchEvent(new Event("change"));
+  }
   if (seguroOcrEstado) seguroOcrEstado.value = "Presupuesto";
   if (seguroOcrProduccion) seguroOcrProduccion.value = "Nueva producción";
   if (segurosOcrFile) segurosOcrFile.value = "";
@@ -69744,6 +69845,10 @@ const openSegurosPresupuestoEdit = (columns, row) => {
   if (seguroOcrProduccion) seguroOcrProduccion.value = getVal("produccion") || "";
   if (seguroOcrColaborador) seguroOcrColaborador.value = getVal("colaborador") || "";
   if (seguroOcrEstado) seguroOcrEstado.value = "Presupuesto";
+  // El guardado en modo edición manda `state.segurosOcrClienteId` como cliente_id.
+  // Al no fijarlo aquí, arrastraba el cliente del alta/OCR anterior y la póliza
+  // acababa reasignada a otro cliente de la misma empresa.
+  state.segurosOcrClienteId = getVal("cliente_id") || "";
   refreshSegurosOcrComisionSuggestion();
   if (segurosOcrSave) {
     segurosOcrSave.dataset.recordId = getVal("id") || "";
@@ -83119,6 +83224,13 @@ if (segurosOcrButton) {
     }
     state.segurosOcrClienteId = "";
     state.segurosOcrParsedFields = {};
+    // Un OCR nuevo es siempre un alta: si venimos de "editar presupuesto", hay que
+    // soltar el recordId o el guardado machacaría ese presupuesto en vez de crear
+    // la póliza nueva.
+    if (segurosOcrSave) {
+      segurosOcrSave.removeAttribute("data-record-id");
+      segurosOcrSave.textContent = "Guardar póliza";
+    }
     setOcrClienteUi(getOcrClienteContext("alta"), { status: "" });
     if (!segurosOcrFile || !segurosOcrFile.files || !segurosOcrFile.files.length) {
       if (segurosOcrStatus) {

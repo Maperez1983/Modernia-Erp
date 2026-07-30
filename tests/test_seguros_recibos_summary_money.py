@@ -39,6 +39,10 @@ class SegurosRecibosSummaryMoneyTests(unittest.TestCase):
         cls.conn = S.open_sqlite_conn(str(db_path), with_row_factory=True)
         cls._seed()
 
+        # `Handler.db_path` es atributo de clase compartido entre tests: lo guardamos
+        # para restaurarlo en tearDownClass y no contaminar a los demás.
+        cls._prev_db_path = getattr(S.Handler, "db_path", None)
+        cls._prev_ocr_db_path = getattr(S.Handler, "ocr_db_path", None)
         S.Handler.db_path = str(db_path)
         S.Handler.ocr_db_path = str(Path(cls.tmp.name) / "ocr.sqlite")
         cls.httpd = S.ThreadingHTTPServer(("127.0.0.1", 0), S.Handler)
@@ -51,6 +55,10 @@ class SegurosRecibosSummaryMoneyTests(unittest.TestCase):
     def tearDownClass(cls):
         cls.httpd.shutdown()
         cls.conn.close()
+        if cls._prev_db_path is not None:
+            S.Handler.db_path = cls._prev_db_path
+        if cls._prev_ocr_db_path is not None:
+            S.Handler.ocr_db_path = cls._prev_ocr_db_path
         cls.tmp.cleanup()
 
     @classmethod
