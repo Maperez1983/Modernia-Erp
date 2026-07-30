@@ -71044,6 +71044,7 @@ class Handler(BaseHTTPRequestHandler):
                     pass
                 upsert_seguro_comision_contabilidad(conn, new_row, now, movimiento="emision")
                 seguros_sync_activation_action(conn, new_row, now)
+            conn.commit()
             json_response(
                 self,
                 {
@@ -71053,7 +71054,6 @@ class Handler(BaseHTTPRequestHandler):
                     "version_grupo": version_grupo,
                 },
             )
-            conn.commit()
             return
         elif parsed.path == "/api/seguros_delete":
             record_id = payload.get("id")
@@ -71226,8 +71226,8 @@ class Handler(BaseHTTPRequestHandler):
                     create_seguro_movimiento(conn, row, now, tipo="contratada", fecha_movimiento=now[:10], created_by=actor or "")
                 except Exception:
                     pass
-                json_response(self, {"ok": True, "id": record_id, "accion": "contratar"})
                 conn.commit()
+                json_response(self, {"ok": True, "id": record_id, "accion": "contratar"})
                 return
             if action in ("ACTIVAR", "ENTRADA VIGOR", "ENTRADA_EN_VIGOR", "PASAR EN VIGOR", "PASAR A EN VIGOR"):
                 current_state = normalize_seguro_estado_value(row["estado"])
@@ -71274,8 +71274,8 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 contabilidad_id = upsert_seguro_comision_contabilidad(conn, row, now, movimiento="emision", fecha=fecha_activacion)
-                json_response(self, {"ok": True, "id": record_id, "accion": "activar", "contabilidad_id": contabilidad_id})
                 conn.commit()
+                json_response(self, {"ok": True, "id": record_id, "accion": "activar", "contabilidad_id": contabilidad_id})
                 return
             if action in ("RENOVAR", "RENEW"):
                 fecha_renovacion = (payload.get("fecha_renovacion") or payload.get("fecha") or now[:10]).strip()
@@ -71330,8 +71330,8 @@ class Handler(BaseHTTPRequestHandler):
                     movimiento="renovacion",
                     fecha=fecha_renovacion,
                 )
-                json_response(self, {"ok": True, "id": record_id, "accion": "renovar", "contabilidad_id": contabilidad_id})
                 conn.commit()
+                json_response(self, {"ok": True, "id": record_id, "accion": "renovar", "contabilidad_id": contabilidad_id})
                 return
             if action in ("ANULAR", "CANCELAR", "CANCEL"):
                 fecha_baja = (payload.get("fecha_baja") or payload.get("fecha") or now[:10]).strip()
@@ -71367,8 +71367,8 @@ class Handler(BaseHTTPRequestHandler):
                     )
                 except Exception:
                     pass
-                json_response(self, {"ok": True, "id": record_id, "accion": "anular"})
                 conn.commit()
+                json_response(self, {"ok": True, "id": record_id, "accion": "anular"})
                 return
             json_response(self, {"error": "Accion no soportada"}, status=400)
             return
@@ -71427,8 +71427,8 @@ class Handler(BaseHTTPRequestHandler):
             if seguro_id:
                 seguro_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (seguro_id,)).fetchone()
                 log_seguro_event(conn, seguro_row, "reclamacion_alta", now, payload={"reclamacion_id": rec_id, "estado": estado})
-            json_response(self, {"ok": True, "id": rec_id})
             conn.commit()
+            json_response(self, {"ok": True, "id": rec_id})
             return
         elif parsed.path == "/api/seguros_reclamacion_update":
             rec_id = payload.get("id")
@@ -71457,8 +71457,8 @@ class Handler(BaseHTTPRequestHandler):
             if row["seguro_id"]:
                 seguro_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (row["seguro_id"],)).fetchone()
                 log_seguro_event(conn, seguro_row, "reclamacion_update", now, payload={"reclamacion_id": rec_id, "campos": sorted(list(updates.keys()))})
-            json_response(self, {"ok": True, "id": rec_id})
             conn.commit()
+            json_response(self, {"ok": True, "id": rec_id})
             return
         elif parsed.path == "/api/seguros_reclamacion_delete":
             rec_id = payload.get("id")
@@ -71475,8 +71475,8 @@ class Handler(BaseHTTPRequestHandler):
             if row["seguro_id"]:
                 seguro_row = conn.execute("SELECT * FROM seguros WHERE id = ?", (row["seguro_id"],)).fetchone()
                 log_seguro_event(conn, seguro_row, "reclamacion_delete", now, payload={"reclamacion_id": rec_id})
-            json_response(self, {"ok": True, "id": rec_id})
             conn.commit()
+            json_response(self, {"ok": True, "id": rec_id})
             return
         elif parsed.path == "/api/seguros_recibos":
             empresa_id = str(payload.get("empresa_id") or "").strip()
@@ -71612,8 +71612,8 @@ class Handler(BaseHTTPRequestHandler):
                     )
             except Exception:
                 pass
-            json_response(self, {"ok": True, "id": rec_id})
             conn.commit()
+            json_response(self, {"ok": True, "id": rec_id})
             return
         elif parsed.path == "/api/seguros_recibos_update":
             rec_id = str(payload.get("id") or "").strip()
@@ -71736,8 +71736,8 @@ class Handler(BaseHTTPRequestHandler):
                     )
             except Exception:
                 pass
-            json_response(self, {"ok": True, "id": rec_id})
             conn.commit()
+            json_response(self, {"ok": True, "id": rec_id})
             return
         elif parsed.path == "/api/seguros_recibos_delete":
             rec_id = str(payload.get("id") or "").strip()
@@ -71764,8 +71764,8 @@ class Handler(BaseHTTPRequestHandler):
                 )
             except Exception:
                 pass
-            json_response(self, {"ok": True, "id": rec_id})
             conn.commit()
+            json_response(self, {"ok": True, "id": rec_id})
             return
         elif parsed.path == "/api/seguros_siniestros":
             empresa_id = str(payload.get("empresa_id") or "").strip()
@@ -71845,8 +71845,8 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
-            json_response(self, {"ok": True, "id": sin_id})
             conn.commit()
+            json_response(self, {"ok": True, "id": sin_id})
             return
         elif parsed.path == "/api/seguros_siniestros_update":
             sin_id = str(payload.get("id") or "").strip()
@@ -71901,8 +71901,8 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE seguros_siniestros SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
-            json_response(self, {"ok": True, "id": sin_id})
             conn.commit()
+            json_response(self, {"ok": True, "id": sin_id})
             return
         elif parsed.path == "/api/seguros_siniestros_delete":
             sin_id = str(payload.get("id") or "").strip()
@@ -71916,8 +71916,8 @@ class Handler(BaseHTTPRequestHandler):
             if not self._enforce_row_empresa_scope(conn, row, "Siniestro"):
                 return
             conn.execute("DELETE FROM seguros_siniestros WHERE id = ?", (sin_id,))
-            json_response(self, {"ok": True, "id": sin_id})
             conn.commit()
+            json_response(self, {"ok": True, "id": sin_id})
             return
         elif parsed.path == "/api/seguros_ipid_register":
             seguro_id = payload.get("seguro_id")
@@ -72347,8 +72347,8 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
-            json_response(self, {"ok": True})
             conn.commit()
+            json_response(self, {"ok": True})
             return
         elif parsed.path == "/api/seguros_idd_update":
             seguro_id = str(payload.get("seguro_id") or payload.get("id") or "").strip()
@@ -72654,6 +72654,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as exc:
                 json_response(self, {"error": str(exc)}, status=400)
                 return
+            conn.commit()
             json_response(
                 self,
                 {
@@ -72664,7 +72665,6 @@ class Handler(BaseHTTPRequestHandler):
                     "errors": result.get("errors") or [],
                 },
             )
-            conn.commit()
             return
         elif parsed.path == "/api/seguros_campanas_update":
             if not self._enforce_global_catalog_write(conn, "Campaña"):
@@ -73563,8 +73563,8 @@ class Handler(BaseHTTPRequestHandler):
                     import_result = import_legal_radar_items_to_library(conn, area=area, limit=LEGAL_RADAR_AUTO_IMPORT_LIMIT, now=now)
                 except Exception as exc:
                     import_result = {"error": str(exc)}
-            json_response(self, {"ok": True, **result, "import_library": import_result})
             conn.commit()
+            json_response(self, {"ok": True, **result, "import_library": import_result})
             return
         elif parsed.path == "/api/legal_radar_import":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -73655,8 +73655,8 @@ class Handler(BaseHTTPRequestHandler):
                 ),
             )
             audit_event(conn, empresa["id"], "legal_radar", item_id, "Crear novedad legal", usuario=payload.get("usuario"), detalles={"area": area, "titulo": titulo}, now=now)
-            json_response(self, {"ok": True, "id": item_id})
             conn.commit()
+            json_response(self, {"ok": True, "id": item_id})
             return
         elif parsed.path == "/api/legal_radar_items_update":
             record_id = str(payload.get("id") or "").strip()
@@ -73705,8 +73705,8 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             )
             audit_event(conn, empresa["id"], "legal_radar", record_id, "Actualizar novedad legal", usuario=payload.get("usuario"), detalles={"area": normalize_legal_area(payload.get("area") or "inmobiliaria"), "estado": updates.get("estado")}, now=now)
-            json_response(self, {"ok": True, "id": record_id})
             conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/compraventas":
             try:
@@ -77526,6 +77526,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Vínculo no encontrado"}, status=404)
                 return
             conn.execute("DELETE FROM clientes_empresas WHERE id = ?", (rel_id,))
+            conn.commit()
             json_response(
                 self,
                 {
@@ -77536,7 +77537,6 @@ class Handler(BaseHTTPRequestHandler):
                     "servicio": row["servicio"],
                 },
             )
-            conn.commit()
             return
         elif parsed.path == "/api/cliente_update":
             cliente_id = payload.get("id")
