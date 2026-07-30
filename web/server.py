@@ -19294,16 +19294,25 @@ def process_workspace_factura_ocr_job(payload, conn, now="now"):
     return result
 
 
-def enqueue_ocr_job(db_path, kind, payload):
+def enqueue_ocr_job(db_path, kind, payload, user_id=""):
+    """Encola un job de OCR.
+
+    `user_id` marca quién lo pidió para que /api/ocr_job no entregue el resultado
+    (que contiene el texto íntegro del documento) a otro usuario distinto.
+    """
     job_id = os.urandom(16).hex()
     now = datetime.now(timezone.utc).isoformat()
     conn = open_sqlite_conn(db_path, with_row_factory=False)
+    try:
+        ensure_column(conn, "ocr_jobs", "user_id", "user_id TEXT")
+    except Exception:
+        pass
     conn.execute(
         """
-        INSERT INTO ocr_jobs (id, kind, status, payload_json, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO ocr_jobs (id, kind, status, payload_json, user_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (job_id, kind, "pending", json.dumps(payload), now, now),
+        (job_id, kind, "pending", json.dumps(payload), str(user_id or ""), now, now),
     )
     conn.commit()
     conn.close()
@@ -68931,7 +68940,23 @@ class Handler(BaseHTTPRequestHandler):
                 if not (payload.get("file_base64") or payload.get("data") or payload.get("s3_key")):
                     json_response(self, {"error": "Archivo requerido"}, status=400)
                     return
-                job_id = enqueue_ocr_job(Handler.ocr_db_path, "seguros", payload)
+                _ocr_session = getattr(self, "auth_session", None) or self._current_session()
+                # El worker procesa el job SIN sesión, y decode_seguros_payload solo
+                # comprueba la visibilidad de la key cuando hay sesión. Sin validar aquí,
+                # se podía encolar la `s3_key` de otra empresa y leer su texto OCR
+                # (con la póliza entera: NIF, dirección, teléfono) vía /api/ocr_job.
+                _s3_key = str(payload.get("s3_key") or "").strip()
+                if _s3_key:
+                    ok_key, err_key = _s3_key_visible_for_user(conn, _ocr_session, _s3_key)
+                    if not ok_key:
+                        json_response(self, {"error": err_key or "No autorizado"}, status=403)
+                        return
+                job_id = enqueue_ocr_job(
+                    Handler.ocr_db_path,
+                    "seguros",
+                    payload,
+                    user_id=str((_ocr_session or {}).get("user_id") or "").strip(),
+                )
                 json_response(self, {"job_id": job_id})
                 return
             except Exception as exc:
@@ -82936,9 +82961,13 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 ocr_conn = open_sqlite_conn(self.ocr_db_path, with_row_factory=True)
                 self._track_conn(ocr_conn)
+                try:
+                    ensure_column(ocr_conn, "ocr_jobs", "user_id", "user_id TEXT")
+                except Exception:
+                    pass
                 row = ocr_conn.execute(
                     """
-                    SELECT id, kind, status, result_json, error, created_at, started_at, finished_at
+                    SELECT id, kind, status, result_json, error, created_at, started_at, finished_at, user_id
                     FROM ocr_jobs
                     WHERE id = ?
                     """,
@@ -82964,6 +82993,19 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "job no encontrado"}, status=404)
                 return
+            # El resultado contiene el texto íntegro del documento: solo lo ve quien
+            # pidió el OCR (o un actor privilegiado). Los jobs antiguos no tienen
+            # user_id, así que para esos se mantiene el comportamiento previo.
+            _job_owner = str(row_value(row, "user_id", "") or "").strip()
+            if _job_owner:
+                _job_session = getattr(self, "auth_session", None) or self._current_session()
+                _job_viewer = str((_job_session or {}).get("user_id") or "").strip()
+                if _job_viewer != _job_owner:
+                    _job_conn = get_db(self.db_path)
+                    self._track_conn(_job_conn)
+                    if not workspace_actor_is_privileged(_job_conn, _job_session):
+                        json_response(self, {"error": "No autorizado"}, status=403)
+                        return
             result = None
             if row["result_json"]:
                 try:
