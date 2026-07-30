@@ -951,6 +951,10 @@ RRHH_ACCESS_LOG_ENABLED = os.environ.get("APP_RRHH_ACCESS_LOG", "1").strip().low
 # (APP_SEGUROS_OCR_EXTERNAL=0 lo corta en toda la instalación) y cada envío queda auditado.
 # Para pasar a opt-in estricto basta cambiar el valor por defecto a "0".
 SEGUROS_OCR_EXTERNAL_ENABLED = os.environ.get("APP_SEGUROS_OCR_EXTERNAL", "1").strip().lower() not in ("0", "false", "no", "off")
+# RGPD (accountability): registrar las CONSULTAS de siniestros y reclamaciones, que en
+# vida/salud/accidentes pueden incluir datos del art. 9. Desactivable con
+# APP_SEGUROS_ACCESS_LOG=0 si el volumen fuera un problema.
+SEGUROS_ACCESS_LOG_ENABLED = os.environ.get("APP_SEGUROS_ACCESS_LOG", "1").strip().lower() not in ("0", "false", "no", "off")
 # RGPD (limitación de conservación, art. 5.1.e): horas que se guardan los jobs de OCR ya
 # terminados, que contienen el documento y su transcripción. 0 = no purgar.
 try:
@@ -17225,6 +17229,41 @@ def seguros_ocr_external_allowed(payload, conn=None, empresa_id=""):
             # Si no podemos leer la preferencia no la inventamos: seguimos con el flag global.
             pass
     return True, ""
+
+
+def log_seguros_sensitive_read(conn, empresa_id, entidad, session=None, total=0, filtros=None):
+    """RGPD (accountability, art. 5.2 / 32): registra la CONSULTA de siniestros y
+    reclamaciones.
+
+    Los siniestros y reclamaciones de vida, salud y accidentes pueden contener datos de
+    categoría especial (art. 9), y sin traza de lectura no hay forma de detectar ni
+    acreditar un acceso indebido. RRHH ya tenía este control (`log_rrhh_read_access`),
+    pero va por la cadena tamper-evident del workspace y estos endpoints se acotan por
+    empresa, así que aquí se usa la auditoría general.
+
+    Se anota UNA entrada por consulta (con el número de filas devueltas), no una por
+    fila, para que el registro sea proporcionado.
+    """
+    if not SEGUROS_ACCESS_LOG_ENABLED:
+        return
+    if not session or not empresa_id:
+        return
+    try:
+        detalles = {"filas": int(total or 0)}
+        if isinstance(filtros, dict):
+            detalles.update({k: v for k, v in filtros.items() if v})
+        audit_event(
+            conn,
+            str(empresa_id or ""),
+            str(entidad or "seguros"),
+            "",
+            "lectura",
+            usuario=_session_user_label(session),
+            detalles=detalles,
+        )
+        conn.commit()
+    except Exception:
+        _rollback_best_effort(conn)
 
 
 def log_seguros_ocr_external_transfer(conn, empresa_id, provider, raw_bytes, session=None, extra=None):
@@ -84711,6 +84750,14 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 values,
             ).fetchall()
+            log_seguros_sensitive_read(
+                conn,
+                empresa_id,
+                "seguros_siniestros",
+                session=getattr(self, "auth_session", None) or self._current_session(),
+                total=len(rows or []),
+                filtros={"q": q, "seguro_id": seguro_id, "cliente_id": cliente_id},
+            )
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
@@ -85197,6 +85244,14 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 values,
             ).fetchall()
+            log_seguros_sensitive_read(
+                conn,
+                empresa_id or (row_value(rows[0], "empresa_id", "") if rows else ""),
+                "seguros_reclamaciones",
+                session=getattr(self, "auth_session", None) or self._current_session(),
+                total=len(rows or []),
+                filtros={"seguro_id": seguro_id, "cliente_id": cliente_id},
+            )
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
