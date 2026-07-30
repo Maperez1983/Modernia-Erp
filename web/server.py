@@ -945,6 +945,24 @@ TIME_GEOLOCATION_ENABLED = os.environ.get("APP_TIME_GEOLOCATION_ENABLED", "0").s
 # sensibles de RRHH (ficha del trabajador, documentos/nóminas). Activado por defecto; desactivable con
 # APP_RRHH_ACCESS_LOG=0 si el volumen fuera un problema.
 RRHH_ACCESS_LOG_ENABLED = os.environ.get("APP_RRHH_ACCESS_LOG", "1").strip().lower() not in ("0", "false", "no", "off")
+# RGPD (encargados del tratamiento y transferencias, art. 28 / 44 y ss.): el OCR de seguros puede
+# enviar la póliza completa a OpenAI y Google Document AI. Se mantiene ACTIVO por defecto para no
+# degradar en silencio la extracción que ya está en uso, pero ahora es un interruptor real
+# (APP_SEGUROS_OCR_EXTERNAL=0 lo corta en toda la instalación) y cada envío queda auditado.
+# Para pasar a opt-in estricto basta cambiar el valor por defecto a "0".
+SEGUROS_OCR_EXTERNAL_ENABLED = os.environ.get("APP_SEGUROS_OCR_EXTERNAL", "1").strip().lower() not in ("0", "false", "no", "off")
+# RGPD (limitación de conservación, art. 5.1.e): horas que se guardan los jobs de OCR ya
+# terminados, que contienen el documento y su transcripción. 0 = no purgar.
+try:
+    OCR_JOBS_RETENTION_HOURS = int(os.environ.get("APP_OCR_JOBS_RETENTION_HOURS", "24") or 24)
+except Exception:
+    OCR_JOBS_RETENTION_HOURS = 24
+# Tope de tamaño del documento que entra al OCR de seguros. El límite del POST no cubre la
+# vía `s3_key`, que lee el objeto completo del bucket.
+try:
+    SEGUROS_OCR_MAX_BYTES = int(os.environ.get("APP_MAX_POST_BYTES", str(10 * 1024 * 1024)) or (10 * 1024 * 1024))
+except Exception:
+    SEGUROS_OCR_MAX_BYTES = 10 * 1024 * 1024
 WORKSPACE_TIME_SWEEP_STATE = {
     "last_run_at": "",
     "last_error": "",
@@ -13802,15 +13820,24 @@ def s3_get_object_bytes(key):
 
 def decode_seguros_payload(payload, *, conn=None, session=None):
     raw_bytes, mime, source_hint = decode_document_payload(payload, conn=conn, session=session)
-    if not mime:
-        if raw_bytes.startswith(b"%PDF"):
-            mime = "application/pdf"
-        elif raw_bytes.startswith(b"\xff\xd8\xff"):
-            mime = "image/jpeg"
-        elif raw_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
-            mime = "image/png"
-        else:
-            mime = "application/pdf"
+    # El tipo se decide SIEMPRE por los magic bytes reales, no por la extensión ni por
+    # lo que diga el cliente: el contenido puede acabar enviado a OpenAI/Google DocAI y
+    # antes cualquier binario no reconocido se etiquetaba como "application/pdf" y salía
+    # igualmente (minimización, art. 5.1.b/c).
+    if raw_bytes.startswith(b"%PDF"):
+        mime = "application/pdf"
+    elif raw_bytes.startswith(b"\xff\xd8\xff"):
+        mime = "image/jpeg"
+    elif raw_bytes.startswith(b"\x89PNG\r\n\x1a\n"):
+        mime = "image/png"
+    else:
+        raise ValueError("El documento debe ser un PDF, JPEG o PNG.")
+    # La vía `s3_key` no pasa por el límite de tamaño del POST (APP_MAX_POST_BYTES):
+    # ponemos el mismo tope aquí para no transferir objetos enormes a un tercero.
+    if len(raw_bytes) > SEGUROS_OCR_MAX_BYTES:
+        raise ValueError(
+            f"El documento supera el máximo admitido ({SEGUROS_OCR_MAX_BYTES // (1024 * 1024)} MB)."
+        )
     return raw_bytes, mime, source_hint
 
 
@@ -17165,6 +17192,75 @@ def resolve_seguros_ocr_cliente_id(conn, empresa_id, nif="", nombre=""):
     return None
 
 
+def seguros_ocr_external_allowed(payload, conn=None, empresa_id=""):
+    """¿Se puede enviar este documento a un proveedor externo (OpenAI / Google DocAI)?
+
+    Antes la única condición era que existiese la API key, así que la póliza completa
+    (tomador, NIF, dirección, matrícula, beneficiarios) salía a un tercero sin control
+    ni forma de acreditarlo. Ahora hay tres niveles, de más general a más concreto:
+
+    1. `APP_SEGUROS_OCR_EXTERNAL=0` desactiva el envío en toda la instalación.
+    2. La empresa puede quedar excluida (`empresas.seguros_ocr_externo` = 0).
+    3. La petición puede pedir explícitamente que no se envíe (`allow_external: false`).
+    """
+    if not SEGUROS_OCR_EXTERNAL_ENABLED:
+        return False, "envio_externo_desactivado_instalacion"
+    if isinstance(payload, dict):
+        raw = payload.get("allow_external")
+        if raw is None:
+            raw = payload.get("use_external")
+        if raw is not None and str(raw).strip().lower() in ("0", "false", "no", "off"):
+            return False, "envio_externo_rechazado_en_peticion"
+    eid = str(empresa_id or "").strip()
+    if conn is not None and eid:
+        try:
+            row = conn.execute(
+                "SELECT seguros_ocr_externo FROM empresas WHERE id = ? LIMIT 1",
+                (eid,),
+            ).fetchone()
+            valor = row_value(row, "seguros_ocr_externo", None) if row is not None else None
+            if valor is not None and str(valor).strip().lower() in ("0", "false", "no", "off"):
+                return False, "envio_externo_desactivado_para_la_empresa"
+        except Exception:
+            # Si no podemos leer la preferencia no la inventamos: seguimos con el flag global.
+            pass
+    return True, ""
+
+
+def log_seguros_ocr_external_transfer(conn, empresa_id, provider, raw_bytes, session=None, extra=None):
+    """Deja constancia de cada transferencia de un documento a un tercero.
+
+    Sin esto no se puede responder a un derecho de acceso ni acreditar ante la AEPD
+    quién envió qué documento, cuándo y a qué encargado del tratamiento (art. 5.2 y 30).
+    Se registra el hash del contenido, nunca el documento.
+    """
+    if conn is None:
+        return
+    try:
+        detalles = {
+            "proveedor": str(provider or ""),
+            "bytes": int(len(raw_bytes or b"")),
+            "sha256": hashlib.sha256(raw_bytes or b"").hexdigest(),
+        }
+        if isinstance(extra, dict):
+            detalles.update(extra)
+        audit_event(
+            conn,
+            str(empresa_id or ""),
+            "seguros_ocr",
+            detalles["sha256"][:32],
+            "transferencia_a_proveedor_ia",
+            usuario=_session_user_label(session) if session else None,
+            detalles=detalles,
+        )
+    except Exception:
+        # Nunca romper el OCR por un fallo al auditar, pero sí dejar rastro en el log.
+        try:
+            print(f"[WARN] no se pudo auditar la transferencia OCR a {provider}")
+        except Exception:
+            pass
+
+
 def process_seguros_ocr(payload, conn, *, session=None):
     raw_bytes, mime, payload_hint = decode_seguros_payload(payload, conn=conn, session=session)
     fast_mode = str(payload.get("fast_mode") or "").strip().lower() in ("1", "true", "yes", "on")
@@ -17185,6 +17281,8 @@ def process_seguros_ocr(payload, conn, *, session=None):
     required_keys = ("tomador", "poliza_numero", "compania", "fecha_efecto")
     ai_used = False
     ai_error = ""
+    external_ok = True
+    external_block_reason = ""
     field_sources = {}
     candidate_fields = []
     def candidate_score(quality):
@@ -17253,7 +17351,9 @@ def process_seguros_ocr(payload, conn, *, session=None):
                 err_detail = ocr_err
         doc_text = ""
         missing_required = any(not fields.get(key) for key in required_keys)
-        if (missing_required or candidate_score(best_quality) < 250) and docai_available() and not fast_mode:
+        external_ok, external_block_reason = seguros_ocr_external_allowed(payload, conn, empresa_id)
+        if (missing_required or candidate_score(best_quality) < 250) and docai_available() and not fast_mode and external_ok:
+            log_seguros_ocr_external_transfer(conn, empresa_id, "google_docai", raw_bytes, session=session)
             doc_text, doc_fields, doc_err = ocr_image_docai(raw_bytes, mime)
             if doc_err and not err_detail:
                 err_detail = doc_err
@@ -17314,7 +17414,10 @@ def process_seguros_ocr(payload, conn, *, session=None):
             elif quick_err and not err_detail:
                 err_detail = quick_err
             missing_required = any(not fields.get(key) for key in required_keys)
-        if (not fast_mode) and openai_available() and (missing_required or candidate_score(best_quality) < 320):
+        if (not fast_mode) and openai_available() and external_ok and (missing_required or candidate_score(best_quality) < 320):
+            log_seguros_ocr_external_transfer(
+                conn, empresa_id, "openai", raw_bytes, session=session, extra={"modo": "vision+texto"}
+            )
             ai_text = text or ""
             if doc_text and doc_text.strip():
                 ai_text = f"{ai_text}\n\n{doc_text}".strip()
@@ -17493,6 +17596,9 @@ def process_seguros_ocr(payload, conn, *, session=None):
             "cliente_match": cliente_match,
             "ai_used": ai_used,
             "ai_error": ai_error,
+            # Si no se envió a terceros, decir por qué: así la peor extracción no se
+            # interpreta como un fallo del OCR.
+            "external_skipped": external_block_reason or "",
         }
     finally:
         if tmp_path and os.path.exists(tmp_path):
@@ -19377,8 +19483,34 @@ def claim_next_ocr_job(conn):
     return None
 
 
+def purge_ocr_jobs(conn):
+    """RGPD (limitación de conservación, art. 5.1.e): retirar el rastro de los OCR viejos.
+
+    `ocr_jobs` acumulaba el PDF entero en base64 (`payload_json`) y la transcripción
+    completa del documento (`result_json`) sin ninguna purga, en una base paralela
+    fuera del alcance del borrado y de los derechos del interesado.
+    """
+    if OCR_JOBS_RETENTION_HOURS <= 0:
+        return 0
+    limite = (datetime.now(timezone.utc) - timedelta(hours=OCR_JOBS_RETENTION_HOURS)).isoformat()
+    borrados = 0
+    try:
+        cur = conn.execute(
+            "DELETE FROM ocr_jobs WHERE status IN ('done','error') AND COALESCE(finished_at, updated_at, created_at) < ?",
+            (limite,),
+        )
+        borrados = int(getattr(cur, "rowcount", 0) or 0)
+        conn.commit()
+    except Exception:
+        pass
+    return borrados
+
+
 def update_ocr_job(conn, job_id, status, result=None, error=None):
     now = datetime.now(timezone.utc).isoformat()
+    # El documento de origen (PDF en base64) ya no hace falta cuando el job termina:
+    # dejarlo guardado era conservar una copia íntegra de la póliza indefinidamente.
+    drop_payload = str(status or "") in ("done", "error")
     conn.execute(
         """
         UPDATE ocr_jobs
@@ -19388,7 +19520,8 @@ def update_ocr_job(conn, job_id, status, result=None, error=None):
                 WHEN started_at IS NULL THEN ?
                 ELSE started_at
             END,
-            finished_at = CASE WHEN ? IN ('done','error') THEN ? ELSE finished_at END
+            finished_at = CASE WHEN ? IN ('done','error') THEN ? ELSE finished_at END,
+            payload_json = CASE WHEN ? THEN '{}' ELSE payload_json END
         WHERE id = ?
         """,
         (
@@ -19401,6 +19534,7 @@ def update_ocr_job(conn, job_id, status, result=None, error=None):
             now,
             status,
             now,
+            1 if drop_payload else 0,
             job_id,
         ),
     )
@@ -19414,6 +19548,11 @@ def ocr_worker_loop(jobs_db_path, main_db_path):
             jobs_conn = open_sqlite_conn(jobs_db_path, with_row_factory=True)
             row = claim_next_ocr_job(jobs_conn)
             if not row:
+                # Cola vacía: aprovechamos para retirar los jobs viejos (documento + transcripción).
+                try:
+                    purge_ocr_jobs(jobs_conn)
+                except Exception:
+                    pass
                 jobs_conn.close()
                 time.sleep(0.6)
                 continue
@@ -36519,6 +36658,9 @@ def ensure_tables(db_path):
     except Exception:
         pass
     ensure_column(conn, "empresas", "logo_url", "logo_url TEXT")
+    # RGPD: permite excluir a una empresa del envío de documentos a proveedores de IA
+    # (OpenAI / Google DocAI) en el OCR de seguros. NULL = se aplica el flag global.
+    ensure_column(conn, "empresas", "seguros_ocr_externo", "seguros_ocr_externo INTEGER")
     ensure_column(conn, "empresas", "razon_social", "razon_social TEXT")
     ensure_column(conn, "empresas", "nif", "nif TEXT")
     ensure_column(conn, "empresas", "direccion", "direccion TEXT")
@@ -55544,6 +55686,27 @@ class Handler(BaseHTTPRequestHandler):
             return self._service_from_tabla(tabla)
         return ""
 
+    def _enforce_global_catalog_write(self, conn, label="Catálogo"):
+        """Protege los catálogos COMPARTIDOS entre todas las empresas.
+
+        `seguros_comisiones` y `seguros_campanas` no tienen columna de empresa: una fila
+        la ven y la usan todos los tenants. Modificar o borrar una regla de comisión
+        cambia además la conciliación de dinero (comisión esperada) de todo el mundo,
+        así que estas escrituras exigen un actor privilegiado.
+        """
+        session = getattr(self, "auth_session", None) or self._current_session()
+        try:
+            if workspace_actor_is_privileged(conn, session):
+                return True
+        except Exception:
+            pass
+        json_response(
+            self,
+            {"error": f"{label} compartido entre empresas: requiere permisos de administración"},
+            status=403,
+        )
+        return False
+
     def _enforce_row_empresa_scope(self, conn, row, label="Registro", empresa_id=None):
         """Aislamiento multi-tenant POR FILA.
 
@@ -71729,7 +71892,26 @@ class Handler(BaseHTTPRequestHandler):
             if not self._enforce_row_empresa_scope(conn, row, "Póliza"):
                 return
             ipid_id = os.urandom(16).hex()
-            fecha_entrega = (payload.get("fecha_entrega") or payload.get("fecha") or now[:10]).strip()
+            # La entrega del IPID es evidencia precontractual exigible por la DGSFP
+            # (art. 20.5 IDD / RDL 3/2020). Antes la fecha Y el asesor venían del
+            # navegador, así que se podía fabricar a posteriori con cualquier nombre y
+            # cualquier fecha. Ahora el autor sale de la sesión y no se admite futuro.
+            # Ojo: en este handler `now` es la cadena literal "now" (va a datetime(?) de
+            # sqlite), así que no sirve para fechas; hay que calcular el día de verdad.
+            _hoy = datetime.now(timezone.utc).date().isoformat()
+            fecha_entrega = (payload.get("fecha_entrega") or payload.get("fecha") or _hoy).strip()
+            if fecha_entrega > _hoy:
+                json_response(
+                    self,
+                    {"error": "La fecha de entrega del IPID no puede ser futura."},
+                    status=400,
+                )
+                return
+            _ipid_actor = (
+                _session_user_label(getattr(self, "auth_session", None) or self._current_session())
+                or str(payload.get("usuario") or "").strip()
+                or "Sistema"
+            )
             conn.execute(
                 """
                 INSERT INTO seguros_ipid_log (
@@ -71748,11 +71930,17 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("documento_url") or row["poliza_url"],
                     fecha_entrega,
                     payload.get("metodo") or "digital",
-                    payload.get("usuario") or "Sistema",
+                    _ipid_actor,
                     now,
                 ),
             )
-            log_seguro_event(conn, row, "ipid_entregado", now, payload={"ipid_id": ipid_id, "fecha": fecha_entrega})
+            log_seguro_event(
+                conn,
+                row,
+                "ipid_entregado",
+                now,
+                payload={"ipid_id": ipid_id, "fecha": fecha_entrega, "usuario": _ipid_actor},
+            )
             json_response(self, {"ok": True, "id": ipid_id})
             conn.commit()
             return
@@ -72312,9 +72500,14 @@ class Handler(BaseHTTPRequestHandler):
                 consent_json = str(consent)
             metodo = str(payload.get("metodo") or "").strip()
             existing = conn.execute(
-                "SELECT id FROM seguros_consentimientos WHERE empresa_id = ? AND cliente_id = ?",
+                "SELECT id, consent_json FROM seguros_consentimientos WHERE empresa_id = ? AND cliente_id = ?",
                 (empresa_id, cliente_id),
             ).fetchone()
+            # La tabla tiene UNIQUE (empresa_id, cliente_id): una sola fila por cliente y
+            # se sobrescribe. Guardamos el valor anterior en la auditoría porque la carga
+            # de la prueba del consentimiento es del responsable (art. 7.1 RGPD): sin esto
+            # no se puede acreditar cómo se otorgó ni cuándo se revocó.
+            consent_anterior = str(row_value(existing, "consent_json", "") or "") if existing else ""
             if existing:
                 record_id = str(existing["id"] or "").strip()
                 conn.execute(
@@ -72350,7 +72543,13 @@ class Handler(BaseHTTPRequestHandler):
                     record_id,
                     accion,
                     usuario=actor,
-                    detalles={"cliente_id": cliente_id, "seguro_id": seguro_id, "metodo": metodo},
+                    detalles={
+                        "cliente_id": cliente_id,
+                        "seguro_id": seguro_id,
+                        "metodo": metodo,
+                        "consent_anterior": consent_anterior,
+                        "consent_nuevo": consent_json,
+                    },
                     now=now,
                 )
             except Exception:
@@ -72427,6 +72626,8 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             return
         elif parsed.path == "/api/seguros_campanas_update":
+            if not self._enforce_global_catalog_write(conn, "Campaña"):
+                return
             record_id = payload.get("id")
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
@@ -72467,6 +72668,8 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             )
         elif parsed.path == "/api/seguros_campanas_delete":
+            if not self._enforce_global_catalog_write(conn, "Campaña"):
+                return
             record_id = payload.get("id")
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
@@ -72500,6 +72703,8 @@ class Handler(BaseHTTPRequestHandler):
                 ),
             )
         elif parsed.path == "/api/seguros_comisiones_update":
+            if not self._enforce_global_catalog_write(conn, "Regla de comisión"):
+                return
             record_id = payload.get("id")
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
@@ -72520,6 +72725,8 @@ class Handler(BaseHTTPRequestHandler):
                 values,
             )
         elif parsed.path == "/api/seguros_comisiones_delete":
+            if not self._enforce_global_catalog_write(conn, "Regla de comisión"):
+                return
             record_id = payload.get("id")
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
