@@ -61,3 +61,27 @@ def test_service_worker_shell_matches_index_asset_versions() -> None:
             f"sw.js precachea {filename}?v={sw_version} pero index.html pide "
             f"{sorted(index_versions)}"
         )
+
+
+def test_service_worker_shell_urls_exist_on_disk() -> None:
+    """Todo lo que precachea el SW tiene que existir.
+
+    `install` cachea la lista entera; si un recurso no está, la instalación falla
+    y el service worker no llega a activarse nunca.
+    """
+    sw_js = (ROOT / "web" / "sw.js").read_text(encoding="utf-8")
+
+    shell_block = re.search(r"const SHELL_URLS = \[(.*?)\];", sw_js, re.S)
+    assert shell_block, "No se encontró SHELL_URLS en web/sw.js"
+
+    missing = []
+    for entry in re.findall(r'"([^"]+)"', shell_block.group(1)):
+        path = entry.split("?", 1)[0]
+        if path == "/":
+            path = "/index.html"
+        relative = path.lstrip("/")
+        # La SPA vive en `web/` pero `/assets/` se sirve desde la raíz del repo.
+        if not ((ROOT / "web" / relative).exists() or (ROOT / relative).exists()):
+            missing.append(entry)
+
+    assert not missing, f"SHELL_URLS apunta a recursos que no existen: {missing}"

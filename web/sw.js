@@ -24,12 +24,10 @@ const SHELL_URLS = [
   "/manifest.webmanifest?v=18",
   "/assets/verifika2/verifika2_wordmark_dark.svg",
   "/icons/catastro.png?v=28",
-  "/assets/verifika2/verifika2_mark.svg",
   "/assets/verifika2/verifika2_badge_gold.svg",
   "/assets/verifika2/verifika2_badge_silver.svg",
   "/assets/verifika2/verifika2_badge_carbon.svg",
   "/icons/ios/v28/apple-touch-icon-120.png",
-  "/icons/ios/v28/apple-touch-icon-152.png",
   "/icons/ios/v28/apple-touch-icon-167.png",
   "/icons/ios/v28/icon-192.png",
   "/icons/ios/v28/icon-512.png",
@@ -86,7 +84,10 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     (async () => {
       const cache = await caches.open(SHELL_CACHE);
-      await cache.addAll(SHELL_URLS);
+      // `addAll` es atómico: un solo 404 en la lista aborta la instalación entera y
+      // el SW no llega a activarse nunca. Precacheamos uno a uno para que un asset
+      // que falte degrade el shell offline en vez de dejar la PWA sin worker.
+      await Promise.allSettled(SHELL_URLS.map((url) => cache.add(url)));
       await self.skipWaiting();
     })()
   );
