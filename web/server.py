@@ -44193,9 +44193,16 @@ def _normalize_workspace_member_role(value):
     return "Miembro"
 
 
+# Roles que otorgan escritura, en su forma ya normalizada por `normalize_lookup_text`.
+WORKSPACE_MEMBER_WRITE_ROLES = {"OWNER", "PROPIETARIO", "ADMIN", "ADMINISTRADOR", "MIEMBRO", "MEMBER"}
+
+
 def workspace_member_can_write(role):
-    role_norm = _normalize_workspace_member_role(role)
-    return role_norm in {"Owner", "Admin", "Miembro"}
+    # No pasamos por `_normalize_workspace_member_role`: ése manda cualquier valor
+    # desconocido a "Miembro" para no persistir basura, y "Miembro" escribe, así que
+    # usarlo aquí concede escritura a un rol que nadie reconoce. Para decidir permisos
+    # el rol se reconoce explícitamente o se deniega.
+    return normalize_lookup_text(role) in WORKSPACE_MEMBER_WRITE_ROLES
 
 
 def fetch_workspace_member(conn, workspace_id, user_id):
