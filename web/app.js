@@ -76420,7 +76420,7 @@ const runGestoriaFacturaOcr = async ({
     return;
   }
   const file = fileInput.files[0];
-  const dataUrl = await readFileAsDataUrl(file);
+  const dataUrl = await fileToBase64(file);
   const payload = {
     empresa_nombre: FINCAS_COMPANY,
     file_base64: dataUrl,
