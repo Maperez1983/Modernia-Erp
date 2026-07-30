@@ -14473,7 +14473,11 @@ const renderWorkspaceHomeAlerts = () => {
       ? (exit ? "Registro horario · Entrada y salida registradas" : "Registro horario · Entrada registrada")
       : "Registro horario · Sin entrada registrada hoy";
     const detail = !hasFicha
-      ? "Pide a administración que te vincule a una ficha de registro horario."
+      ? // Quien gestiona RRHH puede vincularse solo: mandarle "pide a administración"
+        // es mandarle a pedírselo a sí mismo.
+        isWorkspaceRrhhManager()
+        ? "No tienes ficha de registro horario. Créala o vincula tu usuario desde RRHH · Equipo."
+        : "Pide a administración que te vincule a una ficha de registro horario."
       : entry
       ? (exit ? `Entrada: ${entry} · Salida: ${exit}` : `Entrada: ${entry} · Salida pendiente`)
       : "Registra tu entrada para que quede constancia del día.";

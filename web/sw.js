@@ -20,7 +20,7 @@ const SHELL_URLS = [
   "/app-auth.js?v=17",
   "/app-routing.js?v=13",
   "/app_shared.js?v=2",
-  "/app.js?v=804",
+  "/app.js?v=805",
   "/manifest.webmanifest?v=18",
   "/assets/verifika2/verifika2_wordmark_dark.svg",
   "/icons/catastro.png?v=28",
