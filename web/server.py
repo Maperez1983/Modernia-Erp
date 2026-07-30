@@ -65524,6 +65524,15 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id y nombre requeridos"}, status=400)
                 return
             empresa_id = str(payload.get("empresa_id") or "").strip() or None
+            # El selector de empresa del formulario RRHH emite `workspace_companies.id`,
+            # pero esta tabla referencia `empresas(id)`. Sin traducirlo, guardar una ficha
+            # con empresa elegida rompía con "FOREIGN KEY constraint failed" (500).
+            # `resolve_request_legacy_empresa_id` no cubre este caso porque solo traduce
+            # el `empresa_id` suelto cuando NO llega `workspace_id`, y aquí siempre llega.
+            if empresa_id:
+                legacy_empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, empresa_id)
+                if legacy_empresa_id:
+                    empresa_id = legacy_empresa_id
             manual_flag = 1
             manual_raw = str(payload.get("empresa_manual") or "").strip().lower()
             if manual_raw in {"0", "false", "no", "off"}:
