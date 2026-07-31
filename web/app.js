@@ -10729,6 +10729,85 @@ const renderWorkspaceCommercialPack = (workspace = {}, packageData = {}) => {
   `;
 };
 
+// === KPIs de la ficha del trabajador ===
+// Salario, coste social, horas y vacaciones. Cuatro son números sueltos y van como
+// tarjetas: convertirlos en gráfico no añadiría nada. Solo las vacaciones piden
+// forma, y la correcta es una barra de parte-sobre-total (disfrutadas sobre las
+// pactadas), no un gráfico de barras múltiple.
+// Colores: slots 1 y 2 de la paleta categórica validada (azul/naranja). El verde de
+// la marca no sirve aquí — lee como gris (croma 0.054) y el ámbar no llega a 3:1
+// contra el fondo. Verificado con el validador, en claro y en oscuro.
+const RRHH_COLOR_DISFRUTADAS = "#2a78d6";
+const RRHH_COLOR_PENDIENTES = "#eb6834";
+
+const eurosCortos = (n) => {
+  const v = Number(n) || 0;
+  return v >= 1000 ? `${(v / 1000).toFixed(1).replace(".0", "")} k€` : `${v.toFixed(0)} €`;
+};
+
+const renderRrhhKpis = (host, datos) => {
+  if (!host) return;
+  const vac = datos?.vacaciones || {};
+  const total = Math.max(0, Number(vac.dias_total) || 0);
+  const usadas = Math.max(0, Number(vac.dias_usados) || 0);
+  const pendientes = Math.max(0, Number(vac.dias_pendientes) || 0);
+  const pctUsadas = total > 0 ? Math.min(100, (usadas / total) * 100) : 0;
+  const sinNominas = !datos?.tiene_nominas;
+  // Cuando no hay nóminas cargadas se dice, en vez de enseñar un 0 que parece un dato.
+  const dato = (valor) => (sinNominas ? "—" : eurosCortos(valor));
+
+  const tarjetas = [
+    ["Salario bruto", dato(datos?.salario_bruto), sinNominas ? "sin nóminas cargadas" : `${datos?.recibos || 0} recibos`],
+    ["Coste sociales", dato(datos?.ss_empresa), "cuota de empresa"],
+    ["Coste total", dato(datos?.coste_empresa), "bruto + cuota"],
+    ["Horas trabajadas", `${Number(datos?.horas_trabajadas || 0).toLocaleString("es-ES")} h`, `en ${datos?.ejercicio || ""}`],
+    ["Vacaciones disfrutadas", `${usadas} d`, `de ${total} pactados`],
+  ];
+
+  host.innerHTML = `
+    <div class="rrhh-kpi-row">
+      ${tarjetas
+        .map(
+          ([titulo, valor, pie]) => `
+        <div class="rrhh-kpi">
+          <span class="rrhh-kpi-label">${escapeHtml(titulo)}</span>
+          <strong class="rrhh-kpi-value">${escapeHtml(String(valor))}</strong>
+          <span class="rrhh-kpi-foot">${escapeHtml(String(pie))}</span>
+        </div>`
+        )
+        .join("")}
+    </div>
+    <figure class="rrhh-vac">
+      <figcaption class="rrhh-vac-head">
+        <span class="rrhh-kpi-label">Vacaciones ${escapeHtml(String(datos?.ejercicio || ""))}</span>
+        <span class="rrhh-vac-pend"><strong>${pendientes}</strong> días pendientes</span>
+      </figcaption>
+      <div class="rrhh-vac-bar" role="img"
+           aria-label="${usadas} días disfrutados y ${pendientes} pendientes de ${total} pactados">
+        ${usadas > 0 ? `<span class="rrhh-vac-seg rrhh-vac-usadas" style="width:${pctUsadas}%" title="${usadas} disfrutados"></span>` : ""}
+        ${pendientes > 0 ? `<span class="rrhh-vac-seg rrhh-vac-pendientes" style="width:${100 - pctUsadas}%" title="${pendientes} pendientes"></span>` : ""}
+      </div>
+      <div class="rrhh-vac-leyenda">
+        <span><i class="rrhh-vac-punto" style="background:${RRHH_COLOR_DISFRUTADAS}"></i>${usadas} disfrutados</span>
+        <span><i class="rrhh-vac-punto" style="background:${RRHH_COLOR_PENDIENTES}"></i>${pendientes} pendientes</span>
+        <span class="muted">${total} pactados</span>
+      </div>
+    </figure>
+  `;
+};
+
+const loadRrhhKpis = async () => {
+  const host = document.getElementById("workspaceRrhhKpis");
+  if (!host) return;
+  const personaId = String(host.dataset.persona || "").trim();
+  if (!personaId || !state.currentWorkspaceId) return;
+  const datos = await safeWorkspaceApi(
+    `/api/workspace_rrhh_ficha_kpis?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}&persona_id=${encodeURIComponent(personaId)}`,
+    null
+  );
+  if (datos) renderRrhhKpis(host, datos);
+};
+
 // Estado real de los accesos, frente a los perfiles que la pantalla recomienda.
 // La matriz de perfiles no la aplica nadie: el acceso lo deciden el rol del usuario y
 // los módulos del workspace. Sin esto, la pestaña daba a entender que los accesos
@@ -17370,6 +17449,7 @@ const renderWorkspaceRrhhHub = () => {
             <div><span class="muted">Jornada</span><strong>${escapeHtml(selectedEmployee.tipo_jornada || "Completa")}${selectedEmployee.horas_pactadas_dia ? ` · ${escapeHtml(String(selectedEmployee.horas_pactadas_dia))} h/día` : ""}</strong></div>
           </div>
         ` : ""}
+        ${selectedEmployee && !scopeAll ? `<div id="workspaceRrhhKpis" class="rrhh-kpis" data-persona="${escapeHtml(selectedPersonaId)}"></div>` : ""}
         ${!selectedPersonaId && !scopeAll ? "<p class='muted'>Selecciona un empleado.</p>" : ""}
         <form id="workspaceRrhhProfileForm" class="form-grid ${!manager || !selectedPersonaId || scopeAll ? "hidden" : ""}" data-ui-draft="0" data-ui-persist="0">
           <input type="hidden" name="workspace_id" value="${escapeHtml(state.currentWorkspaceId)}" />
@@ -17382,12 +17462,6 @@ const renderWorkspaceRrhhHub = () => {
             Departamento
             <input name="departamento" value="${escapeHtml(profile.departamento || "")}" />
           </label>
-	          <label>
-	            Tipo contrato
-	            <select name="tipo_contrato">
-	              ${buildRrhhContractTypeOptions(profile.tipo_contrato || "")}
-	            </select>
-	          </label>
 	          <label>
 	            Vacaciones/año
 	            <input
@@ -17402,17 +17476,12 @@ const renderWorkspaceRrhhHub = () => {
 	            Centro trabajo
 	            <input name="centro_trabajo" value="${escapeHtml(profile.centro_trabajo || "")}" />
 	          </label>
-          <label>
-            Fecha inicio
-            <input type="date" name="fecha_inicio" value="${escapeHtml(profile.fecha_inicio || "")}" />
-          </label>
-          <label>
-            Fecha fin
-            <input type="date" name="fecha_fin" value="${escapeHtml(profile.fecha_fin || "")}" />
-          </label>
           ${(() => {
             // Aviso de fin de contrato: rojo si ya venció, ámbar si vence en <= 30 días.
-            const ff = String(profile.fecha_fin || "").slice(0, 10);
+            // La fecha sale de la ficha de personal (`fecha_baja`), que es donde vive el
+            // contrato. Antes se leía de un `fecha_fin` propio del perfil, duplicando el
+            // dato: había dos sitios donde editar la misma fecha y ninguno mandaba.
+            const ff = String(selectedEmployee?.fecha_baja || "").slice(0, 10);
             if (!/^\d{4}-\d{2}-\d{2}$/.test(ff)) return "";
             const end = new Date(ff + "T00:00:00");
             const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -17426,10 +17495,6 @@ const renderWorkspaceRrhhHub = () => {
             }
             return "";
           })()}
-          <label class="span-2">
-            Notas
-            <textarea name="notas" rows="3">${escapeHtml(profile.notas || "")}</textarea>
-          </label>
           <div class="form-actions span-2">
             <button type="submit">Guardar ficha RRHH</button>
             <span id="workspaceRrhhProfileStatus" class="muted"></span>
@@ -20082,6 +20147,9 @@ const renderWorkspaceRrhhHub = () => {
       }
     });
   }
+
+  // No bloquea el render de la ficha: las cifras aparecen cuando llegan.
+  loadRrhhKpis();
 
   const profileForm = document.getElementById("workspaceRrhhProfileForm");
   if (profileForm) {

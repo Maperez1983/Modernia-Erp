@@ -14928,3 +14928,115 @@ body.theme-operativa .access-review-warn[data-severidad="alta"] {
   background: rgba(194, 84, 61, 0.1);
   border-left-color: #c2543d;
 }
+
+/* === KPIs de la ficha del trabajador ===
+   Cuatro cifras sueltas como tarjetas y una barra de parte-sobre-total para las
+   vacaciones. Colores: slots 1 y 2 de la paleta categórica validada; el verde de
+   marca no pasa el suelo de croma (lee gris) y el ámbar no llega a 3:1. */
+body.theme-operativa .rrhh-kpis {
+  display: grid;
+  gap: 14px;
+  margin: 14px 0 18px;
+}
+
+body.theme-operativa .rrhh-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+body.theme-operativa .rrhh-kpi {
+  display: grid;
+  gap: 2px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid rgba(11, 29, 51, 0.08);
+}
+
+body.theme-operativa .rrhh-kpi-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5d6b6c;
+}
+
+body.theme-operativa .rrhh-kpi-value {
+  font-size: 1.35rem;
+  font-variant-numeric: tabular-nums;
+  color: #0b1d33;
+}
+
+body.theme-operativa .rrhh-kpi-foot {
+  font-size: 0.78rem;
+  color: #5d6b6c;
+}
+
+body.theme-operativa .rrhh-vac {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid rgba(11, 29, 51, 0.08);
+}
+
+body.theme-operativa .rrhh-vac-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+body.theme-operativa .rrhh-vac-pend {
+  font-size: 0.9rem;
+  color: #0b1d33;
+}
+
+body.theme-operativa .rrhh-vac-pend strong {
+  font-size: 1.2rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Barra fina, extremos redondeados y 2px de hueco entre segmentos: el hueco es lo
+   que separa los tramos sin depender del color. */
+body.theme-operativa .rrhh-vac-bar {
+  display: flex;
+  gap: 2px;
+  height: 14px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(11, 29, 51, 0.06);
+}
+
+body.theme-operativa .rrhh-vac-seg {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+}
+
+body.theme-operativa .rrhh-vac-usadas { background: #2a78d6; }
+body.theme-operativa .rrhh-vac-pendientes { background: #eb6834; }
+
+body.theme-operativa .rrhh-vac-leyenda {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  font-size: 0.82rem;
+  color: #5d6b6c;
+}
+
+body.theme-operativa .rrhh-vac-punto {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  margin-right: 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  body.theme-operativa .rrhh-vac-usadas { background: #3987e5; }
+  body.theme-operativa .rrhh-vac-pendientes { background: #d95926; }
+}
