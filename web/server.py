@@ -40299,10 +40299,28 @@ def _perf_log_operation(operation, started_at, *, workspace_id=None, rows=None, 
     LOGGER.info("perf %s", " ".join(details))
 
 
-def fetch_workspace_company_ids(conn, workspace_id):
+# Roles de `workspace_empresas` que dan visibilidad sobre los DATOS de la empresa.
+# El vínculo de un holding con su participada dice de quién es la empresa, no de quién
+# son sus clientes: sin esta distinción el paraguas hereda la cartera de sus filiales.
+# El rol vacío cuenta como operativo, porque los vínculos legacy no lo traen.
+WORKSPACE_EMPRESA_ROLES_OPERATIVOS = ("", "operativa")
+
+
+def fetch_workspace_operational_company_ids(conn, workspace_id):
+    """Empresas cuyos datos ve el workspace (excluye participadas del holding)."""
+    return fetch_workspace_company_ids(conn, workspace_id, solo_operativas=True)
+
+
+def fetch_workspace_company_ids(conn, workspace_id, *, solo_operativas=False):
     ws_id = str(workspace_id or "").strip()
     if not ws_id:
         return []
+    # Filtro por rol del vínculo. Se aplica solo cuando el caller pide el ámbito de
+    # datos; los paneles de empresas siguen viendo también las participadas.
+    filtro_rol = ""
+    if solo_operativas:
+        marcadores = ",".join(["?"] * len(WORKSPACE_EMPRESA_ROLES_OPERATIVOS))
+        filtro_rol = f" AND LOWER(TRIM(COALESCE(rol, ''))) IN ({marcadores})"
 
     def _safe_fetchall(sql, params=()):
         try:
@@ -40319,16 +40337,19 @@ def fetch_workspace_company_ids(conn, workspace_id):
     except Exception:
         _rollback_best_effort(conn)
         _invalidate_table_columns_cache(conn, "workspace_companies", "workspace_empresas")
+    # v2 solo tiene `rol` si la migración lo añadió; si no está, no filtramos por él.
+    filtro_rol_v2 = filtro_rol if (solo_operativas and "rol" in (table_columns(conn, "workspace_companies") or set())) else ""
     rows_v2 = _safe_fetchall(
-        """
+        f"""
         SELECT legacy_empresa_id
         FROM workspace_companies
         WHERE workspace_id = ?
           AND COALESCE(activo, 1) = 1
           AND COALESCE(TRIM(legacy_empresa_id), '') <> ''
+          {filtro_rol_v2}
         ORDER BY nombre COLLATE NOCASE ASC
-        """,
-        (ws_id,),
+        """,  # nosec B608 - filtro de literales del propio módulo
+        (ws_id, *(WORKSPACE_EMPRESA_ROLES_OPERATIVOS if filtro_rol_v2 else ())),
     )
     legacy_ids = [
         str(row_value(r, "legacy_empresa_id") or row_value(r, 0) or "").strip()
@@ -40339,8 +40360,8 @@ def fetch_workspace_company_ids(conn, workspace_id):
         return legacy_ids
 
     rows = _safe_fetchall(
-        "SELECT empresa_id FROM workspace_empresas WHERE workspace_id = ?",
-        (ws_id,),
+        f"SELECT empresa_id FROM workspace_empresas WHERE workspace_id = ?{filtro_rol}",  # nosec B608 - filtro de literales del propio módulo
+        (ws_id, *(WORKSPACE_EMPRESA_ROLES_OPERATIVOS if solo_operativas else ())),
     )
     empresa_ids = [str(row_value(row, "empresa_id") or row_value(row, 0) or "").strip() for row in rows]
     empresa_ids = [eid for eid in empresa_ids if eid]
@@ -40526,7 +40547,7 @@ def resolve_workspace_id_for_empresa(conn, empresa_id):
     return encontrados[0] if len(encontrados) == 1 else ""
 
 
-def resolve_workspace_scope_empresa_ids(conn, workspace_id, *, empresa_id=""):
+def resolve_workspace_scope_empresa_ids(conn, workspace_id, *, empresa_id="", solo_operativas=False):
     """
     Devuelve la lista de `empresas.id` (legacy) asociadas al workspace para scoping.
 
@@ -40539,7 +40560,7 @@ def resolve_workspace_scope_empresa_ids(conn, workspace_id, *, empresa_id=""):
     if not ws_id:
         return []
     try:
-        ids = fetch_workspace_company_ids(conn, ws_id) or []
+        ids = fetch_workspace_company_ids(conn, ws_id, solo_operativas=solo_operativas) or []
     except Exception:
         _rollback_best_effort(conn)
         ids = []
@@ -40804,7 +40825,7 @@ def resolve_clientes_by_nif_rows(conn, nif, *, limit=6, services=None, workspace
             if "workspace_id" in cliente_cols:
                 scope_parts.append("COALESCE(c.workspace_id, '') = ?")
                 values.append(workspace_id)
-            empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id) or []
+            empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id, solo_operativas=True) or []
             if empresa_ids:
                 placeholders_ws = ",".join(["?"] * len(empresa_ids))
                 scope_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
@@ -40843,7 +40864,7 @@ def resolve_clientes_by_nif_rows(conn, nif, *, limit=6, services=None, workspace
     values = [nif_norm]
     if workspace_id:
         if "workspace_id" in c_cols:
-            empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id) or []
+            empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id, solo_operativas=True) or []
             if empresa_ids:
                 placeholders_ws = ",".join(["?"] * len(empresa_ids))
                 where.insert(0, f"(COALESCE(workspace_id, '') = ? OR (COALESCE(workspace_id, '') = '' AND COALESCE(empresa_id, '') IN ({placeholders_ws})))")
@@ -40852,7 +40873,7 @@ def resolve_clientes_by_nif_rows(conn, nif, *, limit=6, services=None, workspace
                 where.insert(0, "COALESCE(workspace_id, '') = ?")
                 values.insert(0, workspace_id)
         else:
-            empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id) or []
+            empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id, solo_operativas=True) or []
             if empresa_ids:
                 placeholders_ws = ",".join(["?"] * len(empresa_ids))
                 where.insert(0, f"COALESCE(empresa_id, '') IN ({placeholders_ws})")
@@ -62500,6 +62521,19 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (os.urandom(16).hex(), workspace_id, empresa_id, rol, now, now),
             )
+            # El INSERT OR IGNORE no toca un vínculo que ya exista, así que sin esto
+            # no había manera de recalificar una empresa ya vinculada. Y hace falta:
+            # el rol es lo que separa una empresa operativa de una participada del
+            # holding, y con él se decide si el workspace ve o no sus clientes.
+            if str(payload.get("rol") or "").strip():
+                conn.execute(
+                    """
+                    UPDATE workspace_empresas
+                    SET rol = ?, updated_at = datetime(?)
+                    WHERE workspace_id = ? AND empresa_id = ?
+                    """,
+                    (rol, now, workspace_id, empresa_id),
+                )
             # Backfill v2: ensure a workspace_company exists for this legacy company.
             try:
                 ensure_workspace_core_tables(conn)
@@ -83215,7 +83249,7 @@ class Handler(BaseHTTPRequestHandler):
                     if "workspace_id" in seguros_cols:
                         scope_parts.append("COALESCE(s.workspace_id, '') = ?")
                         values.append(workspace_id)
-                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    empresa_ids = fetch_workspace_operational_company_ids(conn, workspace_id) or []
                     if empresa_ids:
                         placeholders = ",".join(["?"] * len(empresa_ids))
                         scope_parts.append(f"s.empresa_id IN ({placeholders})")
@@ -83258,7 +83292,7 @@ class Handler(BaseHTTPRequestHandler):
                 if "workspace_id" in c_cols:
                     scope_parts.append("COALESCE(c.workspace_id, '') = ?")
                     values.append(workspace_id)
-                empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                empresa_ids = fetch_workspace_operational_company_ids(conn, workspace_id) or []
                 if empresa_ids:
                     placeholders_ws = ",".join(["?"] * len(empresa_ids))
                     scope_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
@@ -83313,7 +83347,7 @@ class Handler(BaseHTTPRequestHandler):
                     if "workspace_id" in c_cols:
                         scope_parts.append("COALESCE(c.workspace_id, '') = ?")
                         values.append(workspace_id)
-                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    empresa_ids = fetch_workspace_operational_company_ids(conn, workspace_id) or []
                     if empresa_ids:
                         placeholders_ws = ",".join(["?"] * len(empresa_ids))
                         scope_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
@@ -83348,7 +83382,7 @@ class Handler(BaseHTTPRequestHandler):
                     if "workspace_id" in c_cols:
                         scope_parts.append("COALESCE(c.workspace_id, '') = ?")
                         values.append(workspace_id)
-                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    empresa_ids = fetch_workspace_operational_company_ids(conn, workspace_id) or []
                     if empresa_ids:
                         placeholders_ws = ",".join(["?"] * len(empresa_ids))
                         scope_parts.append(

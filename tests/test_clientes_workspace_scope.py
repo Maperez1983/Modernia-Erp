@@ -38,7 +38,9 @@ class ClientesWorkspaceScopeTests(unittest.TestCase):
 
         # El vínculo por empresas del workspace tiene que estar en la rama genérica.
         self.assertIn("EXISTS (SELECT 1 FROM clientes_empresas ce", block)
-        self.assertIn("fetch_workspace_company_ids(conn, workspace_id)", block)
+        # El resolutor "operativo" excluye las participadas del holding, pero sigue
+        # siendo el mismo respaldo por vínculo de empresa que arregló la lista a cero.
+        self.assertIn("fetch_workspace_operational_company_ids(conn, workspace_id)", block)
 
         # Y no puede quedar ningún filtro que use la columna como única condición.
         self.assertNotIn(
@@ -78,7 +80,9 @@ class ClientesWorkspaceScopeTests(unittest.TestCase):
         # Los tres vínculos tienen que convivir, no excluirse.
         self.assertIn('if "workspace_id" in ce_cols:', block)
         self.assertIn('if "workspace_id" in c_cols:', block)
-        self.assertIn("fetch_workspace_company_ids(conn, workspace_id)", block)
+        # El resolutor "operativo" excluye las participadas del holding, pero sigue
+        # siendo el mismo respaldo por vínculo de empresa que arregló la lista a cero.
+        self.assertIn("fetch_workspace_operational_company_ids(conn, workspace_id)", block)
         self.assertIn('" OR ".join(scope_parts)', block)
 
     def test_nif_duplicate_lookup_combines_links(self):
