@@ -7074,7 +7074,16 @@ const workspaceNameById = (id = "") => {
   if (!target) return "";
   const fila = (Array.isArray(state?.workspaces) ? state.workspaces : [])
     .find((row) => String(row?.id || "").trim() === target);
-  return String(fila?.nombre || fila?.name || fila?.slug || "").trim();
+  const enLista = String(fila?.nombre || fila?.name || fila?.slug || "").trim();
+  if (enLista) return enLista;
+  // La home no carga `state.workspaces`. Recurrimos al nombre que se guardó la última
+  // vez que se entró en este workspace.
+  try {
+    if (String(localStorage.getItem("crm.currentWorkspaceId") || "").trim() === target) {
+      return String(localStorage.getItem("crm.currentWorkspaceName") || "").trim();
+    }
+  } catch (e) {}
+  return "";
 };
 
 const getWorkspaceDisplayName = (workspace = null) => {
@@ -26368,14 +26377,21 @@ const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   state.currentWorkspaceId = workspaceId;
   state.currentWorkspaceMemberRole = "";
+  let wsNombre = "";
   try {
     const wsRow = (state.workspaces || []).find((row) => String(row?.id || "") === String(workspaceId || ""));
     if (wsRow && wsRow.member_role != null) {
       state.currentWorkspaceMemberRole = String(wsRow.member_role || "").trim();
     }
+    wsNombre = String(wsRow?.nombre || wsRow?.name || "").trim();
   } catch (e) {}
   try {
     localStorage.setItem("crm.currentWorkspaceId", String(workspaceId || ""));
+    // Guardamos también el nombre. La home no carga la lista de workspaces, así que sin
+    // esto lo único que tiene del workspace activo es el id, y acababa enseñándolo
+    // crudo ("Continuar workspace · 78be2029..."). Con el nombre guardado puede decir
+    // "Verifika²" sin pedir nada al servidor.
+    if (wsNombre) localStorage.setItem("crm.currentWorkspaceName", wsNombre);
   } catch (e) {}
   // Evita cargar un workspace con DB todavía "fría" (Render/PG): si no, se muestran fichas vacías y
   // el usuario siente que "se han borrado" configuraciones.

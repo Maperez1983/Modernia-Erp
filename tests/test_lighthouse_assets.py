@@ -19,7 +19,7 @@ def test_lighthouse_shell_assets_are_consistent() -> None:
     assert "verifika2_wordmark_dark.svg" in index_html
     assert "verifika2_wordmark_traced_dark.svg" not in app_js
     assert 'manifest.webmanifest?v=18' in index_html
-    assert 'sw.js?v=375' in index_html
+    assert 'sw.js?v=376' in index_html
 
     assert 'CURRENT_ICON_VERSION = 28' in server_py
     assert 'manifest.webmanifest?v=18' in sw_js
