@@ -65830,7 +65830,10 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     _rollback_best_effort(conn)
 
-            if (movidos or otros_movidos) and not bloqueados:
+            # Se desactiva salvo que algo quedara sin mover por un mes bloqueado. Antes se
+            # exigía además haber movido algo, y eso dejaba activo justo el caso más
+            # común: el duplicado vacío, que no tiene nada que mover y es el que sobra.
+            if not bloqueados:
                 # La ficha de origen se desactiva, no se borra: sigue enlazando lo que
                 # ya se exportó con su nombre anterior.
                 conn.execute(
@@ -65858,7 +65861,7 @@ class Handler(BaseHTTPRequestHandler):
                 "movidos": movidos,
                 "bloqueados": sorted(set(bloqueados)),
                 "otros_movidos": otros_movidos,
-                "origen_desactivado": bool((movidos or otros_movidos) and not bloqueados),
+                "origen_desactivado": not bloqueados,
                 "destino": fichas["destino"]["nombre"],
             })
             return

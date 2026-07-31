@@ -89,10 +89,12 @@ class FusionDeFichasTests(unittest.TestCase):
     def test_no_desactiva_si_quedaron_fichajes_sin_mover(self):
         # Si un mes bloqueado impidió mover parte del historial, la ficha origen
         # sigue teniendo datos: desactivarla los escondería.
-        # La condición incluye ahora `otros_movidos` (ausencias, nóminas...), pero lo
-        # que se fija es lo mismo: con algo bloqueado, el origen NO se desactiva.
-        self.assertIn("and not bloqueados:", self._bloque())
-        self.assertNotIn("if movidos and bloqueados", self._bloque())
+        bloque = self._bloque()
+        corte = bloque.index("SET activo = 0")
+        guarda = bloque[bloque.rindex("if ", 0, corte): corte]
+        self.assertIn("not bloqueados", guarda)
+        # Y lo que se devuelve tiene que coincidir con lo que se hizo.
+        self.assertIn('"origen_desactivado": not bloqueados,', bloque)
 
     def test_deja_traza(self):
         self.assertIn('action="fusion_fichas"', self._bloque())
@@ -143,18 +145,20 @@ class LaFusionMueveTodoElHistorialTests(unittest.TestCase):
     def test_no_reescribe_la_auditoria(self):
         """Cambiar a quién apunta un rastro de auditoría es falsearlo."""
         b = self._bloque()
-        corte = b.index("otros_movidos = {}")
-        tramo = b[corte: b.index("if (movidos or otros_movidos)", corte)]
+        tramo = b[b.index("otros_movidos = {}"): b.index("SET activo = 0")]
         self.assertNotIn("workspace_registro_audit", tramo)
 
     def test_no_mueve_perfil_ni_turnos(self):
         # Tienen UNIQUE por persona: chocarían si el destino ya tiene los suyos.
         b = self._bloque()
-        corte = b.index("otros_movidos = {}")
-        tramo = b[corte: b.index("if (movidos or otros_movidos)", corte)]
+        tramo = b[b.index("otros_movidos = {}"): b.index("SET activo = 0")]
         self.assertNotIn("workspace_rrhh_profile", tramo)
         self.assertNotIn("workspace_rrhh_turnos", tramo)
 
-    def test_desactiva_el_origen_aunque_no_tuviera_fichajes(self):
-        """El caso de Alicia: el origen tenía vacaciones pero ningún fichaje."""
-        self.assertIn("if (movidos or otros_movidos) and not bloqueados:", self._bloque())
+    def test_desactiva_el_origen_aunque_no_tuviera_nada_que_mover(self):
+        """Un duplicado vacío es justo el que sobra.
+
+        Antes se exigía haber movido algo para desactivar, y eso dejaba activos los
+        duplicados sin datos: al fusionar las tres fichas de Daniel García Campos,
+        dos se quedaron activas porque no tenían nada que mover."""
+        self.assertIn("if not bloqueados:", self._bloque())
