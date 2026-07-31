@@ -1558,6 +1558,12 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
             ),
         )
 
+        # Hace falta confirmar: al resolver el ámbito por workspace se pasa por
+        # `ensure_workspace_core_tables`, que ante un fallo hace un rollback
+        # best-effort. Con los INSERT sin confirmar, ese rollback se llevaba por
+        # delante los datos del propio test.
+        conn.commit()
+
         try:
             rows = server.resolve_clientes_by_nif_rows(
                 conn,

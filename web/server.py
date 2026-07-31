@@ -40762,18 +40762,33 @@ def resolve_clientes_by_nif_rows(conn, nif, *, limit=6, services=None, workspace
         where = [service_clause] if service_clause else []
         values = list(service_values)
         ce_cols = table_columns(conn, "clientes_empresas") or set()
-        if workspace_id and "workspace_id" in ce_cols:
-            where.append("COALESCE(ce.workspace_id, '') = ?")
-            values.append(workspace_id)
-        elif workspace_id:
+        cliente_cols = table_columns(conn, "clientes") or set()
+        if workspace_id:
+            # Misma forma que en `/api/clientes_list`: la columna existe pero está
+            # vacía en todo lo anterior a la migración, y el respaldo por empresa
+            # quedaba en un `elif` inalcanzable. Aquí duele distinto: esto busca
+            # duplicados por NIF, así que devolver cero no "esconde" clientes, hace
+            # que el CRM cree un cliente repetido.
+            scope_parts = []
+            if "workspace_id" in ce_cols:
+                scope_parts.append("COALESCE(ce.workspace_id, '') = ?")
+                values.append(workspace_id)
+            if "workspace_id" in cliente_cols:
+                scope_parts.append("COALESCE(c.workspace_id, '') = ?")
+                values.append(workspace_id)
             empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id) or []
             if empresa_ids:
                 placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                where.append(f"ce.empresa_id IN ({placeholders_ws})")
+                scope_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
                 values.extend(empresa_ids)
             elif empresa_id:
-                where.append("COALESCE(ce.empresa_id, '') = ?")
+                scope_parts.append("COALESCE(ce.empresa_id, '') = ?")
                 values.append(empresa_id)
+            if not scope_parts:
+                # Sin forma de acotar preferimos no sugerir nada a sugerir clientes
+                # de otro tenant.
+                return []
+            where.append("(" + " OR ".join(scope_parts) + ")")
         elif empresa_id:
             where.append("COALESCE(ce.empresa_id, '') = ?")
             values.append(empresa_id)
@@ -83214,18 +83229,34 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if normalized_services:
                 ce_cols = table_columns(conn, "clientes_empresas") or set()
+                c_cols = table_columns(conn, "clientes") or set()
                 service_clause, service_values = service_sql_match_clause("ce", normalized_services)
                 where_parts = [service_clause] if service_clause else []
                 values = list(service_values)
-                if workspace_id and "workspace_id" in ce_cols:
-                    where_parts.append("COALESCE(ce.workspace_id, '') = ?")
-                    values.append(workspace_id)
-                elif workspace_id:
+                if workspace_id:
+                    # Mismo caso que en la rama genérica y en la de seguros: la columna
+                    # existe pero está vacía en todo lo anterior a la migración, así que
+                    # filtrar solo por ella dejaba la lista a cero. Y el respaldo por
+                    # empresa estaba en un `elif` inalcanzable, precisamente porque la
+                    # columna sí existe. Se combinan los tres vínculos en vez de excluirse.
+                    scope_parts = []
+                    if "workspace_id" in ce_cols:
+                        scope_parts.append("COALESCE(ce.workspace_id, '') = ?")
+                        values.append(workspace_id)
+                    if "workspace_id" in c_cols:
+                        scope_parts.append("COALESCE(c.workspace_id, '') = ?")
+                        values.append(workspace_id)
                     empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
                     if empresa_ids:
                         placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                        where_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
+                        scope_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
                         values.extend(empresa_ids)
+                    if not scope_parts:
+                        # Sin forma de acotar por workspace no devolvemos nada: antes se
+                        # caía aquí sin filtro de ámbito y salían clientes de otros tenants.
+                        json_response(self, [])
+                        return
+                    where_parts.append("(" + " OR ".join(scope_parts) + ")")
                 rows = conn.execute(
                     f"""
                     SELECT DISTINCT {cliente_list_cols}

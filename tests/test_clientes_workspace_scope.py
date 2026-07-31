@@ -61,6 +61,56 @@ class ClientesWorkspaceScopeTests(unittest.TestCase):
         self.assertNotIn('if workspace_id and "workspace_id" in seguros_cols:', SERVER)
         self.assertEqual(SERVER.count('if "workspace_id" in seguros_cols:'), 2)
 
+    def test_multiservice_scope_combines_links_instead_of_only_the_column(self):
+        """La cuarta rama, la de `normalized_services`, se quedó sin arreglar.
+
+        Misma forma que la de seguros: `if workspace_id and "workspace_id" in
+        ce_cols` filtraba solo por `clientes_empresas.workspace_id` —vacía en todo
+        lo anterior a la migración— y el respaldo por empresa era código muerto
+        porque la columna sí existe. Un usuario acotado a un servicio (p.ej.
+        inmobiliaria) veía CERO clientes.
+        """
+        self.assertNotIn('if workspace_id and "workspace_id" in ce_cols:', SERVER)
+
+        # Hay otro `if normalized_services:` en el módulo: nos quedamos con el del
+        # endpoint, que va indentado dentro del handler.
+        block = _block("\n            if normalized_services:", "# El scoping va por workspace, pero")
+        # Los tres vínculos tienen que convivir, no excluirse.
+        self.assertIn('if "workspace_id" in ce_cols:', block)
+        self.assertIn('if "workspace_id" in c_cols:', block)
+        self.assertIn("fetch_workspace_company_ids(conn, workspace_id)", block)
+        self.assertIn('" OR ".join(scope_parts)', block)
+
+    def test_nif_duplicate_lookup_combines_links(self):
+        """El mismo `elif` inalcanzable estaba en la búsqueda de duplicados por NIF.
+
+        Aquí el síntoma no es una lista vacía sino un cliente repetido: si la
+        búsqueda no encuentra al que ya existe, el alta lo crea otra vez.
+        """
+        block = _block("def resolve_clientes_by_nif_rows(", "\ndef ")
+        self.assertNotIn('if workspace_id and "workspace_id" in ce_cols:', block)
+        self.assertIn('if "workspace_id" in ce_cols:', block)
+        self.assertIn('if "workspace_id" in cliente_cols:', block)
+        self.assertIn('" OR ".join(scope_parts)', block)
+        # Y sin forma de acotar, no se sugiere nada en vez de cruzar tenants.
+        tail = block[block.index("if not scope_parts:") :]
+        self.assertIn("return []", tail)
+
+    def test_multiservice_scope_is_fail_closed(self):
+        """Sin forma de acotar, esta rama devolvía la tabla entera.
+
+        Si `workspace_id` venía pero no había ni columna ni empresas del
+        workspace, no se añadía ningún filtro de ámbito y la consulta salía con
+        solo el filtro de servicio: clientes de todos los tenants.
+        """
+        # Hay otro `if normalized_services:` en el módulo: nos quedamos con el del
+        # endpoint, que va indentado dentro del handler.
+        block = _block("\n            if normalized_services:", "# El scoping va por workspace, pero")
+        marker = "if not scope_parts:"
+        self.assertIn(marker, block)
+        tail = block[block.index(marker) :]
+        self.assertIn("json_response(self, [])", tail)
+
 
 if __name__ == "__main__":
     unittest.main()
