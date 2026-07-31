@@ -2327,6 +2327,7 @@ const state = {
   workspaceRrhhRosterSearch: "",
   workspaceRrhhRosterIncluirBajas: false,
   workspaceRrhhRosterRows: [],
+  workspaceRrhhRosterWorkspaceId: "",
   workspaceRrhhEquipoView: "list",
   workspaceRrhhEquipoMemberKey: "",
   workspaceRrhhEquipoMemberPersonaId: "",
@@ -10798,6 +10799,40 @@ const renderRrhhKpis = (host, datos) => {
   `;
 };
 
+// La plantilla del equipo, pedida aparte y sin acotar por empresa.
+//
+// Meterla en la carga general no servía: esa carga se descarta cuando llega otra
+// más nueva (`isStale`), y entonces la cuadrícula se quedaba con la lista filtrada
+// por la empresa activa. Con Estudio Velázquez se veían 9 de 11, y Daniel García
+// (sin empresa) y Teresa Ramos (de Fincas Velázquez) salían como "Sin ficha"
+// teniéndola — que invita a crear otra ficha y duplicar a la persona.
+//
+// `activos=0` trae también las bajas, que hacen falta para "Ver bajas".
+let peticionRosterRrhh = null;
+const loadWorkspaceRrhhRoster = async () => {
+  const wsId = String(state.currentWorkspaceId || "").trim();
+  if (!wsId || peticionRosterRrhh) return;
+  const yaEsta = state.workspaceRrhhRosterWorkspaceId === wsId
+    && Array.isArray(state.workspaceRrhhRosterRows)
+    && state.workspaceRrhhRosterRows.length;
+  if (yaEsta) return;
+  peticionRosterRrhh = safeWorkspaceApi(
+    `/api/workspace_registro_personal?workspace_id=${encodeURIComponent(wsId)}&activos=0&limit=500`,
+    { rows: [] }
+  );
+  let filas = [];
+  try {
+    const datos = await peticionRosterRrhh;
+    filas = Array.isArray(datos?.rows) ? datos.rows : [];
+  } finally {
+    peticionRosterRrhh = null;
+  }
+  if (!filas.length) return;
+  state.workspaceRrhhRosterRows = filas;
+  state.workspaceRrhhRosterWorkspaceId = wsId;
+  renderWorkspaceRrhhHub();
+};
+
 const loadRrhhKpis = async () => {
   const host = document.getElementById("workspaceRrhhKpis");
   if (!host) return;
@@ -15463,7 +15498,7 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
 	  }
 
 		  const year = (String(month || "").slice(0, 4) || String(new Date().getFullYear())).trim();
-		  const [profile, ausencias, gastos, docs, timeSummary, timeRows, timeUsers, rosterAll, vacSummary, ausenciasAll, turnos] = await Promise.all([
+		  const [profile, ausencias, gastos, docs, timeSummary, timeRows, timeUsers, vacSummary, ausenciasAll, turnos] = await Promise.all([
 		    manager
 		      ? (scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { row: {} }) : { row: {} })
 		      : safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}`, { row: {} }),
@@ -15473,12 +15508,6 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
 		    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_registro_horario_resumen?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, {}) : {},
 		    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}&limit=200`, { rows: [] }) : { rows: [] },
 		    manager ? safeWorkspaceApi(`/api/workspace_registro_usuarios?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}&limit=500`, { rows: [] }) : { rows: [] },
-		    // La plantilla, sin acotar por empresa: es la del workspace. La lista que
-		    // llega del arranque viene filtrada por la empresa activa, y con eso Daniel
-		    // García (sin empresa) y Teresa Ramos (de Fincas Velázquez) desaparecían del
-		    // equipo estando en Modernia. `activos=0` incluye las bajas, que hacen falta
-		    // para "Ver bajas".
-		    manager ? safeWorkspaceApi(`/api/workspace_registro_personal?workspace_id=${encodeURIComponent(workspaceId)}&activos=0&limit=500`, { rows: [] }) : { rows: [] },
 		    manager ? safeWorkspaceApi(`/api/workspace_rrhh_vacaciones_summary?workspace_id=${encodeURIComponent(workspaceId)}&year=${encodeURIComponent(year)}`, { rows: [] }) : { rows: [] },
 		    canSeeTeamRequests ? safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }) : { rows: [] },
 		    scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_turnos?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { rows: [] }) : { rows: [] },
@@ -15486,7 +15515,6 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
 		  if (isStale()) return;
 
 		  state.workspaceTimeUsers = timeUsers?.rows || [];
-		  state.workspaceRrhhRosterRows = Array.isArray(rosterAll?.rows) ? rosterAll.rows : [];
 		  // Si no eres superadmin (panel admin global), en RRHH solo trabajamos con usuarios del workspace.
 		  // Esto evita el caso "el usuario existe pero la ficha sale vacía" por no poder leer /api/usuarios.
 		  try {
@@ -20213,6 +20241,7 @@ const renderWorkspaceRrhhHub = () => {
 
   // No bloquea el render de la ficha: las cifras aparecen cuando llegan.
   loadRrhhKpis();
+  loadWorkspaceRrhhRoster();
 
   const profileForm = document.getElementById("workspaceRrhhProfileForm");
   if (profileForm) {

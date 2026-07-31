@@ -14,8 +14,10 @@ con la etiqueta "Sin ficha" teniendo ficha, con NIF y bien enlazada. Eso invita 
 crear una ficha nueva y duplicar a la persona.
 
 El filtro no estaba solo en el cliente: la plantilla llega del arranque del
-workspace, y esa petición ya lleva `empresa_id`. Por eso el módulo de RRHH pide
-la suya aparte, sin acotar.
+workspace, y esa petición ya lleva `empresa_id`. Meterla en la carga general de
+RRHH tampoco bastó, porque esa carga se descarta cuando llega otra más nueva
+(`isStale`) y la lista nunca llegaba a estado. Se pide aparte, como los KPIs, y
+se repinta al llegar.
 """
 
 import unittest
@@ -27,9 +29,8 @@ SERVER = (Path(__file__).resolve().parents[1] / "web" / "server.py").read_text(e
 
 class LaPlantillaSePideSinEmpresaTests(unittest.TestCase):
     def _peticion(self):
-        i = APP.index("state.workspaceRrhhRosterRows = ")
-        j = APP.rindex("/api/workspace_registro_personal?workspace_id=", 0, i)
-        return APP[j: APP.index("\n", j)]
+        i = APP.index("const loadWorkspaceRrhhRoster = async () => {")
+        return APP[i: APP.index("};", i)]
 
     def test_la_peticion_de_plantilla_no_lleva_empresa(self):
         self.assertNotIn("companyQuery", self._peticion())
@@ -38,6 +39,20 @@ class LaPlantillaSePideSinEmpresaTests(unittest.TestCase):
     def test_incluye_las_bajas(self):
         # Hacen falta para "Ver bajas"; el registro se conserva cuatro años.
         self.assertIn("activos=0", self._peticion())
+
+    def test_repinta_cuando_llega(self):
+        """Llega después del primer pintado; sin repintar no se vería."""
+        bloque = self._peticion()
+        self.assertIn("renderWorkspaceRrhhHub();", bloque)
+
+    def test_no_se_pide_en_bucle(self):
+        # Repintar vuelve a llamar al cargador: sin centinela sería un bucle.
+        bloque = self._peticion()
+        self.assertIn("if (!wsId || peticionRosterRrhh) return;", bloque)
+        self.assertIn("if (yaEsta) return;", bloque)
+
+    def test_se_llama_al_pintar_el_modulo(self):
+        self.assertIn("loadWorkspaceRrhhRoster();", APP)
 
     def test_la_cuadricula_une_las_tres_fuentes(self):
         """Elegir una sola lista dependía del orden de carga.
