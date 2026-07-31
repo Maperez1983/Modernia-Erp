@@ -21970,6 +21970,96 @@ const refreshWorkspaceTimeSweepStatus = async () => {
   if (workspaceTimeSweepRunNow) workspaceTimeSweepRunNow.classList.remove("hidden");
 };
 
+// === Regularización de fichajes sin cerrar ===
+// En producción había 126 fichajes abiertos en un solo workspace, algunos de hacía
+// cuatro meses. No se cierran solos: se propone una hora a partir del turno pactado
+// y una persona confirma. Quedan marcados como corrección manual, con auditoría.
+const workspaceTimeOpenPanel = () => document.getElementById("workspaceTimeOpen");
+let _fichajesAbiertos = [];
+
+const renderWorkspaceOpenEntries = () => {
+  const lista = document.getElementById("workspaceTimeOpenList");
+  const acciones = document.getElementById("workspaceTimeOpenActions");
+  const estado = document.getElementById("workspaceTimeOpenStatus");
+  if (!lista || !acciones || !estado) return;
+  if (!_fichajesAbiertos.length) {
+    lista.innerHTML = "";
+    acciones.classList.add("hidden");
+    estado.textContent = "No hay fichajes sin cerrar de días anteriores.";
+    return;
+  }
+  const conPropuesta = _fichajesAbiertos.filter((f) => f.propuesta_hora_fin).length;
+  estado.textContent = `${_fichajesAbiertos.length} sin cerrar · ${conPropuesta} con hora propuesta`;
+  lista.innerHTML = _fichajesAbiertos
+    .map((f, i) => {
+      const horas = f.minutos_propuestos ? (f.minutos_propuestos / 60).toFixed(2) : "—";
+      const origen = { turno: "turno pactado", jornada_pactada: "jornada pactada", sin_datos: "sin datos" }[f.origen_propuesta] || "";
+      return `
+        <label class="workspace-time-open-row">
+          <input type="checkbox" data-open-entry="${i}" ${f.propuesta_hora_fin ? "checked" : "disabled"} />
+          <span class="workspace-time-open-when">${escapeHtml(f.fecha)} · ${escapeHtml(f.hora_inicio)}</span>
+          <span class="workspace-time-open-who">${escapeHtml(f.persona_nombre || "—")}</span>
+          <input type="time" class="workspace-time-open-end" data-open-end="${i}" value="${escapeHtml(f.propuesta_hora_fin || "")}" />
+          <span class="muted">${escapeHtml(origen)}${horas !== "—" ? ` · ${horas} h` : ""}</span>
+        </label>`;
+    })
+    .join("");
+  acciones.classList.remove("hidden");
+  const contador = document.getElementById("workspaceTimeOpenCount");
+  const marcados = () => lista.querySelectorAll("[data-open-entry]:checked").length;
+  const pintaContador = () => {
+    if (contador) contador.textContent = `${marcados()} seleccionados`;
+  };
+  lista.querySelectorAll("[data-open-entry]").forEach((c) => c.addEventListener("change", pintaContador));
+  pintaContador();
+};
+
+const loadWorkspaceOpenEntries = async () => {
+  const estado = document.getElementById("workspaceTimeOpenStatus");
+  const panel = workspaceTimeOpenPanel();
+  if (!panel || !estado) return;
+  if (!state.currentWorkspaceId || !isWorkspaceTimeManager()) {
+    panel.classList.add("hidden");
+    return;
+  }
+  panel.classList.remove("hidden");
+  estado.textContent = "Consultando…";
+  const data = await safeWorkspaceApi(
+    `/api/workspace_registro_horario_abiertos?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`,
+    null
+  );
+  _fichajesAbiertos = Array.isArray(data?.items) ? data.items : [];
+  renderWorkspaceOpenEntries();
+};
+
+const applyWorkspaceOpenEntries = async () => {
+  const lista = document.getElementById("workspaceTimeOpenList");
+  if (!lista) return;
+  const items = [];
+  lista.querySelectorAll("[data-open-entry]:checked").forEach((c) => {
+    const i = Number(c.dataset.openEntry);
+    const fila = _fichajesAbiertos[i];
+    const hora = String(lista.querySelector(`[data-open-end="${i}"]`)?.value || "").trim();
+    if (fila && hora) items.push({ id: fila.id, hora_fin: hora, pausa_min: fila.propuesta_pausa_min ?? 0 });
+  });
+  if (!items.length) {
+    alert("No hay ningún fichaje seleccionado con hora de salida.");
+    return;
+  }
+  if (!confirm(`Se van a cerrar ${items.length} fichajes como corrección manual. Quedará registrado quién y cuándo. ¿Continuar?`)) return;
+  try {
+    const res = await apiPost("/api/workspace_registro_horario_regularizar", {
+      workspace_id: state.currentWorkspaceId,
+      items,
+    });
+    const omitidos = Array.isArray(res?.omitidos) ? res.omitidos.length : 0;
+    alert(`Cerrados ${res?.cerrados ?? 0} fichajes.${omitidos ? ` ${omitidos} omitidos (mes bloqueado o ya cerrados).` : ""}`);
+    await loadWorkspaceOpenEntries();
+  } catch (error) {
+    alert(error.message || "No se pudo regularizar.");
+  }
+};
+
 const fillWorkspaceTimeEmployeeForm = (record = null) => {
   if (!workspaceTimeEmployeeForm) return;
   hydrateWorkspaceCompanySelects();
@@ -86032,6 +86122,22 @@ if (workspaceTimeSweepRunNow) {
       workspaceTimeSweepRunNow.disabled = false;
     }
   });
+}
+
+{
+  const recargar = document.getElementById("workspaceTimeOpenReload");
+  const aplicar = document.getElementById("workspaceTimeOpenApply");
+  if (recargar) recargar.addEventListener("click", () => loadWorkspaceOpenEntries());
+  if (aplicar) {
+    aplicar.addEventListener("click", async () => {
+      aplicar.disabled = true;
+      try {
+        await applyWorkspaceOpenEntries();
+      } finally {
+        aplicar.disabled = false;
+      }
+    });
+  }
 }
 
 if (workspaceTimeForm) {

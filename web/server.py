@@ -946,6 +946,101 @@ WORKSPACE_TIME_RETENTION_YEARS = max(4, int(os.environ.get("WORKSPACE_TIME_RETEN
 WORKSPACE_TIME_MAX_SHIFT_MINUTES = max(60, int(os.environ.get("WORKSPACE_TIME_MAX_SHIFT_MINUTES", "960")))
 
 
+def fetch_workspace_open_time_entries(conn, workspace_id, *, antes_de=None, limit=500):
+    """Fichajes sin cerrar de días anteriores, con una propuesta de hora de salida.
+
+    Existe para regularizar el histórico: en producción había 126 fichajes abiertos
+    en un solo workspace, algunos desde hacía cuatro meses, porque nadie cerraba y
+    el aviso automático estaba apagado. Cerrarlos automáticamente sería inventar
+    horas; lo que hacemos es proponer y que una persona revise y confirme.
+
+    La propuesta sale, por este orden:
+      1. La hora de salida del turno pactado para ese día de la semana.
+      2. La entrada más las horas pactadas al día.
+      3. Nada: si no hay datos no proponemos, y esa fila se revisa a mano.
+    """
+    ws_id = str(workspace_id or "").strip()
+    if not ws_id:
+        return []
+    corte = str(antes_de or "").strip()[:10] or app_now().date().isoformat()
+    try:
+        filas = conn.execute(
+            """
+            SELECT h.id, h.fecha, h.hora_inicio, h.pausa_min, h.persona_id, h.persona_nombre,
+                   h.empresa_id, p.horas_pactadas_dia
+            FROM workspace_registro_horario h
+            LEFT JOIN workspace_registro_personal p ON p.id = h.persona_id
+            WHERE h.workspace_id = ?
+              AND COALESCE(TRIM(COALESCE(h.hora_fin, '')), '') = ''
+              AND TRIM(COALESCE(h.fecha, '')) <> ''
+              AND substr(h.fecha, 1, 10) < ?
+            ORDER BY h.fecha DESC, h.hora_inicio DESC
+            LIMIT ?
+            """,
+            (ws_id, corte, max(1, int(limit))),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return []
+
+    turnos = {}
+    try:
+        for t in conn.execute(
+            """
+            SELECT persona_id, weekday, COALESCE(hora_fin, '') AS hora_fin, COALESCE(pausa_min, 0) AS pausa_min
+            FROM workspace_rrhh_turnos
+            WHERE workspace_id = ? AND COALESCE(enabled, 1) = 1
+            """,
+            (ws_id,),
+        ).fetchall():
+            clave = (str(row_value(t, "persona_id") or "").strip(), int(row_value(t, "weekday") or 0))
+            turnos[clave] = {
+                "hora_fin": str(row_value(t, "hora_fin") or "").strip(),
+                "pausa_min": int(row_value(t, "pausa_min") or 0),
+            }
+    except Exception:
+        _rollback_best_effort(conn)
+
+    salida = []
+    for fila in filas:
+        fecha = str(row_value(fila, "fecha") or "").strip()[:10]
+        inicio = str(row_value(fila, "hora_inicio") or "").strip()[:5]
+        persona_id = str(row_value(fila, "persona_id") or "").strip()
+        pausa = int(row_value(fila, "pausa_min") or 0)
+        propuesta, origen = "", "sin_datos"
+        try:
+            weekday = datetime.strptime(fecha, "%Y-%m-%d").isoweekday()
+        except Exception:
+            weekday = 0
+        turno = turnos.get((persona_id, weekday)) or {}
+        if turno.get("hora_fin"):
+            propuesta, origen = turno["hora_fin"], "turno"
+            pausa = pausa or int(turno.get("pausa_min") or 0)
+        else:
+            try:
+                horas = float(row_value(fila, "horas_pactadas_dia") or 0)
+            except Exception:
+                horas = 0.0
+            inicio_min = parse_hhmm_to_minutes(inicio)
+            if horas > 0 and inicio_min is not None:
+                fin_min = int(inicio_min + horas * 60 + pausa) % (24 * 60)
+                propuesta, origen = f"{fin_min // 60:02d}:{fin_min % 60:02d}", "jornada_pactada"
+        salida.append({
+            "id": str(row_value(fila, "id") or "").strip(),
+            "fecha": fecha,
+            "hora_inicio": inicio,
+            "pausa_min": pausa,
+            "persona_id": persona_id,
+            "persona_nombre": str(row_value(fila, "persona_nombre") or "").strip(),
+            "empresa_id": str(row_value(fila, "empresa_id") or "").strip(),
+            "propuesta_hora_fin": propuesta,
+            "propuesta_pausa_min": pausa,
+            "origen_propuesta": origen,
+            "minutos_propuestos": compute_worked_minutes(inicio, propuesta, pausa) if propuesta else 0,
+        })
+    return salida
+
+
 def workspace_time_open_entry_minutes(open_row, now_dt):
     """Minutos transcurridos desde que se abrió el fichaje. None si no se puede saber."""
     if not open_row or not now_dt:
@@ -57289,6 +57384,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_registro_personal_self_photo",
             "/api/workspace_registro_horario",
             "/api/workspace_registro_horario_toggle",
+            "/api/workspace_registro_horario_regularizar",
             "/api/workspace_kiosk_toggle",
             "/api/workspace_kiosk_token",
             "/api/workspace_registro_alerts",
@@ -57590,6 +57686,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/empresa_update",
             "/api/empresa_delete",
             "/api/workspace_registro_horario_toggle",
+            "/api/workspace_registro_horario_regularizar",
             "/api/workspace_registro_horario",
             "/api/workspace_registro_personal",
             "/api/workspace_registro_personal_delete",
@@ -65371,6 +65468,97 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
             return
+        elif parsed.path == "/api/workspace_registro_horario_regularizar":
+            # Cierra en bloque fichajes que nadie cerró, con la hora que confirma una
+            # persona. No se cierra nada sin hora explícita: el objetivo es regularizar
+            # el histórico dejando claro que son correcciones, no fichajes reales.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            items = payload.get("items")
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            if not isinstance(items, list) or not items:
+                json_response(self, {"error": "items requerido"}, status=400)
+                return
+            nota_base = str(payload.get("notas") or "").strip() or "Regularización de fichaje sin cerrar"
+            now_dt = app_now()
+            now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+            cerrados, omitidos = [], []
+            for item in items[:500]:
+                if not isinstance(item, dict):
+                    continue
+                entry_id = str(item.get("id") or "").strip()
+                hora_fin = str(item.get("hora_fin") or "").strip()[:5]
+                if not entry_id or parse_hhmm_to_minutes(hora_fin) is None:
+                    omitidos.append({"id": entry_id, "motivo": "hora_fin_invalida"})
+                    continue
+                fila = conn.execute(
+                    """
+                    SELECT id, fecha, hora_inicio, hora_fin, pausa_min, persona_id, persona_nombre, empresa_id
+                    FROM workspace_registro_horario
+                    WHERE workspace_id = ? AND id = ?
+                    LIMIT 1
+                    """,
+                    (workspace_id, entry_id),
+                ).fetchone()
+                if not fila:
+                    omitidos.append({"id": entry_id, "motivo": "no_encontrado"})
+                    continue
+                if str(row_value(fila, "hora_fin") or "").strip():
+                    omitidos.append({"id": entry_id, "motivo": "ya_cerrado"})
+                    continue
+                fecha_fila = str(row_value(fila, "fecha") or "").strip()[:10]
+                empresa_fila = str(row_value(fila, "empresa_id") or "").strip()
+                if is_workspace_time_month_locked(conn, workspace_id, fecha_fila, empresa_id=empresa_fila):
+                    omitidos.append({"id": entry_id, "motivo": "mes_bloqueado", "fecha": fecha_fila})
+                    continue
+                inicio = str(row_value(fila, "hora_inicio") or "").strip()[:5]
+                # La pausa puede venir en la propuesta (la del turno pactado). Si no
+                # viaja con el cierre, el listado propone "8,0 h" descontando la pausa y
+                # se acaba guardando 8,5 h: la pantalla enseñaría un número y la base
+                # otro, que en un registro de jornada es justo lo que no puede pasar.
+                try:
+                    pausa = int(item.get("pausa_min")) if item.get("pausa_min") is not None else int(row_value(fila, "pausa_min") or 0)
+                except Exception:
+                    pausa = int(row_value(fila, "pausa_min") or 0)
+                pausa = max(0, pausa)
+                minutos = compute_worked_minutes(inicio, hora_fin, pausa)
+                nota = f"{nota_base} · cerrado el {now_dt.strftime('%d/%m/%Y %H:%M')}"
+                conn.execute(
+                    """
+                    UPDATE workspace_registro_horario
+                    SET hora_fin = ?, minutos_trabajados = ?, estado = ?,
+                        pausa_min = ?,
+                        metodo_registro = 'Manual',
+                        notas = CASE WHEN COALESCE(TRIM(COALESCE(notas, '')), '') = '' THEN ?
+                                     ELSE notas || ' | ' || ? END,
+                        updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (hora_fin, minutos, normalize_time_entry_state("Cerrado", hora_fin), pausa, nota, nota, now, entry_id, workspace_id),
+                )
+                log_workspace_registro_audit(
+                    conn,
+                    workspace_id,
+                    empresa_id=empresa_fila,
+                    persona_id=str(row_value(fila, "persona_id") or "").strip(),
+                    entity_type="fichaje",
+                    entity_id=entry_id,
+                    action="regularizacion_cierre",
+                    actor=session,
+                    before={"fecha": fecha_fila, "hora_inicio": inicio, "hora_fin": "", "pausa_min": int(row_value(fila, "pausa_min") or 0)},
+                    after={"fecha": fecha_fila, "hora_fin": hora_fin, "pausa_min": pausa, "minutos_trabajados": minutos, "metodo_registro": "Manual"},
+                    now=now,
+                )
+                cerrados.append({"id": entry_id, "fecha": fecha_fila, "hora_fin": hora_fin, "minutos": minutos})
+            conn.commit()
+            json_response(self, {"ok": True, "cerrados": len(cerrados), "omitidos": omitidos, "detalle": cerrados[:50]})
+            return
+
         elif parsed.path == "/api/workspace_registro_horario_toggle":
             workspace_id = str(payload.get("workspace_id") or "").strip()
             persona_id = str(payload.get("persona_id") or "").strip()
@@ -81928,6 +82116,19 @@ class Handler(BaseHTTPRequestHandler):
             created = run_workspace_time_missing_sweep(conn, workspace_id)
             conn.commit()
             json_response(self, {"ok": True, "notifications": len(created), "channels": created[:12]})
+            return
+
+        if path == "/api/workspace_registro_horario_abiertos":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            filas = fetch_workspace_open_time_entries(conn, workspace_id)
+            json_response(self, {"items": filas, "total": len(filas)})
             return
 
         if path == "/api/workspace_registro_sweep_status":

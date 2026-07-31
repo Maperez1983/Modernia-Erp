@@ -14828,3 +14828,74 @@ body.theme-operativa .pill {
     scroll-behavior: auto !important;
   }
 }
+
+/* === Fichajes sin cerrar (regularización) ===
+   Panel de administración: se usa poco pero cuando se usa hay que ver muchas filas
+   de un vistazo, así que prima la densidad sobre el lucimiento. */
+body.theme-operativa .workspace-time-open {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid rgba(11, 29, 51, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+body.theme-operativa .workspace-time-open-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+body.theme-operativa .workspace-time-open-list {
+  display: grid;
+  gap: 4px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+body.theme-operativa .workspace-time-open-row {
+  display: grid;
+  grid-template-columns: auto 150px minmax(0, 1fr) 110px minmax(0, 1.1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid rgba(11, 29, 51, 0.07);
+  font-size: 0.88rem;
+}
+
+body.theme-operativa .workspace-time-open-row:hover {
+  border-color: rgba(60, 110, 113, 0.35);
+}
+
+body.theme-operativa .workspace-time-open-when {
+  font-variant-numeric: tabular-nums;
+  color: #0b1d33;
+}
+
+body.theme-operativa .workspace-time-open-who {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.theme-operativa .workspace-time-open-end {
+  font-variant-numeric: tabular-nums;
+}
+
+body.theme-operativa .workspace-time-open-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  body.theme-operativa .workspace-time-open-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    row-gap: 4px;
+  }
+}

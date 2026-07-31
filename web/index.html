@@ -9,7 +9,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=283" />
+	    <link rel="stylesheet" href="styles.css?v=284" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2182,6 +2182,23 @@
                 <div class="muted" id="workspaceTimeSweepStatus">Barrido automático: consultando...</div>
                 <button type="button" id="workspaceTimeSweepRunNow" class="secondary ghost button-inline hidden">Ejecutar alertas ahora</button>
               </div>
+              <!-- Regularización de fichajes que nadie cerró. Se propone una hora de
+                   salida a partir del turno pactado, pero no se cierra nada sin que
+                   una persona lo confirme: quedan marcados como corrección manual. -->
+              <section class="workspace-time-open" id="workspaceTimeOpen" aria-labelledby="workspaceTimeOpenTitulo">
+                <div class="workspace-time-open-head">
+                  <div>
+                    <strong id="workspaceTimeOpenTitulo">Fichajes sin cerrar</strong>
+                    <div class="muted" id="workspaceTimeOpenStatus">Consultando…</div>
+                  </div>
+                  <button type="button" id="workspaceTimeOpenReload" class="secondary ghost button-inline">Revisar</button>
+                </div>
+                <div id="workspaceTimeOpenList" class="workspace-time-open-list"></div>
+                <div class="workspace-time-open-actions hidden" id="workspaceTimeOpenActions">
+                  <span class="muted" id="workspaceTimeOpenCount"></span>
+                  <button type="button" id="workspaceTimeOpenApply" class="button-inline">Cerrar los seleccionados</button>
+                </div>
+              </section>
               <form id="workspaceAlertForm" class="form-grid">
                 <input type="hidden" name="workspace_id" />
                 <input type="hidden" name="persona_id" />
@@ -11978,7 +11995,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=812",
+              "app.js?v=813",
             ];
 
             const getParams = () => {
@@ -12338,7 +12355,7 @@
 		    <script>
 					      (function () {
 					        if (!("serviceWorker" in navigator)) return;
-				        const TARGET_SW = "/sw.js?v=380";
+				        const TARGET_SW = "/sw.js?v=381";
 				        // Marca de la limpieza de rescate. Súbela para forzar una purga nueva
 				        // en todos los navegadores tras un despliegue problemático.
 				        const HEAL_KEY = "verifika2:sw-heal:v374";
