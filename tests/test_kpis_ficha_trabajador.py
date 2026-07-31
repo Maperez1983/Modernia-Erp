@@ -156,3 +156,36 @@ class PresentacionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LosKpisEstanDondeSeMiraLaFichaTests(unittest.TestCase):
+    """Estaban puestos en la pantalla equivocada.
+
+    Se añadieron al panel antiguo de "Ficha laboral" (`#workspaceRrhhProfileForm`),
+    pero la ficha que se abre pulsando a alguien en Equipo es otra vista, con sus
+    propias pestañas. Al comprobarlo contra producción, el contenedor no existía en
+    la pantalla que de verdad se usa: el endpoint devolvía las cifras y nadie las
+    veía.
+    """
+
+    APP = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+
+    def test_el_dashboard_del_miembro_incluye_los_kpis(self):
+        i = self.APP.index("const dashboardHtml = ")
+        tramo = self.APP[i - 700: i + 300]
+        self.assertIn('id="workspaceRrhhKpis"', tramo)
+        self.assertIn("const dashboardHtml = kpisHtml + renderRrhhEconomicosDashboardPanel({", self.APP)
+
+    def test_solo_si_hay_ficha(self):
+        # Sin ficha no hay persona_id que consultar; pedirlo daría un 400.
+        self.assertIn("const kpisHtml = employee?.id", self.APP)
+
+    def test_el_contenedor_lleva_la_persona(self):
+        i = self.APP.index("const kpisHtml = employee?.id")
+        self.assertIn('data-persona="${escapeHtml(String(employee.id))}"', self.APP[i: i + 400])
+
+    def test_se_cargan_al_pintar(self):
+        # `loadRrhhKpis()` vive dentro de renderWorkspaceRrhhHub, que es quien pinta
+        # el detalle y quien se vuelve a llamar al cambiar de pestaña.
+        self.assertIn("loadRrhhKpis();", self.APP)
+        self.assertIn("state.workspaceRrhhEquipoMemberTab = String(button.dataset.rrhhMemberTab", self.APP)

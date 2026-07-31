@@ -17033,7 +17033,14 @@ const renderWorkspaceRrhhHub = () => {
 
 	      const docsHtml = renderMemberDocs(employee);
         const vacacionesHtml = renderMemberVacaciones(employee);
-	        const dashboardHtml = renderRrhhEconomicosDashboardPanel({
+	        // Los KPIs de la persona (salario, costes sociales, horas y vacaciones) vivían
+	        // solo en el panel antiguo de "Ficha laboral", que no es el que se abre al
+	        // pulsar a alguien en Equipo. Aquí es donde se mira la ficha, así que van
+	        // delante del dashboard de comisiones, que trata de otra cosa.
+	        const kpisHtml = employee?.id
+	          ? `<div id="workspaceRrhhKpis" class="rrhh-kpis" data-persona="${escapeHtml(String(employee.id))}"></div>`
+	          : "";
+	        const dashboardHtml = kpisHtml + renderRrhhEconomicosDashboardPanel({
 	          personaId: String(employee?.id || "").trim(),
 	          empresaId: String(employee?.empresa_id || "").trim(),
 	        });
