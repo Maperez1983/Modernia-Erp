@@ -13107,15 +13107,127 @@ body.theme-operativa #homeSection.hero::before {
 }
 
 body.theme-operativa .hero-shell {
+  /* Una sola columna. La home es una pantalla de paso —se entra, se elige destino y
+     se sale—, y lo operativo vive dentro de cada CRM. El reparto a dos columnas
+     dedicaba la mitad del ancho a un título y un selector de año, y dejaba ~950px
+     vacíos en pantalla grande. */
   display: grid;
-  /* Estaba al revés: 1.8fr para la columna izquierda, que solo lleva el título y el
-     selector de año, y 0.95fr para el panel que lleva TODO el contenido útil (retomar
-     trabajo, buscador y accesos). En pantalla ancha eso dejaba ~950px vacíos a la
-     izquierda y apretaba lo importante en 505px. Al repartirlo a partes iguales el
-     panel casi dobla su ancho y el hueco se reduce. */
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 1fr);
-  gap: 24px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
   align-items: start;
+  max-width: 960px;
+  margin-inline: auto;
+}
+
+/* Con una sola columna, el título y el selector de año conviven en una línea en vez
+   de apilarse ocupando alto. */
+body.theme-operativa .hero-copy {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 20px;
+}
+
+@media (max-width: 720px) {
+  body.theme-operativa .hero-copy {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+/* === Estado de configuración ===
+   Panel que casi siempre está callado: solo aparece cuando hay algo que arreglar.
+   Por eso puede permitirse destacar cuando habla. */
+body.theme-operativa .setup-status {
+  display: grid;
+  gap: 10px;
+  padding: 18px 20px;
+  border: 1px solid rgba(60, 110, 113, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+body.theme-operativa .setup-status[hidden] {
+  display: none;
+}
+
+body.theme-operativa .setup-status-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+body.theme-operativa .setup-status-title {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #3c6e71;
+}
+
+body.theme-operativa .setup-status-count {
+  font-size: 0.78rem;
+  color: #5d6b6c;
+}
+
+body.theme-operativa .setup-status-list {
+  display: grid;
+  gap: 8px;
+}
+
+body.theme-operativa .setup-status-item {
+  display: grid;
+  grid-template-columns: 4px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid rgba(11, 29, 51, 0.08);
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+
+body.theme-operativa .setup-status-item:hover,
+body.theme-operativa .setup-status-item:focus-visible {
+  border-color: rgba(60, 110, 113, 0.45);
+  transform: translateY(-1px);
+}
+
+/* Franja de severidad: color como refuerzo, nunca como único indicador —
+   el texto ya dice qué pasa. */
+body.theme-operativa .setup-status-flag {
+  align-self: stretch;
+  border-radius: 999px;
+  background: #d9a441;
+}
+
+body.theme-operativa .setup-status-item[data-severidad="alta"] .setup-status-flag {
+  background: #c2543d;
+}
+
+body.theme-operativa .setup-status-item-title {
+  font-weight: 600;
+  color: #0b1d33;
+}
+
+body.theme-operativa .setup-status-item-detail {
+  font-size: 0.86rem;
+  color: #5d6b6c;
+}
+
+body.theme-operativa .setup-status-item-go {
+  font-size: 0.82rem;
+  color: #3c6e71;
+  white-space: nowrap;
+}
+
+body.theme-operativa .setup-status-ok {
+  font-size: 0.9rem;
+  color: #5d6b6c;
 }
 
 body.theme-operativa .hero-copy {

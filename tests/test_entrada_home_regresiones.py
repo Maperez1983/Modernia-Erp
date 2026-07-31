@@ -96,14 +96,18 @@ class RepartoDeLaHomeTests(unittest.TestCase):
         i = CSS.index("body.theme-operativa .hero-shell {")
         return CSS[i : CSS.index("}", i)]
 
-    def test_la_columna_de_contenido_no_es_la_estrecha(self):
+    def test_no_vuelve_la_columna_vacia(self):
+        """La home pasó a una sola columna.
+
+        Antes eran dos: 1.8fr para la que solo llevaba el título y el selector de
+        año, y 0.95fr para la que llevaba todo. Cualquier reparto a dos columnas
+        reintroduce el hueco, así que aquí se veta el patrón entero.
+        """
         regla = self._regla()
-        m = re.search(r"grid-template-columns:\s*minmax\(0,\s*([\d.]+)fr\)\s*minmax\([^,]+,\s*([\d.]+)fr\)", regla)
-        self.assertIsNotNone(m, "no se pudo leer el reparto de columnas")
-        izquierda, derecha = float(m.group(1)), float(m.group(2))
-        self.assertGreaterEqual(
-            derecha, izquierda,
-            "el panel con el contenido no puede ser más estrecho que la columna vacía",
+        self.assertIn("grid-template-columns: minmax(0, 1fr);", regla)
+        self.assertIsNone(
+            re.search(r"grid-template-columns:[^;]*fr\)\s*minmax", regla),
+            "la home volvió a repartirse en dos columnas",
         )
 
     def test_el_contenido_no_flota_centrado_en_el_hueco(self):

@@ -40442,6 +40442,97 @@ def fetch_workspace_company_ids(conn, workspace_id, *, solo_operativas=False):
     return []
 
 
+def fetch_workspace_setup_status(conn, workspace_id):
+    """Qué le falta por configurar a un workspace.
+
+    Criterio deliberado: solo entra lo que es **raro y accionable**. Midiendo
+    producción el 2026-07-31, el 100% de las empresas no tenía IBAN ni dirección
+    fiscal, el 90% no tenía teléfono y el 80% no tenía email. Avisar de eso no
+    señala un descuido, señala campos que no se usan — y un panel que abre con
+    diez alarmas se ignora el primer día y ya no se mira más.
+
+    Devuelve una lista de avisos; vacía significa que está todo en orden, y ese
+    es el estado normal esperado.
+    """
+    ws_id = str(workspace_id or "").strip()
+    if not ws_id:
+        return []
+    avisos = []
+
+    def _contar(sql, params=()):
+        try:
+            fila = conn.execute(sql, params).fetchone()
+            return int(row_value(fila, 0) or 0) if fila else 0
+        except Exception:
+            _rollback_best_effort(conn)
+            return None
+
+    # 1) Un workspace sin empresas no puede operar: sus listas salen vacías haga
+    #    lo que haga el usuario. En producción le pasaba a DEMOCASA, con 9 módulos
+    #    activos y ninguna empresa detrás.
+    empresa_ids = []
+    try:
+        empresa_ids = fetch_workspace_company_ids(conn, ws_id) or []
+    except Exception:
+        _rollback_best_effort(conn)
+    if not empresa_ids:
+        avisos.append({
+            "clave": "workspace_sin_empresas",
+            "titulo": "Este workspace no tiene empresas",
+            "detalle": "Sin empresas vinculadas no hay datos que mostrar en ningún módulo.",
+            "severidad": "alta",
+            "accion": "ajustes",
+        })
+
+    # 2) Clientes que no cuelgan de ningún workspace ni de ninguna empresa: no
+    #    aparecen en ninguna lista acotada, así que nadie los ve hasta que alguien
+    #    los echa en falta.
+    huerfanos = _contar(
+        """
+        SELECT COUNT(*)
+        FROM clientes c
+        WHERE COALESCE(TRIM(COALESCE(c.workspace_id, '')), '') = ''
+          AND NOT EXISTS (
+            SELECT 1
+            FROM clientes_empresas ce
+            JOIN workspace_empresas we ON we.empresa_id = ce.empresa_id
+            WHERE ce.cliente_id = c.id
+          )
+        """
+    )
+    if huerfanos:
+        avisos.append({
+            "clave": "clientes_sin_asignar",
+            "titulo": f"{huerfanos} cliente{'s' if huerfanos != 1 else ''} sin asignar",
+            "detalle": "No pertenecen a ningún workspace y no salen en ninguna lista.",
+            "severidad": "media",
+            "accion": "clientes_sin_asignar",
+        })
+
+    # 3) El NIF sí importa: sin él no se puede facturar ni presentar modelos.
+    if empresa_ids:
+        marcadores = ",".join(["?"] * len(empresa_ids))
+        sin_nif = _contar(
+            f"""
+            SELECT COUNT(*)
+            FROM empresas
+            WHERE id IN ({marcadores})
+              AND COALESCE(TRIM(COALESCE(nif, '')), '') = ''
+            """,  # nosec B608 - marcadores parametrizados
+            tuple(empresa_ids),
+        )
+        if sin_nif:
+            avisos.append({
+                "clave": "empresas_sin_nif",
+                "titulo": f"{sin_nif} empresa{'s' if sin_nif != 1 else ''} sin NIF",
+                "detalle": "Hace falta para facturar y para presentar modelos.",
+                "severidad": "media",
+                "accion": "ajustes",
+            })
+
+    return avisos
+
+
 def fetch_empresa_ids_visible_for_session(conn, session, *, workspace_id=""):
     """Empresas que una sesión puede ver. `None` significa "todas".
 
@@ -80544,6 +80635,16 @@ class Handler(BaseHTTPRequestHandler):
             q = (params.get("q", [""])[0] or "").strip()
             limit = (params.get("limit", ["20"])[0] or "20").strip()
             json_response(self, fetch_legal_library_documents(conn, area=area, topic_key=topic_key, q=q, limit=limit))
+            return
+
+        if path == "/api/workspace_setup_status":
+            # El gate GET centralizado ya exigió pertenencia al workspace_id que venga.
+            ws_id = (params.get("workspace_id", [""])[0] or "").strip()
+            if not ws_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            avisos = fetch_workspace_setup_status(conn, ws_id)
+            json_response(self, {"items": avisos, "total": len(avisos)})
             return
 
         if path == "/api/workspaces":

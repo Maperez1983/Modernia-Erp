@@ -9,7 +9,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=282" />
+	    <link rel="stylesheet" href="styles.css?v=283" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -77,6 +77,8 @@
                 </div>
               </div>
               <aside id="homeHeroAside" class="hero-aside" aria-label="Accesos rápidos de inicio"></aside>
+              <!-- Solo se muestra cuando hay algo que configurar; oculto es el estado normal. -->
+              <section id="homeSetupStatus" class="setup-status" aria-labelledby="homeSetupStatusTitulo" hidden></section>
             </div>
             <div class="home-block">
               <h3>Accesos directos</h3>
@@ -11976,7 +11978,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=808",
+              "app.js?v=809",
             ];
 
             const getParams = () => {
@@ -12336,7 +12338,7 @@
 		    <script>
 					      (function () {
 					        if (!("serviceWorker" in navigator)) return;
-				        const TARGET_SW = "/sw.js?v=376";
+				        const TARGET_SW = "/sw.js?v=377";
 				        // Marca de la limpieza de rescate. Súbela para forzar una purga nueva
 				        // en todos los navegadores tras un despliegue problemático.
 				        const HEAL_KEY = "verifika2:sw-heal:v374";

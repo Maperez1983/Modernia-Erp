@@ -6515,6 +6515,8 @@ const renderCompanyCards = () => {
     coreCards.innerHTML = "";
   }
   renderHomeGuidance();
+  // No bloquea el render: el panel aparece cuando llega la respuesta.
+  loadHomeSetupStatus();
   if (coreCards) {
     const user = getAuthScopeUser();
     const isPriv = canSeeAllWorkspacesHome(user);
@@ -7530,6 +7532,70 @@ const buildWorkspaceContinueAction = (user = null) => {
     primaryService,
     canAdmin,
   };
+};
+
+// === Estado de configuración de la home ===
+// Deliberadamente escueto: solo se pinta cuando hay algo que arreglar. Un panel que
+// abre siempre con avisos deja de leerse a la semana.
+const homeSetupStatusHost = () => document.getElementById("homeSetupStatus");
+let _setupStatusPedidoPara = "";
+
+const renderHomeSetupStatus = (items = []) => {
+  const host = homeSetupStatusHost();
+  if (!host) return;
+  const avisos = Array.isArray(items) ? items : [];
+  if (!avisos.length) {
+    host.hidden = true;
+    host.innerHTML = "";
+    return;
+  }
+  host.hidden = false;
+  host.innerHTML = `
+    <div class="setup-status-head">
+      <span class="setup-status-title" id="homeSetupStatusTitulo">Configuración pendiente</span>
+      <span class="setup-status-count">${avisos.length} ${avisos.length === 1 ? "aviso" : "avisos"}</span>
+    </div>
+    <div class="setup-status-list">
+      ${avisos
+        .map(
+          (a) => `
+        <button type="button" class="setup-status-item" data-severidad="${escapeHtml(String(a.severidad || "media"))}" data-setup-accion="${escapeHtml(String(a.accion || ""))}">
+          <span class="setup-status-flag" aria-hidden="true"></span>
+          <span>
+            <span class="setup-status-item-title">${escapeHtml(String(a.titulo || ""))}</span><br />
+            <span class="setup-status-item-detail">${escapeHtml(String(a.detalle || ""))}</span>
+          </span>
+          <span class="setup-status-item-go" aria-hidden="true">Revisar →</span>
+        </button>`
+        )
+        .join("")}
+    </div>
+  `;
+  host.querySelectorAll("[data-setup-accion]").forEach((boton) => {
+    boton.addEventListener("click", () => {
+      const accion = String(boton.dataset.setupAccion || "").trim();
+      if (accion === "clientes_sin_asignar") {
+        openHolding({ mode: "platform", view: "tenant" });
+      } else {
+        openHolding({ mode: "platform", view: "tenant" });
+      }
+    });
+  });
+};
+
+const loadHomeSetupStatus = async () => {
+  const ws = String(state.currentWorkspaceId || "").trim();
+  if (!ws || !homeSetupStatusHost()) return;
+  // Una vez por workspace y carga: es configuración, no cambia entre pulsaciones.
+  if (_setupStatusPedidoPara === ws) return;
+  _setupStatusPedidoPara = ws;
+  try {
+    const data = await api(`/api/workspace_setup_status?workspace_id=${encodeURIComponent(ws)}`);
+    renderHomeSetupStatus(data?.items || []);
+  } catch (e) {
+    // Si falla, no estorbamos: el panel simplemente no aparece.
+    renderHomeSetupStatus([]);
+  }
 };
 
 const renderHomeGuidance = () => {
