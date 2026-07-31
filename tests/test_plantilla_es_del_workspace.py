@@ -39,15 +39,25 @@ class LaPlantillaSePideSinEmpresaTests(unittest.TestCase):
         # Hacen falta para "Ver bajas"; el registro se conserva cuatro años.
         self.assertIn("activos=0", self._peticion())
 
-    def test_la_cuadricula_usa_esa_lista(self):
-        self.assertIn(
-            "const employeesAll = Array.isArray(state.workspaceRrhhRosterRows) && state.workspaceRrhhRosterRows.length",
-            APP,
-        )
+    def test_la_cuadricula_une_las_tres_fuentes(self):
+        """Elegir una sola lista dependía del orden de carga.
 
-    def test_hay_respaldo_si_aun_no_ha_llegado(self):
-        i = APP.index("const employeesAll = Array.isArray(state.workspaceRrhhRosterRows)")
-        self.assertIn("state.workspaceTimeEmployees", APP[i: i + 400])
+        Con Estudio Velázquez activa se veían 9 de 11: las bajas que mostraba eran
+        exactamente las 6 de esa sociedad, y las 5 de Fincas Velázquez no salían.
+        Unir por id es lo único que no depende de cuál llegue antes.
+        """
+        i = APP.index("const employeesAll = (() => {")
+        bloque = APP[i: APP.index("})();", i)]
+        for fuente in ("state.workspaceRrhhRosterRows",
+                       "state.currentWorkspaceData?.timeEmployees",
+                       "state.workspaceTimeEmployees"):
+            with self.subTest(fuente=fuente):
+                self.assertIn(fuente, bloque)
+
+    def test_no_duplica_a_nadie_al_unirlas(self):
+        i = APP.index("const employeesAll = (() => {")
+        bloque = APP[i: APP.index("})();", i)]
+        self.assertIn("if (id && !porId.has(id)) porId.set(id, fila);", bloque)
 
     def test_sigue_quitando_las_fichas_automaticas(self):
         # Eso no era el problema y no se toca.

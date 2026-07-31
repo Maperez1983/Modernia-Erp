@@ -16151,9 +16151,27 @@ const renderWorkspaceRrhhHub = () => {
     // (sin empresa asignada) y Teresa Ramos (de Fincas Velázquez) desaparecían al mirar
     // Estudio Velázquez, y sus tarjetas caían a "Sin ficha" teniendo ficha. Los dos
     // trabajan en Modernia; que estén en una sociedad u otra no los saca del equipo.
-    const employeesAll = Array.isArray(state.workspaceRrhhRosterRows) && state.workspaceRrhhRosterRows.length
-      ? state.workspaceRrhhRosterRows
-      : (Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : []);
+    // La plantilla llega por tres caminos —la petición propia de RRHH sin acotar, la
+    // del arranque y la ya filtrada por empresa— y cuál está lista depende del orden
+    // de carga. Elegir una sola dejaba fuera a gente según el momento: con Estudio
+    // Velázquez activa se veían 9 de 11, y Daniel García (sin empresa) y Teresa Ramos
+    // (de Fincas Velázquez) salían como "Sin ficha" teniéndola. Se unen las tres y se
+    // quitan repetidos por id, que es lo único que no depende del orden.
+    const employeesAll = (() => {
+      const porId = new Map();
+      for (const fuente of [
+        state.workspaceRrhhRosterRows,
+        state.currentWorkspaceData?.timeEmployees,
+        state.workspaceTimeEmployees,
+      ]) {
+        if (!Array.isArray(fuente)) continue;
+        for (const fila of fuente) {
+          const id = String(fila?.id || "").trim();
+          if (id && !porId.has(id)) porId.set(id, fila);
+        }
+      }
+      return [...porId.values()];
+    })();
     const employees = employeesAll.filter((row) => String(row?.source || "").trim() !== "auto");
     const usersAll = Array.isArray(state.usersList) ? state.usersList : [];
     const usersById = new Map(usersAll.map((row) => [String(row.id || "").trim(), row]));
