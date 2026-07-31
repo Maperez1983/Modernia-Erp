@@ -142,8 +142,21 @@ class EstadoDeFichajeNoMienteTests(unittest.TestCase):
         self.assertIn("WORKSPACE_TIME_MAX_SHIFT_MINUTES", bloque)
 
     def test_usa_el_mismo_umbral_que_el_toggle(self):
-        # Dos criterios distintos para lo mismo acabarían discrepando.
-        self.assertEqual(SERVER.count("WORKSPACE_TIME_MAX_SHIFT_MINUTES"), 4)
+        """Un solo umbral para "esto ya no es una jornada plausible".
+
+        Se comprueba que los sitios que deciden sobre jornadas plausibles usan la
+        misma constante, no que aparezca N veces: contar ocurrencias se rompe cada
+        vez que la constante se reutiliza con buen criterio.
+        """
+        for firma, fin in (
+            ('elif parsed.path == "/api/workspace_registro_horario_toggle":', "elif parsed.path =="),
+            ('if path == "/api/home_time_status":', 'if path == "/api/'),
+            ("def fetch_workspace_open_time_entries", "\ndef "),
+        ):
+            i = SERVER.index(firma)
+            bloque = SERVER[i : SERVER.index(fin, i + len(firma) + 10)]
+            with self.subTest(bloque=firma[:50]):
+                self.assertIn("WORKSPACE_TIME_MAX_SHIFT_MINUTES", bloque)
 
 
 class LaPantallaDeFichajeTests(unittest.TestCase):

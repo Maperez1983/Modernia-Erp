@@ -1021,6 +1021,12 @@ def fetch_workspace_open_time_entries(conn, workspace_id, *, antes_de=None, limi
                 horas = float(row_value(fila, "horas_pactadas_dia") or 0)
             except Exception:
                 horas = 0.0
+            # Defensa contra fichas ya guardadas con una jornada imposible: en producción
+            # había una con 40 h/día (las semanales en el campo del día) y la propuesta
+            # daba la vuelta al reloj, sugiriendo cerrar 33 fichajes a 16 h. Si el dato no
+            # es plausible no proponemos nada y esa fila se revisa a mano.
+            if horas > WORKSPACE_TIME_MAX_SHIFT_MINUTES / 60:
+                horas = 0.0
             inicio_min = parse_hhmm_to_minutes(inicio)
             if horas > 0 and inicio_min is not None:
                 fin_min = int(inicio_min + horas * 60 + pausa) % (24 * 60)
@@ -66206,6 +66212,33 @@ class Handler(BaseHTTPRequestHandler):
                 horas_pactadas_semana = float(payload.get("horas_pactadas_semana")) if str(payload.get("horas_pactadas_semana") or "").strip() else None
             except Exception:
                 horas_pactadas_semana = None
+            # Una jornada DIARIA imposible se colaba sin más: en producción había una
+            # ficha con 40, que son las horas de la semana metidas en el campo del día.
+            # Ese 40 se propagaba a la regularización y proponía cerrar 33 fichajes a
+            # 16 h/día. El límite es el mismo que define una jornada plausible al fichar.
+            horas_dia_max = WORKSPACE_TIME_MAX_SHIFT_MINUTES / 60
+            if horas_pactadas_dia is not None and not (0 < horas_pactadas_dia <= horas_dia_max):
+                json_response(
+                    self,
+                    {
+                        "error": (
+                            f"Las horas pactadas al día deben estar entre 0 y {horas_dia_max:g}. "
+                            f"Si querías indicar la jornada semanal, usa el campo de horas a la semana."
+                        ),
+                        "detail": "horas_pactadas_dia_fuera_de_rango",
+                        "valor": horas_pactadas_dia,
+                    },
+                    status=400,
+                )
+                return
+            if horas_pactadas_semana is not None and not (0 < horas_pactadas_semana <= 7 * horas_dia_max):
+                json_response(
+                    self,
+                    {"error": f"Las horas pactadas a la semana deben estar entre 0 y {7 * horas_dia_max:g}.",
+                     "detail": "horas_pactadas_semana_fuera_de_rango"},
+                    status=400,
+                )
+                return
             active_flag = 0 if str(payload.get("activo") or "1").strip().lower() in {"0", "false", "no", "off"} else 1
             # El formulario siempre envía el campo hidden `usuario_id` aunque esté vacío.
             # Si llega vacío, NO lo interpretamos como "desvincular", sino como "no tocar".

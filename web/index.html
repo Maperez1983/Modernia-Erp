@@ -2320,7 +2320,9 @@
               </label>
               <label>
                 Horas pactadas/día
-                <input name="horas_pactadas_dia" type="number" min="0" step="0.25" />
+                <!-- max=16: el campo aceptaba 40, que son las horas de la semana puestas
+                     en el del día, y eso se propagaba a la regularización de fichajes. -->
+                <input name="horas_pactadas_dia" type="number" min="0" max="16" step="0.25" title="Horas al día, no a la semana (máximo 16)" />
               </label>
               <label>
                 Fecha alta
@@ -11995,7 +11997,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=813",
+              "app.js?v=814",
             ];
 
             const getParams = () => {
@@ -12355,7 +12357,7 @@
 		    <script>
 					      (function () {
 					        if (!("serviceWorker" in navigator)) return;
-				        const TARGET_SW = "/sw.js?v=381";
+				        const TARGET_SW = "/sw.js?v=382";
 				        // Marca de la limpieza de rescate. Súbela para forzar una purga nueva
 				        // en todos los navegadores tras un despliegue problemático.
 				        const HEAL_KEY = "verifika2:sw-heal:v374";
