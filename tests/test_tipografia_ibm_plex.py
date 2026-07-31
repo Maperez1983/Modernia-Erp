@@ -44,6 +44,17 @@ class LaPantallaTests(unittest.TestCase):
         # Sin esto la jerarquía se aplana: los títulos dejan de distinguirse.
         self.assertIn('--font-display: "IBM Plex Serif"', CSS)
 
+    def test_el_texto_de_codigo_no_usa_la_monospace_del_navegador(self):
+        """`code` y `pre` no tenían estilo.
+
+        Salían con la monospace por defecto de cada navegador —Menlo, Consolas,
+        DejaVu Sans Mono— y se ven en la pantalla de importación de gestoría.
+        """
+        self.assertIn('--font-mono: "IBM Plex Mono"', CSS)
+        bloque = CSS[CSS.index("code,\npre,"):]
+        self.assertIn("font-family: var(--font-mono);", bloque)
+        self.assertIn("family=IBM+Plex+Mono", HTML)
+
     def test_no_queda_ninguna_familia_suelta_en_la_hoja_de_estilos(self):
         sueltas = [l for l in re.findall(r"font-family:[^;}]+", CSS) if "var(--font" not in l]
         self.assertEqual(sueltas, [], f"font-family sin variable: {sueltas}")

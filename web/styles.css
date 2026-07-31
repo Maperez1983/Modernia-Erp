@@ -33,6 +33,7 @@
   --font-body: "IBM Plex Sans", "Segoe UI", sans-serif;
   --font-display: "IBM Plex Serif", "Georgia", serif;
   --font-ui: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
   --layout-max: 1820px;
   --layout-gutter: clamp(14px, 2.2vw, 38px);
   --section-pad-x: clamp(16px, 1.6vw, 28px);
@@ -15058,4 +15059,11 @@ body.theme-operativa .rrhh-vac-punto {
 @media (prefers-color-scheme: dark) {
   body.theme-operativa .rrhh-vac-usadas { background: #3987e5; }
   body.theme-operativa .rrhh-vac-pendientes { background: #d95926; }
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-mono);
 }
