@@ -49,6 +49,7 @@ from email.message import EmailMessage
 from email.header import decode_header
 from email.utils import parseaddr
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
+from web.pdf_fonts import PDF_FONT_BOLD, PDF_FONT_REGULAR
 try:
     import cairosvg
 except Exception:  # pragma: no cover
@@ -7684,7 +7685,7 @@ def render_hipoteca_print_html(payload, auto_print=False, section=None):
     * {{ box-sizing: border-box; }}
     body {{
       margin: 0;
-      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
       color: var(--ink);
       background:
         radial-gradient(circle at top right, rgba(200,162,74,.14), transparent 28%),
@@ -19348,9 +19349,9 @@ def _render_rrhh_memoria_pdf(*, persona_nombre: str, ejercicio: str, kpis: dict,
     c.setFillColor(rl_colors.HexColor("#0b1b2a"))
     c.rect(0, h - 86, w, 86, stroke=0, fill=1)
     c.setFillColor(rl_colors.white)
-    c.setFont("Helvetica-Bold", 16)
+    c.setFont(PDF_FONT_BOLD, 16)
     c.drawString(margin, h - 42, "Memoria económica")
-    c.setFont("Helvetica", 11)
+    c.setFont(PDF_FONT_REGULAR, 11)
     c.drawString(margin, h - 62, f"{name} · Ejercicio {year}")
 
     # KPI cards
@@ -19362,14 +19363,14 @@ def _render_rrhh_memoria_pdf(*, persona_nombre: str, ejercicio: str, kpis: dict,
         ("Rentabilidad", pct(kpis.get("rentabilidad_pct", 0))),
     ]
     c.setFillColor(rl_colors.black)
-    c.setFont("Helvetica-Bold", 11)
+    c.setFont(PDF_FONT_BOLD, 11)
     c.drawString(margin, h - 120, "KPIs")
     x0 = margin
     y0 = h - 160
     card_w = (w - margin * 2 - 12) / 2
     card_h = 46
     gap = 12
-    c.setFont("Helvetica", 9)
+    c.setFont(PDF_FONT_REGULAR, 9)
     for i, (label, value) in enumerate(cards):
         col = i % 2
         row = i // 2
@@ -19378,14 +19379,14 @@ def _render_rrhh_memoria_pdf(*, persona_nombre: str, ejercicio: str, kpis: dict,
         c.setFillColor(rl_colors.HexColor("#f6f7f9"))
         c.roundRect(x, y, card_w, card_h, 8, stroke=0, fill=1)
         c.setFillColor(rl_colors.HexColor("#172b3a"))
-        c.setFont("Helvetica", 9)
+        c.setFont(PDF_FONT_REGULAR, 9)
         c.drawString(x + 12, y + card_h - 16, label)
-        c.setFont("Helvetica-Bold", 12)
+        c.setFont(PDF_FONT_BOLD, 12)
         c.drawString(x + 12, y + 14, value)
 
     # Chart: Comision cobrada vs Coste (por mes)
     c.setFillColor(rl_colors.HexColor("#172b3a"))
-    c.setFont("Helvetica-Bold", 11)
+    c.setFont(PDF_FONT_BOLD, 11)
     c.drawString(margin, h - 330, "Evolución mensual (comisión cobrada vs coste nómina)")
     chart_x = margin
     chart_y = h - 620
@@ -19422,11 +19423,11 @@ def _render_rrhh_memoria_pdf(*, persona_nombre: str, ejercicio: str, kpis: dict,
         c.setFillColor(rl_colors.HexColor("#f2994a"))
         c.rect(px + bar_w + bar_gap, by0, bar_w, h2, stroke=0, fill=1)
         c.setFillColor(rl_colors.HexColor("#5b6b7a"))
-        c.setFont("Helvetica", 7)
+        c.setFont(PDF_FONT_REGULAR, 7)
         c.drawCentredString(px + pair_w / 2, chart_y + 6, f"{m:02d}")
 
     c.setFillColor(rl_colors.HexColor("#2f80ed"))
-    c.setFont("Helvetica", 8)
+    c.setFont(PDF_FONT_REGULAR, 8)
     c.drawString(chart_x + 16, chart_y + chart_h - 14, "■ Comisión cobrada")
     c.setFillColor(rl_colors.HexColor("#f2994a"))
     c.drawString(chart_x + 140, chart_y + chart_h - 14, "■ Coste nómina")
@@ -51960,7 +51961,7 @@ def _build_acroform_overlay_pdf(pagesize_list, fields_by_page):
                     font_size = float(font_size)
                 except Exception:
                     font_size = 10
-                font_name = str(field.get("fontName") or field.get("font_name") or "Helvetica").strip() or "Helvetica"
+                font_name = str(field.get("fontName") or field.get("font_name") or PDF_FONT_REGULAR).strip() or PDF_FONT_REGULAR
                 flags = 4096 if multiline else 0  # Multiline
                 form.textfield(
                     name=name,
@@ -52014,7 +52015,7 @@ def _build_acroform_overlay_pdf(pagesize_list, fields_by_page):
         return None
 
 
-def _build_static_text_overlay_pdf(pagesize_list, fields_by_page, font_name="Helvetica", font_size=10, leading=12):
+def _build_static_text_overlay_pdf(pagesize_list, fields_by_page, font_name=PDF_FONT_REGULAR, font_size=10, leading=12):
     """
     Devuelve bytes PDF con texto "plano" (no editable) para superponer sobre un template.
     `fields_by_page`: {page_index: [ {x,y,width,height,value,multiline?} ]}
@@ -52030,7 +52031,7 @@ def _build_static_text_overlay_pdf(pagesize_list, fields_by_page, font_name="Hel
             return float(c.stringWidth(str(text or ""), font_name, float(fs)))
         except Exception:
             try:
-                return float(c.stringWidth(str(text or ""), "Helvetica", float(fs)))
+                return float(c.stringWidth(str(text or ""), PDF_FONT_REGULAR, float(fs)))
             except Exception:
                 return float(len(str(text or "")) * (float(fs) * 0.55))
 
@@ -52107,7 +52108,7 @@ def _build_static_text_overlay_pdf(pagesize_list, fields_by_page, font_name="Hel
                 try:
                     c.setFont(font_name, fs)
                 except Exception:
-                    c.setFont("Helvetica", fs)
+                    c.setFont(PDF_FONT_REGULAR, fs)
                 if is_multiline:
                     # Dibuja desde arriba del bbox hacia abajo.
                     lines = [line for line in str(value).replace("\r", "").split("\n") if line is not None]
@@ -52129,7 +52130,7 @@ def _build_static_text_overlay_pdf(pagesize_list, fields_by_page, font_name="Hel
                     try:
                         c.setFont(font_name, fs_fit)
                     except Exception:
-                        c.setFont("Helvetica", fs_fit)
+                        c.setFont(PDF_FONT_REGULAR, fs_fit)
                     clip_active = _with_clip_rect(x, y, w, h)
                     try:
                         c.drawString(x + 1.0, y + 3.0, safe_value)
@@ -52582,27 +52583,27 @@ def build_inmueble_nota_encargo_pdf_editable(company, inmueble, captacion, owner
         w, h = pagesizes[0]
         # Coordenadas calculadas sobre plantilla Modernia venta (A4) usando bbox.
         fields[0] = [
-            {"name": "direccion", "x": 80, "y": h - 157.08, "width": w - 100, "height": 14, "value": direccion_full, "fontName": "Helvetica-Bold"},
-            {"name": "datos_registrales", "x": 110, "y": h - 171.84, "width": 310, "height": 14, "value": datos_registrales, "fontName": "Helvetica-Bold"},
-            {"name": "ref_catastral", "x": 90, "y": h - 186.60, "width": 130, "height": 14, "value": ref_catastral, "fontName": "Helvetica-Bold"},
-            {"name": "m2_utiles", "x": 265, "y": h - 186.60, "width": 40, "height": 14, "value": m2_utiles, "fontName": "Helvetica-Bold"},
-            {"name": "m2_construidos", "x": 385, "y": h - 186.60, "width": 85, "height": 14, "value": m2_construidos, "fontName": "Helvetica-Bold"},
-            {"name": "otros", "x": 60, "y": h - 201.36, "width": w - 90, "height": 14, "value": otros, "fontName": "Helvetica-Bold"},
-            {"name": "owner1", "x": 60, "y": h - 262.0, "width": w - 90, "height": 44, "value": owner1_text.upper(), "multiline": True, "fontSize": 9, "fontName": "Helvetica-Bold"},
-            {"name": "owner2", "x": 60, "y": h - 321.3, "width": w - 90, "height": 44, "value": owner2_text.upper(), "multiline": True, "fontSize": 9, "fontName": "Helvetica-Bold"},
-            {"name": "cargas", "x": 445, "y": h - 496.85, "width": 130, "height": 14, "value": cargas, "fontName": "Helvetica-Bold"},
-            {"name": "precio_venta", "x": 270, "y": h - 511.49, "width": 300, "height": 14, "value": precio, "fontName": "Helvetica-Bold"},
-            {"name": "fecha_venta_desde", "x": 466, "y": h - 526.3, "width": 80, "height": 14, "value": fecha_venta_desde, "fontName": "Helvetica-Bold"},
-            {"name": "fecha_venta_antes", "x": 198, "y": h - 540.9, "width": 90, "height": 14, "value": fecha_venta_antes, "fontName": "Helvetica-Bold"},
-            {"name": "honorarios", "x": 340, "y": h - 599.93, "width": 160, "height": 14, "value": honorarios, "fontName": "Helvetica-Bold"},
-            {"name": "fecha_inicio", "x": 270, "y": h - 703.16, "width": 95, "height": 14, "value": fecha_inicio, "fontName": "Helvetica-Bold"},
-            {"name": "fecha_fin", "x": 382, "y": h - 703.16, "width": 95, "height": 14, "value": fecha_fin, "fontName": "Helvetica-Bold"},
+            {"name": "direccion", "x": 80, "y": h - 157.08, "width": w - 100, "height": 14, "value": direccion_full, "fontName": PDF_FONT_BOLD},
+            {"name": "datos_registrales", "x": 110, "y": h - 171.84, "width": 310, "height": 14, "value": datos_registrales, "fontName": PDF_FONT_BOLD},
+            {"name": "ref_catastral", "x": 90, "y": h - 186.60, "width": 130, "height": 14, "value": ref_catastral, "fontName": PDF_FONT_BOLD},
+            {"name": "m2_utiles", "x": 265, "y": h - 186.60, "width": 40, "height": 14, "value": m2_utiles, "fontName": PDF_FONT_BOLD},
+            {"name": "m2_construidos", "x": 385, "y": h - 186.60, "width": 85, "height": 14, "value": m2_construidos, "fontName": PDF_FONT_BOLD},
+            {"name": "otros", "x": 60, "y": h - 201.36, "width": w - 90, "height": 14, "value": otros, "fontName": PDF_FONT_BOLD},
+            {"name": "owner1", "x": 60, "y": h - 262.0, "width": w - 90, "height": 44, "value": owner1_text.upper(), "multiline": True, "fontSize": 9, "fontName": PDF_FONT_BOLD},
+            {"name": "owner2", "x": 60, "y": h - 321.3, "width": w - 90, "height": 44, "value": owner2_text.upper(), "multiline": True, "fontSize": 9, "fontName": PDF_FONT_BOLD},
+            {"name": "cargas", "x": 445, "y": h - 496.85, "width": 130, "height": 14, "value": cargas, "fontName": PDF_FONT_BOLD},
+            {"name": "precio_venta", "x": 270, "y": h - 511.49, "width": 300, "height": 14, "value": precio, "fontName": PDF_FONT_BOLD},
+            {"name": "fecha_venta_desde", "x": 466, "y": h - 526.3, "width": 80, "height": 14, "value": fecha_venta_desde, "fontName": PDF_FONT_BOLD},
+            {"name": "fecha_venta_antes", "x": 198, "y": h - 540.9, "width": 90, "height": 14, "value": fecha_venta_antes, "fontName": PDF_FONT_BOLD},
+            {"name": "honorarios", "x": 340, "y": h - 599.93, "width": 160, "height": 14, "value": honorarios, "fontName": PDF_FONT_BOLD},
+            {"name": "fecha_inicio", "x": 270, "y": h - 703.16, "width": 95, "height": 14, "value": fecha_inicio, "fontName": PDF_FONT_BOLD},
+            {"name": "fecha_fin", "x": 382, "y": h - 703.16, "width": 95, "height": 14, "value": fecha_fin, "fontName": PDF_FONT_BOLD},
         ]
         if len(pagesizes) > 1:
             w2, h2 = pagesizes[1]
             fields[1] = [
-                {"name": "lugar_firma", "x": 200, "y": h2 - 608.40, "width": 70, "height": 14, "value": lugar_firma, "fontName": "Helvetica-Bold"},
-                {"name": "fecha_firma", "x": 270, "y": h2 - 608.40, "width": w2 - 285, "height": 14, "value": fecha_firma, "fontName": "Helvetica-Bold"},
+                {"name": "lugar_firma", "x": 200, "y": h2 - 608.40, "width": 70, "height": 14, "value": lugar_firma, "fontName": PDF_FONT_BOLD},
+                {"name": "fecha_firma", "x": 270, "y": h2 - 608.40, "width": w2 - 285, "height": 14, "value": fecha_firma, "fontName": PDF_FONT_BOLD},
             ]
     else:
         w, h = pagesizes[0]
@@ -52878,7 +52879,7 @@ def build_inmueble_nota_encargo_pdf_final(company, inmueble, captacion, owners, 
             {"x": 305, "y": 531, "width": 220, "height": 12, "value": o2["nif"], "fontSize": 9},
         ]
 
-    overlay_bytes = _build_static_text_overlay_pdf(pagesizes, fields, font_name="Helvetica-Bold")
+    overlay_bytes = _build_static_text_overlay_pdf(pagesizes, fields, font_name=PDF_FONT_BOLD)
     if not overlay_bytes:
         return build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=extra)
     merged = _merge_template_with_overlay_pdf(template_bytes, overlay_bytes)
@@ -53014,12 +53015,12 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
                 img_buf.seek(0)
                 c.drawImage(ImageReader(img_buf), margin, h - 66, width=logo.width * 0.45, height=logo.height * 0.45, mask="auto")
         except Exception:
-            c.setFont("Helvetica-Bold", 18)
+            c.setFont(PDF_FONT_BOLD, 18)
             c.drawString(margin, h - 48, company_name)
     else:
-        c.setFont("Helvetica-Bold", 18)
+        c.setFont(PDF_FONT_BOLD, 18)
         c.drawString(margin, h - 48, company_name)
-    c.setFont("Helvetica", 8)
+    c.setFont(PDF_FONT_REGULAR, 8)
     header_right = []
     if company_cif:
         header_right.append(f"CIF: {company_cif}")
@@ -53037,14 +53038,14 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
     c.setFillColor(accent)
     c.rect(margin, h - 84, w - margin * 2, 18, stroke=0, fill=1)
     c.setFillColor(rl_colors.white)
-    c.setFont("Helvetica-Bold", 10)
+    c.setFont(PDF_FONT_BOLD, 10)
     c.drawCentredString(w / 2, h - 80, "HOJA DE VISITA - COMPRAVENTA")
 
     y = h - 120
 
     def field_row(label, value, y_row):
-        label_font = ("Helvetica-Bold", 9)
-        value_font = ("Helvetica-Bold", 9)
+        label_font = (PDF_FONT_BOLD, 9)
+        value_font = (PDF_FONT_BOLD, 9)
         label_x = margin
         value_x = margin + 92
         line_x1 = value_x
@@ -53062,7 +53063,7 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
 
     # Cliente (C1)
     c.setFillColor(muted)
-    c.setFont("Helvetica-Bold", 8)
+    c.setFont(PDF_FONT_BOLD, 8)
     c.drawString(margin, y + 10, "CLIENTE (C1)")
     field_row("D./Dª:", buyer_name, y)
     y -= 18
@@ -53077,21 +53078,21 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
 
     # Inmueble
     c.setFillColor(muted)
-    c.setFont("Helvetica-Bold", 8)
+    c.setFont(PDF_FONT_BOLD, 8)
     c.drawString(margin, y + 10, "INMUEBLE VISITADO")
     field_row("DIRECCIÓN:", u(direccion_full), y)
     y -= 26
 
     # Texto legal (resumen)
     c.setFillColor(ink)
-    c.setFont("Helvetica", 9)
+    c.setFont(PDF_FONT_REGULAR, 9)
     legal = (
         "El cliente declara haber recibido información y haber visitado el inmueble indicado, "
         "con intermediación de la agencia. Cualquier negociación o acuerdo posterior sobre el inmueble "
         "deberá canalizarse a través de la agencia, salvo pacto en contrario por escrito."
     )
     max_w = w - margin * 2
-    lines = _wrap(c, legal, max_w, "Helvetica", 9)
+    lines = _wrap(c, legal, max_w, PDF_FONT_REGULAR, 9)
     ty = y
     for line_txt in lines:
         c.drawString(margin, ty, line_txt)
@@ -53100,7 +53101,7 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
 
     # Fecha / lugar / firmas
     c.setFillColor(ink)
-    c.setFont("Helvetica", 9)
+    c.setFont(PDF_FONT_REGULAR, 9)
     c.drawString(margin, y, f"EN {u(poblacion or provincia or '—')}, A {fecha}.")
     y -= 26
 
@@ -53110,7 +53111,7 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
     c.line(margin, y, margin + col_w, y)
     c.line(margin + col_w + 24, y, margin + col_w + 24 + col_w, y)
     c.setFillColor(muted)
-    c.setFont("Helvetica", 8)
+    c.setFont(PDF_FONT_REGULAR, 8)
     c.drawString(margin, y - 12, "FIRMA CLIENTE (C1)")
     c.drawString(margin + col_w + 24, y - 12, "FIRMA AGENCIA")
 
@@ -54595,19 +54596,19 @@ def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
                 img_buf.seek(0)
                 c.drawImage(ImageReader(img_buf), margin, h - 66, width=logo.width * 0.45, height=logo.height * 0.45, mask="auto")
         except Exception:
-            c.setFont("Helvetica-Bold", 18)
+            c.setFont(PDF_FONT_BOLD, 18)
             c.drawString(margin, h - 48, company_name)
     else:
-        c.setFont("Helvetica-Bold", 18)
+        c.setFont(PDF_FONT_BOLD, 18)
         c.drawString(margin, h - 48, company_name)
 
     c.setFillColor(accent)
     c.rect(margin, h - 92, w - margin * 2, 22, stroke=0, fill=1)
     c.setFillColor(rl_colors.white)
-    c.setFont("Helvetica-Bold", 9)
+    c.setFont(PDF_FONT_BOLD, 9)
     c.drawCentredString(w / 2, h - 84, "FICHA INFORMATIVA DE VENTA")
     c.setFillColor(muted)
-    c.setFont("Helvetica", 8)
+    c.setFont(PDF_FONT_REGULAR, 8)
     c.drawCentredString(w / 2, h - 106, "MODELO OPERATIVO (D. 218/2005 ANDALUCÍA)")
 
     y = h - 132
@@ -54616,7 +54617,7 @@ def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
     def heading(text):
         nonlocal y
         c.setFillColor(muted)
-        c.setFont("Helvetica-Bold", 8)
+        c.setFont(PDF_FONT_BOLD, 8)
         c.drawString(margin, y, text)
         y -= 12
 
@@ -54626,13 +54627,13 @@ def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
         value_x = margin + 130
         line_x2 = w - margin
         c.setFillColor(ink)
-        c.setFont("Helvetica-Bold", 9)
+        c.setFont(PDF_FONT_BOLD, 9)
         c.drawString(label_x, y, label)
         c.setStrokeColor(line)
         c.setLineWidth(0.8)
         c.line(value_x, y - 2, line_x2, y - 2)
-        c.setFont("Helvetica-Bold", 9)
-        fitted = _fit_text(c, u(value), (line_x2 - value_x) - 4, "Helvetica-Bold", 9)
+        c.setFont(PDF_FONT_BOLD, 9)
+        fitted = _fit_text(c, u(value), (line_x2 - value_x) - 4, PDF_FONT_BOLD, 9)
         c.drawString(value_x + 2, y, fitted)
         y -= 16
 
@@ -54649,8 +54650,8 @@ def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
 
     heading("DOCUMENTACIÓN")
     c.setFillColor(ink)
-    c.setFont("Helvetica", 9)
-    doc_lines = _wrap(c, docs_text, max_w, "Helvetica", 9)[:6]
+    c.setFont(PDF_FONT_REGULAR, 9)
+    doc_lines = _wrap(c, docs_text, max_w, PDF_FONT_REGULAR, 9)[:6]
     for line_txt in doc_lines:
         c.drawString(margin, y, line_txt)
         y -= 12
@@ -54658,9 +54659,9 @@ def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
 
     heading("OBSERVACIONES")
     obs = str((captacion or {}).get("notas") or "").strip() or "—"
-    obs_lines = _wrap(c, obs, max_w, "Helvetica", 9)[:8]
+    obs_lines = _wrap(c, obs, max_w, PDF_FONT_REGULAR, 9)[:8]
     c.setFillColor(ink)
-    c.setFont("Helvetica", 9)
+    c.setFont(PDF_FONT_REGULAR, 9)
     for line_txt in obs_lines:
         c.drawString(margin, y, line_txt)
         y -= 12
@@ -54672,7 +54673,7 @@ def build_inmueble_consumo_sale_sheet_pdf(company, inmueble, captacion, docs):
     c.line(margin, y, margin + col_w, y)
     c.line(margin + col_w + 24, y, margin + col_w + 24 + col_w, y)
     c.setFillColor(muted)
-    c.setFont("Helvetica", 8)
+    c.setFont(PDF_FONT_REGULAR, 8)
     c.drawString(margin, y - 12, "RECIBÍ (NOMBRE Y FIRMA)")
     c.drawString(margin + col_w + 24, y - 12, "POR LA AGENCIA (FIRMA)")
 
@@ -54802,7 +54803,7 @@ def build_inmueble_consumo_sale_price_note_pdf(company, inmueble, captacion):
                     {"x": 250, "y": 176, "width": 200, "height": 14, "value": u(money(total_estimado)), "fontSize": 9},
                 ],
             }
-            overlay_bytes = _build_static_text_overlay_pdf(pagesizes, fields, font_name="Helvetica-Bold", font_size=9, leading=11)
+            overlay_bytes = _build_static_text_overlay_pdf(pagesizes, fields, font_name=PDF_FONT_BOLD, font_size=9, leading=11)
             if overlay_bytes:
                 merged = _merge_template_with_overlay_pdf(template_bytes, overlay_bytes)
                 if merged:
@@ -54975,7 +54976,7 @@ def build_inmueble_negotiation_offer_pdf(company, inmueble, buyer, action):
                 ],
             }
 
-            overlay_bytes = _build_static_text_overlay_pdf(pagesizes, fields, font_name="Helvetica-Bold", font_size=9, leading=11)
+            overlay_bytes = _build_static_text_overlay_pdf(pagesizes, fields, font_name=PDF_FONT_BOLD, font_size=9, leading=11)
             if overlay_bytes:
                 merged = _merge_template_with_overlay_pdf(template_bytes, overlay_bytes)
                 if merged:
@@ -55084,7 +55085,7 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
                     {"x": px_to_pt_x(62), "y": px_to_pt_y(1404), "width": px_to_pt_x(246) - px_to_pt_x(62), "height": 14, "value": u(lugar), "fontSize": 9},
                 ]
             }
-            overlay_text_bytes = _build_static_text_overlay_pdf(pagesizes, text_fields, font_name="Helvetica-Bold", font_size=9, leading=11)
+            overlay_text_bytes = _build_static_text_overlay_pdf(pagesizes, text_fields, font_name=PDF_FONT_BOLD, font_size=9, leading=11)
             template_with_text = template_bytes
             if overlay_text_bytes:
                 merged_text = _merge_template_with_overlay_pdf(template_bytes, overlay_text_bytes)
@@ -55166,9 +55167,9 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
     c.setFillColor(primary)
     c.rect(0, h - 120, w, 120, stroke=0, fill=1)
     c.setFillColor(rl_colors.white)
-    c.setFont("Helvetica-Bold", 18)
+    c.setFont(PDF_FONT_BOLD, 18)
     c.drawString(margin, h - 55, "RECONOCIMIENTO DE HONORARIOS")
-    c.setFont("Helvetica", 10)
+    c.setFont(PDF_FONT_REGULAR, 10)
     c.drawString(margin, h - 78, f"{company_name} · {inmueble_dir}")
     c.setFillColor(accent)
     c.rect(margin, h - 112, 160, 6, stroke=0, fill=1)
@@ -55176,7 +55177,7 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
     # Helper for labeled fields
     def label(x, y, text):
         c.setFillColor(muted)
-        c.setFont("Helvetica-Bold", 8)
+        c.setFont(PDF_FONT_BOLD, 8)
         c.drawString(x, y, text.upper())
 
     def field(name, x, y, width, height, value="", multiline=False, font_size=10):
@@ -55194,7 +55195,7 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
                 borderColor=line,
                 fillColor=bg,
                 textColor=ink,
-                fontName="Helvetica",
+                fontName=PDF_FONT_REGULAR,
                 fontSize=font_size,
                 fieldFlags=flags,
             )
@@ -55205,14 +55206,14 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
     # Content
     y = h - 170
     c.setFillColor(ink)
-    c.setFont("Helvetica", 10)
+    c.setFont(PDF_FONT_REGULAR, 10)
     intro = (
         "Por medio del presente documento, la persona interesada en el inmueble reconoce haber sido informada "
         "de los honorarios de intermediación y acepta su devengo en los términos acordados con la agencia."
     )
     lines = _pdf_wrap_lines(intro, width=92)
     text = c.beginText(margin, y)
-    text.setFont("Helvetica", 10)
+    text.setFont(PDF_FONT_REGULAR, 10)
     text.setFillColor(ink)
     for line_text in lines:
         text.textLine(line_text)
@@ -55237,7 +55238,7 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
     field("propuesta_importe", margin + col_w + col_gap + 14, y - 74, (col_w - 36) * 0.6, 18, propuesta_value, font_size=9)
     field("propuesta_fecha", margin + col_w + col_gap + 22 + (col_w - 36) * 0.6, y - 74, (col_w - 36) * 0.4, 18, fecha_display, font_size=9)
     c.setFillColor(muted)
-    c.setFont("Helvetica", 7)
+    c.setFont(PDF_FONT_REGULAR, 7)
     c.drawString(margin + col_w + col_gap + 14, y - 86, "Importe (EUR) / Fecha")
 
     y -= box_h + box_gap
@@ -55252,7 +55253,7 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
     field("comprador_telefono", margin + 22 + (col_w - 36) * 0.45, y - 72, (col_w - 36) * 0.55, 18, buyer_tel, font_size=9)
     field("comprador_email", margin + 14, y - 100, col_w - 28, 18, buyer_email, font_size=9)
     c.setFillColor(muted)
-    c.setFont("Helvetica", 7)
+    c.setFont(PDF_FONT_REGULAR, 7)
     c.drawString(margin + 14, y - 114, "NIF / Teléfono")
 
     label(margin + col_w + col_gap + 14, y - 18, "Honorarios")
@@ -55260,7 +55261,7 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
     field("iva_pct", margin + col_w + col_gap + 22 + (col_w - 36) * 0.5, y - 44, (col_w - 36) * 0.2, 18, iva_pct, font_size=9)
     field("honorarios_total", margin + col_w + col_gap + 30 + (col_w - 36) * 0.7, y - 44, (col_w - 36) * 0.3, 18, "", font_size=9)
     c.setFillColor(muted)
-    c.setFont("Helvetica", 7)
+    c.setFont(PDF_FONT_REGULAR, 7)
     c.drawString(margin + col_w + col_gap + 14, y - 58, "Base (EUR) / IVA % / Total (rellenar si procede)")
     field(
         "honorarios_condiciones",
@@ -55280,14 +55281,14 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
     c.roundRect(margin, y - 140, w - margin * 2, 140, 12, stroke=1, fill=1)
     label(margin + 14, y - 18, "Firma y aceptación")
     c.setFillColor(ink)
-    c.setFont("Helvetica", 9)
+    c.setFont(PDF_FONT_REGULAR, 9)
     footer = (
         "Declaro haber sido informado/a de los honorarios de intermediación y acepto su devengo conforme a lo indicado. "
         "Este documento se vincula a la propuesta indicada y forma parte del expediente del inmueble."
     )
     footer_lines = _pdf_wrap_lines(footer, width=102)
     text = c.beginText(margin + 14, y - 38)
-    text.setFont("Helvetica", 9)
+    text.setFont(PDF_FONT_REGULAR, 9)
     text.setFillColor(ink)
     for line_text in footer_lines:
         text.textLine(line_text)
@@ -55303,7 +55304,7 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
 
     # Footer line
     c.setFillColor(muted)
-    c.setFont("Helvetica", 7)
+    c.setFont(PDF_FONT_REGULAR, 7)
     c.drawString(margin, 22, "Documento generado por Verifika² · Revisar antes de firma · No constituye asesoramiento jurídico.")
 
     c.save()
@@ -57023,7 +57024,7 @@ class Handler(BaseHTTPRequestHandler):
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Kiosko · Fichaje</title>
   <style>
-    body{{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:820px;margin:32px auto;padding:0 18px;color:#1d1d1f}}
+    body{{font-family:"IBM Plex Sans","Segoe UI",sans-serif;max-width:820px;margin:32px auto;padding:0 18px;color:#1d1d1f}}
     .card{{border:1px solid #e7e7ea;border-radius:14px;padding:18px}}
     .muted{{color:#6b7280}}
     label{{display:block;margin-top:12px}}

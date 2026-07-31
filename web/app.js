@@ -34451,7 +34451,7 @@ const createWordmarkLogoDataUri = (label, options = {}) => {
       </defs>
       <rect width="${width}" height="${height}" rx="18" fill="url(#bg)" />
       <rect x="10" y="10" width="6" height="${height - 20}" rx="3" fill="${accent}" />
-      <text x="${width / 2 + 8}" y="${height / 2 + 6}" text-anchor="middle" font-family="Space Grotesk, Arial, sans-serif" font-size="26" font-weight="700" fill="${text}" letter-spacing="0.5">${safeLabel}</text>
+      <text x="${width / 2 + 8}" y="${height / 2 + 6}" text-anchor="middle" font-family="IBM Plex Sans, Segoe UI, sans-serif" font-size="26" font-weight="700" fill="${text}" letter-spacing="0.5">${safeLabel}</text>
     </svg>
   `.trim();
   return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
@@ -44642,7 +44642,7 @@ const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}, br
   if (!total) {
     return `
       <style>
-        .hipoteca-print-shell{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:linear-gradient(180deg,#f8fafc 0%,#eef4ff 100%);padding:24px;color:#102131;}
+        .hipoteca-print-shell{font-family:"IBM Plex Sans","Segoe UI",sans-serif;background:linear-gradient(180deg,#f8fafc 0%,#eef4ff 100%);padding:24px;color:#102131;}
         .hipoteca-print-card{background:#fff;border:1px solid #dbe3ed;border-radius:24px;box-shadow:0 20px 42px rgba(15,23,42,.08);overflow:hidden;}
         .hipoteca-print-hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;padding:24px 28px;background:linear-gradient(135deg,#0f172a 0%,#15803d 58%,#16A34A 100%);color:#fff;}
         .hipoteca-print-brand{display:flex;gap:16px;align-items:center;min-width:0;}
@@ -44708,7 +44708,7 @@ const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}, br
 
   return `
     <style>
-      .hipoteca-print-shell{font-family:Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:linear-gradient(180deg,#f8fafc 0%,#eef4ff 100%);padding:24px;color:#102131;}
+      .hipoteca-print-shell{font-family:"IBM Plex Sans","Segoe UI",sans-serif;background:linear-gradient(180deg,#f8fafc 0%,#eef4ff 100%);padding:24px;color:#102131;}
       .hipoteca-print-card{background:#fff;border:1px solid #dbe3ed;border-radius:24px;box-shadow:0 20px 42px rgba(15,23,42,.08);overflow:hidden;}
       .hipoteca-print-hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;padding:24px 28px;background:linear-gradient(135deg,#0f172a 0%,#15803d 58%,#16A34A 100%);color:#fff;}
       .hipoteca-print-brand{display:flex;gap:16px;align-items:center;min-width:0;}
@@ -56534,7 +56534,7 @@ const openCrmPrintWindow = ({ title = "Impresión", html = "" } = {}) => {
           <meta name="viewport" content="width=device-width, initial-scale=1" />
           <title>${escapeHtml(title)}</title>
           <style>
-            body{font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:18px;color:#0f172a;}
+            body{font-family:"IBM Plex Sans","Segoe UI",sans-serif;padding:18px;color:#0f172a;}
             h1{font-size:18px;margin:0 0 12px;}
             table{width:100%;border-collapse:collapse;font-size:12px;}
             th,td{padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:left;vertical-align:top;}
@@ -56576,7 +56576,7 @@ const writeCrmPrintWindow = (win, { title = "Impresión", html = "" } = {}) => {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>${escapeHtml(title)}</title>
         <style>
-          body{font-family:system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;padding:18px;color:#0f172a;}
+          body{font-family:"IBM Plex Sans","Segoe UI",sans-serif;padding:18px;color:#0f172a;}
           h1{font-size:18px;margin:0 0 12px;}
           table{width:100%;border-collapse:collapse;font-size:12px;}
           th,td{padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:left;vertical-align:top;}
@@ -73899,7 +73899,7 @@ const renderGestoriaPrintableTable = (title, headers, rows = [], note = "") => {
     .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(String(cell ?? ""))}</td>`).join("")}</tr>`)
     .join("");
   return `
-    <div style="font-family:Arial,Helvetica,sans-serif;padding:20px;color:#111827;">
+    <div style="font-family:'IBM Plex Sans','Segoe UI',sans-serif;padding:20px;color:#111827;">
       <h1 style="margin:0 0 8px 0;font-size:20px;">${escapeHtml(title || "Informe")}</h1>
       ${note ? `<p style="margin:0 0 16px 0;color:#6b7280;">${escapeHtml(note)}</p>` : ""}
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
@@ -86715,7 +86715,7 @@ if (workspaceFincasBudgetQuickForm) {
 	      pdfWindow = window.open("about:blank", "_blank");
 	      if (pdfWindow) {
 	        pdfWindow.document.title = "Generando PDF...";
-	        pdfWindow.document.body.innerHTML = `<div style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;padding:24px;color:#111827;">
+	        pdfWindow.document.body.innerHTML = `<div style="font-family:'IBM Plex Sans','Segoe UI',sans-serif;padding:24px;color:#111827;">
 	          <h2 style="margin:0 0 10px;font-size:18px;">Generando PDF…</h2>
 	          <p style="margin:0;color:#6b7280;font-size:13px;">En unos segundos se cargará el presupuesto.</p>
 	        </div>`;

@@ -26,9 +26,13 @@
   --oxblood: #0B1D33;
   --sage: #22C55E;
   --shadow: rgba(11, 29, 51, 0.16);
-  --font-body: "Source Sans 3", "Segoe UI", sans-serif;
-  --font-display: "Playfair Display", "Times New Roman", serif;
-  --font-ui: "Space Grotesk", "Source Sans 3", sans-serif;
+  /* Toda la tipografía es IBM Plex. Se conservan los tres papeles —texto, títulos
+     e interfaz— porque están usados en ~90 sitios y marcan la jerarquía, pero los
+     tres salen de la misma superfamilia: antes eran Source Sans 3, Playfair Display
+     y Space Grotesk, tres diseños sin relación entre sí. */
+  --font-body: "IBM Plex Sans", "Segoe UI", sans-serif;
+  --font-display: "IBM Plex Serif", "Georgia", serif;
+  --font-ui: "IBM Plex Sans", "Segoe UI", sans-serif;
   --layout-max: 1820px;
   --layout-gutter: clamp(14px, 2.2vw, 38px);
   --section-pad-x: clamp(16px, 1.6vw, 28px);

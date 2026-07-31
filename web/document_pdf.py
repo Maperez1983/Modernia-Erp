@@ -6,6 +6,7 @@ import urllib.parse
 from typing import Any
 
 from PIL import Image, ImageDraw
+from web.pdf_fonts import PDF_FONT_BOLD, PDF_FONT_REGULAR
 
 try:
     import cairosvg
@@ -586,9 +587,9 @@ def build_signature_evidence_pdf(request_row, evidence):
     c.setFillColor(primary)
     c.rect(0, h - 100, w, 100, stroke=0, fill=1)
     c.setFillColor(rl_colors.white)
-    c.setFont("Helvetica-Bold", 18)
+    c.setFont(PDF_FONT_BOLD, 18)
     c.drawString(42, h - 45, "JUSTIFICANTE DE FIRMA ELECTRÓNICA INTERNA")
-    c.setFont("Helvetica", 9)
+    c.setFont(PDF_FONT_REGULAR, 9)
     c.drawString(42, h - 68, "Evidencias técnicas registradas por el CRM Verifika2.")
     c.setFillColor(accent)
     c.rect(42, h - 88, 160, 5, stroke=0, fill=1)
@@ -601,10 +602,10 @@ def build_signature_evidence_pdf(request_row, evidence):
             c.showPage()
             y = h - 52
         c.setFillColor(muted)
-        c.setFont("Helvetica-Bold", 8)
+        c.setFont(PDF_FONT_BOLD, 8)
         c.drawString(42, y, str(label or "").upper())
         c.setFillColor(ink)
-        c.setFont("Helvetica", 10)
+        c.setFont(PDF_FONT_REGULAR, 10)
         text = str(value or "-")
         for part in textwrap.wrap(text, width=92) or ["-"]:
             c.drawString(178, y, part)
@@ -627,7 +628,7 @@ def build_signature_evidence_pdf(request_row, evidence):
     line("Texto aceptado", row.get("acceptance_text") or evidence.get("acceptance_text"))
     line("Resultado", "Documento aceptado y firmado electrónicamente dentro del CRM.")
     c.setFillColor(muted)
-    c.setFont("Helvetica", 8)
+    c.setFont(PDF_FONT_REGULAR, 8)
     c.drawString(42, 38, "Este justificante acredita trazabilidad interna; no sustituye por sí solo a un prestador cualificado eIDAS.")
     c.save()
     return buf.getvalue()

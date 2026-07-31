@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from PIL import Image, ImageColor, ImageDraw, ImageFont
+from web.pdf_fonts import font_path
 
 
 def _normalize_lookup_text(value):
@@ -346,7 +347,13 @@ def _pdf_format_number(value, decimals=2):
 
 
 def _document_font(size=18, bold=False):
+    # IBM Plex primero, que viaja con el repositorio. Antes se tiraba de la fuente
+    # del sistema y el mismo documento salía en Arial en un Mac y en DejaVu Sans en
+    # el servidor de Render, que es donde se generan de verdad.
     candidates = []
+    plex = font_path("IBMPlexSans-Bold.ttf" if bold else "IBMPlexSans-Regular.ttf")
+    if plex is not None:
+        candidates.append(str(plex))
     if bold:
         candidates.extend(
             [
