@@ -7058,11 +7058,34 @@ const safeSetMonthInputValue = (input, value) => {
   }
 };
 
+// Un id interno nunca es un nombre presentable. Los callers acaban pasando el id
+// cuando todavía no ha llegado la ficha del workspace, y sin esto se colaba tal cual
+// a la interfaz: en producción se leía "Continuar workspace ·
+// 78be2029839add99b5ec83570311faea · Sin empresa activa".
+const looksLikeInternalId = (value = "") => {
+  const v = String(value || "").trim();
+  return /^[0-9a-f]{32}$/i.test(v) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
+};
+
+// Si solo tenemos el id, todavía podemos dar con el nombre: la lista de workspaces
+// ya está cargada en `state.workspaces` desde el arranque.
+const workspaceNameById = (id = "") => {
+  const target = String(id || "").trim();
+  if (!target) return "";
+  const fila = (Array.isArray(state?.workspaces) ? state.workspaces : [])
+    .find((row) => String(row?.id || "").trim() === target);
+  return String(fila?.nombre || fila?.name || fila?.slug || "").trim();
+};
+
 const getWorkspaceDisplayName = (workspace = null) => {
-  const rawName =
+  let rawName =
     typeof workspace === "string"
       ? workspace
       : workspace?.nombre || workspace?.name || workspace?.slug || workspace?.id || "";
+  if (looksLikeInternalId(rawName)) {
+    rawName = workspaceNameById(rawName);
+    if (!rawName) return "Workspace";
+  }
   const normalized = normalizeWorkspaceIdentifier(rawName);
   if (!normalized) return "Workspace";
   if (["modernia", "grupomodernia", "grupo-modernia", "verifika2", "verifika", "verifika-2"].includes(normalized)) {
@@ -7615,9 +7638,9 @@ const renderHomeGuidance = () => {
         <label for="homeModuleSearch">Buscar módulo, vista o servicio</label>
         <span class="muted">Encuentra áreas, accesos y servicios en segundos.</span>
       </div>
-      <input id="homeModuleSearch" type="search" inputmode="search" autocomplete="off" placeholder="Hipotecas, Gestoría, RRHH, Documental..." data-home-module-search />
+      <input id="homeModuleSearch" type="search" inputmode="search" autocomplete="off" placeholder="Hipotecas, Gestoría, RRHH, Documental..." data-home-module-search aria-controls="homeModuleSearchResults" />
       <div class="muted">Módulos, servicios o vistas en un solo gesto.</div>
-      <div class="home-guidance-search-results" data-home-search-results></div>
+      <div id="homeModuleSearchResults" class="home-guidance-search-results" data-home-search-results role="region" aria-live="polite" aria-label="Resultados de búsqueda"></div>
     </div>
     <div class="home-guidance-secondary">
       ${secondaryActions
@@ -22387,17 +22410,25 @@ let _homeTimePunchBody = null;
 let _homeTimePunchClose = null;
 let _homeTimePunchAutoShownKey = "";
 let _homeTimePunchLastActionAt = 0;
+let _homeTimeStatusLoadedAt = 0;
+// A quién devolvemos el foco al cerrar el diálogo.
+let _homeTimePunchFocusOrigen = null;
+// Cuánto damos por bueno el estado recién cargado antes de volver a pedirlo.
+const HOME_TIME_STATUS_FRESCO_MS = 15_000;
 
 const ensureHomeTimePunchModal = () => {
   if (_homeTimePunchModal) return;
   const modal = document.createElement("div");
   modal.id = "homeTimePunchModal";
   modal.className = "modal hidden";
+  modal.setAttribute("role", "dialog");
+  modal.setAttribute("aria-modal", "true");
+  modal.setAttribute("aria-labelledby", "homeTimePunchTitulo");
   modal.innerHTML = `
     <div class="modal-content hipoteca-ficha-modal-content">
       <div class="modal-header">
         <div>
-          <h3>Registro horario</h3>
+          <h3 id="homeTimePunchTitulo">Registro horario</h3>
           <p class="muted">Entrada y salida de hoy.</p>
         </div>
         <button type="button" class="secondary ghost" data-home-time-close>Cerrar</button>
@@ -22416,12 +22447,27 @@ const ensureHomeTimePunchModal = () => {
   modal.addEventListener("click", (event) => {
     if (event.target === modal) close();
   });
+  // Esc cierra igual que el botón, incluido el descarte del día: si no, el diálogo
+  // reaparecía en el siguiente render para quien lo cierra con el teclado.
+  modal.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      close();
+    }
+  });
 };
 
 const closeHomeTimePunchModal = ({ persist = false } = {}) => {
   if (!_homeTimePunchModal) return;
   _homeTimePunchModal.classList.add("hidden");
   document.body.classList.remove("modal-open");
+  // Devolvemos el foco a donde estaba, o el teclado se queda huérfano al cerrar.
+  try {
+    if (_homeTimePunchFocusOrigen && document.contains(_homeTimePunchFocusOrigen)) {
+      _homeTimePunchFocusOrigen.focus();
+    }
+  } catch (e) {}
+  _homeTimePunchFocusOrigen = null;
   if (persist) {
     try {
       const user = getAuthScopeUser();
@@ -22498,10 +22544,18 @@ const renderHomeTimePunchModal = () => {
 const openHomeTimePunchModal = ({ persist = false } = {}) => {
 	  ensureHomeTimePunchModal();
 	  const refresh = async () => {
+	    // El arranque ya pide /api/home_time_status. Si acaba de traerlo, reutilizamos:
+	    // antes se pedía dos veces en cada entrada.
+	    const recienCargado =
+	      state.homeTimeStatus &&
+	      _homeTimeStatusLoadedAt &&
+	      Date.now() - _homeTimeStatusLoadedAt < HOME_TIME_STATUS_FRESCO_MS;
+	    if (recienCargado) return;
 	    try {
 	      const next = await api("/api/home_time_status");
 	      if (next && next.ok) {
 	        state.homeTimeStatus = next;
+	        _homeTimeStatusLoadedAt = Date.now();
 	      }
 	      try {
 	        if (typeof setAuthUi === "function") setAuthUi(state.authUser);
@@ -22519,6 +22573,16 @@ const openHomeTimePunchModal = ({ persist = false } = {}) => {
 	  renderHomeTimePunchModal();
 	  _homeTimePunchModal?.classList.remove("hidden");
 	  document.body.classList.add("modal-open");
+	  // El foco se quedaba en <body>: con el diálogo tapando la pantalla, quien navega
+	  // por teclado tenía que tabular a ciegas entre más de mil elementos de detrás.
+	  _homeTimePunchFocusOrigen = document.activeElement;
+	  window.setTimeout(() => {
+	    const destino =
+	      _homeTimePunchBody?.querySelector("button:not([disabled])") || _homeTimePunchClose;
+	    try {
+	      destino?.focus();
+	    } catch (e) {}
+	  }, 0);
 	  if (persist) {
 	    // If opened explicitly, don't auto-open again in the same render loop.
     _homeTimePunchLastActionAt = Date.now();
@@ -79831,6 +79895,9 @@ const init = async () => {
     state.tablas = tablas;
     state.resumen = resumen;
     state.homeTimeStatus = homeTimeStatus && homeTimeStatus.ok ? homeTimeStatus : null;
+    // El modal de fichaje volvía a pedir /api/home_time_status nada más abrirse, aunque
+    // el arranque acabara de traerlo. Marcamos cuándo se cargó para no repetir la llamada.
+    _homeTimeStatusLoadedAt = state.homeTimeStatus ? Date.now() : 0;
     // Tenant: asegura workspace_id “activo” aunque el usuario entre por un deep-link sin `?workspace=...`.
     // Esto afecta a módulos como Agenda (/api/acciones) que requieren scope por workspace.
     try {

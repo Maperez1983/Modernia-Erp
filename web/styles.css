@@ -13108,9 +13108,14 @@ body.theme-operativa #homeSection.hero::before {
 
 body.theme-operativa .hero-shell {
   display: grid;
-  grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.95fr);
+  /* Estaba al revés: 1.8fr para la columna izquierda, que solo lleva el título y el
+     selector de año, y 0.95fr para el panel que lleva TODO el contenido útil (retomar
+     trabajo, buscador y accesos). En pantalla ancha eso dejaba ~950px vacíos a la
+     izquierda y apretaba lo importante en 505px. Al repartirlo a partes iguales el
+     panel casi dobla su ancho y el hueco se reduce. */
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 1fr);
   gap: 24px;
-  align-items: stretch;
+  align-items: start;
 }
 
 body.theme-operativa .hero-copy {

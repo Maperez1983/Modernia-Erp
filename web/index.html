@@ -9,7 +9,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=281" />
+	    <link rel="stylesheet" href="styles.css?v=282" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -62,7 +62,10 @@
             <div class="hero-shell">
               <div class="hero-copy app-lightning-topbar">
                 <div>
-                  <h2>CRM 360</h2>
+                  <!-- El <h1> de la cabecera ya dice "CRM 360": este es el título de la
+                       página, no el del producto. Además la barra de contexto deriva su
+                       título de este h2, así que repetirlo lo triplicaba en pantalla. -->
+                  <h2>Inicio</h2>
                   <p>Entrada limpia por workspace, empresa y módulo. Ve a lo importante sin ruido.</p>
                 </div>
                 <div class="toolbar home-year-toolbar" id="tableToolbar">
@@ -11973,7 +11976,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=806",
+              "app.js?v=807",
             ];
 
             const getParams = () => {
@@ -12333,7 +12336,7 @@
 		    <script>
 					      (function () {
 					        if (!("serviceWorker" in navigator)) return;
-				        const TARGET_SW = "/sw.js?v=374";
+				        const TARGET_SW = "/sw.js?v=375";
 				        // Marca de la limpieza de rescate. Súbela para forzar una purga nueva
 				        // en todos los navegadores tras un despliegue problemático.
 				        const HEAL_KEY = "verifika2:sw-heal:v374";
