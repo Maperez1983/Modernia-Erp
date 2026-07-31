@@ -49,7 +49,10 @@ from email.message import EmailMessage
 from email.header import decode_header
 from email.utils import parseaddr
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps
-from web.pdf_fonts import PDF_FONT_BOLD, PDF_FONT_REGULAR
+try:  # arranca como paquete (python -m web.server) o como script suelto
+    from .pdf_fonts import PDF_FONT_BOLD, PDF_FONT_REGULAR
+except ImportError:
+    from pdf_fonts import PDF_FONT_BOLD, PDF_FONT_REGULAR
 try:
     import cairosvg
 except Exception:  # pragma: no cover

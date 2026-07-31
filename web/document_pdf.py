@@ -6,7 +6,10 @@ import urllib.parse
 from typing import Any
 
 from PIL import Image, ImageDraw
-from web.pdf_fonts import PDF_FONT_BOLD, PDF_FONT_REGULAR
+try:  # arranca como paquete (python -m web.server) o como script suelto
+    from .pdf_fonts import PDF_FONT_BOLD, PDF_FONT_REGULAR
+except ImportError:
+    from pdf_fonts import PDF_FONT_BOLD, PDF_FONT_REGULAR
 
 try:
     import cairosvg

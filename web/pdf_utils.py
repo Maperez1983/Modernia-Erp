@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any, cast
 
 from PIL import Image, ImageColor, ImageDraw, ImageFont
-from web.pdf_fonts import font_path
+try:  # arranca como paquete (python -m web.server) o como script suelto
+    from .pdf_fonts import font_path
+except ImportError:
+    from pdf_fonts import font_path
 
 
 def _normalize_lookup_text(value):
