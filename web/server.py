@@ -65830,6 +65830,33 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     _rollback_best_effort(conn)
 
+            # La ficha que sobra suele traer datos que a la buena le faltan: las tres
+            # duplicadas de marzo eran las únicas con NIF, y sin NIF el importador de
+            # nóminas no sabe a quién asignar la nómina. Se rellenan solo los huecos
+            # del destino; lo que el destino ya tiene no se pisa nunca, porque el
+            # destino es la ficha que se ha estado usando.
+            campos_heredables = (
+                "nif", "email", "telefono", "foto_url", "fecha_nacimiento",
+                "tipo_contrato", "horas_pactadas_dia", "horas_pactadas_semana", "fecha_alta",
+            )
+            heredados = {}
+            filas_datos = {}
+            for clave, pid in (("origen", origen_id), ("destino", destino_id)):
+                filas_datos[clave] = conn.execute(
+                    f"SELECT {', '.join(campos_heredables)} FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",  # nosec B608 - lista fija
+                    (workspace_id, pid),
+                ).fetchone()
+            for campo in campos_heredables:
+                actual = row_value(filas_datos["destino"], campo)
+                si_hay = row_value(filas_datos["origen"], campo)
+                if str(actual or "").strip() or not str(si_hay or "").strip():
+                    continue
+                conn.execute(
+                    f"UPDATE workspace_registro_personal SET {campo} = ?, updated_at = datetime(?) WHERE workspace_id = ? AND id = ?",  # nosec B608 - lista fija
+                    (si_hay, now, workspace_id, destino_id),
+                )
+                heredados[campo] = si_hay
+
             # Se desactiva salvo que algo quedara sin mover por un mes bloqueado. Antes se
             # exigía además haber movido algo, y eso dejaba activo justo el caso más
             # común: el duplicado vacío, que no tiene nada que mover y es el que sobra.
@@ -65852,7 +65879,7 @@ class Handler(BaseHTTPRequestHandler):
                 before={"origen_id": origen_id, "origen_nombre": fichas["origen"]["nombre"]},
                 after={"destino_id": destino_id, "destino_nombre": fichas["destino"]["nombre"],
                        "fichajes_movidos": movidos, "bloqueados": len(bloqueados),
-                       "otros_movidos": otros_movidos},
+                       "otros_movidos": otros_movidos, "heredados": sorted(heredados)},
                 now=now,
             )
             conn.commit()
@@ -65861,6 +65888,7 @@ class Handler(BaseHTTPRequestHandler):
                 "movidos": movidos,
                 "bloqueados": sorted(set(bloqueados)),
                 "otros_movidos": otros_movidos,
+                "heredados": heredados,
                 "origen_desactivado": not bloqueados,
                 "destino": fichas["destino"]["nombre"],
             })

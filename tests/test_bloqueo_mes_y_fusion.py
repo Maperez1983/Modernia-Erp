@@ -162,3 +162,51 @@ class LaFusionMueveTodoElHistorialTests(unittest.TestCase):
         duplicados sin datos: al fusionar las tres fichas de Daniel García Campos,
         dos se quedaron activas porque no tenían nada que mover."""
         self.assertIn("if not bloqueados:", self._bloque())
+
+
+class LaFusionRecuperaLosDatosDeLaFichaQueSobraTests(unittest.TestCase):
+    """La ficha buena no siempre es la más completa.
+
+    En producción, las tres duplicadas de Daniel García, Rubén Miera y Sebastián
+    Lallana creadas el 31/03 eran las ÚNICAS con NIF — pero apuntaban a cuentas de
+    usuario que no existen, así que nadie podía fichar con ellas. La fusión tiene
+    que ir hacia la ficha con cuenta real, y esa dirección perdía el NIF: sin NIF,
+    el importador de nóminas no sabe a quién asignar la nómina.
+    """
+
+    def _bloque(self):
+        i = SERVER.index('elif parsed.path == "/api/workspace_registro_personal_merge":')
+        return SERVER[i: SERVER.index("elif parsed.path ==", i + 100)]
+
+    def test_hereda_el_nif_y_los_datos_de_contrato(self):
+        b = self._bloque()
+        for campo in ("nif", "email", "telefono", "fecha_nacimiento",
+                      "horas_pactadas_dia", "horas_pactadas_semana", "fecha_alta"):
+            with self.subTest(campo=campo):
+                self.assertIn(f'"{campo}"', b[b.index("campos_heredables = ("):])
+
+    def test_no_hereda_lo_que_define_la_direccion_de_la_fusion(self):
+        # usuario_id y activo son justo lo que distingue a la ficha buena: copiarlos
+        # desde el origen la convertiría en el duplicado que estamos retirando.
+        b = self._bloque()
+        tramo = b[b.index("campos_heredables = ("): b.index(")", b.index("campos_heredables = ("))]
+        for campo in ("usuario_id", "activo", "nombre", "empresa_id"):
+            with self.subTest(campo=campo):
+                self.assertNotIn(campo, tramo)
+
+    def test_solo_rellena_huecos(self):
+        b = self._bloque()
+        tramo = b[b.index("for campo in campos_heredables:"): b.index("# Se desactiva salvo")]
+        # Si el destino ya tiene valor, o el origen no tiene nada, no se escribe.
+        self.assertIn("if str(actual or \"\").strip() or not str(si_hay or \"\").strip():", tramo)
+        self.assertIn("continue", tramo)
+
+    def test_escribe_sobre_el_destino_no_sobre_el_origen(self):
+        b = self._bloque()
+        tramo = b[b.index("for campo in campos_heredables:"): b.index("# Se desactiva salvo")]
+        self.assertIn("(si_hay, now, workspace_id, destino_id)", tramo)
+        self.assertNotIn("origen_id)", tramo)
+
+    def test_lo_heredado_queda_en_la_auditoria(self):
+        b = self._bloque()
+        self.assertIn('"heredados": sorted(heredados)', b)
