@@ -16138,7 +16138,14 @@ const renderWorkspaceRrhhHub = () => {
       `;
     }
     const companies = state.currentWorkspaceDetail?.companies || [];
-    const employeesAll = Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : [];
+    // La plantilla es del workspace, no de la empresa activa. `workspaceTimeEmployees`
+    // viene acotado por la empresa seleccionada, y eso escondía gente: Daniel García
+    // (sin empresa asignada) y Teresa Ramos (de Fincas Velázquez) desaparecían al mirar
+    // Estudio Velázquez, y sus tarjetas caían a "Sin ficha" teniendo ficha. Los dos
+    // trabajan en Modernia; que estén en una sociedad u otra no los saca del equipo.
+    const employeesAll = Array.isArray(state.currentWorkspaceData?.timeEmployees)
+      ? state.currentWorkspaceData.timeEmployees
+      : (Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : []);
     const employees = employeesAll.filter((row) => String(row?.source || "").trim() !== "auto");
     const usersAll = Array.isArray(state.usersList) ? state.usersList : [];
     const usersById = new Map(usersAll.map((row) => [String(row.id || "").trim(), row]));
