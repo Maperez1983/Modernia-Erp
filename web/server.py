@@ -38303,6 +38303,10 @@ def ensure_tables(db_path):
         )
         """
     )
+    # El workspace es el tenant del cliente. La columna no existía ni en `schema.sql`
+    # ni por migración, así que el scope se deducía de `clientes_empresas` y quien no
+    # tuviera ese vínculo se quedaba fuera de todas las listas.
+    ensure_column(conn, "clientes", "workspace_id", "workspace_id TEXT")
     ensure_column(conn, "clientes", "tipo_persona", "tipo_persona TEXT")
     ensure_column(conn, "clientes", "codigo_postal", "codigo_postal TEXT")
     ensure_column(conn, "clientes", "poblacion", "poblacion TEXT")
