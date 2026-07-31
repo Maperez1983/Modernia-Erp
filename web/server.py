@@ -40597,6 +40597,92 @@ def allowed_services_for(rol, servicio_raw):
     return services
 
 
+def fetch_workspace_rrhh_persona_kpis(conn, workspace_id, persona_id, year=None):
+    """Cifras de cabecera de la ficha de un trabajador, en una sola llamada.
+
+    Salario y costes sociales salen de `workspace_rrhh_nominas`; las horas, de los
+    fichajes cerrados; las vacaciones, del mismo resumen que ya usa RRHH.
+
+    Aviso medido el 2026-07-31: en producción no había ninguna nómina cargada, así
+    que salario y costes salen a 0 hasta que se importen. Se devuelve
+    `tiene_nominas` para que la interfaz lo diga en vez de enseñar un cero que
+    parece un dato.
+    """
+    ws = str(workspace_id or "").strip()
+    pid = str(persona_id or "").strip()
+    if not ws or not pid:
+        return {}
+    try:
+        anio = int(str(year or "").strip() or app_now().year)
+    except Exception:
+        anio = app_now().year
+    anio = max(2000, min(anio, 2100))
+
+    def _uno(sql, params, campos):
+        try:
+            fila = conn.execute(sql, params).fetchone()
+        except Exception:
+            _rollback_best_effort(conn)
+            return {c: 0.0 for c in campos}
+        if not fila:
+            return {c: 0.0 for c in campos}
+        return {c: float(row_value(fila, c) or 0) for c in campos}
+
+    nom = _uno(
+        """
+        SELECT COALESCE(SUM(bruto), 0) AS bruto,
+               COALESCE(SUM(neto), 0) AS neto,
+               COALESCE(SUM(ss_empresa), 0) AS ss_empresa,
+               COALESCE(SUM(ss_trabajador), 0) AS ss_trabajador,
+               COUNT(*) AS recibos
+        FROM workspace_rrhh_nominas
+        WHERE workspace_id = ? AND persona_id = ? AND year = ?
+        """,
+        (ws, pid, anio),
+        ["bruto", "neto", "ss_empresa", "ss_trabajador", "recibos"],
+    )
+    horas = _uno(
+        """
+        SELECT COALESCE(SUM(minutos_trabajados), 0) AS minutos
+        FROM workspace_registro_horario
+        WHERE workspace_id = ? AND persona_id = ?
+          AND substr(fecha, 1, 4) = ?
+          AND COALESCE(TRIM(COALESCE(hora_fin, '')), '') <> ''
+        """,
+        (ws, pid, str(anio)),
+        ["minutos"],
+    )
+
+    vac = {"dias_total": 22.0, "dias_usados": 0.0, "dias_pendientes": 22.0}
+    try:
+        resumen = fetch_workspace_rrhh_vacaciones_summary(conn, ws, year=anio) or {}
+        for fila in (resumen.get("rows") or []):
+            if str(fila.get("persona_id") or "").strip() == pid:
+                vac = {
+                    "dias_total": float(fila.get("dias_total") or 0),
+                    "dias_usados": float(fila.get("dias_usados") or 0),
+                    "dias_pendientes": float(fila.get("dias_pendientes") or 0),
+                }
+                break
+    except Exception:
+        _rollback_best_effort(conn)
+
+    recibos = int(nom.get("recibos") or 0)
+    return {
+        "ejercicio": anio,
+        "salario_bruto": round(nom["bruto"], 2),
+        "salario_neto": round(nom["neto"], 2),
+        "ss_empresa": round(nom["ss_empresa"], 2),
+        "ss_trabajador": round(nom["ss_trabajador"], 2),
+        # Lo que le cuesta la persona a la empresa: bruto + cuota patronal.
+        "coste_empresa": round(nom["bruto"] + nom["ss_empresa"], 2),
+        "recibos": recibos,
+        "tiene_nominas": recibos > 0,
+        "horas_trabajadas": round(horas["minutos"] / 60.0, 1),
+        "vacaciones": vac,
+    }
+
+
 def fetch_workspace_access_review(conn, workspace_id):
     """Quién tiene acceso a qué, de verdad, frente a lo que la pantalla recomienda.
 
@@ -40768,7 +40854,74 @@ def fetch_workspace_setup_status(conn, workspace_id):
             "accion": "clientes_sin_asignar",
         })
 
-    # 3) El NIF sí importa: sin él no se puede facturar ni presentar modelos.
+    # 3) Fichas de personal incompletas. El criterio es el mismo de siempre: solo entra
+    #    lo que impide hacer algo concreto, no todo campo vacío.
+    #    - Sin NIF no se presentan nóminas ni modelos.
+    #    - Sin fecha de alta no hay antigüedad ni prorrateo de vacaciones.
+    #    - Sin días de vacaciones definidos, el resumen usa 22 por defecto: un número que
+    #      nadie ha confirmado y sobre el que se está calculando el saldo de la plantilla.
+    for clave, titulo, detalle, sql in (
+        (
+            "personal_sin_nif",
+            "sin NIF",
+            "Hace falta para nóminas y para presentar modelos.",
+            """
+            SELECT COUNT(*) AS total FROM workspace_registro_personal
+            WHERE workspace_id = ? AND COALESCE(activo, 1) = 1
+              AND COALESCE(TRIM(COALESCE(nif, '')), '') = ''
+            """,
+        ),
+        (
+            "personal_sin_fecha_alta",
+            "sin fecha de alta",
+            "Sin ella no hay antigüedad ni prorrateo de vacaciones.",
+            """
+            SELECT COUNT(*) AS total FROM workspace_registro_personal
+            WHERE workspace_id = ? AND COALESCE(activo, 1) = 1
+              AND COALESCE(TRIM(COALESCE(fecha_alta, '')), '') = ''
+            """,
+        ),
+        (
+            "personal_sin_vacaciones",
+            "sin días de vacaciones definidos",
+            "El saldo se está calculando con 22 días por defecto, sin que nadie lo confirme.",
+            """
+            SELECT COUNT(*) AS total FROM workspace_registro_personal p
+            WHERE p.workspace_id = ? AND COALESCE(p.activo, 1) = 1
+              AND NOT EXISTS (
+                SELECT 1 FROM workspace_rrhh_profile f
+                WHERE f.workspace_id = p.workspace_id AND f.persona_id = p.id
+                  AND f.vacaciones_dias_anuales IS NOT NULL
+              )
+            """,
+        ),
+        (
+            "personal_sin_puesto",
+            "sin puesto ni departamento",
+            "Campos de la ficha que nadie rellena: úsalos o quítalos del formulario.",
+            """
+            SELECT COUNT(*) AS total FROM workspace_registro_personal p
+            WHERE p.workspace_id = ? AND COALESCE(p.activo, 1) = 1
+              AND NOT EXISTS (
+                SELECT 1 FROM workspace_rrhh_profile f
+                WHERE f.workspace_id = p.workspace_id AND f.persona_id = p.id
+                  AND (COALESCE(TRIM(COALESCE(f.puesto, '')), '') <> ''
+                       OR COALESCE(TRIM(COALESCE(f.departamento, '')), '') <> '')
+              )
+            """,
+        ),
+    ):
+        cuantos = _contar(sql, (ws_id,))
+        if cuantos:
+            avisos.append({
+                "clave": clave,
+                "titulo": f"{cuantos} persona{'s' if cuantos != 1 else ''} {titulo}",
+                "detalle": detalle,
+                "severidad": "baja" if clave == "personal_sin_puesto" else "media",
+                "accion": "rrhh",
+            })
+
+    # 4) El NIF sí importa: sin él no se puede facturar ni presentar modelos.
     if empresa_ids:
         marcadores = ",".join(["?"] * len(empresa_ids))
         sin_nif = _contar(
@@ -67206,15 +67359,9 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "persona no encontrada"}, status=404)
                 return
             empresa_id = str(payload.get("empresa_id") or persona_row["empresa_id"] or "").strip() or None
-            # Integridad de la ficha: la fecha de fin de contrato no puede ser anterior a la de inicio.
-            _fi = str(payload.get("fecha_inicio") or "").strip()
-            _ff = str(payload.get("fecha_fin") or "").strip()
-            if _fi and _ff:
-                _di = parse_iso_date(_fi)
-                _df = parse_iso_date(_ff)
-                if _di and _df and _df < _di:
-                    json_response(self, {"error": "La fecha de fin no puede ser anterior a la de inicio."}, status=400)
-                    return
+            # (La validación de fecha_inicio/fecha_fin se retiró con los campos: las fechas
+            # de contrato son `fecha_alta`/`fecha_baja` de `workspace_registro_personal`,
+            # que ya valida su propio orden.)
             prev = fetch_workspace_rrhh_profile(conn, workspace_id, persona_id)
             record = conn.execute(
                 "SELECT id FROM workspace_rrhh_profile WHERE workspace_id = ? AND persona_id = ? LIMIT 1",
@@ -67223,24 +67370,28 @@ class Handler(BaseHTTPRequestHandler):
             vacaciones_dias = round(parse_money_value(payload.get("vacaciones_dias_anuales")), 2) if str(payload.get("vacaciones_dias_anuales") or "").strip() else 22.0
             if not vacaciones_dias or vacaciones_dias <= 0:
                 vacaciones_dias = 22.0
+            # Contrato, fechas y notas viven en `workspace_registro_personal` y solo ahí.
+            # Estaban duplicados en las dos tablas con nombres distintos —`tipo_contrato`
+            # en ambas, `fecha_alta/fecha_baja` frente a `fecha_inicio/fecha_fin`— así que
+            # había dos sitios donde editar lo mismo. Hoy no discrepaban porque el perfil
+            # estaba vacío en las 21 fichas; en cuanto alguien lo rellenara, habría dos
+            # verdades sobre el mismo contrato. El perfil se queda con lo suyo: puesto,
+            # departamento, centro de trabajo y vacaciones.
+            # Las columnas no se borran ni se pisan: si algún día tuvieran datos, siguen ahí.
             if record:
                 record_id = str(row_value(record, "id") or row_value(record, 0) or "").strip()
                 conn.execute(
                     """
                     UPDATE workspace_rrhh_profile
-                    SET empresa_id = ?, puesto = ?, departamento = ?, tipo_contrato = ?, fecha_inicio = ?, fecha_fin = ?,
-                        centro_trabajo = ?, notas = ?, vacaciones_dias_anuales = ?, updated_at = datetime(?)
+                    SET empresa_id = ?, puesto = ?, departamento = ?,
+                        centro_trabajo = ?, vacaciones_dias_anuales = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
                     (
                         empresa_id,
                         str(payload.get("puesto") or "").strip() or None,
                         str(payload.get("departamento") or "").strip() or None,
-                        str(payload.get("tipo_contrato") or "").strip() or None,
-                        str(payload.get("fecha_inicio") or "").strip() or None,
-                        str(payload.get("fecha_fin") or "").strip() or None,
                         str(payload.get("centro_trabajo") or "").strip() or None,
-                        str(payload.get("notas") or "").strip() or None,
                         vacaciones_dias,
                         now,
                         record_id,
@@ -67252,9 +67403,9 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO workspace_rrhh_profile (
-                      id, workspace_id, persona_id, empresa_id, puesto, departamento, tipo_contrato,
-                      fecha_inicio, fecha_fin, centro_trabajo, notas, vacaciones_dias_anuales, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      id, workspace_id, persona_id, empresa_id, puesto, departamento,
+                      centro_trabajo, vacaciones_dias_anuales, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (
                         record_id,
@@ -67263,11 +67414,7 @@ class Handler(BaseHTTPRequestHandler):
                         empresa_id,
                         str(payload.get("puesto") or "").strip() or None,
                         str(payload.get("departamento") or "").strip() or None,
-                        str(payload.get("tipo_contrato") or "").strip() or None,
-                        str(payload.get("fecha_inicio") or "").strip() or None,
-                        str(payload.get("fecha_fin") or "").strip() or None,
                         str(payload.get("centro_trabajo") or "").strip() or None,
-                        str(payload.get("notas") or "").strip() or None,
                         vacaciones_dias,
                         now,
                         now,
@@ -82358,6 +82505,27 @@ class Handler(BaseHTTPRequestHandler):
             created = run_workspace_time_missing_sweep(conn, workspace_id)
             conn.commit()
             json_response(self, {"ok": True, "notifications": len(created), "channels": created[:12]})
+            return
+
+        if path == "/api/workspace_rrhh_ficha_kpis":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            persona_id = (params.get("persona_id", [""])[0] or "").strip()
+            year = (params.get("year", [""])[0] or "").strip()
+            if not workspace_id or not persona_id:
+                json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            # Salario y costes son datos personales: o gestionas el workspace, o es tu
+            # propia ficha. Mismo criterio que el resto de lecturas de RRHH.
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                propia = workspace_persona_id_for_user(conn, workspace_id, str(session.get("user_id") or "").strip())
+                if not propia or propia != persona_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+            json_response(self, fetch_workspace_rrhh_persona_kpis(conn, workspace_id, persona_id, year=year))
             return
 
         if path == "/api/workspace_access_review":
