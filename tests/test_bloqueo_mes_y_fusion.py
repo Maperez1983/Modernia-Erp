@@ -89,7 +89,10 @@ class FusionDeFichasTests(unittest.TestCase):
     def test_no_desactiva_si_quedaron_fichajes_sin_mover(self):
         # Si un mes bloqueado impidió mover parte del historial, la ficha origen
         # sigue teniendo datos: desactivarla los escondería.
-        self.assertIn("if movidos and not bloqueados:", self._bloque())
+        # La condición incluye ahora `otros_movidos` (ausencias, nóminas...), pero lo
+        # que se fija es lo mismo: con algo bloqueado, el origen NO se desactiva.
+        self.assertIn("and not bloqueados:", self._bloque())
+        self.assertNotIn("if movidos and bloqueados", self._bloque())
 
     def test_deja_traza(self):
         self.assertIn('action="fusion_fichas"', self._bloque())
@@ -115,3 +118,43 @@ class OtrosRegexMalEscapadosTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LaFusionMueveTodoElHistorialTests(unittest.TestCase):
+    """Mover solo los fichajes dejaba medio historial huérfano.
+
+    Salió con Alicia Mostazo: una ficha acumulaba 543 h de fichajes y la otra sus
+    vacaciones. Fusionando solo fichajes, las ausencias se habrían quedado en la
+    ficha desactivada y su saldo de vacaciones habría pasado a cero — justo el dato
+    que la fusión pretendía arreglar.
+    """
+
+    def _bloque(self):
+        i = SERVER.index('elif parsed.path == "/api/workspace_registro_personal_merge":')
+        return SERVER[i: SERVER.index("elif parsed.path ==", i + 100)]
+
+    def test_mueve_el_historial_operativo(self):
+        b = self._bloque()
+        for tabla in ("workspace_rrhh_ausencias", "workspace_rrhh_gastos", "workspace_rrhh_documentos",
+                      "workspace_rrhh_nominas", "workspace_rrhh_productividad_manual"):
+            with self.subTest(tabla=tabla):
+                self.assertIn(tabla, b)
+
+    def test_no_reescribe_la_auditoria(self):
+        """Cambiar a quién apunta un rastro de auditoría es falsearlo."""
+        b = self._bloque()
+        corte = b.index("otros_movidos = {}")
+        tramo = b[corte: b.index("if (movidos or otros_movidos)", corte)]
+        self.assertNotIn("workspace_registro_audit", tramo)
+
+    def test_no_mueve_perfil_ni_turnos(self):
+        # Tienen UNIQUE por persona: chocarían si el destino ya tiene los suyos.
+        b = self._bloque()
+        corte = b.index("otros_movidos = {}")
+        tramo = b[corte: b.index("if (movidos or otros_movidos)", corte)]
+        self.assertNotIn("workspace_rrhh_profile", tramo)
+        self.assertNotIn("workspace_rrhh_turnos", tramo)
+
+    def test_desactiva_el_origen_aunque_no_tuviera_fichajes(self):
+        """El caso de Alicia: el origen tenía vacaciones pero ningún fichaje."""
+        self.assertIn("if (movidos or otros_movidos) and not bloqueados:", self._bloque())

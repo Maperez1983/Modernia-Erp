@@ -65797,7 +65797,40 @@ class Handler(BaseHTTPRequestHandler):
                     (destino_id, fichas["destino"]["nombre"] or "-", now, str(row_value(fila, "id") or ""), workspace_id),
                 )
                 movidos += 1
-            if movidos and not bloqueados:
+            # El historial de la persona no son solo los fichajes. Con Alicia Mostazo
+            # salió a la vista: una ficha acumulaba 543 h y la otra sus vacaciones, así
+            # que mover solo los fichajes habría dejado las ausencias huérfanas en la
+            # ficha desactivada y su saldo de vacaciones habría quedado a cero.
+            # NO se toca `workspace_registro_audit`: reescribir un rastro de auditoría
+            # sería falsearlo. Tampoco `profile` ni `turnos`, que tienen UNIQUE por
+            # persona y chocarían si el destino ya tiene los suyos.
+            otros_movidos = {}
+            for tabla in (
+                "workspace_rrhh_ausencias",
+                "workspace_rrhh_gastos",
+                "workspace_rrhh_documentos",
+                "workspace_rrhh_nominas",
+                "workspace_rrhh_productividad_manual",
+            ):
+                try:
+                    if "persona_id" not in (table_columns(conn, tabla) or set()):
+                        continue
+                    antes = conn.execute(
+                        f"SELECT COUNT(*) AS total FROM {tabla} WHERE workspace_id = ? AND persona_id = ?",  # nosec B608 - tabla de una lista fija
+                        (workspace_id, origen_id),
+                    ).fetchone()
+                    cuantos = int(row_value(antes, "total") or 0)
+                    if not cuantos:
+                        continue
+                    conn.execute(
+                        f"UPDATE {tabla} SET persona_id = ? WHERE workspace_id = ? AND persona_id = ?",  # nosec B608 - tabla de una lista fija
+                        (destino_id, workspace_id, origen_id),
+                    )
+                    otros_movidos[tabla] = cuantos
+                except Exception:
+                    _rollback_best_effort(conn)
+
+            if (movidos or otros_movidos) and not bloqueados:
                 # La ficha de origen se desactiva, no se borra: sigue enlazando lo que
                 # ya se exportó con su nombre anterior.
                 conn.execute(
@@ -65815,7 +65848,8 @@ class Handler(BaseHTTPRequestHandler):
                 actor=session,
                 before={"origen_id": origen_id, "origen_nombre": fichas["origen"]["nombre"]},
                 after={"destino_id": destino_id, "destino_nombre": fichas["destino"]["nombre"],
-                       "fichajes_movidos": movidos, "bloqueados": len(bloqueados)},
+                       "fichajes_movidos": movidos, "bloqueados": len(bloqueados),
+                       "otros_movidos": otros_movidos},
                 now=now,
             )
             conn.commit()
@@ -65823,7 +65857,8 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "movidos": movidos,
                 "bloqueados": sorted(set(bloqueados)),
-                "origen_desactivado": bool(movidos and not bloqueados),
+                "otros_movidos": otros_movidos,
+                "origen_desactivado": bool((movidos or otros_movidos) and not bloqueados),
                 "destino": fichas["destino"]["nombre"],
             })
             return
