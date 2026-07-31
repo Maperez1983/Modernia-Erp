@@ -40460,9 +40460,21 @@ def fetch_workspace_setup_status(conn, workspace_id):
     avisos = []
 
     def _contar(sql, params=()):
+        """La cuenta viene con alias `total` a propósito.
+
+        Con Postgres las filas son diccionarios y `row_value(fila, 0)` busca la
+        clave 0, que no existe: devolvía None y el panel salía siempre vacío.
+        Con SQLite, en cambio, el índice numérico funciona, así que en local no se
+        veía. Leemos por nombre, que vale en los dos.
+        """
         try:
             fila = conn.execute(sql, params).fetchone()
-            return int(row_value(fila, 0) or 0) if fila else 0
+            if not fila:
+                return 0
+            valor = row_value(fila, "total")
+            if valor is None:
+                valor = row_value(fila, 0)
+            return int(valor or 0)
         except Exception:
             _rollback_best_effort(conn)
             return None
@@ -40489,7 +40501,7 @@ def fetch_workspace_setup_status(conn, workspace_id):
     #    los echa en falta.
     huerfanos = _contar(
         """
-        SELECT COUNT(*)
+        SELECT COUNT(*) AS total
         FROM clientes c
         WHERE COALESCE(TRIM(COALESCE(c.workspace_id, '')), '') = ''
           AND NOT EXISTS (
@@ -40514,7 +40526,7 @@ def fetch_workspace_setup_status(conn, workspace_id):
         marcadores = ",".join(["?"] * len(empresa_ids))
         sin_nif = _contar(
             f"""
-            SELECT COUNT(*)
+            SELECT COUNT(*) AS total
             FROM empresas
             WHERE id IN ({marcadores})
               AND COALESCE(TRIM(COALESCE(nif, '')), '') = ''

@@ -125,6 +125,54 @@ class QueNoAvisaTests(unittest.TestCase):
             self.assertNotIn(f"{campo}, ''", bloque, f"se coló un aviso por {campo}")
 
 
+class FilasTipoPostgresTests(unittest.TestCase):
+    """En producción el panel salía vacío y en local funcionaba.
+
+    Postgres devuelve las filas como diccionarios; SQLite como tuplas indexables.
+    Leer la cuenta por índice (`row[0]`) funciona en SQLite y devuelve None en
+    Postgres, así que los avisos desaparecían justo donde importaban.
+    """
+
+    class _ConnDictRow:
+        """Envuelve SQLite devolviendo dicts, como hace psycopg."""
+
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, sql, params=()):
+            cur = self._conn.execute(sql, params)
+            filas = [dict(f) for f in cur.fetchall()]
+            return _Cursor(filas)
+
+        def __getattr__(self, n):
+            return getattr(self._conn, n)
+
+    def test_los_avisos_salen_tambien_con_filas_diccionario(self):
+        conn = _conn(con_huerfano=True, con_nif=False)
+        envuelta = self._ConnDictRow(conn)
+        claves = [a["clave"] for a in server.fetch_workspace_setup_status(envuelta, WS)]
+        self.assertIn("clientes_sin_asignar", claves)
+        self.assertIn("empresas_sin_nif", claves)
+        conn.close()
+
+    def test_la_cuenta_se_pide_con_alias(self):
+        bloque = SERVER[SERVER.index("def fetch_workspace_setup_status") : SERVER.index("def fetch_empresa_ids_visible_for_session")]
+        self.assertNotIn("SELECT COUNT(*)\n", bloque, "la cuenta necesita alias para leerse por nombre")
+        self.assertIn("SELECT COUNT(*) AS total", bloque)
+        self.assertIn('row_value(fila, "total")', bloque)
+
+
+class _Cursor:
+    def __init__(self, filas):
+        self._filas = filas
+
+    def fetchone(self):
+        return self._filas[0] if self._filas else None
+
+    def fetchall(self):
+        return self._filas
+
+
 class EndpointTests(unittest.TestCase):
     def test_existe_y_exige_workspace(self):
         i = SERVER.index('if path == "/api/workspace_setup_status":')
