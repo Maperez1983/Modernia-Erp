@@ -2326,6 +2326,7 @@ const state = {
   workspaceRrhhSelectedUserId: "",
   workspaceRrhhRosterSearch: "",
   workspaceRrhhRosterIncluirBajas: false,
+  workspaceRrhhRosterRows: [],
   workspaceRrhhEquipoView: "list",
   workspaceRrhhEquipoMemberKey: "",
   workspaceRrhhEquipoMemberPersonaId: "",
@@ -15462,7 +15463,7 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
 	  }
 
 		  const year = (String(month || "").slice(0, 4) || String(new Date().getFullYear())).trim();
-		  const [profile, ausencias, gastos, docs, timeSummary, timeRows, timeUsers, vacSummary, ausenciasAll, turnos] = await Promise.all([
+		  const [profile, ausencias, gastos, docs, timeSummary, timeRows, timeUsers, rosterAll, vacSummary, ausenciasAll, turnos] = await Promise.all([
 		    manager
 		      ? (scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { row: {} }) : { row: {} })
 		      : safeWorkspaceApi(`/api/workspace_rrhh_profile?workspace_id=${encodeURIComponent(workspaceId)}`, { row: {} }),
@@ -15472,6 +15473,12 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
 		    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_registro_horario_resumen?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}`, {}) : {},
 		    canFetchPersonaData ? safeWorkspaceApi(`/api/workspace_registro_horario?workspace_id=${encodeURIComponent(workspaceId)}&month=${encodeURIComponent(month)}${companyQuery}${personaQuery}&limit=200`, { rows: [] }) : { rows: [] },
 		    manager ? safeWorkspaceApi(`/api/workspace_registro_usuarios?workspace_id=${encodeURIComponent(workspaceId)}${companyQuery}&limit=500`, { rows: [] }) : { rows: [] },
+		    // La plantilla, sin acotar por empresa: es la del workspace. La lista que
+		    // llega del arranque viene filtrada por la empresa activa, y con eso Daniel
+		    // García (sin empresa) y Teresa Ramos (de Fincas Velázquez) desaparecían del
+		    // equipo estando en Modernia. `activos=0` incluye las bajas, que hacen falta
+		    // para "Ver bajas".
+		    manager ? safeWorkspaceApi(`/api/workspace_registro_personal?workspace_id=${encodeURIComponent(workspaceId)}&activos=0&limit=500`, { rows: [] }) : { rows: [] },
 		    manager ? safeWorkspaceApi(`/api/workspace_rrhh_vacaciones_summary?workspace_id=${encodeURIComponent(workspaceId)}&year=${encodeURIComponent(year)}`, { rows: [] }) : { rows: [] },
 		    canSeeTeamRequests ? safeWorkspaceApi(`/api/workspace_rrhh_ausencias?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] }) : { rows: [] },
 		    scopePersonaId ? safeWorkspaceApi(`/api/workspace_rrhh_turnos?workspace_id=${encodeURIComponent(workspaceId)}&persona_id=${encodeURIComponent(scopePersonaId)}`, { rows: [] }) : { rows: [] },
@@ -15479,6 +15486,7 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
 		  if (isStale()) return;
 
 		  state.workspaceTimeUsers = timeUsers?.rows || [];
+		  state.workspaceRrhhRosterRows = Array.isArray(rosterAll?.rows) ? rosterAll.rows : [];
 		  // Si no eres superadmin (panel admin global), en RRHH solo trabajamos con usuarios del workspace.
 		  // Esto evita el caso "el usuario existe pero la ficha sale vacía" por no poder leer /api/usuarios.
 		  try {
@@ -16143,8 +16151,8 @@ const renderWorkspaceRrhhHub = () => {
     // (sin empresa asignada) y Teresa Ramos (de Fincas Velázquez) desaparecían al mirar
     // Estudio Velázquez, y sus tarjetas caían a "Sin ficha" teniendo ficha. Los dos
     // trabajan en Modernia; que estén en una sociedad u otra no los saca del equipo.
-    const employeesAll = Array.isArray(state.currentWorkspaceData?.timeEmployees)
-      ? state.currentWorkspaceData.timeEmployees
+    const employeesAll = Array.isArray(state.workspaceRrhhRosterRows) && state.workspaceRrhhRosterRows.length
+      ? state.workspaceRrhhRosterRows
       : (Array.isArray(state.workspaceTimeEmployees) ? state.workspaceTimeEmployees : []);
     const employees = employeesAll.filter((row) => String(row?.source || "").trim() !== "auto");
     const usersAll = Array.isArray(state.usersList) ? state.usersList : [];
