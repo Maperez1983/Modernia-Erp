@@ -40421,6 +40421,34 @@ def fetch_workspace_company_ids(conn, workspace_id):
     return []
 
 
+def fetch_empresa_ids_visible_for_session(conn, session, *, workspace_id=""):
+    """Empresas que una sesión puede ver. `None` significa "todas".
+
+    `/api/empresas` era un `SELECT ... FROM empresas` sin `WHERE`: servía las
+    empresas de todos los tenants a cualquier sesión, y para cualquier
+    `workspace_id` —incluido uno inexistente—, con NIF, IBAN y BIC dentro.
+
+    Devolvemos `None` para el actor privilegiado (que legítimamente ve todo) y la
+    lista de ids en el resto de casos. Una lista vacía significa que no ve
+    ninguna, y hay que respetarlo en vez de caer al catálogo entero.
+    """
+    ws_id = str(workspace_id or "").strip()
+    if ws_id:
+        # Piden un workspace concreto: el gate GET ya exigió pertenencia, esto acota.
+        return fetch_workspace_company_ids(conn, ws_id) or []
+    try:
+        if workspace_actor_is_privileged(conn, session):
+            return None
+    except Exception:
+        _rollback_best_effort(conn)
+    ids = []
+    for fila in (fetch_workspace_rows_for_user(conn, session) or []):
+        for eid in (fetch_workspace_company_ids(conn, str(fila.get("id") or "")) or []):
+            if eid and eid not in ids:
+                ids.append(eid)
+    return ids
+
+
 def resolve_workspace_id_for_empresa(conn, empresa_id):
     """Workspace al que pertenece una empresa legacy. '' si no se puede saber.
 
@@ -80411,8 +80439,20 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/empresas":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            empresa_ids_visibles = fetch_empresa_ids_visible_for_session(
+                conn, session, workspace_id=(params.get("workspace_id", [""])[0] or "").strip()
+            )
+            if empresa_ids_visibles is not None and not empresa_ids_visibles:
+                json_response(self, [])
+                return
+            filtro_empresas = ""
+            valores_empresas = []
+            if empresa_ids_visibles is not None:
+                filtro_empresas = "WHERE id IN (" + ",".join(["?"] * len(empresa_ids_visibles)) + ")"
+                valores_empresas = list(empresa_ids_visibles)
             rows = conn.execute(
-                """
+                f"""
                 SELECT
                   id,
                   nombre,
@@ -80438,8 +80478,10 @@ class Handler(BaseHTTPRequestHandler):
                   COALESCE(vacaciones_modo, '') AS vacaciones_modo,
                   COALESCE(CAST(vacaciones_dias_anuales AS TEXT), '') AS vacaciones_dias_anuales
                 FROM empresas
+                {filtro_empresas}
                 ORDER BY nombre
-                """
+                """,  # nosec B608 - marcadores parametrizados, los ids van como valores
+                valores_empresas,
             ).fetchall()
             json_response(self, [dict(r) for r in rows])
             return
@@ -83135,6 +83177,31 @@ class Handler(BaseHTTPRequestHandler):
             """
             empresas_agg = sql_group_concat("e.nombre", " | ")
             servicios_agg = sql_group_concat("ce.servicio", " | ")
+            if (params.get("sin_asignar", [""])[0] or "").strip() in ("1", "true", "yes"):
+                # Cubo "sin asignar": clientes que no cuelgan de ningún workspace NI de
+                # ninguna empresa vinculada a uno. No salen en ninguna lista acotada, así
+                # que sin esto solo se les ve mirando la tabla a mano (en producción eran
+                # 5 el 2026-07-31). Como no son de ningún tenant, solo los ve un actor de
+                # plataforma: devolverlos dentro de un workspace sería atribuirlos a dedo.
+                if not workspace_actor_is_privileged(conn, session):
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                rows = conn.execute(
+                    f"""
+                    SELECT {cliente_list_cols}
+                    FROM clientes c
+                    WHERE COALESCE(TRIM(COALESCE(c.workspace_id, '')), '') = ''
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM clientes_empresas ce
+                        JOIN workspace_empresas we ON we.empresa_id = ce.empresa_id
+                        WHERE ce.cliente_id = c.id
+                      )
+                    ORDER BY c.nombre
+                    """  # nosec B608 - lista de columnas constante del propio handler
+                ).fetchall()
+                json_response(self, [dict(r) for r in rows])
+                return
             if is_seguros_view and ("seguros" in normalized_services or not normalized_services):
                 where = ["s.cliente_id IS NOT NULL"]
                 values = []
