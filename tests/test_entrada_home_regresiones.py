@@ -41,6 +41,46 @@ class IdInternoNoSeEnsenaTests(unittest.TestCase):
         self.assertIn("nombre", bloque)
 
 
+class CadaWorkspaceMuestraSuNombreTests(unittest.TestCase):
+    """Entrar en Modernia y que la pantalla diga "Verifika²".
+
+    `getWorkspaceDisplayName` renombraba modernia/grupomodernia/grupo-modernia al
+    nombre de marca. Con un solo tenant era cosmético; con cuatro workspaces —dos
+    llamados justamente Modernia y Verifika²— impedía saber en cuál estabas, y eso
+    con Verifika² siendo superconjunto de Modernia y viendo sus mismos clientes.
+    """
+
+    def _bloque(self):
+        return APP[APP.index("const getWorkspaceDisplayName") : APP.index("const isGrupoModerniaWorkspace")]
+
+    def test_modernia_ya_no_se_renombra(self):
+        bloque = self._bloque()
+        for alias in ('"modernia"', '"grupomodernia"', '"grupo-modernia"'):
+            self.assertNotIn(alias, bloque, f"{alias} sigue sustituyéndose por la marca")
+
+    def test_el_nombre_de_la_ficha_manda(self):
+        bloque = self._bloque()
+        # Si viene el registro del workspace, se devuelve su nombre sin tocarlo.
+        self.assertIn("nombreReal", bloque)
+        self.assertLess(
+            bloque.index("if (nombreReal) return nombreReal;"),
+            bloque.index("normalizeWorkspaceIdentifier"),
+            "el nombre real tiene que devolverse antes de cualquier normalización",
+        )
+
+    def test_el_slug_suelto_se_sigue_presentando_bien(self):
+        # Varios callers pasan "verifika2" como respaldo: no puede leerse en minúsculas.
+        bloque = self._bloque()
+        self.assertIn('"verifika2", "verifika", "verifika-2"', bloque)
+        self.assertIn("DEFAULT_TENANT_WORKSPACE_NAME", bloque)
+
+    def test_no_se_toco_la_logica_del_copiloto_legal(self):
+        # `isGrupoModerniaWorkspace` usa su propia lista y decide permisos, no texto.
+        bloque = APP[APP.index("const isGrupoModerniaWorkspace") : APP.index("const workspaceHasEnabledModule")]
+        self.assertIn('"modernia"', bloque)
+        self.assertIn('"grupomodernia"', bloque)
+
+
 class SinLlamadaDuplicadaTests(unittest.TestCase):
     def test_el_modal_reutiliza_el_estado_recien_cargado(self):
         bloque = APP[APP.index("const openHomeTimePunchModal") : APP.index("const renderWorkspaceTimeSummary")]

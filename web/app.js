@@ -7089,17 +7089,26 @@ const workspaceNameById = (id = "") => {
 };
 
 const getWorkspaceDisplayName = (workspace = null) => {
-  let rawName =
-    typeof workspace === "string"
-      ? workspace
-      : workspace?.nombre || workspace?.name || workspace?.slug || workspace?.id || "";
+  // Si tenemos la ficha del workspace, su nombre manda tal cual. Antes se
+  // renombraba "Modernia" a "Verifika²" (y grupomodernia, y grupo-modernia): un
+  // alias inofensivo cuando había un solo tenant, pero hoy hay cuatro workspaces,
+  // dos llamados justamente Modernia y Verifika², y la regla hacía imposible saber
+  // en cuál estabas. La marca ya está en la cabecera, el dominio y el acceso; el
+  // nombre del workspace es un dato operativo, no un sitio donde poner la marca.
+  const nombreReal =
+    typeof workspace === "string" ? "" : String(workspace?.nombre || workspace?.name || "").trim();
+  if (nombreReal) return nombreReal;
+
+  let rawName = typeof workspace === "string" ? workspace : workspace?.slug || workspace?.id || "";
   if (looksLikeInternalId(rawName)) {
     rawName = workspaceNameById(rawName);
     if (!rawName) return "Workspace";
   }
   const normalized = normalizeWorkspaceIdentifier(rawName);
   if (!normalized) return "Workspace";
-  if (["modernia", "grupomodernia", "grupo-modernia", "verifika2", "verifika", "verifika-2"].includes(normalized)) {
+  // Varios sitios pasan el slug suelto como respaldo. Solo lo vestimos para que no
+  // se lea "verifika2" en minúsculas; ningún otro nombre se sustituye.
+  if (["verifika2", "verifika", "verifika-2"].includes(normalized)) {
     return DEFAULT_TENANT_WORKSPACE_NAME;
   }
   return rawName;
