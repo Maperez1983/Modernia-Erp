@@ -3280,6 +3280,21 @@ body.theme-operativa .workspace-home-count {
   background: rgba(255, 214, 102, 0.28);
 }
 
+.rrhh-roster-bajas {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: -4px 0 10px;
+  font-size: 0.9rem;
+  color: var(--muted, #5b6b62);
+  cursor: pointer;
+}
+
+.rrhh-roster-bajas input {
+  width: auto;
+  margin: 0;
+}
+
 .rrhh-member-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

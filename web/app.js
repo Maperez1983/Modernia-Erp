@@ -2325,6 +2325,7 @@ const state = {
   workspaceRrhhUserSearch: "",
   workspaceRrhhSelectedUserId: "",
   workspaceRrhhRosterSearch: "",
+  workspaceRrhhRosterIncluirBajas: false,
   workspaceRrhhEquipoView: "list",
   workspaceRrhhEquipoMemberKey: "",
   workspaceRrhhEquipoMemberPersonaId: "",
@@ -16236,7 +16237,14 @@ const renderWorkspaceRrhhHub = () => {
     const memberKey = String(state.workspaceRrhhEquipoMemberKey || "").trim();
     const selected = members.find((m) => String(m.key || "") === memberKey) || null;
     const query = normalizeSimple(String(state.workspaceRrhhRosterSearch || ""));
+    // Las bajas no son plantilla: dar de baja a alguien y seguir viéndolo aquí como
+    // "En plantilla" es lo que pasaba antes. Pero tampoco se esconden del todo, que
+    // el registro de jornada hay que poder consultarlo cuatro años: quedan detrás
+    // de "Ver bajas".
+    const incluirBajas = Boolean(state.workspaceRrhhRosterIncluirBajas);
+    const bajas = members.filter((m) => m.hasFicha && !m.activo).length;
     const filtered = members.filter((m) => {
+      if (!incluirBajas && m.hasFicha && !m.activo) return false;
       if (!query) return true;
       const hay = normalizeSimple([m.nombre || "", m.empresa_nombre || "", m.servicios || "", m.user?.usuario || "", m.user?.email || ""].join(" "));
       return hay.includes(query);
@@ -16259,8 +16267,13 @@ const renderWorkspaceRrhhHub = () => {
           Buscar
           <input id="workspaceRrhhRosterSearch" value="${escapeHtml(state.workspaceRrhhRosterSearch || "")}" placeholder="Nombre, usuario, email, empresa..." />
         </label>
+        ${bajas ? `
+        <label class="rrhh-roster-bajas">
+          <input type="checkbox" id="workspaceRrhhRosterIncluirBajas" ${incluirBajas ? "checked" : ""} />
+          Ver bajas (${bajas})
+        </label>` : ""}
         <div class="rrhh-member-grid">
-          ${(filtered.length ? filtered : members).length
+          ${filtered.length
             ? (() => {
               const rowsAll = Array.isArray(state.workspaceRrhhTimeRows) && state.workspaceRrhhTimeRows.length
                 ? state.workspaceRrhhTimeRows
@@ -16347,10 +16360,10 @@ const renderWorkspaceRrhhHub = () => {
                 return { total, used, pending, pct };
               };
 
-              const list = (filtered.length ? filtered : members);
+              const list = filtered;
               return list.map((m) => {
                 const company = String(m.empresa_nombre || "").trim();
-                const status = m.hasFicha ? "En plantilla" : "Sin ficha";
+                const status = m.hasFicha ? (m.activo ? "En plantilla" : "Baja") : "Sin ficha";
                 const pill = m.hasFicha ? "rrhh-pill" : "rrhh-pill rrhh-pill-warn";
                 const cardStateClass = m.hasFicha ? "has-ficha" : "no-ficha";
                 const personaId = String(m.personaId || m.employee?.id || "").trim();
@@ -16417,7 +16430,9 @@ const renderWorkspaceRrhhHub = () => {
                 `;
               }).join("");
             })()
-            : "<p class='muted'>No hay miembros todavía.</p>"
+            : `<p class="muted">${members.length
+                ? (query ? "Nadie coincide con la búsqueda." : "Nadie en plantilla; marca \"Ver bajas\" para consultar a quien ya no está.")
+                : "No hay miembros todavía."}</p>`
           }
         </div>
       </div>
@@ -18066,6 +18081,14 @@ const renderWorkspaceRrhhHub = () => {
   if (rosterSearch) {
     rosterSearch.addEventListener("input", () => {
       state.workspaceRrhhRosterSearch = String(rosterSearch.value || "");
+      renderWorkspaceRrhhHub();
+    });
+  }
+
+  const rosterBajas = workspaceRrhhHub.querySelector("#workspaceRrhhRosterIncluirBajas");
+  if (rosterBajas) {
+    rosterBajas.addEventListener("change", () => {
+      state.workspaceRrhhRosterIncluirBajas = Boolean(rosterBajas.checked);
       renderWorkspaceRrhhHub();
     });
   }
