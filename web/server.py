@@ -5638,6 +5638,37 @@ def parse_boolish(value):
     return 1 if raw in {"1", "true", "yes", "si", "sí", "on"} else 0
 
 
+def payload_flag(payload, key, default=1):
+    """Lee una bandera 0/1 de un payload JSON respetando los valores falsos.
+
+    `str(payload.get(k) or "1")` convierte el `0` y el `false` de JSON en el valor
+    por defecto, porque en Python son falsos. Así que pedir por API la baja de un
+    usuario lo dejaba activo — y respondía `ok: true`. La interfaz se libraba de
+    puro azar: manda cadenas desde un `<select>`, y `"0"` sí es verdadero.
+
+    Cuando la clave no viene, o viene vacía, manda `default`; cuando viene, se
+    respeta tal cual, sea número, booleano o cadena.
+    """
+    si_no_viene = 1 if default else 0
+    if key not in payload:
+        return si_no_viene
+    valor = payload.get(key)
+    if valor is None:
+        return si_no_viene
+    if isinstance(valor, bool):
+        return 1 if valor else 0
+    if isinstance(valor, (int, float)):
+        return 1 if valor else 0
+    raw = str(valor).strip().lower()
+    if not raw:
+        return si_no_viene
+    if raw in {"1", "true", "yes", "si", "sí", "on"}:
+        return 1
+    if raw in {"0", "false", "no", "off"}:
+        return 0
+    return si_no_viene
+
+
 MALAGA_BONUS_OFFICES = {
     "MODERNIA NORTE",
     "MODERNIA OESTE",
@@ -44411,10 +44442,10 @@ def upsert_workspace_alert_config(conn, workspace_id, persona_id, payload, now=N
     ).fetchone()
     values = (
         (payload.get("empresa_id") or "").strip() or None,
-        0 if str(payload.get("alert_missing_checkin") or "1").strip().lower() in {"0", "false", "no", "off"} else 1,
-        0 if str(payload.get("alert_missing_checkout") or "1").strip().lower() in {"0", "false", "no", "off"} else 1,
-        0 if str(payload.get("notify_worker") or "1").strip().lower() in {"0", "false", "no", "off"} else 1,
-        0 if str(payload.get("notify_admin") or "1").strip().lower() in {"0", "false", "no", "off"} else 1,
+        payload_flag(payload, "alert_missing_checkin", 1),
+        payload_flag(payload, "alert_missing_checkout", 1),
+        payload_flag(payload, "notify_worker", 1),
+        payload_flag(payload, "notify_admin", 1),
         (payload.get("admin_contact") or "").strip() or "",
         (payload.get("schedule") or "").strip() or "",
     )
@@ -61353,7 +61384,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             categoria = normalize_gestoria_trabajo_category(payload.get("categoria") or "") or classify_gestoria_trabajo_category(nombre)
             try:
-                activo = 0 if str(payload.get("activo") or "1").strip().lower() in {"0", "false", "no", "off"} else 1
+                activo = payload_flag(payload, "activo", 1)
             except Exception:
                 activo = 1
             orden = payload.get("orden")
@@ -61976,7 +62007,7 @@ class Handler(BaseHTTPRequestHandler):
             servicio = str(payload.get("servicio") or "").strip()
             workspace_id = str(payload.get("workspace_id") or "").strip()
             password = str(payload.get("password") or "")
-            registro_horario_activo = 1 if str(payload.get("registro_horario_activo") or "0").strip().lower() in {"1", "true", "si", "sí", "on"} else 0
+            registro_horario_activo = payload_flag(payload, "registro_horario_activo", 0)
             if not nombre:
                 json_response(self, {"error": "nombre requerido"}, status=400)
                 return
@@ -62033,7 +62064,7 @@ class Handler(BaseHTTPRequestHandler):
                         str(payload.get("rol") or "").strip() or None,
                         int(registro_horario_activo),
                         password_hash,
-                        1 if str(payload.get("activo") or "1").strip() in {"1", "true", "si", "sí", "on"} else 0,
+                        payload_flag(payload, "activo", 1),
                         now,
                         now,
                     ),
@@ -62258,10 +62289,10 @@ class Handler(BaseHTTPRequestHandler):
                     values.append(normalize_person_name(payload.get(field)) or None)
                 elif field == "registro_horario_activo":
                     updates.append("registro_horario_activo = ?")
-                    values.append(1 if str(payload.get(field) or "0").strip().lower() in {"1", "true", "si", "sí", "on"} else 0)
+                    values.append(payload_flag(payload, field, 0))
                 elif field == "activo":
                     updates.append("activo = ?")
-                    values.append(1 if str(payload.get(field) or "1").strip().lower() in {"1", "true", "si", "sí", "on"} else 0)
+                    values.append(payload_flag(payload, field, 1))
                 else:
                     updates.append(f"{field} = ?")
                     values.append(str(payload.get(field) or "").strip() or None)
@@ -66568,7 +66599,7 @@ class Handler(BaseHTTPRequestHandler):
                     status=400,
                 )
                 return
-            active_flag = 0 if str(payload.get("activo") or "1").strip().lower() in {"0", "false", "no", "off"} else 1
+            active_flag = payload_flag(payload, "activo", 1)
             # El formulario siempre envía el campo hidden `usuario_id` aunque esté vacío.
             # Si llega vacío, NO lo interpretamos como "desvincular", sino como "no tocar".
             usuario_raw = str(payload.get("usuario_id") or "").strip()
