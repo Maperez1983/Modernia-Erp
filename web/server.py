@@ -44023,7 +44023,7 @@ def fetch_workspace_alert_preferences(conn, workspace_id, persona_id=None):
 
 
 def upsert_workspace_alert_config(conn, workspace_id, persona_id, payload, now=None):
-    now_ts = now or datetime.now().isoformat()
+    now_ts = now or app_now().isoformat()
     existing = conn.execute(
         """
         SELECT id FROM workspace_registro_alerts
@@ -44084,7 +44084,7 @@ def fetch_workspace_notifications(conn, workspace_id, limit=40, persona_id=None)
     return {"rows": [dict(row) for row in rows]}
 
 def log_workspace_notification(conn, workspace_id, persona_id, channel, payload, now=None):
-    now_ts = now or datetime.now().isoformat()
+    now_ts = now or app_now().isoformat()
     notification_id = os.urandom(16).hex()
     conn.execute(
         """
@@ -44305,7 +44305,7 @@ def fetch_workspace_registro_periodos(conn, workspace_id, empresa_id=None, limit
 
 
 def upsert_workspace_registro_periodo_lock(conn, workspace_id, month, locked, actor_user_id="", empresa_id=None, now=None):
-    now_ts = now or datetime.now().isoformat()
+    now_ts = now or app_now().isoformat()
     month_key = _normalize_month(month)
     if not workspace_id or not month_key:
         return {"error": "workspace_id y month requeridos"}
@@ -45513,7 +45513,7 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
 
 
 def log_workspace_registro_audit(conn, workspace_id, *, empresa_id=None, persona_id=None, entity_type="", entity_id="", action="", actor=None, before=None, after=None, now=None):
-    now_ts = now or datetime.now().isoformat()
+    now_ts = now or app_now().isoformat()
     session = actor or {}
     actor_user_id = str(session.get("user_id") or "").strip() or None
     actor_nombre = " ".join(
@@ -46346,7 +46346,7 @@ def workspace_time_sweep_loop(db_path, interval_seconds=300):
                 time.sleep(max(60, int(interval_seconds or 300)))
                 continue
             with WORKSPACE_TIME_SWEEP_STATE_LOCK:
-                WORKSPACE_TIME_SWEEP_STATE["last_run_at"] = datetime.now().isoformat()
+                WORKSPACE_TIME_SWEEP_STATE["last_run_at"] = app_now().isoformat()
                 WORKSPACE_TIME_SWEEP_STATE["last_error"] = str(cycle.get("last_error") or "")
                 WORKSPACE_TIME_SWEEP_STATE["last_workspaces"] = int(cycle.get("workspaces") or 0)
                 WORKSPACE_TIME_SWEEP_STATE["last_notifications"] = int(cycle.get("notifications") or 0)
@@ -46357,7 +46357,7 @@ def workspace_time_sweep_loop(db_path, interval_seconds=300):
             except Exception:
                 pass
             with WORKSPACE_TIME_SWEEP_STATE_LOCK:
-                WORKSPACE_TIME_SWEEP_STATE["last_run_at"] = datetime.now().isoformat()
+                WORKSPACE_TIME_SWEEP_STATE["last_run_at"] = app_now().isoformat()
                 WORKSPACE_TIME_SWEEP_STATE["last_error"] = str(exc)
         finally:
             try:
@@ -46416,7 +46416,7 @@ def legal_radar_auto_scan_loop(db_path, interval_seconds=3600):
 
 
 def run_workspace_time_alerts(conn, workspace_id, entry, now=None):
-    now_ts = now or datetime.now().isoformat()
+    now_ts = now or app_now().isoformat()
     persona_id = entry.get("persona_id")
     persona_nombre = entry.get("persona_nombre")
     company_name = entry.get("empresa_nombre") or ""

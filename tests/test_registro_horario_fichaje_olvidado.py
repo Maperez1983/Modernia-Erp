@@ -171,3 +171,42 @@ class LaPantallaDeFichajeTests(unittest.TestCase):
     def test_se_explica_al_usuario_que_hacer(self):
         bloque = self._bloque()
         self.assertIn("corregirlo administración", bloque)
+
+
+class UnSoloRelojEnElModuloTests(unittest.TestCase):
+    """Los fichajes se sellaban en hora de Madrid y su auditoría en UTC.
+
+    `app_now()` devuelve Europe/Madrid; `datetime.now()` en Render devuelve UTC. El
+    módulo mezclaba las dos: un fichaje decía 10:52 y su propio registro de
+    auditoría decía 08:52. En el rastro que sirve justamente para demostrar quién
+    corrigió qué y cuándo, dos relojes distintos son un problema.
+    """
+
+    FUNCIONES = [
+        "def log_workspace_registro_audit",
+        "def log_workspace_notification",
+        "def run_workspace_time_alerts",
+        "def upsert_workspace_registro_periodo_lock",
+        "def upsert_workspace_alert_config",
+    ]
+
+    def test_ninguna_sella_con_el_reloj_del_sistema(self):
+        for firma in self.FUNCIONES:
+            i = SERVER.index(firma)
+            bloque = SERVER[i : SERVER.index("\ndef ", i + 10)]
+            with self.subTest(funcion=firma):
+                self.assertNotIn(
+                    "datetime.now().isoformat()", bloque,
+                    f"{firma} vuelve a usar el reloj del sistema, que en Render es UTC",
+                )
+
+    def test_la_auditoria_usa_la_hora_de_la_aplicacion(self):
+        i = SERVER.index("def log_workspace_registro_audit")
+        bloque = SERVER[i : SERVER.index("\ndef ", i + 10)]
+        self.assertIn("app_now().isoformat()", bloque)
+
+    def test_la_barrida_reporta_su_hora_en_local(self):
+        i = SERVER.index("def workspace_time_sweep_loop")
+        bloque = SERVER[i : SERVER.index("\ndef ", i + 10)]
+        self.assertIn('WORKSPACE_TIME_SWEEP_STATE["last_run_at"] = app_now().isoformat()', bloque)
+        self.assertNotIn('"last_run_at"] = datetime.now()', bloque)
