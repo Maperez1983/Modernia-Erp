@@ -22572,9 +22572,22 @@ const renderHomeTimePunchModal = () => {
   const open = Boolean(today?.open);
   const checkin = String(today?.checkin || "").trim();
   const checkout = String(today?.checkout || "").trim();
-  const label = checkin
-    ? `${checkin}${checkout ? ` - ${checkout}` : " · Abierto"}`
-    : "Sin fichaje de hoy";
+  // Un fichaje que nadie cerró hace días llegaba aquí como si fuera de hoy: la
+  // pantalla decía "Hoy: 10:52" con una entrada de hace once días, y de paso
+  // deshabilitaba "Fichar entrada" porque creía que ya habías fichado.
+  const rancio = Boolean(today?.stale);
+  const fechaEntrada = String(today?.entry_date || "").trim();
+  const fechaHoy = String(today?.date || today?.fecha || "").trim();
+  const esDeOtroDia = Boolean(fechaEntrada && fechaHoy && fechaEntrada !== fechaHoy);
+  const fechaCorta = (iso) => {
+    const p = String(iso || "").split("-");
+    return p.length === 3 ? `${p[2]}/${p[1]}` : iso;
+  };
+  const label = rancio
+    ? `Fichaje del ${fechaCorta(fechaEntrada)} sin cerrar (entrada ${checkin})`
+    : checkin
+      ? `${esDeOtroDia ? `Turno del ${fechaCorta(fechaEntrada)}: ` : ""}${checkin}${checkout ? ` - ${checkout}` : " · Abierto"}`
+      : "Sin fichaje de hoy";
   if (!status?.workspace_id) {
     _homeTimePunchBody.innerHTML = `<p class="muted">Cargando registro horario…</p>`;
     return;
@@ -22586,11 +22599,15 @@ const renderHomeTimePunchModal = () => {
     `;
     return;
   }
-  const canCheckIn = !checkin;
-  const canCheckOut = Boolean(open);
+  // Con un fichaje rancio se puede entrar (un olvido de hace días no debe impedir
+  // trabajar hoy) pero no salir: cerrarlo con la hora de ahora registraría una
+  // jornada que no ocurrió. El servidor rechaza ese cierre; aquí no lo ofrecemos.
+  const canCheckIn = rancio || !checkin;
+  const canCheckOut = Boolean(open) && !rancio;
   _homeTimePunchBody.innerHTML = `
     <div class="workspace-time-preview">
-      <div class="muted">Hoy: ${escapeHtml(label)}</div>
+      <div class="muted">${rancio ? "" : "Hoy: "}${escapeHtml(label)}</div>
+      ${rancio ? `<p class="muted" style="margin-top:6px;">Puedes fichar hoy con normalidad. El fichaje sin cerrar tiene que corregirlo administración: no se cierra solo para no registrar horas que no se trabajaron.</p>` : ""}
       <div class="form-actions" style="margin-top:10px;">
         <button type="button" class="secondary ghost button-inline" data-home-time-checkin ${canCheckIn ? "" : "disabled"}>Fichar entrada</button>
         <button type="button" class="secondary ghost button-inline" data-home-time-checkout ${canCheckOut ? "" : "disabled"}>Fichar salida</button>

@@ -120,3 +120,54 @@ class ElTurnoNocturnoSigueFuncionandoTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EstadoDeFichajeNoMienteTests(unittest.TestCase):
+    """`/api/home_time_status` metía un fichaje viejo dentro de "hoy".
+
+    Encontrado en la cuenta real el 2026-07-31: había un fichaje abierto del
+    2026-07-20 y el estado lo devolvía como `today.checkin = "10:52"`. La pantalla
+    ponía "Hoy: 10:52" y, peor, deshabilitaba "Fichar entrada" porque creía que ya
+    se había fichado: el usuario no podía fichar y nada le explicaba por qué.
+    """
+
+    def _bloque(self):
+        i = SERVER.index('if path == "/api/home_time_status":')
+        return SERVER[i : SERVER.index("json_response(", SERVER.index("today_payload[\"stale\"]", i))]
+
+    def test_el_estado_marca_el_fichaje_rancio(self):
+        bloque = self._bloque()
+        self.assertIn('today_payload["stale"]', bloque)
+        self.assertIn("workspace_time_open_entry_minutes", bloque)
+        self.assertIn("WORKSPACE_TIME_MAX_SHIFT_MINUTES", bloque)
+
+    def test_usa_el_mismo_umbral_que_el_toggle(self):
+        # Dos criterios distintos para lo mismo acabarían discrepando.
+        self.assertEqual(SERVER.count("WORKSPACE_TIME_MAX_SHIFT_MINUTES"), 4)
+
+
+class LaPantallaDeFichajeTests(unittest.TestCase):
+    APP = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+
+    def _bloque(self):
+        i = self.APP.index("const renderHomeTimePunchModal")
+        return self.APP[i : self.APP.index("const openHomeTimePunchModal", i)]
+
+    def test_con_un_fichaje_rancio_se_puede_fichar_entrada(self):
+        bloque = self._bloque()
+        self.assertIn("const canCheckIn = rancio || !checkin;", bloque)
+
+    def test_pero_no_salida(self):
+        bloque = self._bloque()
+        self.assertIn("const canCheckOut = Boolean(open) && !rancio;", bloque)
+
+    def test_ya_no_dice_hoy_cuando_no_es_de_hoy(self):
+        bloque = self._bloque()
+        self.assertIn("sin cerrar", bloque)
+        self.assertIn("entry_date", bloque)
+        # El "Hoy: " literal solo se antepone si NO es rancio.
+        self.assertIn('${rancio ? "" : "Hoy: "}', bloque)
+
+    def test_se_explica_al_usuario_que_hacer(self):
+        bloque = self._bloque()
+        self.assertIn("corregirlo administración", bloque)

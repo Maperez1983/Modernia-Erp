@@ -80923,6 +80923,17 @@ class Handler(BaseHTTPRequestHandler):
                         today_payload["checkin"] = checkin
                         today_payload["checkout"] = checkout
                         today_payload["open"] = open_entry
+                        # Un fichaje abierto de hace días se colaba aquí como si fuera de
+                        # hoy: la pantalla decía "Hoy: 10:52" con una entrada del 20/07 y
+                        # dejaba deshabilitado "Fichar entrada". Marcamos la anomalía con
+                        # el mismo umbral que usa el toggle, para no tener dos criterios.
+                        minutos_abierto = workspace_time_open_entry_minutes(entry, now_dt) if open_entry else None
+                        today_payload["open_minutes"] = minutos_abierto
+                        today_payload["stale"] = bool(
+                            open_entry
+                            and minutos_abierto is not None
+                            and minutos_abierto > WORKSPACE_TIME_MAX_SHIFT_MINUTES
+                        )
             json_response(
                 self,
                 {
