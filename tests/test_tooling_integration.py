@@ -216,7 +216,10 @@ class ToolingSentryConfigTests(unittest.TestCase):
         index_html = (ROOT / "web" / "index.html").read_text(encoding="utf-8")
         bootstrap_marker = "window.__CRMClientDiagnosticsBootstrap__"
         endpoint_marker = 'CLIENT_ERROR_ENDPOINT = "/api/client_error"'
-        auth_bundle_marker = "app-auth.js?v=16"
+        # Sin fijar el número: lo que importa es que el bootstrap vaya antes que el
+        # bundle de auth, y un pin de versión solo hace que el test se rompa en cada
+        # bump de caché sin que nadie haya tocado el orden.
+        auth_bundle_marker = "app-auth.js?v="
         self.assertIn(bootstrap_marker, index_html)
         self.assertIn(endpoint_marker, index_html)
         self.assertIn(auth_bundle_marker, index_html)

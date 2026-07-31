@@ -24953,7 +24953,58 @@ def parse_asesoramiento_text(text):
 
     return fields
 
-def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None):
+
+# Columnas de `clientes` que el alta escribe a través de `datetime(...)`, como hacía
+# cada INSERT literal antes de pasar por el helper.
+CLIENTE_INSERT_DATETIME_COLS = {"created_at", "updated_at"}
+
+
+def cliente_workspace_id_for_write(conn, *, workspace_id="", empresa_id=""):
+    """El `workspace_id` con el que debe nacer un cliente.
+
+    Precedencia: primero el ámbito explícito de la petición (que ya pasó por
+    `enforce_workspace_membership`), y si no lo hay, el que se deduzca de la
+    empresa. Devuelve '' cuando no hay forma de saberlo.
+    """
+    ws = str(workspace_id or "").strip()
+    if ws:
+        return ws
+    return resolve_workspace_id_for_empresa(conn, empresa_id)
+
+
+def insert_cliente_scoped(conn, columnas, valores, *, workspace_id="", empresa_id=""):
+    """Único punto por el que pasan las altas internas de cliente.
+
+    Existe para que ningún cliente vuelva a nacer sin ámbito: los flujos de
+    seguros, inmobiliaria, financiaciones y presupuestos insertaban en `clientes`
+    sin `workspace_id`, y esos clientes desaparecían de todas las listas acotadas
+    por workspace aunque siguieran en la tabla (2014 filas, 0 devueltas en
+    producción el 2026-07-30).
+
+    Si la columna todavía no existe (bases anteriores a la migración) se inserta
+    sin ella en vez de reventar.
+    """
+    cols = list(columnas)
+    vals = list(valores)
+    if len(cols) != len(vals):
+        raise ValueError("insert_cliente_scoped: columnas y valores no cuadran")
+    try:
+        tiene_ws = "workspace_id" in (table_columns(conn, "clientes") or set())
+    except Exception:
+        _rollback_best_effort(conn)
+        tiene_ws = False
+    if tiene_ws and "workspace_id" not in cols:
+        ws = cliente_workspace_id_for_write(conn, workspace_id=workspace_id, empresa_id=empresa_id)
+        cols.insert(1, "workspace_id")
+        vals.insert(1, ws or None)
+    marcadores = ", ".join("datetime(?)" if c in CLIENTE_INSERT_DATETIME_COLS else "?" for c in cols)
+    conn.execute(
+        f"INSERT INTO clientes ({', '.join(cols)}) VALUES ({marcadores})",  # nosec B608 - columnas del propio código, valores parametrizados
+        tuple(vals),
+    )
+
+
+def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None, workspace_id=""):
     if not tomador:
         return None
     try:
@@ -25007,17 +25058,14 @@ def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None):
             elif re.match(r"^[A-Z][0-9]{7}[0-9A-Z]$", nif_norm):
                 tipo_persona = "Jurídica"
         cliente_id = os.urandom(16).hex()
-        conn.execute(
-            """
-            INSERT INTO clientes (
-              id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, direccion,
-              procedencia_canal, procedencia_detalle, procedencia_user_id,
-              estado, created_at, updated_at
-            ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-            )
-            """,
-            (
+        insert_cliente_scoped(
+            conn,
+            [
+                "id", "nombre", "tipo_persona", "nif", "telefono", "email", "fecha_nacimiento", "direccion",
+                "procedencia_canal", "procedencia_detalle", "procedencia_user_id",
+                "estado", "created_at", "updated_at",
+            ],
+            [
                 cliente_id,
                 tomador,
                 tipo_persona,
@@ -25032,7 +25080,9 @@ def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None):
                 "Activo",
                 now,
                 now,
-            ),
+            ],
+            workspace_id=workspace_id,
+            empresa_id=empresa_id,
         )
     else:
         cliente_id = cliente["id"]
@@ -25164,7 +25214,7 @@ def resolve_empresa_id_for_cliente_servicio(conn, cliente_id, servicio_key, *, p
     return ""
 
 
-def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=None):
+def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=None, workspace_id=""):
     if not nombre and not nif:
         return None
     extra = extra or {}
@@ -25272,17 +25322,14 @@ def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=No
     if nif_norm and re.match(r"^[A-Z][0-9]{7}[0-9A-Z]$", nif_norm):
         tipo_persona = "Jurídica"
     cliente_id = os.urandom(16).hex()
-    conn.execute(
-        """
-        INSERT INTO clientes (
-          id, empresa_id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, direccion,
-          procedencia_canal, procedencia_detalle, procedencia_user_id,
-          estado, created_at, updated_at
-        ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-        )
-        """,
-        (
+    insert_cliente_scoped(
+        conn,
+        [
+            "id", "empresa_id", "nombre", "tipo_persona", "nif", "telefono", "email", "fecha_nacimiento", "direccion",
+            "procedencia_canal", "procedencia_detalle", "procedencia_user_id",
+            "estado", "created_at", "updated_at",
+        ],
+        [
             cliente_id,
             empresa_id,
             nombre_norm or nif_norm or "Cliente inmobiliaria",
@@ -25298,7 +25345,9 @@ def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=No
             "Inactivo",
             now,
             now,
-        ),
+        ],
+        workspace_id=workspace_id,
+        empresa_id=empresa_id,
     )
     ensure_cliente_servicio_link(conn, cliente_id, empresa_id, "inmobiliaria", now, estado="Activo")
     return cliente_id
@@ -31149,6 +31198,7 @@ def create_portal_inmueble_lead(conn, payload, now):
         payload.get("nif"),
         now,
         {"telefono": telefono, "email": email},
+        workspace_id=workspace_id,
     )
     existing = conn.execute(
         """
@@ -35561,7 +35611,7 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
         },
     }
 
-def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=None):
+def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=None, workspace_id=""):
     if not nombre:
         return None
     empresa_id = str(empresa_id or "").strip()
@@ -35613,17 +35663,14 @@ def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=No
             elif re.match(r"^[A-Z][0-9]{7}[0-9A-Z]$", nif):
                 tipo_persona = "Jurídica"
         cliente_id = os.urandom(16).hex()
-        conn.execute(
-            """
-            INSERT INTO clientes (
-              id, empresa_id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, direccion,
-              procedencia_canal, procedencia_detalle, procedencia_user_id,
-              estado, created_at, updated_at
-            ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-            )
-            """,
-            (
+        insert_cliente_scoped(
+            conn,
+            [
+                "id", "empresa_id", "nombre", "tipo_persona", "nif", "telefono", "email", "fecha_nacimiento", "direccion",
+                "procedencia_canal", "procedencia_detalle", "procedencia_user_id",
+                "estado", "created_at", "updated_at",
+            ],
+            [
                 cliente_id,
                 empresa_id or None,
                 nombre,
@@ -35639,7 +35686,9 @@ def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=No
                 "Activo",
                 now,
                 now,
-            ),
+            ],
+            workspace_id=workspace_id,
+            empresa_id=empresa_id,
         )
     else:
         cliente_id = cliente["id"]
@@ -38303,6 +38352,10 @@ def ensure_tables(db_path):
         )
         """
     )
+    # El workspace es el tenant del cliente. La columna no existía ni en `schema.sql`
+    # ni por migración, así que el scope se deducía de `clientes_empresas` y quien no
+    # tuviera ese vínculo se quedaba fuera de todas las listas.
+    ensure_column(conn, "clientes", "workspace_id", "workspace_id TEXT")
     ensure_column(conn, "clientes", "tipo_persona", "tipo_persona TEXT")
     ensure_column(conn, "clientes", "codigo_postal", "codigo_postal TEXT")
     ensure_column(conn, "clientes", "poblacion", "poblacion TEXT")
@@ -40368,6 +40421,83 @@ def fetch_workspace_company_ids(conn, workspace_id):
     return []
 
 
+def resolve_workspace_id_for_empresa(conn, empresa_id):
+    """Workspace al que pertenece una empresa legacy. '' si no se puede saber.
+
+    Es la inversa de `fetch_workspace_company_ids`, y la usamos para estampar
+    `clientes.workspace_id` en las altas que solo conocen la empresa.
+
+    Si la empresa cuelga de más de un workspace NO adivinamos: devolvemos '' y el
+    cliente queda sin asignar. Eso es reversible con el backfill; estampar el
+    workspace equivocado sería una fuga entre tenants y no lo es.
+
+    A propósito sin caché por conexión: con el pool de Postgres las conexiones
+    duran mucho, y si una empresa cambia de workspace una entrada cacheada
+    estamparía el tenant viejo. Son dos SELECT indexados sobre tablas diminutas.
+    """
+    eid = str(empresa_id or "").strip()
+    if not eid:
+        return ""
+
+    def _safe_fetchall(sql, params=()):
+        try:
+            return conn.execute(sql, params).fetchall() or []
+        except Exception:
+            _rollback_best_effort(conn)
+            return []
+
+    def _distintos(rows):
+        vistos = []
+        for r in rows:
+            ws = str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip()
+            if ws and ws not in vistos:
+                vistos.append(ws)
+        return vistos
+
+    encontrados = []
+    # Preferimos v2 (`workspace_companies`), igual que `fetch_workspace_company_ids`.
+    try:
+        cols_v2 = table_columns(conn, "workspace_companies") or set()
+    except Exception:
+        _rollback_best_effort(conn)
+        cols_v2 = set()
+    if {"workspace_id", "legacy_empresa_id"} <= cols_v2:
+        encontrados = _distintos(
+            _safe_fetchall(
+                """
+                SELECT DISTINCT workspace_id
+                FROM workspace_companies
+                WHERE COALESCE(TRIM(legacy_empresa_id), '') = ?
+                  AND COALESCE(activo, 1) = 1
+                  AND COALESCE(TRIM(COALESCE(workspace_id, '')), '') <> ''
+                LIMIT 5
+                """,
+                (eid,),
+            )
+        )
+    if not encontrados:
+        try:
+            cols_v1 = table_columns(conn, "workspace_empresas") or set()
+        except Exception:
+            _rollback_best_effort(conn)
+            cols_v1 = set()
+        if {"workspace_id", "empresa_id"} <= cols_v1:
+            encontrados = _distintos(
+                _safe_fetchall(
+                    """
+                    SELECT DISTINCT workspace_id
+                    FROM workspace_empresas
+                    WHERE COALESCE(TRIM(empresa_id), '') = ?
+                      AND COALESCE(TRIM(COALESCE(workspace_id, '')), '') <> ''
+                    LIMIT 5
+                    """,
+                    (eid,),
+                )
+            )
+
+    return encontrados[0] if len(encontrados) == 1 else ""
+
+
 def resolve_workspace_scope_empresa_ids(conn, workspace_id, *, empresa_id=""):
     """
     Devuelve la lista de `empresas.id` (legacy) asociadas al workspace para scoping.
@@ -40632,18 +40762,33 @@ def resolve_clientes_by_nif_rows(conn, nif, *, limit=6, services=None, workspace
         where = [service_clause] if service_clause else []
         values = list(service_values)
         ce_cols = table_columns(conn, "clientes_empresas") or set()
-        if workspace_id and "workspace_id" in ce_cols:
-            where.append("COALESCE(ce.workspace_id, '') = ?")
-            values.append(workspace_id)
-        elif workspace_id:
+        cliente_cols = table_columns(conn, "clientes") or set()
+        if workspace_id:
+            # Misma forma que en `/api/clientes_list`: la columna existe pero está
+            # vacía en todo lo anterior a la migración, y el respaldo por empresa
+            # quedaba en un `elif` inalcanzable. Aquí duele distinto: esto busca
+            # duplicados por NIF, así que devolver cero no "esconde" clientes, hace
+            # que el CRM cree un cliente repetido.
+            scope_parts = []
+            if "workspace_id" in ce_cols:
+                scope_parts.append("COALESCE(ce.workspace_id, '') = ?")
+                values.append(workspace_id)
+            if "workspace_id" in cliente_cols:
+                scope_parts.append("COALESCE(c.workspace_id, '') = ?")
+                values.append(workspace_id)
             empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id) or []
             if empresa_ids:
                 placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                where.append(f"ce.empresa_id IN ({placeholders_ws})")
+                scope_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
                 values.extend(empresa_ids)
             elif empresa_id:
-                where.append("COALESCE(ce.empresa_id, '') = ?")
+                scope_parts.append("COALESCE(ce.empresa_id, '') = ?")
                 values.append(empresa_id)
+            if not scope_parts:
+                # Sin forma de acotar preferimos no sugerir nada a sugerir clientes
+                # de otro tenant.
+                return []
+            where.append("(" + " OR ".join(scope_parts) + ")")
         elif empresa_id:
             where.append("COALESCE(ce.empresa_id, '') = ?")
             values.append(empresa_id)
@@ -44193,9 +44338,16 @@ def _normalize_workspace_member_role(value):
     return "Miembro"
 
 
+# Roles que otorgan escritura, en su forma ya normalizada por `normalize_lookup_text`.
+WORKSPACE_MEMBER_WRITE_ROLES = {"OWNER", "PROPIETARIO", "ADMIN", "ADMINISTRADOR", "MIEMBRO", "MEMBER"}
+
+
 def workspace_member_can_write(role):
-    role_norm = _normalize_workspace_member_role(role)
-    return role_norm in {"Owner", "Admin", "Miembro"}
+    # No pasamos por `_normalize_workspace_member_role`: ése manda cualquier valor
+    # desconocido a "Miembro" para no persistir basura, y "Miembro" escribe, así que
+    # usarlo aquí concede escritura a un rol que nadie reconoce. Para decidir permisos
+    # el rol se reconoce explícitamente o se deniega.
+    return normalize_lookup_text(role) in WORKSPACE_MEMBER_WRITE_ROLES
 
 
 def fetch_workspace_member(conn, workspace_id, user_id):
@@ -46441,15 +46593,14 @@ def ensure_workspace_budget_client(
         row = _scoped_row_by_id(found_id)
     if not row and lookup:
         cliente_id = os.urandom(16).hex()
-        conn.execute(
-            """
-                INSERT INTO clientes (
-                  id, nombre, tipo_persona, nif, telefono, email,
-                  procedencia_canal, procedencia_detalle, procedencia_user_id,
-                  estado, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
-                """,
-            (
+        insert_cliente_scoped(
+            conn,
+            [
+                "id", "nombre", "tipo_persona", "nif", "telefono", "email",
+                "procedencia_canal", "procedencia_detalle", "procedencia_user_id",
+                "estado", "created_at", "updated_at",
+            ],
+            [
                 cliente_id,
                 lookup,
                 "Física",
@@ -46462,7 +46613,9 @@ def ensure_workspace_budget_client(
                 "Lead",
                 now,
                 now,
-            ),
+            ],
+            workspace_id=workspace_id,
+            empresa_id=empresa_id,
         )
         row = conn.execute(
             "SELECT id, nombre, COALESCE(nif, '') AS nif, COALESCE(telefono, '') AS telefono, COALESCE(email, '') AS email FROM clientes WHERE id = ? LIMIT 1",
@@ -65517,6 +65670,15 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id y nombre requeridos"}, status=400)
                 return
             empresa_id = str(payload.get("empresa_id") or "").strip() or None
+            # El selector de empresa del formulario RRHH emite `workspace_companies.id`,
+            # pero esta tabla referencia `empresas(id)`. Sin traducirlo, guardar una ficha
+            # con empresa elegida rompía con "FOREIGN KEY constraint failed" (500).
+            # `resolve_request_legacy_empresa_id` no cubre este caso porque solo traduce
+            # el `empresa_id` suelto cuando NO llega `workspace_id`, y aquí siempre llega.
+            if empresa_id:
+                legacy_empresa_id = resolve_legacy_empresa_id_from_workspace_company(conn, workspace_id, empresa_id)
+                if legacy_empresa_id:
+                    empresa_id = legacy_empresa_id
             manual_flag = 1
             manual_raw = str(payload.get("empresa_manual") or "").strip().lower()
             if manual_raw in {"0", "false", "no", "off"}:
@@ -82977,15 +83139,21 @@ class Handler(BaseHTTPRequestHandler):
                 where = ["s.cliente_id IS NOT NULL"]
                 values = []
                 seguros_cols = table_columns(conn, "seguros") or set()
-                if workspace_id and "workspace_id" in seguros_cols:
-                    where.append("COALESCE(s.workspace_id, '') = ?")
-                    values.append(workspace_id)
-                elif workspace_id:
+                if workspace_id:
+                    # Mismo caso que en la lista genérica: `seguros.workspace_id` existe pero
+                    # está vacío en lo anterior a la migración, y el `elif` de abajo nunca se
+                    # alcanzaba precisamente porque la columna sí existe. Se combinan los dos
+                    # vínculos con el workspace en vez de excluirse.
+                    scope_parts = []
+                    if "workspace_id" in seguros_cols:
+                        scope_parts.append("COALESCE(s.workspace_id, '') = ?")
+                        values.append(workspace_id)
                     empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
                     if empresa_ids:
                         placeholders = ",".join(["?"] * len(empresa_ids))
-                        where.append(f"s.empresa_id IN ({placeholders})")
+                        scope_parts.append(f"s.empresa_id IN ({placeholders})")
                         values.extend(empresa_ids)
+                    where.append("(" + " OR ".join(scope_parts) + ")" if scope_parts else "1 = 0")
                 elif empresa_id:
                     where.append("s.empresa_id = ?")
                     values.append(empresa_id)
@@ -83061,18 +83229,34 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if normalized_services:
                 ce_cols = table_columns(conn, "clientes_empresas") or set()
+                c_cols = table_columns(conn, "clientes") or set()
                 service_clause, service_values = service_sql_match_clause("ce", normalized_services)
                 where_parts = [service_clause] if service_clause else []
                 values = list(service_values)
-                if workspace_id and "workspace_id" in ce_cols:
-                    where_parts.append("COALESCE(ce.workspace_id, '') = ?")
-                    values.append(workspace_id)
-                elif workspace_id:
+                if workspace_id:
+                    # Mismo caso que en la rama genérica y en la de seguros: la columna
+                    # existe pero está vacía en todo lo anterior a la migración, así que
+                    # filtrar solo por ella dejaba la lista a cero. Y el respaldo por
+                    # empresa estaba en un `elif` inalcanzable, precisamente porque la
+                    # columna sí existe. Se combinan los tres vínculos en vez de excluirse.
+                    scope_parts = []
+                    if "workspace_id" in ce_cols:
+                        scope_parts.append("COALESCE(ce.workspace_id, '') = ?")
+                        values.append(workspace_id)
+                    if "workspace_id" in c_cols:
+                        scope_parts.append("COALESCE(c.workspace_id, '') = ?")
+                        values.append(workspace_id)
                     empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
                     if empresa_ids:
                         placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                        where_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
+                        scope_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
                         values.extend(empresa_ids)
+                    if not scope_parts:
+                        # Sin forma de acotar por workspace no devolvemos nada: antes se
+                        # caía aquí sin filtro de ámbito y salían clientes de otros tenants.
+                        json_response(self, [])
+                        return
+                    where_parts.append("(" + " OR ".join(scope_parts) + ")")
                 rows = conn.execute(
                     f"""
                     SELECT DISTINCT {cliente_list_cols}
@@ -83085,11 +83269,36 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchall()
             else:
                 c_cols = table_columns(conn, "clientes") or set()
-                if workspace_id and "workspace_id" in c_cols:
-                    rows = conn.execute(
-                        f"SELECT {cliente_list_cols} FROM clientes c WHERE COALESCE(c.workspace_id, '') = ? ORDER BY c.nombre",
-                        (workspace_id,),
-                    ).fetchall()
+                if workspace_id:
+                    # El scoping va por workspace, pero `clientes.workspace_id` llegó con una
+                    # migración y los clientes anteriores lo tienen vacío. Filtrar solo por esa
+                    # columna los dejaba a TODOS fuera: la lista de cualquier CRM salía a cero
+                    # mientras los clientes seguían en la tabla. Aceptamos también al cliente
+                    # que cuelga de una empresa del workspace, que es el mismo vínculo que ya
+                    # usa la rama de gestoría y no cruza tenants.
+                    scope_parts = []
+                    values = []
+                    if "workspace_id" in c_cols:
+                        scope_parts.append("COALESCE(c.workspace_id, '') = ?")
+                        values.append(workspace_id)
+                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
+                    if empresa_ids:
+                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                        scope_parts.append(
+                            "EXISTS (SELECT 1 FROM clientes_empresas ce"
+                            f" WHERE ce.cliente_id = c.id AND ce.empresa_id IN ({placeholders_ws}))"
+                        )
+                        values.extend(empresa_ids)
+                    if scope_parts:
+                        rows = conn.execute(
+                            f"SELECT {cliente_list_cols} FROM clientes c"
+                            f" WHERE {' OR '.join(scope_parts)} ORDER BY c.nombre",
+                            values,
+                        ).fetchall()
+                    else:
+                        # Sin forma de acotar por workspace no devolvemos todo: sería enseñar
+                        # clientes de otros tenants.
+                        rows = []
                 else:
                     rows = conn.execute(f"SELECT {cliente_list_cols} FROM clientes c ORDER BY c.nombre").fetchall()
             json_response(self, [dict(r) for r in rows])
@@ -88928,15 +89137,21 @@ class Handler(BaseHTTPRequestHandler):
                 values = []
                 empresa_id = str(empresa_id or "").strip()
                 seguros_cols = table_columns(conn, "seguros") or set()
-                if workspace_id and "workspace_id" in seguros_cols:
-                    where.append("COALESCE(s.workspace_id, '') = ?")
-                    values.append(workspace_id)
-                elif workspace_id:
+                if workspace_id:
+                    # Mismo caso que en la lista genérica: `seguros.workspace_id` existe pero
+                    # está vacío en lo anterior a la migración, y el `elif` de abajo nunca se
+                    # alcanzaba precisamente porque la columna sí existe. Se combinan los dos
+                    # vínculos con el workspace en vez de excluirse.
+                    scope_parts = []
+                    if "workspace_id" in seguros_cols:
+                        scope_parts.append("COALESCE(s.workspace_id, '') = ?")
+                        values.append(workspace_id)
                     empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
                     if empresa_ids:
                         placeholders = ",".join(["?"] * len(empresa_ids))
-                        where.append(f"s.empresa_id IN ({placeholders})")
+                        scope_parts.append(f"s.empresa_id IN ({placeholders})")
                         values.extend(empresa_ids)
+                    where.append("(" + " OR ".join(scope_parts) + ")" if scope_parts else "1 = 0")
                 elif empresa_id:
                     where.append("s.empresa_id = ?")
                     values.append(empresa_id)

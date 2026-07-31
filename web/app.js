@@ -4709,7 +4709,11 @@ const quantityFormatter = new Intl.NumberFormat("es-ES", {
 
 const formatPercent = (value) => {
   const num = Number(value) || 0;
-  const normalized = num > 0 && num <= 1 ? num * 100 : num;
+  // Unos valores llegan como fracción (0,25 = 25%) y otros ya en escala de
+  // porcentaje (80 = 80%). El umbral se mide sobre el valor ABSOLUTO: con
+  // `num > 0` los ratios negativos no se convertían, así que una rentabilidad
+  // de -0,7879 (perder el 78,79%) se pintaba como "-0.79%".
+  const normalized = num !== 0 && Math.abs(num) <= 1 ? num * 100 : num;
   return `${normalized.toFixed(2)}%`;
 };
 
@@ -14469,7 +14473,11 @@ const renderWorkspaceHomeAlerts = () => {
       ? (exit ? "Registro horario · Entrada y salida registradas" : "Registro horario · Entrada registrada")
       : "Registro horario · Sin entrada registrada hoy";
     const detail = !hasFicha
-      ? "Pide a administración que te vincule a una ficha de registro horario."
+      ? // Quien gestiona RRHH puede vincularse solo: mandarle "pide a administración"
+        // es mandarle a pedírselo a sí mismo.
+        isWorkspaceRrhhManager()
+        ? "No tienes ficha de registro horario. Créala o vincula tu usuario desde RRHH · Equipo."
+        : "Pide a administración que te vincule a una ficha de registro horario."
       : entry
       ? (exit ? `Entrada: ${entry} · Salida: ${exit}` : `Entrada: ${entry} · Salida pendiente`)
       : "Registra tu entrada para que quede constancia del día.";
@@ -76412,7 +76420,7 @@ const runGestoriaFacturaOcr = async ({
     return;
   }
   const file = fileInput.files[0];
-  const dataUrl = await readFileAsDataUrl(file);
+  const dataUrl = await fileToBase64(file);
   const payload = {
     empresa_nombre: FINCAS_COMPANY,
     file_base64: dataUrl,
@@ -79625,6 +79633,11 @@ const showAuthOverlay = (message = "") => {
   if (authActivateOverlay) authActivateOverlay.classList.add("hidden");
   document.body.classList.add("auth-locked");
   setAuthUi(null);
+  // `autofocus` no dispara aquí: el overlay está oculto al parsear y se revela
+  // por JS, así que hay que poner el foco a mano o se entra siempre con un clic.
+  try {
+    if (authLoginUser && !authLoginUser.value) authLoginUser.focus();
+  } catch (e) {}
   try {
     debugLog("showAuthOverlay()", message || "");
   } catch (e) {}

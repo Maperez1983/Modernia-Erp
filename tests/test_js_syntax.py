@@ -16,11 +16,15 @@ class JavaScriptSyntaxTests(unittest.TestCase):
         server_py = (root / "web" / "server.py").read_text(encoding="utf-8")
 
         self.assertIn("window.__APP_SHELL_BOOTSTRAP__", index_html)
-        self.assertIn("app-auth.js?v=16", index_html)
-        self.assertIn("app.js?v=793", index_html)
-        self.assertNotIn('<script src="app.js?v=792"', index_html)
-        self.assertNotIn('<script src="ui-foundation.js?v=5"', index_html)
-        self.assertNotIn('<script src="app-routing.js?v=13"', index_html)
+        # Sin fijar los números de versión: lo que se comprueba aquí es qué bundles
+        # existen y cómo se cargan. Pinchar la versión exacta solo hacía que el test
+        # se rompiera en cada bump de caché sin que nadie tocara la carga.
+        self.assertIn("app-auth.js?v=", index_html)
+        self.assertIn("app.js?v=", index_html)
+        # El shell carga estos tres desde el loader, no con un <script> estático.
+        self.assertNotIn('<script src="app.js?v=', index_html)
+        self.assertNotIn('<script src="ui-foundation.js?v=', index_html)
+        self.assertNotIn('<script src="app-routing.js?v=', index_html)
         self.assertIn('app_shared.js?v=2', index_html)
         self.assertNotIn('<script src="app_shared.js?v=1"', index_html)
         self.assertNotIn('leaflet.css', index_html.split("window.__APP_SHELL_BOOTSTRAP__")[0])
@@ -95,7 +99,10 @@ class JavaScriptSyntaxTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         app_js_path = root / "web" / "app.js"
         app_js = app_js_path.read_text(encoding="utf-8")
-        marker = "const api = async"
+        # El corte solo marca dónde acaba el arranque: `const api` dejó de ser `async`
+        # y ahora envuelve a `apiRaw`, que es el primer helper de red tras los
+        # fallbacks que este test ejercita.
+        marker = "const apiRaw = async"
         self.assertIn(marker, app_js)
         prefix = app_js[: app_js.index(marker)]
         self.assertIn("const useSharedOrFallback =", app_js)
