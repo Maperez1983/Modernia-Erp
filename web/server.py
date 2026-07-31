@@ -937,6 +937,29 @@ WORKSPACE_TIME_SWEEP_ENABLED = (
 )
 WORKSPACE_TIME_SWEEP_INTERVAL_SECONDS = max(60, int(os.environ.get("WORKSPACE_TIME_SWEEP_INTERVAL_SECONDS", "300")))
 WORKSPACE_TIME_RETENTION_YEARS = max(4, int(os.environ.get("WORKSPACE_TIME_RETENTION_YEARS", "4")))
+# Jornada máxima que damos por plausible al cerrar un fichaje.
+# Sirve para distinguir dos cosas que se parecen: un turno nocturno legítimo (entra a
+# las 22:00, sale a las 02:00 del día siguiente) de una salida que nadie fichó. Por
+# debajo del umbral cerramos con normalidad; por encima NO inventamos la hora de
+# salida, porque este registro es de obligada conservación y una jornada de 19 horas
+# que nunca ocurrió es un problema en una inspección.
+WORKSPACE_TIME_MAX_SHIFT_MINUTES = max(60, int(os.environ.get("WORKSPACE_TIME_MAX_SHIFT_MINUTES", "960")))
+
+
+def workspace_time_open_entry_minutes(open_row, now_dt):
+    """Minutos transcurridos desde que se abrió el fichaje. None si no se puede saber."""
+    if not open_row or not now_dt:
+        return None
+    fecha_ini = str(open_row.get("fecha") or "").strip()[:10]
+    hora_ini = str(open_row.get("hora_inicio") or "").strip()[:5]
+    if not fecha_ini or not hora_ini:
+        return None
+    try:
+        inicio = datetime.strptime(f"{fecha_ini} {hora_ini}", "%Y-%m-%d %H:%M")
+    except Exception:
+        return None
+    ahora = now_dt.replace(tzinfo=None) if getattr(now_dt, "tzinfo", None) else now_dt
+    return int((ahora - inicio).total_seconds() // 60)
 # RGPD (privacy by default, art. 25 RGPD / art. 90 LOPDGDD): la geolocalización del fichaje NO se
 # captura ni almacena salvo activación explícita. Geolocalizar a la plantilla exige informar,
 # proporcionalidad y base legal (idealmente EIPD); por eso viene DESACTIVADA por defecto.
@@ -65476,9 +65499,33 @@ class Handler(BaseHTTPRequestHandler):
                 horas_pactadas_dia = float(persona_row["horas_pactadas_dia"]) if persona_row["horas_pactadas_dia"] not in (None, "") else None
             except Exception:
                 horas_pactadas_dia = None
+            abierto_minutos = workspace_time_open_entry_minutes(open_row, now_dt)
+            abierto_fecha = str((open_row or {}).get("fecha") or "").strip()[:10]
+            # "Rancio" = lleva abierto más que una jornada plausible. Un turno nocturno
+            # sigue entrando dentro del umbral, así que no se ve afectado.
+            fichaje_rancio = bool(open_row) and abierto_minutos is not None and abierto_minutos > WORKSPACE_TIME_MAX_SHIFT_MINUTES
             if action in {"checkout", "salida"}:
                 if not open_row:
-                    json_response(self, {"error": "no hay fichaje abierto hoy para esa persona"}, status=409)
+                    json_response(self, {"error": "no hay fichaje abierto para esa persona"}, status=409)
+                    return
+                if fichaje_rancio:
+                    # No cerramos con la hora de hoy: saldría una jornada inventada de
+                    # hasta 19 horas sobre el día equivocado. Lo corrige una persona.
+                    horas = round((abierto_minutos or 0) / 60)
+                    json_response(
+                        self,
+                        {
+                            "error": (
+                                f"El fichaje del {abierto_fecha} lleva {horas} h sin cerrar. "
+                                "No se cierra solo para no registrar una jornada que no ocurrió: "
+                                "pide a administración que lo corrija."
+                            ),
+                            "detail": "open_entry_stale",
+                            "fecha_abierta": abierto_fecha,
+                            "minutos_abierto": abierto_minutos,
+                        },
+                        status=409,
+                    )
                     return
                 start = str(open_row["hora_inicio"] or "").strip()
                 pausa_min = int(open_row["pausa_min"] or 0)
@@ -65547,9 +65594,27 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"ok": True, "action": "checkout", "id": open_row["id"], "fecha": fecha, "hora_fin": now_hhmm})
                 return
             # checkin
-            if open_row:
-                json_response(self, {"error": "ya existe un fichaje abierto hoy para esa persona"}, status=409)
+            if open_row and not fichaje_rancio:
+                # Sigue habiendo un fichaje vivo: o es de hoy, o es un turno nocturno
+                # todavía en curso. En los dos casos hay que cerrarlo antes.
+                mismo_dia = abierto_fecha == fecha
+                json_response(
+                    self,
+                    {
+                        "error": (
+                            "Ya tienes un fichaje abierto de hoy sin cerrar."
+                            if mismo_dia
+                            else f"Tienes un turno abierto desde el {abierto_fecha}. Ficha la salida antes de volver a entrar."
+                        ),
+                        "detail": "open_entry_exists",
+                        "fecha_abierta": abierto_fecha,
+                    },
+                    status=409,
+                )
                 return
+            # Con un fichaje rancio de otro día seguimos adelante: que un olvido de ayer
+            # no impida fichar hoy. El de ayer queda abierto, visible en la revisión del
+            # gestor, y se corrige a mano en vez de cerrarse con una hora inventada.
             record_id = os.urandom(16).hex()
             estado = normalize_time_entry_state("Abierto", "")
             conn.execute(
