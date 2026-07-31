@@ -24953,7 +24953,58 @@ def parse_asesoramiento_text(text):
 
     return fields
 
-def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None):
+
+# Columnas de `clientes` que el alta escribe a través de `datetime(...)`, como hacía
+# cada INSERT literal antes de pasar por el helper.
+CLIENTE_INSERT_DATETIME_COLS = {"created_at", "updated_at"}
+
+
+def cliente_workspace_id_for_write(conn, *, workspace_id="", empresa_id=""):
+    """El `workspace_id` con el que debe nacer un cliente.
+
+    Precedencia: primero el ámbito explícito de la petición (que ya pasó por
+    `enforce_workspace_membership`), y si no lo hay, el que se deduzca de la
+    empresa. Devuelve '' cuando no hay forma de saberlo.
+    """
+    ws = str(workspace_id or "").strip()
+    if ws:
+        return ws
+    return resolve_workspace_id_for_empresa(conn, empresa_id)
+
+
+def insert_cliente_scoped(conn, columnas, valores, *, workspace_id="", empresa_id=""):
+    """Único punto por el que pasan las altas internas de cliente.
+
+    Existe para que ningún cliente vuelva a nacer sin ámbito: los flujos de
+    seguros, inmobiliaria, financiaciones y presupuestos insertaban en `clientes`
+    sin `workspace_id`, y esos clientes desaparecían de todas las listas acotadas
+    por workspace aunque siguieran en la tabla (2014 filas, 0 devueltas en
+    producción el 2026-07-30).
+
+    Si la columna todavía no existe (bases anteriores a la migración) se inserta
+    sin ella en vez de reventar.
+    """
+    cols = list(columnas)
+    vals = list(valores)
+    if len(cols) != len(vals):
+        raise ValueError("insert_cliente_scoped: columnas y valores no cuadran")
+    try:
+        tiene_ws = "workspace_id" in (table_columns(conn, "clientes") or set())
+    except Exception:
+        _rollback_best_effort(conn)
+        tiene_ws = False
+    if tiene_ws and "workspace_id" not in cols:
+        ws = cliente_workspace_id_for_write(conn, workspace_id=workspace_id, empresa_id=empresa_id)
+        cols.insert(1, "workspace_id")
+        vals.insert(1, ws or None)
+    marcadores = ", ".join("datetime(?)" if c in CLIENTE_INSERT_DATETIME_COLS else "?" for c in cols)
+    conn.execute(
+        f"INSERT INTO clientes ({', '.join(cols)}) VALUES ({marcadores})",  # nosec B608 - columnas del propio código, valores parametrizados
+        tuple(vals),
+    )
+
+
+def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None, workspace_id=""):
     if not tomador:
         return None
     try:
@@ -25007,17 +25058,14 @@ def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None):
             elif re.match(r"^[A-Z][0-9]{7}[0-9A-Z]$", nif_norm):
                 tipo_persona = "Jurídica"
         cliente_id = os.urandom(16).hex()
-        conn.execute(
-            """
-            INSERT INTO clientes (
-              id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, direccion,
-              procedencia_canal, procedencia_detalle, procedencia_user_id,
-              estado, created_at, updated_at
-            ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-            )
-            """,
-            (
+        insert_cliente_scoped(
+            conn,
+            [
+                "id", "nombre", "tipo_persona", "nif", "telefono", "email", "fecha_nacimiento", "direccion",
+                "procedencia_canal", "procedencia_detalle", "procedencia_user_id",
+                "estado", "created_at", "updated_at",
+            ],
+            [
                 cliente_id,
                 tomador,
                 tipo_persona,
@@ -25032,7 +25080,9 @@ def ensure_cliente_for_seguro(conn, empresa_id, tomador, nif, now, extra=None):
                 "Activo",
                 now,
                 now,
-            ),
+            ],
+            workspace_id=workspace_id,
+            empresa_id=empresa_id,
         )
     else:
         cliente_id = cliente["id"]
@@ -25164,7 +25214,7 @@ def resolve_empresa_id_for_cliente_servicio(conn, cliente_id, servicio_key, *, p
     return ""
 
 
-def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=None):
+def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=None, workspace_id=""):
     if not nombre and not nif:
         return None
     extra = extra or {}
@@ -25272,17 +25322,14 @@ def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=No
     if nif_norm and re.match(r"^[A-Z][0-9]{7}[0-9A-Z]$", nif_norm):
         tipo_persona = "Jurídica"
     cliente_id = os.urandom(16).hex()
-    conn.execute(
-        """
-        INSERT INTO clientes (
-          id, empresa_id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, direccion,
-          procedencia_canal, procedencia_detalle, procedencia_user_id,
-          estado, created_at, updated_at
-        ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-        )
-        """,
-        (
+    insert_cliente_scoped(
+        conn,
+        [
+            "id", "empresa_id", "nombre", "tipo_persona", "nif", "telefono", "email", "fecha_nacimiento", "direccion",
+            "procedencia_canal", "procedencia_detalle", "procedencia_user_id",
+            "estado", "created_at", "updated_at",
+        ],
+        [
             cliente_id,
             empresa_id,
             nombre_norm or nif_norm or "Cliente inmobiliaria",
@@ -25298,7 +25345,9 @@ def ensure_cliente_for_inmobiliaria(conn, empresa_id, nombre, nif, now, extra=No
             "Inactivo",
             now,
             now,
-        ),
+        ],
+        workspace_id=workspace_id,
+        empresa_id=empresa_id,
     )
     ensure_cliente_servicio_link(conn, cliente_id, empresa_id, "inmobiliaria", now, estado="Activo")
     return cliente_id
@@ -31149,6 +31198,7 @@ def create_portal_inmueble_lead(conn, payload, now):
         payload.get("nif"),
         now,
         {"telefono": telefono, "email": email},
+        workspace_id=workspace_id,
     )
     existing = conn.execute(
         """
@@ -35561,7 +35611,7 @@ def build_cliente_ficha_payload(conn, cliente_id, services_filter=None):
         },
     }
 
-def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=None):
+def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=None, workspace_id=""):
     if not nombre:
         return None
     empresa_id = str(empresa_id or "").strip()
@@ -35613,17 +35663,14 @@ def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=No
             elif re.match(r"^[A-Z][0-9]{7}[0-9A-Z]$", nif):
                 tipo_persona = "Jurídica"
         cliente_id = os.urandom(16).hex()
-        conn.execute(
-            """
-            INSERT INTO clientes (
-              id, empresa_id, nombre, tipo_persona, nif, telefono, email, fecha_nacimiento, direccion,
-              procedencia_canal, procedencia_detalle, procedencia_user_id,
-              estado, created_at, updated_at
-            ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
-            )
-            """,
-            (
+        insert_cliente_scoped(
+            conn,
+            [
+                "id", "empresa_id", "nombre", "tipo_persona", "nif", "telefono", "email", "fecha_nacimiento", "direccion",
+                "procedencia_canal", "procedencia_detalle", "procedencia_user_id",
+                "estado", "created_at", "updated_at",
+            ],
+            [
                 cliente_id,
                 empresa_id or None,
                 nombre,
@@ -35639,7 +35686,9 @@ def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=No
                 "Activo",
                 now,
                 now,
-            ),
+            ],
+            workspace_id=workspace_id,
+            empresa_id=empresa_id,
         )
     else:
         cliente_id = cliente["id"]
@@ -40370,6 +40419,83 @@ def fetch_workspace_company_ids(conn, workspace_id):
         return inferred_ids
 
     return []
+
+
+def resolve_workspace_id_for_empresa(conn, empresa_id):
+    """Workspace al que pertenece una empresa legacy. '' si no se puede saber.
+
+    Es la inversa de `fetch_workspace_company_ids`, y la usamos para estampar
+    `clientes.workspace_id` en las altas que solo conocen la empresa.
+
+    Si la empresa cuelga de más de un workspace NO adivinamos: devolvemos '' y el
+    cliente queda sin asignar. Eso es reversible con el backfill; estampar el
+    workspace equivocado sería una fuga entre tenants y no lo es.
+
+    A propósito sin caché por conexión: con el pool de Postgres las conexiones
+    duran mucho, y si una empresa cambia de workspace una entrada cacheada
+    estamparía el tenant viejo. Son dos SELECT indexados sobre tablas diminutas.
+    """
+    eid = str(empresa_id or "").strip()
+    if not eid:
+        return ""
+
+    def _safe_fetchall(sql, params=()):
+        try:
+            return conn.execute(sql, params).fetchall() or []
+        except Exception:
+            _rollback_best_effort(conn)
+            return []
+
+    def _distintos(rows):
+        vistos = []
+        for r in rows:
+            ws = str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip()
+            if ws and ws not in vistos:
+                vistos.append(ws)
+        return vistos
+
+    encontrados = []
+    # Preferimos v2 (`workspace_companies`), igual que `fetch_workspace_company_ids`.
+    try:
+        cols_v2 = table_columns(conn, "workspace_companies") or set()
+    except Exception:
+        _rollback_best_effort(conn)
+        cols_v2 = set()
+    if {"workspace_id", "legacy_empresa_id"} <= cols_v2:
+        encontrados = _distintos(
+            _safe_fetchall(
+                """
+                SELECT DISTINCT workspace_id
+                FROM workspace_companies
+                WHERE COALESCE(TRIM(legacy_empresa_id), '') = ?
+                  AND COALESCE(activo, 1) = 1
+                  AND COALESCE(TRIM(COALESCE(workspace_id, '')), '') <> ''
+                LIMIT 5
+                """,
+                (eid,),
+            )
+        )
+    if not encontrados:
+        try:
+            cols_v1 = table_columns(conn, "workspace_empresas") or set()
+        except Exception:
+            _rollback_best_effort(conn)
+            cols_v1 = set()
+        if {"workspace_id", "empresa_id"} <= cols_v1:
+            encontrados = _distintos(
+                _safe_fetchall(
+                    """
+                    SELECT DISTINCT workspace_id
+                    FROM workspace_empresas
+                    WHERE COALESCE(TRIM(empresa_id), '') = ?
+                      AND COALESCE(TRIM(COALESCE(workspace_id, '')), '') <> ''
+                    LIMIT 5
+                    """,
+                    (eid,),
+                )
+            )
+
+    return encontrados[0] if len(encontrados) == 1 else ""
 
 
 def resolve_workspace_scope_empresa_ids(conn, workspace_id, *, empresa_id=""):
@@ -46452,15 +46578,14 @@ def ensure_workspace_budget_client(
         row = _scoped_row_by_id(found_id)
     if not row and lookup:
         cliente_id = os.urandom(16).hex()
-        conn.execute(
-            """
-                INSERT INTO clientes (
-                  id, nombre, tipo_persona, nif, telefono, email,
-                  procedencia_canal, procedencia_detalle, procedencia_user_id,
-                  estado, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
-                """,
-            (
+        insert_cliente_scoped(
+            conn,
+            [
+                "id", "nombre", "tipo_persona", "nif", "telefono", "email",
+                "procedencia_canal", "procedencia_detalle", "procedencia_user_id",
+                "estado", "created_at", "updated_at",
+            ],
+            [
                 cliente_id,
                 lookup,
                 "Física",
@@ -46473,7 +46598,9 @@ def ensure_workspace_budget_client(
                 "Lead",
                 now,
                 now,
-            ),
+            ],
+            workspace_id=workspace_id,
+            empresa_id=empresa_id,
         )
         row = conn.execute(
             "SELECT id, nombre, COALESCE(nif, '') AS nif, COALESCE(telefono, '') AS telefono, COALESCE(email, '') AS email FROM clientes WHERE id = ? LIMIT 1",
