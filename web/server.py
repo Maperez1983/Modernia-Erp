@@ -44324,9 +44324,14 @@ def _normalize_month(value):
     raw = str(value or "").strip()
     if not raw:
         return ""
-    if re.match(r"^\\d{4}-\\d{2}$", raw):
+    # OJO con el escapado: iba `\\d`, que en una cadena raw significa "barra invertida
+    # seguida de d", no "un dígito". El patrón no casaba nunca, así que esta función
+    # devolvía siempre "" y con ella se caía el bloqueo de mes entero: ni se guardaba
+    # con clave válida ni se comprobaba al fichar. Se podía "bloquear" un mes y seguir
+    # escribiendo en él.
+    if re.match(r"^\d{4}-\d{2}$", raw):
         return raw
-    if len(raw) >= 7 and re.match(r"^\\d{4}-\\d{2}", raw):
+    if len(raw) >= 7 and re.match(r"^\d{4}-\d{2}", raw):
         return raw[:7]
     return ""
 
@@ -57381,6 +57386,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_portal_requerimientos",
             "/api/workspace_registro_personal",
             "/api/workspace_registro_personal_delete",
+            "/api/workspace_registro_personal_merge",
             "/api/workspace_registro_personal_self_photo",
             "/api/workspace_registro_horario",
             "/api/workspace_registro_horario_toggle",
@@ -57690,6 +57696,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_registro_horario",
             "/api/workspace_registro_personal",
             "/api/workspace_registro_personal_delete",
+            "/api/workspace_registro_personal_merge",
             "/api/workspace_registro_usuario_toggle",
             "/api/workspace_registro_notifications",
             "/api/workspace_registro_alerts",
@@ -65468,6 +65475,93 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "automation_actions": auto_created})
             return
+        elif parsed.path == "/api/workspace_registro_personal_merge":
+            # Une dos fichas de la misma persona moviendo sus fichajes a una sola.
+            # En producción había 22 fichas para unas 12 personas, y una trabajadora
+            # con el historial partido en dos: ninguna de las dos fichas reflejaba su
+            # jornada real, así que ni el cómputo ni el exporte eran ciertos.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            origen_id = str(payload.get("origen_id") or "").strip()
+            destino_id = str(payload.get("destino_id") or "").strip()
+            if not workspace_id or not origen_id or not destino_id:
+                json_response(self, {"error": "workspace_id, origen_id y destino_id requeridos"}, status=400)
+                return
+            if origen_id == destino_id:
+                json_response(self, {"error": "El origen y el destino son la misma ficha"}, status=400)
+                return
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            fichas = {}
+            for clave, pid in (("origen", origen_id), ("destino", destino_id)):
+                fila = conn.execute(
+                    "SELECT id, nombre, empresa_id FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
+                    (workspace_id, pid),
+                ).fetchone()
+                if not fila:
+                    json_response(self, {"error": f"Ficha de {clave} no encontrada"}, status=404)
+                    return
+                fichas[clave] = {
+                    "id": str(row_value(fila, "id") or ""),
+                    "nombre": str(row_value(fila, "nombre") or "").strip(),
+                    "empresa_id": str(row_value(fila, "empresa_id") or "").strip(),
+                }
+            now_dt = app_now()
+            now = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+            pendientes = conn.execute(
+                "SELECT id, fecha, empresa_id FROM workspace_registro_horario WHERE workspace_id = ? AND persona_id = ?",
+                (workspace_id, origen_id),
+            ).fetchall()
+            movidos, bloqueados = 0, []
+            for fila in pendientes:
+                fecha_fila = str(row_value(fila, "fecha") or "").strip()[:10]
+                empresa_fila = str(row_value(fila, "empresa_id") or "").strip()
+                # Un mes cerrado no se toca ni para esto: si el periodo está bloqueado,
+                # mover el fichaje cambiaría un registro ya dado por bueno.
+                if is_workspace_time_month_locked(conn, workspace_id, fecha_fila, empresa_id=empresa_fila):
+                    bloqueados.append(fecha_fila)
+                    continue
+                conn.execute(
+                    """
+                    UPDATE workspace_registro_horario
+                    SET persona_id = ?, persona_nombre = ?, updated_at = datetime(?)
+                    WHERE id = ? AND workspace_id = ?
+                    """,
+                    (destino_id, fichas["destino"]["nombre"] or "-", now, str(row_value(fila, "id") or ""), workspace_id),
+                )
+                movidos += 1
+            if movidos and not bloqueados:
+                # La ficha de origen se desactiva, no se borra: sigue enlazando lo que
+                # ya se exportó con su nombre anterior.
+                conn.execute(
+                    "UPDATE workspace_registro_personal SET activo = 0, updated_at = datetime(?) WHERE workspace_id = ? AND id = ?",
+                    (now, workspace_id, origen_id),
+                )
+            log_workspace_registro_audit(
+                conn,
+                workspace_id,
+                empresa_id=fichas["destino"]["empresa_id"],
+                persona_id=destino_id,
+                entity_type="persona",
+                entity_id=destino_id,
+                action="fusion_fichas",
+                actor=session,
+                before={"origen_id": origen_id, "origen_nombre": fichas["origen"]["nombre"]},
+                after={"destino_id": destino_id, "destino_nombre": fichas["destino"]["nombre"],
+                       "fichajes_movidos": movidos, "bloqueados": len(bloqueados)},
+                now=now,
+            )
+            conn.commit()
+            json_response(self, {
+                "ok": True,
+                "movidos": movidos,
+                "bloqueados": sorted(set(bloqueados)),
+                "origen_desactivado": bool(movidos and not bloqueados),
+                "destino": fichas["destino"]["nombre"],
+            })
+            return
+
         elif parsed.path == "/api/workspace_registro_horario_regularizar":
             # Cierra en bloque fichajes que nadie cerró, con la hora que confirma una
             # persona. No se cierra nada sin hora explícita: el objetivo es regularizar
