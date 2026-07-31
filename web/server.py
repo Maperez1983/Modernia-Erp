@@ -66081,13 +66081,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_kiosk_token":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_session_is_privileged(session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             workspace_id = str(payload.get("workspace_id") or "").strip()
             persona_id = str(payload.get("persona_id") or "").strip()
             if not workspace_id or not persona_id:
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            # La autorización va DESPUÉS de leer el workspace, a propósito: antes se
+            # comprobaba solo el rol de la sesión, que no sabe sobre QUÉ workspace se
+            # actúa, así que un administrador podía operar sobre tenants ajenos.
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
                 return
             row = conn.execute(
                 """
@@ -66630,14 +66633,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_registro_personal_delete":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_session_is_privileged(session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             workspace_id = str(payload.get("workspace_id") or "").strip()
             record_id = str(payload.get("id") or "").strip()
             usuario_id_value = str(payload.get("usuario_id") or "").strip()
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            # Borrar la ficha de un empleado exige gestionar ESE workspace, no solo
+            # tener rol de administrador en cualquier sitio.
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
                 return
             if not record_id and usuario_id_value:
                 row = conn.execute(
@@ -67184,13 +67189,14 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_rrhh_profile":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_session_is_privileged(session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             workspace_id = str(payload.get("workspace_id") or "").strip()
             persona_id = str(payload.get("persona_id") or "").strip()
             if not workspace_id or not persona_id:
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            # Ficha de empleado: datos personales. Exige gestionar ESE workspace.
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
                 return
             persona_row = conn.execute(
                 "SELECT id, empresa_id FROM workspace_registro_personal WHERE workspace_id = ? AND id = ? LIMIT 1",
@@ -67286,14 +67292,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/workspace_rrhh_turnos":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_session_is_privileged(session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
             workspace_id = str(payload.get("workspace_id") or "").strip()
             persona_id = str(payload.get("persona_id") or "").strip()
             days = payload.get("days")
             if not workspace_id or not persona_id:
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
+                return
+            # El turno pactado alimenta la regularización de fichajes: cambiarlo cambia
+            # las horas que se registran. Exige gestionar ESE workspace.
+            if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
                 return
             if not isinstance(days, (list, tuple)):
                 json_response(self, {"error": "days requerido (lista)"}, status=400)
@@ -67330,7 +67338,7 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not persona_id:
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
                 return
-            if session and not workspace_session_is_privileged(session):
+            if session and not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 user_id = str(session.get("user_id") or "").strip()
                 own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 if not own_persona or own_persona != persona_id:
@@ -67372,7 +67380,7 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "persona_id no coincide"}, status=409)
                     return
                 prev = dict(row)
-                if session and not workspace_session_is_privileged(session):
+                if session and not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                     if str(row["estado"] or "") != "Solicitada":
                         json_response(self, {"error": "Solo se puede editar una solicitud pendiente"}, status=409)
                         return
@@ -67440,7 +67448,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 # Notificaciones: el trabajador solicita → avisar a admin (y al propio trabajador).
                 try:
-                    is_priv = workspace_session_is_privileged(session)
+                    is_priv = workspace_actor_can_manage_workspace(conn, session, workspace_id)
                     notif_payload = {
                         "type": "rrhh_ausencia",
                         "action": "create",
@@ -67498,7 +67506,7 @@ class Handler(BaseHTTPRequestHandler):
             persona_id = str(row["persona_id"] or "").strip()
             empresa_id = str(row["empresa_id"] or "").strip() or None
             prev = dict(row)
-            is_priv = workspace_session_is_privileged(session)
+            is_priv = workspace_actor_can_manage_workspace(conn, session, workspace_id)
             if not is_priv:
                 user_id = str(session.get("user_id") or "").strip() if session else ""
                 own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
@@ -67607,7 +67615,7 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not persona_id or not fecha:
                 json_response(self, {"error": "workspace_id, persona_id y fecha requeridos"}, status=400)
                 return
-            if session and not workspace_session_is_privileged(session):
+            if session and not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 user_id = str(session.get("user_id") or "").strip()
                 own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 if not own_persona or own_persona != persona_id:
@@ -67635,7 +67643,7 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "persona_id no coincide"}, status=409)
                     return
                 prev = dict(row)
-                if session and not workspace_session_is_privileged(session):
+                if session and not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                     if str(row["estado"] or "") != "Pendiente":
                         json_response(self, {"error": "Solo se puede editar un gasto pendiente"}, status=409)
                         return
@@ -67723,7 +67731,7 @@ class Handler(BaseHTTPRequestHandler):
             persona_id = str(row["persona_id"] or "").strip()
             empresa_id = str(row["empresa_id"] or "").strip() or None
             prev = dict(row)
-            is_priv = workspace_session_is_privileged(session)
+            is_priv = workspace_actor_can_manage_workspace(conn, session, workspace_id)
             if not is_priv:
                 user_id = str(session.get("user_id") or "").strip() if session else ""
                 own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
@@ -67800,7 +67808,7 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            if session and not workspace_session_is_privileged(session):
+            if session and not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 user_id = str(session.get("user_id") or "").strip()
                 own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id) or ensure_workspace_persona_for_self(conn, workspace_id, session)
                 if not persona_id:
@@ -68205,7 +68213,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "documento no encontrado"}, status=404)
                 return
             persona_id = str(row["persona_id"] or "").strip()
-            if session and not workspace_session_is_privileged(session):
+            if session and not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 user_id = str(session.get("user_id") or "").strip()
                 own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id) or ensure_workspace_persona_for_self(conn, workspace_id, session)
                 if not own_persona or own_persona != persona_id:
@@ -68255,7 +68263,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            if session and not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 user_id = str(session.get("user_id") or "").strip()
                 own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 if not own_persona or (persona_id and persona_id != own_persona):
@@ -82547,7 +82555,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            if session and not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 user_id = str(session.get("user_id") or "").strip()
                 own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 if not own_persona or own_persona != persona_id:
@@ -82573,7 +82581,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
-            if session and not workspace_session_is_privileged(session):
+            if session and not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 user_id = str(session.get("user_id") or "").strip()
                 own_persona = workspace_persona_id_for_user(conn, workspace_id, user_id)
                 if not own_persona or own_persona != persona_id:
