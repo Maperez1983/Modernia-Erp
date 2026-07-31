@@ -14899,3 +14899,32 @@ body.theme-operativa .workspace-time-open-actions {
     row-gap: 4px;
   }
 }
+
+/* === Estado real de los accesos ===
+   Va encima de los perfiles recomendados a propósito: la recomendación es una guía
+   que el sistema no aplica, y encabezar con ella daba a entender que los accesos
+   estaban segmentados cuando no lo estaban. */
+body.theme-operativa .access-review {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+body.theme-operativa .access-review-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+body.theme-operativa .access-review-warn {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: rgba(217, 164, 65, 0.1);
+  border-left: 4px solid #d9a441;
+}
+
+body.theme-operativa .access-review-warn[data-severidad="alta"] {
+  background: rgba(194, 84, 61, 0.1);
+  border-left-color: #c2543d;
+}

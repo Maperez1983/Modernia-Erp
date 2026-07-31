@@ -40566,6 +40566,129 @@ def fetch_workspace_company_ids(conn, workspace_id, *, solo_operativas=False):
     return []
 
 
+# Roles y servicios que conceden acceso sin restricción a todos los servicios.
+SERVICIOS_SIN_RESTRICCION_POR_ROL = {"administrador", "admin", "direccion", "administracion", "control"}
+SERVICIOS_SIN_RESTRICCION_POR_SERVICIO = {"direccion", "administracion", "control"}
+
+
+def allowed_services_for(rol, servicio_raw):
+    """Servicios que puede ver alguien. `None` significa "todos, sin filtro".
+
+    Estaba dentro del handler, atado a la sesión. Se saca aquí para que la revisión
+    de accesos pueda responder "¿quién ve qué?" con exactamente la misma regla que
+    se aplica al servir los datos: dos implementaciones acabarían discrepando, y en
+    control de acceso eso significa que el informe dice una cosa y el sistema hace
+    otra.
+    """
+    rol_key = normalize_service_key(rol or "")
+    services = set()
+    for item in parse_services_param(str(servicio_raw or "")):
+        key = normalize_service_key(item)
+        if key:
+            services.add(key)
+    if rol_key in SERVICIOS_SIN_RESTRICCION_POR_ROL:
+        return None
+    if services.intersection(SERVICIOS_SIN_RESTRICCION_POR_SERVICIO):
+        return None
+    if "financiaciones" in services:
+        services.add("hipotecas")
+    if "hipotecas" in services:
+        services.add("financiaciones")
+    return services
+
+
+def fetch_workspace_access_review(conn, workspace_id):
+    """Quién tiene acceso a qué, de verdad, frente a lo que la pantalla recomienda.
+
+    La pestaña de Permisos enseña cinco perfiles graduados (Dirección, Operaciones,
+    Comercial, Backoffice, RRHH) con la letra pequeña "vista informativa". Nada del
+    sistema usa esos perfiles: el acceso lo deciden el rol del usuario y los módulos
+    del workspace. Medido en producción el 2026-07-31: los 6 usuarios activos eran
+    `Administrador`, es decir, ninguno tenía el acceso limitado a nada, mientras la
+    pantalla sugería una segmentación que no existía.
+
+    Esto no cambia permisos: los enseña, para que la diferencia se vea donde se
+    gestiona en vez de estar enterrada.
+    """
+    ws_id = str(workspace_id or "").strip()
+    if not ws_id:
+        return {}
+    try:
+        filas = conn.execute(
+            """
+            SELECT m.usuario_id, COALESCE(m.rol, '') AS rol_workspace,
+                   u.id AS uid, COALESCE(u.usuario, '') AS usuario, COALESCE(u.nombre, '') AS nombre,
+                   COALESCE(u.rol, '') AS rol_usuario, COALESCE(u.servicio, '') AS servicio,
+                   COALESCE(u.activo, 0) AS activo
+            FROM workspace_miembros m
+            LEFT JOIN usuarios u ON u.id = m.usuario_id
+            WHERE m.workspace_id = ?
+            """,
+            (ws_id,),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return {}
+
+    miembros, huerfanos, sin_restriccion = [], [], []
+    por_rol_workspace = {}
+    for f in filas:
+        rol_ws = str(row_value(f, "rol_workspace") or "").strip() or "(sin rol)"
+        por_rol_workspace[rol_ws] = por_rol_workspace.get(rol_ws, 0) + 1
+        uid = str(row_value(f, "uid") or "").strip()
+        activo = int(row_value(f, "activo") or 0)
+        nombre = str(row_value(f, "nombre") or "").strip() or str(row_value(f, "usuario") or "").strip()
+        if not uid or not activo:
+            # Pertenencia que apunta a una cuenta inexistente o desactivada.
+            huerfanos.append({"usuario_id": str(row_value(f, "usuario_id") or "")[:8], "rol_workspace": rol_ws,
+                              "motivo": "cuenta inexistente" if not uid else "cuenta desactivada"})
+            continue
+        permitidos = allowed_services_for(row_value(f, "rol_usuario"), row_value(f, "servicio"))
+        entrada = {
+            "nombre": nombre,
+            "rol_workspace": rol_ws,
+            "rol_usuario": str(row_value(f, "rol_usuario") or "").strip(),
+            "escribe": workspace_member_can_write(rol_ws),
+            "servicios": "todos" if permitidos is None else sorted(permitidos),
+        }
+        miembros.append(entrada)
+        if permitidos is None:
+            sin_restriccion.append(nombre)
+
+    avisos = []
+    if miembros and len(sin_restriccion) == len(miembros):
+        avisos.append({
+            "clave": "todos_sin_restriccion",
+            "severidad": "alta",
+            "titulo": f"Los {len(miembros)} usuarios activos ven todos los servicios",
+            "detalle": "Nadie tiene el acceso limitado. La matriz de perfiles de esta pantalla no se aplica: "
+                       "el acceso lo decide el rol de cada usuario.",
+        })
+    elif sin_restriccion:
+        avisos.append({
+            "clave": "algunos_sin_restriccion",
+            "severidad": "media",
+            "titulo": f"{len(sin_restriccion)} de {len(miembros)} usuarios ven todos los servicios",
+            "detalle": "Revisa si su rol necesita acceso completo.",
+        })
+    if huerfanos:
+        avisos.append({
+            "clave": "pertenencias_huerfanas",
+            "severidad": "media",
+            "titulo": f"{len(huerfanos)} pertenencia{'s' if len(huerfanos) != 1 else ''} sin cuenta válida",
+            "detalle": "Apuntan a cuentas inexistentes o desactivadas. Inflan el recuento de miembros.",
+        })
+
+    return {
+        "miembros": miembros,
+        "miembros_total": len(miembros),
+        "por_rol_workspace": por_rol_workspace,
+        "sin_restriccion_total": len(sin_restriccion),
+        "huerfanos": huerfanos,
+        "avisos": avisos,
+    }
+
+
 def fetch_workspace_setup_status(conn, workspace_id):
     """Qué le falta por configurar a un workspace.
 
@@ -56053,23 +56176,7 @@ class Handler(BaseHTTPRequestHandler):
         session = getattr(self, "auth_session", None) or self._current_session()
         if not session:
             return None
-        rol = normalize_service_key(session.get("rol") or "")
-        servicio_raw = str(session.get("servicio") or "")
-        services = set()
-        for item in parse_services_param(servicio_raw):
-            key = normalize_service_key(item)
-            if key:
-                services.add(key)
-        expanded = set(services)
-        if rol in {"administrador", "admin", "direccion", "administracion", "control"}:
-            return None
-        if expanded.intersection({"direccion", "administracion", "control"}):
-            return None
-        if "financiaciones" in expanded:
-            expanded.add("hipotecas")
-        if "hipotecas" in expanded:
-            expanded.add("financiaciones")
-        return expanded
+        return allowed_services_for(session.get("rol"), session.get("servicio"))
 
     def _service_from_tabla(self, tabla):
         table_service_map = {
@@ -82243,6 +82350,18 @@ class Handler(BaseHTTPRequestHandler):
             created = run_workspace_time_missing_sweep(conn, workspace_id)
             conn.commit()
             json_response(self, {"ok": True, "notifications": len(created), "channels": created[:12]})
+            return
+
+        if path == "/api/workspace_access_review":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_access_review(conn, workspace_id))
             return
 
         if path == "/api/workspace_registro_horario_abiertos":

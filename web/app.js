@@ -10729,8 +10729,68 @@ const renderWorkspaceCommercialPack = (workspace = {}, packageData = {}) => {
   `;
 };
 
+// Estado real de los accesos, frente a los perfiles que la pantalla recomienda.
+// La matriz de perfiles no la aplica nadie: el acceso lo deciden el rol del usuario y
+// los módulos del workspace. Sin esto, la pestaña daba a entender que los accesos
+// estaban segmentados por perfil cuando en producción los 6 usuarios activos eran
+// Administrador y veían absolutamente todo.
+const renderWorkspaceAccessReview = (data = null) => {
+  const host = document.getElementById("workspaceAccessReview");
+  if (!host) return;
+  const miembros = Array.isArray(data?.miembros) ? data.miembros : [];
+  if (!miembros.length && !(data?.huerfanos || []).length) {
+    host.innerHTML = "";
+    return;
+  }
+  const avisos = Array.isArray(data?.avisos) ? data.avisos : [];
+  host.innerHTML = `
+    <div class="access-review">
+      <div class="access-review-head">
+        <strong>Estado real de los accesos</strong>
+        <span class="muted">${miembros.length} ${miembros.length === 1 ? "usuario activo" : "usuarios activos"}</span>
+      </div>
+      ${avisos
+        .map(
+          (a) => `
+        <div class="access-review-warn" data-severidad="${escapeHtml(String(a.severidad || "media"))}">
+          <strong>${escapeHtml(String(a.titulo || ""))}</strong>
+          <div class="muted">${escapeHtml(String(a.detalle || ""))}</div>
+        </div>`
+        )
+        .join("")}
+      <div class="workspace-billing-list">
+        ${miembros
+          .map(
+            (m) => `
+          <div class="workspace-billing-row">
+            <div>
+              <strong>${escapeHtml(m.nombre || "—")}</strong>
+              <div class="muted">${escapeHtml(m.rol_workspace || "—")}${m.rol_usuario ? ` · ${escapeHtml(m.rol_usuario)}` : ""}${m.escribe ? " · puede escribir" : " · solo lectura"}</div>
+            </div>
+            <div class="workspace-billing-meta">
+              <span>${m.servicios === "todos" ? "ve todos los servicios" : escapeHtml((m.servicios || []).join(", ") || "sin servicios")}</span>
+            </div>
+          </div>`
+          )
+          .join("")}
+      </div>
+    </div>
+  `;
+};
+
+const loadWorkspaceAccessReview = async () => {
+  if (!document.getElementById("workspaceAccessReview")) return;
+  if (!state.currentWorkspaceId || !isWorkspaceTimeManager()) return;
+  const data = await safeWorkspaceApi(
+    `/api/workspace_access_review?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`,
+    null
+  );
+  renderWorkspaceAccessReview(data);
+};
+
 const renderWorkspacePermissionMatrix = (rows = []) => {
   if (!workspacePermissionMatrix) return;
+  loadWorkspaceAccessReview();
   if (!rows.length) {
     workspacePermissionMatrix.innerHTML = "<p class='muted'>Sin matriz de acceso disponible.</p>";
     return;
@@ -10738,8 +10798,8 @@ const renderWorkspacePermissionMatrix = (rows = []) => {
   workspacePermissionMatrix.innerHTML = `
     <div class="workspace-context-strip">
       <div>
-        <strong>Plantillas de acceso por perfil</strong>
-        <div class="muted">Vista informativa (solo lectura). Los accesos se ajustan activando módulos y asignando roles a cada miembro.</div>
+        <strong>Perfiles recomendados (referencia)</strong>
+        <div class="muted">El sistema NO aplica estos perfiles: son una guía. El acceso real de cada persona es el de arriba, y se ajusta con su rol y con los módulos activos del workspace.</div>
       </div>
     </div>
     <div class="workspace-billing-list">
