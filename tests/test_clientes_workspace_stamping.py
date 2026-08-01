@@ -165,15 +165,23 @@ class InsertClienteScopedTests(unittest.TestCase):
         self.assertTrue(fila["created_at"])
         conn.close()
 
-    def test_sin_ambito_resoluble_deja_el_cliente_sin_asignar(self):
+    def test_sin_ambito_resoluble_no_se_crea_el_cliente(self):
+        """Antes se insertaba con workspace nulo y el cliente nacía invisible.
+
+        Ese era el fallo de origen: 2014 clientes en la tabla y 0 en las listas.
+        Ahora se para en el momento del alta, que es cuando aún se puede decir qué
+        falta, en vez de descubrirlo semanas después contando filas.
+        """
         conn = _conn(vinculo="v1")
-        server.insert_cliente_scoped(
-            conn,
-            ["id", "nombre", "created_at", "updated_at"],
-            ["c1", "Quien Sea", AHORA, AHORA],
-            empresa_id="emp-fantasma",
-        )
-        self.assertIsNone(conn.execute("SELECT workspace_id FROM clientes WHERE id = 'c1'").fetchone()[0])
+        with self.assertRaises(ValueError) as caso:
+            server.insert_cliente_scoped(
+                conn,
+                ["id", "nombre", "created_at", "updated_at"],
+                ["c1", "Quien Sea", AHORA, AHORA],
+                empresa_id="emp-fantasma",
+            )
+        self.assertIn("sin workspace", str(caso.exception))
+        self.assertIsNone(conn.execute("SELECT id FROM clientes WHERE id = 'c1'").fetchone())
         conn.close()
 
     def test_base_antigua_sin_la_columna_no_revienta(self):

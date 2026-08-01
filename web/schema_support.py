@@ -101,6 +101,44 @@ def table_columns(conn, table_name):
         return set()
 
 
+def ensure_not_null(conn, table_name, column_name):
+    """Pone NOT NULL en una columna que ya está poblada, sin romper nada si no.
+
+    Solo actúa en Postgres: SQLite no sabe añadir NOT NULL a una columna existente
+    sin reconstruir la tabla, y no compensa para una base de desarrollo.
+
+    Es idempotente y cobarde a propósito: si queda una sola fila a NULL o vacía, no
+    hace nada. Poner la restricción con datos sucios tumbaría el arranque de la
+    aplicación entera, que es peor que la fila sucia.
+    """
+    try:  # como paquete o como script suelto, igual que el resto del proyecto
+        from .db_backend import is_postgres_enabled
+    except ImportError:
+        from db_backend import is_postgres_enabled
+    if not is_postgres_enabled():
+        return False
+    try:
+        fila = conn.execute(
+            f"SELECT COUNT(*) AS n FROM {table_name} WHERE {column_name} IS NULL OR TRIM({column_name}) = ''"  # nosec B608 - nombres del propio código
+        ).fetchone()
+        sucias = int((fila[0] if not hasattr(fila, "keys") else fila["n"]) or 0)
+    except Exception:
+        return False
+    if sucias:
+        return False
+    try:
+        conn.execute(f"ALTER TABLE {table_name} ALTER COLUMN {column_name} SET NOT NULL")  # nosec B608 - nombres del propio código
+        conn.commit()
+        return True
+    except Exception:
+        # Ya estaba puesta, o la base no deja: no es motivo para no arrancar.
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return False
+
+
 def ensure_column(conn, table_name, column_name, column_sql):
     if column_name in table_columns(conn, table_name):
         return False

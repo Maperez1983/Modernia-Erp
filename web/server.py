@@ -78,7 +78,7 @@ try:
     from .auth_security import needs_password_rehash
     from .auth_security import PBKDF2_SHA256
     from .auth_security import verify_password as runtime_verify_password
-    from .schema_support import apply_schema_file, ensure_column, table_columns
+    from .schema_support import apply_schema_file, ensure_column, ensure_not_null, table_columns
     from .db_backend import is_postgres_enabled as db_is_postgres_enabled
     from .db_backend import open_db_conn, open_postgres_conn, get_postgres_pool_stats
     from .db_backend import set_conn_tracker as db_set_conn_tracker, reset_conn_tracker as db_reset_conn_tracker
@@ -89,7 +89,7 @@ except ImportError:
     from auth_security import needs_password_rehash
     from auth_security import PBKDF2_SHA256
     from auth_security import verify_password as runtime_verify_password
-    from schema_support import apply_schema_file, ensure_column, table_columns
+    from schema_support import apply_schema_file, ensure_column, ensure_not_null, table_columns
     from db_backend import is_postgres_enabled as db_is_postgres_enabled
     from db_backend import open_db_conn, open_postgres_conn, get_postgres_pool_stats
     from db_backend import set_conn_tracker as db_set_conn_tracker, reset_conn_tracker as db_reset_conn_tracker
@@ -25154,8 +25154,16 @@ def insert_cliente_scoped(conn, columnas, valores, *, workspace_id="", empresa_i
         tiene_ws = False
     if tiene_ws and "workspace_id" not in cols:
         ws = cliente_workspace_id_for_write(conn, workspace_id=workspace_id, empresa_id=empresa_id)
+        if not ws:
+            # Antes se insertaba NULL y el cliente nacía invisible. Ahora se para aquí,
+            # con un mensaje que dice qué falta, en vez de dejar el problema para que
+            # aparezca semanas después como "faltan clientes en la lista".
+            raise ValueError(
+                "No se puede crear el cliente sin workspace: ni la petición trae workspace_id "
+                f"ni se deduce de la empresa {empresa_id or '(ninguna)'}"
+            )
         cols.insert(1, "workspace_id")
-        vals.insert(1, ws or None)
+        vals.insert(1, ws)
     marcadores = ", ".join("datetime(?)" if c in CLIENTE_INSERT_DATETIME_COLS else "?" for c in cols)
     conn.execute(
         f"INSERT INTO clientes ({', '.join(cols)}) VALUES ({marcadores})",  # nosec B608 - columnas del propio código, valores parametrizados
@@ -38515,6 +38523,10 @@ def ensure_tables(db_path):
     # ni por migración, así que el scope se deducía de `clientes_empresas` y quien no
     # tuviera ese vínculo se quedaba fuera de todas las listas.
     ensure_column(conn, "clientes", "workspace_id", "workspace_id TEXT")
+    # Con la columna ya poblada (backfill del 2026-08-01: 2009 a Modernia, 5 a
+    # Verifika², cero sin ámbito), se cierra la puerta a que vuelva a entrar un
+    # cliente sin workspace. No hace nada si quedara alguna fila sucia.
+    ensure_not_null(conn, "clientes", "workspace_id")
     ensure_column(conn, "clientes", "tipo_persona", "tipo_persona TEXT")
     ensure_column(conn, "clientes", "codigo_postal", "codigo_postal TEXT")
     ensure_column(conn, "clientes", "poblacion", "poblacion TEXT")
@@ -78431,8 +78443,23 @@ class Handler(BaseHTTPRequestHandler):
                 datetime.now(timezone.utc).isoformat(),
             ]
             if "workspace_id" in cols:
+                # Metía NULL cuando la petición no traía workspace, y así nacían los
+                # clientes sin ámbito que luego no salen en ninguna lista. Se deduce de
+                # la empresa igual que en el resto de altas, y si aun así no hay forma
+                # de saberlo se rechaza: mejor un alta que no ocurre que un cliente que
+                # existe y nadie ve.
+                ws_para_alta = cliente_workspace_id_for_write(
+                    conn, workspace_id=workspace_id, empresa_id=str(empresa["id"] or "")
+                )
+                if not ws_para_alta:
+                    json_response(
+                        self,
+                        {"error": "No se puede crear el cliente sin saber a qué workspace pertenece."},
+                        status=400,
+                    )
+                    return
                 insert_cols.insert(1, "workspace_id")
-                values.insert(1, workspace_id or None)
+                values.insert(1, ws_para_alta)
             if "empresa_id" in cols:
                 insert_cols.insert(1, "empresa_id")
                 values.insert(1, empresa["id"])
