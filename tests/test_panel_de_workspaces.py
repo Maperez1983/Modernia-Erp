@@ -40,23 +40,13 @@ class ElRecuentoDeClientesTests(unittest.TestCase):
         i = SERVER.index("def fetch_workspace_health")
         return SERVER[i: SERVER.index("\ndef ", i + 10)]
 
-    def test_cuenta_tambien_a_los_que_no_tienen_empresa(self):
-        bloque = self._bloque()
-        self.assertIn("UNION", bloque)
-        self.assertIn("FROM clientes c", bloque)
-
     def test_usa_la_regla_de_ambito_del_resto_del_crm(self):
-        bloque = self._bloque()
-        self.assertIn("COALESCE(c.workspace_id, '') = ?", bloque)
-        self.assertIn("COALESCE(c.workspace_id, '') = '' AND COALESCE(c.empresa_id, '') IN", bloque)
+        self.assertIn("clientes_workspace_scope_sql(conn, workspace_id, alias=\"c\")", self._bloque())
 
-    def test_sigue_contando_a_los_vinculados_por_la_tabla_de_relacion(self):
-        # Un cliente puede estar en una empresa del workspace solo por `clientes_empresas`.
-        self.assertIn("FROM clientes_empresas ce", self._bloque())
-
-    def test_aguanta_una_base_sin_la_columna(self):
+    def test_conserva_el_recuento_viejo_si_no_hay_ambito(self):
+        # Sin workspace la regla devuelve vacío; ahí sigue valiendo la cuenta por empresas.
         bloque = self._bloque()
-        self.assertIn('if "workspace_id" in c_cols:', bloque)
+        self.assertIn("FROM clientes_empresas ce", bloque)
 
 
 class ElAyudanteDeAmbitoTests(unittest.TestCase):
@@ -71,7 +61,21 @@ class ElAyudanteDeAmbitoTests(unittest.TestCase):
 
     def test_rescata_a_los_clientes_sin_workspace_estampado(self):
         f = self._funcion()
-        self.assertIn("COALESCE({alias}.workspace_id, '') = '' ", f.replace("f\"", '"'))
+        self.assertIn("COALESCE({alias}.workspace_id, '') = ''", f)
+
+    def test_mira_tambien_la_tabla_de_relacion(self):
+        """Mirar solo `clientes.empresa_id` descartaba 1180 de 2014 en producción.
+
+        El vínculo de verdad casi siempre vive en `clientes_empresas`; comprobar solo
+        la columna dejó el contador en 834.
+        """
+        f = self._funcion()
+        self.assertIn("EXISTS (SELECT 1 FROM clientes_empresas ce", f)
+        self.assertIn("ce.cliente_id = {alias}.id", f)
+
+    def test_no_se_limita_a_las_empresas_operativas(self):
+        # `solo_operativas=True` recortaba el conjunto de empresas y con él la cartera.
+        self.assertNotIn("solo_operativas=True", self._funcion())
 
 
 class LosContadoresDicenSuAmbitoTests(unittest.TestCase):

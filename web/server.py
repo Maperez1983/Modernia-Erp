@@ -41088,10 +41088,13 @@ def resolve_workspace_id_for_empresa(conn, empresa_id):
 def clientes_workspace_scope_sql(conn, workspace_id, *, alias="c", empresa_id=""):
     """Condición SQL para acotar `clientes` a un workspace, y sus valores.
 
-    La regla ya estaba escrita a mano en varios sitios: un cliente es del workspace
-    si lo lleva estampado, o si no lleva ninguno pero pertenece a una empresa suya.
-    Esa segunda mitad es la que rescata a los que se quedaron sin `workspace_id`
-    antes de que las escrituras lo pusieran.
+    Un cliente es del workspace si lo lleva estampado, o si no lleva ninguno pero
+    cuelga de una empresa suya. Y "colgar de una empresa" son dos cosas distintas:
+    la columna `clientes.empresa_id` y la tabla de relación `clientes_empresas`.
+
+    Mirar solo la columna descartaba 1180 de 2014 clientes en producción, porque el
+    vínculo de verdad casi siempre está en la tabla de relación. Se comprueban las
+    dos.
 
     Devuelve ("", []) cuando no hay workspace, para que quien llame decida si eso
     significa "sin filtro" o "sin resultados".
@@ -41100,21 +41103,24 @@ def clientes_workspace_scope_sql(conn, workspace_id, *, alias="c", empresa_id=""
     if not ws:
         return "", []
     columnas = table_columns(conn, "clientes") or set()
-    empresa_ids = resolve_workspace_scope_empresa_ids(conn, ws, empresa_id=empresa_id, solo_operativas=True) or []
-    if "workspace_id" not in columnas:
-        if not empresa_ids:
-            return "1 = 0", []
-        marcadores = ",".join(["?"] * len(empresa_ids))
-        return f"COALESCE({alias}.empresa_id, '') IN ({marcadores})", list(empresa_ids)
+    empresa_ids = resolve_workspace_scope_empresa_ids(conn, ws, empresa_id=empresa_id) or []
     if not empresa_ids:
-        return f"COALESCE({alias}.workspace_id, '') = ?", [ws]
+        if "workspace_id" in columnas:
+            return f"COALESCE({alias}.workspace_id, '') = ?", [ws]
+        return "1 = 0", []
     marcadores = ",".join(["?"] * len(empresa_ids))
-    return (
-        f"(COALESCE({alias}.workspace_id, '') = ? OR (COALESCE({alias}.workspace_id, '') = '' "
-        f"AND COALESCE({alias}.empresa_id, '') IN ({marcadores})))",
-        [ws, *empresa_ids],
+    por_empresa = (
+        f"(COALESCE({alias}.empresa_id, '') IN ({marcadores})"
+        f" OR EXISTS (SELECT 1 FROM clientes_empresas ce WHERE ce.cliente_id = {alias}.id"
+        f" AND ce.empresa_id IN ({marcadores})))"
     )
-
+    valores_empresa = [*empresa_ids, *empresa_ids]
+    if "workspace_id" not in columnas:
+        return por_empresa, valores_empresa
+    return (
+        f"(COALESCE({alias}.workspace_id, '') = ? OR (COALESCE({alias}.workspace_id, '') = '' AND {por_empresa}))",
+        [ws, *valores_empresa],
+    )
 
 def resolve_workspace_scope_empresa_ids(conn, workspace_id, *, empresa_id="", solo_operativas=False):
     """
@@ -49933,36 +49939,27 @@ def fetch_workspace_health(conn, workspace_id):
         }
     placeholders = ",".join(["?"] * len(empresa_ids))
     # El recuento iba solo por `clientes_empresas`, así que quien no estaba vinculado a
-    # ninguna empresa no contaba: la tarjeta decía 2004 clientes cuando el workspace
-    # tiene 2014, y los que faltaban eran justo los que la propia pantalla señala arriba
-    # como "clientes sin asignar". Se cuenta con la misma regla de ámbito que el resto
-    # del CRM —workspace propio, o sin workspace pero de una empresa suya— y se suman
-    # los vinculados por la tabla de relación.
-    c_cols = table_columns(conn, "clientes") or set()
-    if "workspace_id" in c_cols:
-        clientes_sql = f"""
-            SELECT COUNT(*) AS total FROM (
-              SELECT c.id
-              FROM clientes c
-              WHERE COALESCE(c.workspace_id, '') = ?
-                 OR (COALESCE(c.workspace_id, '') = '' AND COALESCE(c.empresa_id, '') IN ({placeholders}))
-              UNION
-              SELECT ce.cliente_id AS id
-              FROM clientes_empresas ce
-              WHERE ce.empresa_id IN ({placeholders})
-            ) AS t
-        """
-        clientes_params = [workspace_id, *empresa_ids, *empresa_ids]
+    # ninguna empresa no contaba: decía 2004 de 2014. Se reutiliza la regla de ámbito
+    # del resto del CRM, que mira el workspace estampado, la columna `empresa_id` y la
+    # tabla de relación — las tres cosas, que el vínculo puede estar en cualquiera.
+    ws_where, ws_values = clientes_workspace_scope_sql(conn, workspace_id, alias="c")
+    if ws_where:
+        clientes_total_row = _safe(
+            lambda: conn.execute(f"SELECT COUNT(*) AS total FROM clientes c WHERE {ws_where}", ws_values).fetchone(),
+            None,
+        )
     else:
-        clientes_sql = f"""
-            SELECT COUNT(*) AS total FROM (
-              SELECT c.id FROM clientes c WHERE COALESCE(c.empresa_id, '') IN ({placeholders})
-              UNION
-              SELECT ce.cliente_id AS id FROM clientes_empresas ce WHERE ce.empresa_id IN ({placeholders})
-            ) AS t
-        """
-        clientes_params = [*empresa_ids, *empresa_ids]
-    clientes_total_row = _safe(lambda: conn.execute(clientes_sql, clientes_params).fetchone(), None)
+        clientes_total_row = _safe(
+            lambda: conn.execute(
+                f"""
+                SELECT COUNT(DISTINCT ce.cliente_id) AS total
+                FROM clientes_empresas ce
+                WHERE ce.empresa_id IN ({placeholders})
+                """,
+                empresa_ids,
+            ).fetchone(),
+            None,
+        )
     clientes_total = int(row_value(clientes_total_row, "total", 0) or 0)
     docs_summary = (_safe(lambda: fetch_workspace_document_hub(conn, workspace_id, limit=5), {"summary": {"documentos_total": 0}}).get("summary") or {})
     billing_rows = (_safe(lambda: fetch_workspace_billing_rows(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
