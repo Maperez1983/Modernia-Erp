@@ -329,6 +329,25 @@ def main(argv=None):
         destino = f"SQLite {args.db}"
     print(f"Base de datos ............... {destino}")
 
+    # Caer a SQLite en silencio teniendo el DSN puesto es la forma más fácil de creer
+    # que migraste producción cuando has tocado la copia local. Si hay algo parecido a
+    # una cadena de Postgres en el entorno y aun así vamos a SQLite, se avisa y se para.
+    if backend == "sqlite" and args.backend != "sqlite":
+        indicios = [
+            nombre
+            for nombre in ("DATABASE_URL", "POSTGRES_URL")
+            if (os.environ.get(nombre) or "").strip()
+        ]
+        if indicios:
+            print(
+                "ERROR: hay " + " y ".join(indicios) + " en el entorno, pero no se reconoce como Postgres.\n"
+                "       Revisa que el nombre de la variable esté bien escrito y que el valor empiece\n"
+                "       por 'postgres'. Para forzarlo: --backend postgres. Para usar la copia local\n"
+                "       a propósito: --backend sqlite.",
+                file=sys.stderr,
+            )
+            return 2
+
     try:
         conn = open_db_conn(args.db)
     except Exception as exc:

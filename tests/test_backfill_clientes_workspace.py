@@ -324,3 +324,29 @@ class BackfillDialectoPostgresTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoMigraLaCopiaLocalCreyendoQueEsProduccionTests(unittest.TestCase):
+    """Caer a SQLite en silencio teniendo el DSN puesto es una trampa.
+
+    Pasó al lanzarlo contra producción: el nombre de la variable iba mal escrito,
+    el guion no lo dijo y anunció tranquilamente "Base de datos ... SQLite". Se
+    habría podido dar por migrada la producción habiendo tocado la copia local.
+    """
+
+    GUION = (Path(__file__).resolve().parents[1] / "scripts" / "backfill_clientes_workspace.py").read_text(encoding="utf-8")
+
+    def test_avisa_si_hay_dsn_en_el_entorno_y_aun_asi_va_a_sqlite(self):
+        self.assertIn('if backend == "sqlite" and args.backend != "sqlite":', self.GUION)
+        self.assertIn('for nombre in ("DATABASE_URL", "POSTGRES_URL")', self.GUION)
+
+    def test_para_en_vez_de_seguir(self):
+        i = self.GUION.index('if backend == "sqlite" and args.backend != "sqlite":')
+        tramo = self.GUION[i: i + 900]
+        self.assertIn("return 2", tramo)
+        self.assertIn("file=sys.stderr", tramo)
+
+    def test_deja_salida_para_quien_quiera_la_copia_local(self):
+        # Con --backend sqlite se trabaja en local a propósito, sin aviso.
+        i = self.GUION.index('if backend == "sqlite" and args.backend != "sqlite":')
+        self.assertIn("--backend sqlite", self.GUION[i: i + 900])
