@@ -41085,6 +41085,37 @@ def resolve_workspace_id_for_empresa(conn, empresa_id):
     return encontrados[0] if len(encontrados) == 1 else ""
 
 
+def clientes_workspace_scope_sql(conn, workspace_id, *, alias="c", empresa_id=""):
+    """Condición SQL para acotar `clientes` a un workspace, y sus valores.
+
+    La regla ya estaba escrita a mano en varios sitios: un cliente es del workspace
+    si lo lleva estampado, o si no lleva ninguno pero pertenece a una empresa suya.
+    Esa segunda mitad es la que rescata a los que se quedaron sin `workspace_id`
+    antes de que las escrituras lo pusieran.
+
+    Devuelve ("", []) cuando no hay workspace, para que quien llame decida si eso
+    significa "sin filtro" o "sin resultados".
+    """
+    ws = str(workspace_id or "").strip()
+    if not ws:
+        return "", []
+    columnas = table_columns(conn, "clientes") or set()
+    empresa_ids = resolve_workspace_scope_empresa_ids(conn, ws, empresa_id=empresa_id, solo_operativas=True) or []
+    if "workspace_id" not in columnas:
+        if not empresa_ids:
+            return "1 = 0", []
+        marcadores = ",".join(["?"] * len(empresa_ids))
+        return f"COALESCE({alias}.empresa_id, '') IN ({marcadores})", list(empresa_ids)
+    if not empresa_ids:
+        return f"COALESCE({alias}.workspace_id, '') = ?", [ws]
+    marcadores = ",".join(["?"] * len(empresa_ids))
+    return (
+        f"(COALESCE({alias}.workspace_id, '') = ? OR (COALESCE({alias}.workspace_id, '') = '' "
+        f"AND COALESCE({alias}.empresa_id, '') IN ({marcadores})))",
+        [ws, *empresa_ids],
+    )
+
+
 def resolve_workspace_scope_empresa_ids(conn, workspace_id, *, empresa_id="", solo_operativas=False):
     """
     Devuelve la lista de `empresas.id` (legacy) asociadas al workspace para scoping.
@@ -49901,17 +49932,37 @@ def fetch_workspace_health(conn, workspace_id):
             },
         }
     placeholders = ",".join(["?"] * len(empresa_ids))
-    clientes_total_row = _safe(
-        lambda: conn.execute(
-            f"""
-            SELECT COUNT(DISTINCT ce.cliente_id) AS total
-            FROM clientes_empresas ce
-            WHERE ce.empresa_id IN ({placeholders})
-            """,
-            empresa_ids,
-        ).fetchone(),
-        None,
-    )
+    # El recuento iba solo por `clientes_empresas`, así que quien no estaba vinculado a
+    # ninguna empresa no contaba: la tarjeta decía 2004 clientes cuando el workspace
+    # tiene 2014, y los que faltaban eran justo los que la propia pantalla señala arriba
+    # como "clientes sin asignar". Se cuenta con la misma regla de ámbito que el resto
+    # del CRM —workspace propio, o sin workspace pero de una empresa suya— y se suman
+    # los vinculados por la tabla de relación.
+    c_cols = table_columns(conn, "clientes") or set()
+    if "workspace_id" in c_cols:
+        clientes_sql = f"""
+            SELECT COUNT(*) AS total FROM (
+              SELECT c.id
+              FROM clientes c
+              WHERE COALESCE(c.workspace_id, '') = ?
+                 OR (COALESCE(c.workspace_id, '') = '' AND COALESCE(c.empresa_id, '') IN ({placeholders}))
+              UNION
+              SELECT ce.cliente_id AS id
+              FROM clientes_empresas ce
+              WHERE ce.empresa_id IN ({placeholders})
+            ) AS t
+        """
+        clientes_params = [workspace_id, *empresa_ids, *empresa_ids]
+    else:
+        clientes_sql = f"""
+            SELECT COUNT(*) AS total FROM (
+              SELECT c.id FROM clientes c WHERE COALESCE(c.empresa_id, '') IN ({placeholders})
+              UNION
+              SELECT ce.cliente_id AS id FROM clientes_empresas ce WHERE ce.empresa_id IN ({placeholders})
+            ) AS t
+        """
+        clientes_params = [*empresa_ids, *empresa_ids]
+    clientes_total_row = _safe(lambda: conn.execute(clientes_sql, clientes_params).fetchone(), None)
     clientes_total = int(row_value(clientes_total_row, "total", 0) or 0)
     docs_summary = (_safe(lambda: fetch_workspace_document_hub(conn, workspace_id, limit=5), {"summary": {"documentos_total": 0}}).get("summary") or {})
     billing_rows = (_safe(lambda: fetch_workspace_billing_rows(conn, workspace_id, limit=5), {"rows": []}).get("rows") or [])
@@ -83775,6 +83826,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/clientes_stats":
+            # No acotaba por tenant: contaba los clientes de toda la base. Hoy no
+            # filtraba nada porque solo hay una cartera cargada, pero el día que otro
+            # workspace tenga clientes los estaría sumando aquí.
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
             servicio = (params.get("servicio", [""])[0] or "").strip()
             services = parse_services_param(servicio)
             source = (params.get("source", [""])[0] or "").strip().lower()
@@ -83825,16 +83880,27 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
                 json_response(self, {"total": total["total"] if total else 0})
                 return
+            ws_where, ws_values = clientes_workspace_scope_sql(conn, workspace_id, alias="c")
             if services:
                 placeholders = ",".join(["?"] * len(services))
+                condiciones = [f"LOWER(ce.servicio) IN ({placeholders})"]
+                valores = list(services)
+                if ws_where:
+                    condiciones.append(ws_where)
+                    valores.extend(ws_values)
                 total = conn.execute(
                     f"""
                     SELECT COUNT(DISTINCT c.id) AS total
                     FROM clientes c
                     JOIN clientes_empresas ce ON ce.cliente_id = c.id
-                    WHERE LOWER(ce.servicio) IN ({placeholders})
+                    WHERE {' AND '.join(condiciones)}
                     """,
-                    services,
+                    valores,
+                ).fetchone()
+            elif ws_where:
+                total = conn.execute(
+                    f"SELECT COUNT(*) AS total FROM clientes c WHERE {ws_where}",
+                    ws_values,
                 ).fetchone()
             else:
                 total = conn.execute("SELECT COUNT(*) AS total FROM clientes").fetchone()

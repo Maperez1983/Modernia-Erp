@@ -7284,12 +7284,17 @@ const formatRelativeTime = (value = "") => {
   }
 };
 
+// Pendientes del checklist de puesta en marcha, y nada más.
+//
+// Antes era `Math.max(pendientes del checklist, acciones de puesta en marcha)`. Da el
+// mismo número —cada acción es exactamente un ítem pendiente del checklist, así que
+// nunca puede haber más acciones que pendientes—, pero un máximo entre dos listas no
+// dice qué se está contando. Ojo: esto no son los avisos de configuración de
+// /api/workspace_setup_status, que son otra cosa (calidad del dato, no puesta en marcha).
 const getWorkspacePendingCount = (health = null) => {
   const source = health && typeof health === "object" ? health : state.currentWorkspaceHealth || {};
   const checklist = Array.isArray(source.checklist) ? source.checklist : [];
-  const checklistPending = checklist.filter((item) => Number(item?.done || 0) !== 1).length;
-  const onboardingPending = Array.isArray(source.onboarding_actions) ? source.onboarding_actions.length : 0;
-  return Math.max(Number(checklistPending || 0), Number(onboardingPending || 0));
+  return checklist.filter((item) => Number(item?.done || 0) !== 1).length;
 };
 
 const buildWorkspaceQuickSearchCatalog = (user = null) => {
@@ -7884,7 +7889,7 @@ const renderWorkspaceEntryBanner = () => {
       <div class="workspace-entry-banner-metric">
         <span class="label">Pendientes</span>
         <strong>${escapeHtml(pendingCount ? `${numberFormatter.format(pendingCount)} tareas` : "Sin pendientes")}</strong>
-        <span class="muted">${escapeHtml(pendingCount ? "Acciones por cerrar" : "Todo al día")}</span>
+        <span class="muted">${escapeHtml(pendingCount ? "Del checklist de puesta en marcha" : "Checklist completo")}</span>
       </div>
       <div class="workspace-entry-banner-metric">
         <span class="label">Último movimiento</span>
@@ -10526,9 +10531,12 @@ const getWorkspaceEnabledModules = (modules = []) =>
 const renderWorkspaceKpis = (summary = {}) => {
   if (!workspaceKpis) return;
   const items = [
-    ["Workspaces", summary.workspaces_total || 0, "Clientes operativos"],
-    ["Empresas operativas", summary.empresas_total || 0, "Sociedades enlazadas a workspaces"],
-    ["Módulos activos", summary.modulos_activos_total || 0, "Capacidades habilitadas"],
+    // Son totales de plataforma —la suma de todos los workspaces que ve la sesión—,
+    // y se pintan justo debajo de "Configurando: <workspace>". Sin decirlo, se leían
+    // como cifras del workspace: Modernia tiene 8 empresas y 15 módulos, no 19 y 51.
+    ["Workspaces", summary.workspaces_total || 0, "Clientes operativos de la plataforma"],
+    ["Empresas operativas", summary.empresas_total || 0, "En todos los workspaces, no solo en este"],
+    ["Módulos activos", summary.modulos_activos_total || 0, "Capacidades habilitadas en la plataforma"],
   ];
   workspaceKpis.innerHTML = items
     .map(
@@ -10545,7 +10553,10 @@ const renderWorkspaceKpis = (summary = {}) => {
 
 const renderWorkspaceHealth = (data = {}) => {
   state.currentWorkspaceHealth = data && typeof data === "object" ? data : {};
-  const companyLabel = getWorkspaceCompanyContextLabel();
+  // Las cifras son del workspace entero: `fetch_workspace_health` no recibe empresa y
+  // suma las ocho sociedades. Ponía el nombre de la empresa activa, así que atribuía a
+  // Estudio Velázquez los 2014 clientes y los 4322 documentos de todo Modernia.
+  const workspaceLabel = getWorkspaceDisplayName(state.currentWorkspaceId) || "el workspace";
   if (workspaceHealthScore) {
     const score = Number(data.readiness_score || 0);
     const summary = data.summary || {};
@@ -10553,7 +10564,8 @@ const renderWorkspaceHealth = (data = {}) => {
       <div class="workspace-health-score-card">
           <div class="workspace-health-ring">${score}%</div>
           <div>
-          <strong>Salud operativa de ${companyLabel}</strong>
+          <strong>Salud operativa de ${escapeHtml(workspaceLabel)}</strong>
+          <div class="muted">Suma de las empresas del workspace</div>
           <div class="muted">
             ${numberFormatter.format(Number(summary.clientes || 0))} clientes ·
             ${numberFormatter.format(Number(summary.documentos || 0))} documentos ·
@@ -10811,6 +10823,9 @@ const renderRrhhKpis = (host, datos) => {
 let peticionRosterRrhh = null;
 const loadWorkspaceRrhhRoster = async () => {
   const wsId = String(state.currentWorkspaceId || "").trim();
+  // El hub de RRHH se pinta aunque la vista activa sea otra, así que sin esto la
+  // plantilla se pedía también desde el panel de workspaces, que no la muestra.
+  if (String(state.currentWorkspaceView || "").trim().toLowerCase() !== "rrhh") return;
   if (!wsId || peticionRosterRrhh) return;
   const yaEsta = state.workspaceRrhhRosterWorkspaceId === wsId
     && Array.isArray(state.workspaceRrhhRosterRows)
@@ -26659,7 +26674,44 @@ const renderWorkspaceDocumentHub = (data = {}) => {
   });
 };
 
+// Peticiones GET idénticas que salen a la vez comparten una sola llamada.
+//
+// Al abrir el panel de workspaces se lanzaban 37 peticiones, y varias eran la misma
+// repetida en el mismo arranque: /api/health seis veces, /api/workspaces tres,
+// /api/usuarios dos. No es caché —la promesa se olvida en cuanto termina—, así que
+// nadie recibe un dato viejo: solo se evita pedir dos veces lo mismo a la vez.
+const peticionesEnVuelo = new Map();
+
 const safeWorkspaceApi = async (path, fallback) => {
+  const clave = String(path || "");
+  if (peticionesEnVuelo.has(clave)) {
+    return peticionesEnVuelo.get(clave);
+  }
+  const promesa = (async () => {
+    try {
+      state.lastApiError = null;
+      return await api(clave);
+    } catch (error) {
+      const payload = {
+        path: clave,
+        status: Number(error?.status || 0) || 0,
+        message: String(error?.message || error || "").slice(0, 900),
+        at: new Date().toISOString(),
+      };
+      state.lastApiError = payload;
+      console.error(`Workspace API failed: ${payload.path} · HTTP ${payload.status} · ${payload.message}`, payload);
+      return fallback;
+    }
+  })();
+  peticionesEnVuelo.set(clave, promesa);
+  try {
+    return await promesa;
+  } finally {
+    peticionesEnVuelo.delete(clave);
+  }
+};
+
+const safeWorkspaceApiSinUnificar = async (path, fallback) => {
   try {
     state.lastApiError = null;
     return await api(path);
@@ -27274,7 +27326,7 @@ const renderHoldingOrgChart = () => {
     <ul>
       <li>
         <div class="org-node">
-          <h4>Inmovere Holding</h4>
+          <h4>${escapeHtml(getWorkspaceDisplayName(state.currentWorkspaceId) || "Grupo")}</h4>
           <div class="muted">Grupo principal</div>
         </div>
         <ul>
@@ -27288,10 +27340,11 @@ const renderHoldingOrgChart = () => {
           `
             )
             .join("")}
+          ${companies.includes(AIE_COMPANY) ? `
           <li class="org-aie-node">
             ${buildNode(AIE_COMPANY, true)}
             <div class="muted">Socias: ${aieMembers.join(" · ")}</div>
-          </li>
+          </li>` : ""}
         </ul>
       </li>
     </ul>
