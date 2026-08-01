@@ -27208,7 +27208,26 @@ const loadWorkspaceDetail = async (workspaceId) => {
   } catch (e) {}
 };
 
-const loadWorkspaceCentral = async () => {
+// Se llama desde ocho sitios y en el arranque coinciden varios: al abrir el panel de
+// workspaces la secuencia entera corría tres veces (/api/health seis, /api/workspaces
+// tres, /api/workspace_access_review tres, separadas por segundo y medio). Las que se
+// solapan comparten ejecución; una llamada posterior —tras guardar algo, por ejemplo—
+// vuelve a cargar con normalidad.
+let cargaCentralEnCurso = null;
+
+const loadWorkspaceCentral = async (...args) => {
+  if (cargaCentralEnCurso) return cargaCentralEnCurso;
+  cargaCentralEnCurso = (async () => {
+    try {
+      return await loadWorkspaceCentralAhora(...args);
+    } finally {
+      cargaCentralEnCurso = null;
+    }
+  })();
+  return cargaCentralEnCurso;
+};
+
+const loadWorkspaceCentralAhora = async () => {
   if (!state.authUser) {
     clearCurrentWorkspaceUi();
     renderWorkspaceList([]);

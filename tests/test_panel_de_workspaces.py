@@ -136,6 +136,23 @@ class NoSePideDosVecesLoMismoALaVezTests(unittest.TestCase):
         self.assertIn("peticionesEnVuelo.delete(clave)", bloque)
         self.assertIn("finally", bloque)
 
+    def test_la_carga_central_no_se_solapa_consigo_misma(self):
+        """No eran duplicados simultáneos: era el arranque entero corriendo tres veces.
+
+        Separadas por segundo y medio, así que compartir promesas de peticiones
+        sueltas no bastaba; hay que no repetir la secuencia.
+        """
+        i = APP.index("const loadWorkspaceCentral = async")
+        bloque = APP[i: APP.index("const loadWorkspaceCentralAhora", i)]
+        self.assertIn("if (cargaCentralEnCurso) return cargaCentralEnCurso;", bloque)
+        self.assertIn("cargaCentralEnCurso = null;", bloque)
+        self.assertIn("finally", bloque)
+
+    def test_una_carga_posterior_sigue_funcionando(self):
+        # El guardia solo une lo que se solapa: al terminar se suelta.
+        i = APP.index("const loadWorkspaceCentral = async")
+        self.assertIn("finally {\n      cargaCentralEnCurso = null;", APP[i: i + 600])
+
     def test_la_plantilla_no_se_pide_fuera_de_rrhh(self):
         i = APP.index("const loadWorkspaceRrhhRoster")
         bloque = APP[i: APP.index("\n};", i)]
