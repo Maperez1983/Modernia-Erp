@@ -19,11 +19,12 @@ from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[1]
 
-# Lo que el guion de migración importa, directa o indirectamente.
+# Todo `web/*.py` y el guion de migración. Empezó cubriendo solo la cadena del
+# backfill y por eso se coló `hipotecas_pdf.py`, que tampoco cargaba con 3.9 y
+# se llevaba por delante a `server.py` entero al importarlo.
 CADENA_DEL_BACKFILL = [
     RAIZ / "scripts" / "backfill_clientes_workspace.py",
-    RAIZ / "web" / "db_backend.py",
-    RAIZ / "web" / "schema_support.py",
+    *sorted(p for p in (RAIZ / "web").glob("*.py")),
 ]
 
 
