@@ -27952,8 +27952,16 @@ const resolveCrmGestoriaEmpresaNombre = () => resolveCrmGestoriaEmpresa()?.nombr
 const resolveCrmFinEmpresaNombre = () => resolveCrmFinEmpresa()?.nombre || FIN_COMPANY;
 
 const resolveCrmSegurosEmpresa = () => {
-  // En modo tenant, la empresa activa del workspace es la fuente de verdad.
-  // Evita reusar una selección almacenada de Seguros que pertenezca a otro contexto.
+  // La empresa del servicio manda sobre la empresa activa del workspace.
+  //
+  // Antes ganaba la activa, igual que le pasaba al CRM de hipotecas: con Estudio
+  // Velázquez seleccionada, Seguros pedía las pólizas de esa sociedad y encontraba
+  // cero. Las 408 están en Fincas Velázquez, que es justo lo que dice la matriz de
+  // servicios. El CRM aparecía vacío sin decir por qué.
+  const fromMatrixFirst = resolveWorkspaceDefaultEmpresa("seguros");
+  if (fromMatrixFirst) return fromMatrixFirst;
+  // Sin matriz, la empresa activa del workspace sigue siendo la fuente de verdad:
+  // evita reusar una selección guardada de Seguros que venga de otro contexto.
   try {
     if (isTenantWorkspaceMode()) {
       const activeWsCompanyId = String(state.currentWorkspaceCompanyId || "").trim();
@@ -27978,6 +27986,11 @@ const resolveCrmSegurosEmpresa = () => {
 };
 
 const resolveSegurosDashboardEmpresaId = () => {
+  // Misma regla que resolveCrmSegurosEmpresa: la empresa del servicio primero. Si el
+  // dashboard usara la activa y el listado la del servicio, cada uno enseñaría cifras
+  // de una sociedad distinta en la misma pantalla.
+  const delServicio = resolveWorkspaceDefaultEmpresa("seguros");
+  if (delServicio?.id) return String(delServicio.id).trim();
   try {
     if (isTenantWorkspaceMode()) {
       const activeWsCompanyId = String(state.currentWorkspaceCompanyId || "").trim();
@@ -44546,7 +44559,7 @@ const syncHipotecaDashboardYearSelect = (select, availableYears = [], selectedYe
   const requestedYear = String(selectedYear || "").trim();
   const nextYears = requestedYear && !years.includes(requestedYear) ? [requestedYear, ...years] : years;
   select.innerHTML = "";
-  select.appendChild(createOption("", "Año · Elegir…"));
+  select.appendChild(createOption("", "Año · Todos"));
   nextYears.forEach((year) => {
     select.appendChild(createOption(year, year));
   });
@@ -48440,9 +48453,23 @@ const loadHipotecaDashboard = () => {
       const availableYears = Array.isArray(data?.available_years) ? data.available_years.map((item) => String(item)) : [];
       const selectedYear = syncHipotecaDashboardYearSelect(hipotecaDashboardYearSelect, availableYears, requestedYear);
       if (!requestedYear) {
+        // Nadie entra a un dashboard para elegir un año: entra para ver cómo va. Este
+        // primer viaje ya trae los ejercicios disponibles, así que se elige el que toca
+        // y se carga. El desplegable sigue ahí para cambiarlo.
+        const enCurso = String(new Date().getFullYear());
+        const porDefecto = availableYears.includes(enCurso)
+          ? enCurso
+          : availableYears.slice().sort((a, b) => Number(b) - Number(a))[0] || "";
+        if (porDefecto) {
+          // Deja el año puesto en el selector; al reentrar, requestedYear ya no está
+          // vacío, así que esto no se repite.
+          syncHipotecaDashboardYearSelect(hipotecaDashboardYearSelect, availableYears, porDefecto);
+          loadHipotecaDashboard();
+          return;
+        }
         clearHipotecaDashboardResults(
-          "<div class='card'><p class='muted'>Selecciona un año para ver el resumen de hipotecas firmadas e indemnización.</p></div>",
-          "Elige un año para cargar el dashboard."
+          "<div class='card'><p class='muted'>Todavía no hay hipotecas firmadas de las que hacer resumen.</p></div>",
+          "Sin ejercicios con datos."
         );
         return;
       }

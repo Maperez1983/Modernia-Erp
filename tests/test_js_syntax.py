@@ -312,7 +312,10 @@ return {{
         self.assertIn('id="hipotecaBdtExcelListado"', index_html)
         self.assertIn('id="hipotecaBdtPrintFichas"', index_html)
         self.assertIn('class="hipoteca-export-details"', index_html)
-        self.assertIn('Selecciona un ejercicio para cargar métricas, gráficos y tarjetas.', index_html)
+        # Antes ponía "Selecciona un ejercicio para cargar métricas...": la pantalla
+        # abría vacía y había que elegir año en cada visita. Ahora entra en el año en
+        # curso y el texto solo dice de qué ejercicio son las cifras.
+        self.assertIn('Cifras del ejercicio seleccionado.', index_html)
         self.assertIn('Filtra, cambia la vista y exporta sobre la selección actual.', index_html)
         self.assertIn('Exportar listado', index_html)
         self.assertIn('PDF, Excel y fichas con la selección actual.', index_html)

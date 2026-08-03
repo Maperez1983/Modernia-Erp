@@ -8832,12 +8832,15 @@
               </div>
               <div class="section-head-actions">
                 <select id="hipotecaDashboardYear" class="inline-input" aria-label="Año del dashboard de hipotecas">
-                  <option value="">Año · Elegir…</option>
+                  <option value="">Año · Todos</option>
                 </select>
                 <button type="button" id="hipotecaDashboardRefresh" class="secondary">Actualizar</button>
               </div>
             </div>
-            <p class="muted hipoteca-dashboard-hint">Selecciona un ejercicio para cargar métricas, gráficos y tarjetas.</p>
+            <!-- Antes decía "Selecciona un ejercicio...": la pantalla abría vacía y el
+                 primer clic de cada visita era elegir el año. Ahora entra en el año en
+                 curso y este texto solo explica de qué año son las cifras. -->
+            <p class="muted hipoteca-dashboard-hint">Cifras del ejercicio seleccionado. Cambia el año arriba a la derecha.</p>
             <div class="grid dashboard-kpis" id="hipotecaDashboardKpis"></div>
 	            <div id="hipotecaDashboardEntities" class="form-card u-mt-14">
               <div class="section-head">
@@ -11901,7 +11904,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=831",
+              "app.js?v=832",
             ];
 
             const getParams = () => {

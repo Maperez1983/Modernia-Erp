@@ -2401,7 +2401,14 @@ class HipotecaDashboardYearSelectionTests(unittest.TestCase):
         script = make_factory_script(self.segment, self.param_names, self.return_names, prelude, body)
         run_node_script(script)
 
-    def test_dashboard_year_select_requires_explicit_choice(self):
+    def test_dashboard_year_select_no_inventa_el_ano(self):
+        """Sin año pedido, el selector no elige por su cuenta: devuelve "".
+
+        Quien decide el año por defecto es `loadHipotecaDashboard`, que para eso ya
+        tiene delante los ejercicios disponibles. Mantener esa decisión fuera de aquí
+        es lo que permite que esta función siga sirviendo para rellenar el desplegable
+        sin efectos colaterales. Ver test_el_dashboard_abre_con_datos.py.
+        """
         self._run(
             dedent(
                 """
@@ -2425,7 +2432,7 @@ class HipotecaDashboardYearSelectionTests(unittest.TestCase):
                 assert.strictEqual(select.value, "");
                 assert.strictEqual(select.disabled, false);
                 assert.strictEqual(select.innerHTML, "");
-                assert.deepStrictEqual(select.options[0], { value: "", label: "Año · Elegir…" });
+                assert.deepStrictEqual(select.options[0], { value: "", label: "Año · Todos" });
                 assert.strictEqual(select.options.some((option) => option.value === "2026"), true);
                 assert.strictEqual(select.options.some((option) => option.value === "2025"), true);
                 assert.strictEqual(select.options.some((option) => option.value === "2024"), true);
