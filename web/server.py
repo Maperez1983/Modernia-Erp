@@ -6535,6 +6535,28 @@ HIPOTECA_BDT_STATE_ORDER = (
 )
 
 
+def canonical_hipoteca_estado(value):
+    """Devuelve el estado con la grafía única del catálogo.
+
+    En producción convivían "FIRMADA" (46) y "Firmada" (21), y "ESTUDIO" con
+    "Estudio": la misma cosa contada dos veces en cualquier informe agrupado por
+    estado, con el dinero partido en dos filas. El origen es el alta, que usaba
+    "FIRMADA" como valor por defecto mientras el resto de la aplicación escribe
+    en capitalización normal.
+
+    Los estados que no están en el catálogo se devuelven tal cual: "CAIDA" no es
+    "Cancelada" y no se inventa la equivalencia.
+    """
+    crudo = str(value or "").strip()
+    if not crudo:
+        return ""
+    clave = normalize_lookup_text(crudo)
+    for canonico in HIPOTECA_BDT_STATE_ORDER:
+        if normalize_lookup_text(canonico) == clave:
+            return canonico
+    return crudo
+
+
 def extract_hipoteca_bdt_year(row):
     raw_year = str(row_value(row, "anio", "") or row_value(row, "año", "") or row_value(row, "year", "") or "").strip()
     if re.fullmatch(r"\d{4}", raw_year):
@@ -81061,7 +81083,7 @@ class Handler(BaseHTTPRequestHandler):
                         commission_split["comision_modernia"],
                         (payload.get("inmobiliaria_compra") or None),
                         (payload.get("asesor") or None),
-                        (payload.get("estado") or None),
+                        (canonical_hipoteca_estado(payload.get("estado")) or None),
                         anio,
                         now,
                         existing["id"],
@@ -81105,7 +81127,7 @@ class Handler(BaseHTTPRequestHandler):
                         commission_split["comision_modernia"],
                         (payload.get("inmobiliaria_compra") or None),
                         (payload.get("asesor") or None),
-                        (payload.get("estado") or None),
+                        (canonical_hipoteca_estado(payload.get("estado")) or None),
                         anio,
                         now,
                         now,
@@ -81114,7 +81136,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             hipoteca_id = payload.get("id")
             fecha_firma = payload.get("fecha_firma")
-            estado = payload.get("estado", "FIRMADA")
+            estado = canonical_hipoteca_estado(payload.get("estado") or "Firmada")
             if not hipoteca_id or not fecha_firma:
                 json_response(self, {"error": "id y fecha_firma requeridos"}, status=400)
                 return
