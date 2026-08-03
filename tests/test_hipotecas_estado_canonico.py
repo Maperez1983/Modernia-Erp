@@ -30,9 +30,24 @@ class CanonizarElEstadoTests(unittest.TestCase):
                 self.assertEqual(server.canonical_hipoteca_estado(crudo), "Indemnización")
 
     def test_no_inventa_equivalencias(self):
-        """"CAIDA" no es "Cancelada": cambiar eso sería cambiar el significado."""
-        self.assertEqual(server.canonical_hipoteca_estado("CAIDA"), "CAIDA")
+        """Solo traduce lo que está en la tabla de alias; lo demás pasa tal cual."""
         self.assertEqual(server.canonical_hipoteca_estado("lo que sea"), "lo que sea")
+        self.assertEqual(server.canonical_hipoteca_estado("Caducada"), "Caducada")
+
+    def test_traduce_las_equivalencias_que_confirmo_el_negocio(self):
+        """"CAIDA" es "Cancelada" porque lo dijo el usuario, no porque se parezcan.
+
+        Antes se devolvía tal cual, y dos hipotecas vivían en un estado que el
+        desplegable no ofrece: no se podían filtrar ni agrupar con las demás.
+        """
+        for crudo in ("CAIDA", "caida", "Caída", "  CAÍDA  "):
+            with self.subTest(crudo=crudo):
+                self.assertEqual(server.canonical_hipoteca_estado(crudo), "Cancelada")
+
+    def test_la_tabla_de_alias_no_pisa_el_catalogo(self):
+        catalogo = {server.normalize_lookup_text(e) for e in server.HIPOTECA_BDT_STATE_ORDER}
+        for clave in server.HIPOTECA_ESTADOS_ALIAS:
+            self.assertNotIn(clave, catalogo, f"{clave} ya está en el catálogo")
 
     def test_el_vacio_sigue_vacio(self):
         self.assertEqual(server.canonical_hipoteca_estado(""), "")

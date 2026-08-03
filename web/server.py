@@ -6596,6 +6596,12 @@ HIPOTECA_BDT_STATE_ORDER = (
     "Indemnización",
 )
 
+# Grafías de fuera del catálogo cuya equivalencia ha confirmado el negocio.
+# La clave va como la deja normalize_lookup_text: sin tildes y en MAYÚSCULAS.
+HIPOTECA_ESTADOS_ALIAS = {
+    "CAIDA": "Cancelada",
+}
+
 
 def canonical_hipoteca_estado(value):
     """Devuelve el estado con la grafía única del catálogo.
@@ -6606,8 +6612,10 @@ def canonical_hipoteca_estado(value):
     "FIRMADA" como valor por defecto mientras el resto de la aplicación escribe
     en capitalización normal.
 
-    Los estados que no están en el catálogo se devuelven tal cual: "CAIDA" no es
-    "Cancelada" y no se inventa la equivalencia.
+    Los estados que no están en el catálogo se devuelven tal cual. Las
+    equivalencias no se deducen: solo se traduce lo que está en HIPOTECA_ESTADOS_ALIAS,
+    y ahí solo entra lo que el negocio ha confirmado. "CAIDA" es Cancelada porque
+    así lo dijo el usuario el 2026-08-03, no porque se parezcan.
     """
     crudo = str(value or "").strip()
     if not crudo:
@@ -6616,7 +6624,7 @@ def canonical_hipoteca_estado(value):
     for canonico in HIPOTECA_BDT_STATE_ORDER:
         if normalize_lookup_text(canonico) == clave:
             return canonico
-    return crudo
+    return HIPOTECA_ESTADOS_ALIAS.get(clave, crudo)
 
 
 def extract_hipoteca_bdt_year(row):
