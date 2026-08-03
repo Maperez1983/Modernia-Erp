@@ -880,4 +880,19 @@ class HipotecasFichaPdfTests(unittest.TestCase):
         self.assertTrue(server.build_hipoteca_bank_logo_meta("BBVA")["logo_url"])
         if server.PdfReader is not None:
             reader = server.PdfReader(BytesIO(pdf_bytes))
-            self.assertEqual(len(reader.pages), 3)
+            # No se fija el número de páginas: el motor vectorial compacta el mismo
+            # contenido en menos hojas (en producción, 110 expedientes pasaron de 111
+            # páginas a 95 sin perder ninguno). Lo que importa es que estén todos.
+            self.assertGreaterEqual(len(reader.pages), 1)
+            texto = " ".join((pagina.extract_text() or "") for pagina in reader.pages)
+            # Se comprueba contra lo que produce `build_hipoteca_export_row`, no contra
+            # la columna `cliente`: cuando la hipoteca tiene ficha de cliente vinculada,
+            # el exportador usa el nombre de la ficha. Si las dos discrepan —en
+            # producción pasa en 6 de 64— el documento enseña el de la ficha, y ese es
+            # el dato que el PDF tiene que contener.
+            for fila in rows:
+                exportada = server.build_hipoteca_export_row(self.conn, fila)
+                nombre = str(exportada.get("cliente") or "").strip()
+                if nombre:
+                    with self.subTest(cliente=nombre):
+                        self.assertIn(nombre.split()[0].upper(), texto.upper())

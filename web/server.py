@@ -53417,6 +53417,34 @@ build_company_branded_text_document_pdf = runtime_document_pdf.build_company_bra
 
 
 def build_modernia_branded_document_pdf(title, subtitle, sections, footer_lines=None, company=None, brand_logo_url=None):
+    """Documento con marca. Elige motor: vectorial (por defecto) o de imagen.
+
+    El de imagen compone cada página con PIL y la incrusta como JPEG: pesaba 156 kB
+    por página, no llevaba ninguna fuente incrustada —así que no se podía buscar ni
+    copiar una cifra, ni leerlo un lector de pantalla— y la tipografía del producto
+    no llegaba a él.
+
+    Se puede volver al anterior sin desplegar, poniendo PDF_MOTOR=imagen.
+    """
+    motor = (os.environ.get("PDF_MOTOR") or "").strip().lower()
+    if motor not in ("imagen", "pil", "raster"):
+        try:
+            try:
+                from .branded_pdf_vector import build_modernia_branded_document_pdf_vector
+            except ImportError:
+                from branded_pdf_vector import build_modernia_branded_document_pdf_vector
+            return build_modernia_branded_document_pdf_vector(
+                title, subtitle, sections, footer_lines, company=company, brand_logo_url=brand_logo_url
+            )
+        except Exception as exc:
+            # Un documento con el aspecto viejo es mejor que un documento que no sale.
+            print(f"[pdf] motor vectorial falló, se usa el de imagen: {exc}", file=sys.stderr)
+    return build_modernia_branded_document_pdf_imagen(
+        title, subtitle, sections, footer_lines, company=company, brand_logo_url=brand_logo_url
+    )
+
+
+def build_modernia_branded_document_pdf_imagen(title, subtitle, sections, footer_lines=None, company=None, brand_logo_url=None):
     """
     Variante de `build_branded_document_pdf` con estética Modernia (logo + banda dorada con título).
     Se usa para documentos generados (no basados en plantilla) para mantener consistencia visual.
