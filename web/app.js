@@ -28013,6 +28013,15 @@ const resolveCrmGestoriaEmpresa = () => {
 };
 
 const resolveCrmFinEmpresa = () => {
+  // La empresa del servicio manda sobre la empresa activa del workspace.
+  //
+  // Antes ganaba la activa, y con Estudio Velázquez seleccionada el CRM de
+  // hipotecas pedía las hipotecas de esa sociedad: cero. Las 110 están en
+  // Financiaciones Modernia, que es justo lo que dice la matriz de servicios
+  // —`financiaciones -> Financiaciones Modernia`, marcada como predeterminada—.
+  // El dashboard salía vacío y el desplegable de años, sin un solo año.
+  const fromMatrixFirst = resolveWorkspaceDefaultEmpresa("financiaciones");
+  if (fromMatrixFirst) return fromMatrixFirst;
   try {
     if (isTenantWorkspaceMode()) {
       const activeWsCompanyId = String(state.currentWorkspaceCompanyId || "").trim();
