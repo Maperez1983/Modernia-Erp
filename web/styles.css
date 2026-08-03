@@ -178,6 +178,9 @@ body.crm-context-vertical #explorerSection > .section-head {
 body.crm-context-vertical #viewTabs,
 body.crm-context-vertical #companySummary,
 body.crm-context-vertical #tableToolbar,
+/* Cuando esta barra compartía el id tableToolbar también la alcanzaba la regla de
+   arriba; se mantiene para no cambiar lo que ya se ve. */
+body.crm-context-vertical #homeYearToolbar,
 body.crm-context-vertical #tableContainer,
 body.crm-context-vertical #tableInfo,
 body.crm-context-vertical #bdtSection {

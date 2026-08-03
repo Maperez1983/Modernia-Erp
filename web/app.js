@@ -3120,6 +3120,9 @@ const gestoriaTrabajoStatus = document.getElementById("gestoriaTrabajoStatus");
 const gestoriaOpenIrpfBtn = document.getElementById("gestoriaOpenIrpfBtn");
 const gestoriaTrabajosTable = document.getElementById("gestoriaTrabajosTable");
 const gestoriaTrabajosInfo = document.getElementById("gestoriaTrabajosInfo");
+// El de la ficha del cliente. Antes ambos se llamaban gestoriaTrabajosTable y esta
+// constante se quedaba con el del explorador, así que "Gestiones vinculadas" no se pintaba.
+const clienteGestionesTable = document.getElementById("clienteGestionesTable");
 const gestoriaModelosTable = document.getElementById("gestoriaModelosTable");
 const gestoriaModelosInfo = document.getElementById("gestoriaModelosInfo");
 const gestoriaModelosOverviewTable = document.getElementById("gestoriaModelosOverviewTable");
@@ -72384,11 +72387,11 @@ const loadGestoriaActaFirmas = async (actaId = "") => {
 };
 
 const loadGestoriaTrabajos = (clienteId) => {
-  if (!gestoriaTrabajosTable) return;
+  if (!clienteGestionesTable) return;
   api(`/api/gestoria_trabajos?cliente_id=${clienteId}`).then((data) => {
     const rows = data.rows || [];
     if (!rows.length) {
-      gestoriaTrabajosTable.innerHTML = "<p class='muted'>Sin gestiones registradas.</p>";
+      clienteGestionesTable.innerHTML = "<p class='muted'>Sin gestiones registradas.</p>";
       return;
     }
     const readonly = state.currentPage === "cliente";
@@ -72506,8 +72509,8 @@ const loadGestoriaTrabajos = (clienteId) => {
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
-    gestoriaTrabajosTable.innerHTML = "";
-    gestoriaTrabajosTable.appendChild(table);
+    clienteGestionesTable.innerHTML = "";
+    clienteGestionesTable.appendChild(table);
   });
 };
 
@@ -79878,8 +79881,8 @@ const openClienteDetail = (id) => {
       if (gestoriaModelosTable) {
         gestoriaModelosTable.innerHTML = "<p class='muted'>Sin modelos asignados.</p>";
       }
-      if (gestoriaTrabajosTable) {
-        gestoriaTrabajosTable.innerHTML = "<p class='muted'>Sin trabajos puntuales.</p>";
+      if (clienteGestionesTable) {
+        clienteGestionesTable.innerHTML = "<p class='muted'>Sin trabajos puntuales.</p>";
       }
       if (gestoriaDocsTable) {
         gestoriaDocsTable.innerHTML = "<p class='muted'>Sin documentación registrada.</p>";
