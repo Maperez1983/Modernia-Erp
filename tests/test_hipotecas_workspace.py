@@ -7,9 +7,11 @@ El estampado va en un UPDATE aparte, no dentro del INSERT, porque la tabla vive
 en bases que aún no han migrado y en los propios tests: un INSERT con una columna
 que no existe revienta el alta entera.
 
-Y no lleva NOT NULL todavía. No es un descuido: la empresa Financiaciones Modernia
-cuelga de dos workspaces (Modernia y Verifika²), así que el resolvedor se niega a
-adivinar y devuelve ''. Con la restricción puesta, el alta fallaría.
+Al principio se dejó sin NOT NULL a propósito: la empresa Financiaciones Modernia
+colgaba a la vez de Modernia y de Verifika², el resolvedor se negaba a adivinar y
+devolvía '', y con la restricción puesta el alta habría fallado. Al dejar de
+heredar el holding las sociedades de sus participadas, cada empresa pertenece a un
+solo workspace y la restricción ya se puede sostener.
 """
 
 import unittest
@@ -24,11 +26,15 @@ class LaColumnaTests(unittest.TestCase):
     def test_se_crea_al_arrancar(self):
         self.assertIn('ensure_column(conn, "hipotecas", "workspace_id", "workspace_id TEXT")', SERVER)
 
-    def test_todavia_sin_not_null_y_se_dice_por_que(self):
+    def test_lleva_not_null(self):
         i = SERVER.index('ensure_column(conn, "hipotecas", "workspace_id"')
-        tramo = SERVER[i: i + 700]
-        self.assertNotIn('ensure_not_null(conn, "hipotecas"', tramo)
-        self.assertIn("cuelga de dos workspaces", tramo)
+        tramo = SERVER[i: i + 900]
+        self.assertIn('ensure_not_null(conn, "hipotecas", "workspace_id")', tramo)
+
+    def test_queda_escrito_por_que_no_se_pudo_antes(self):
+        # Para que nadie la quite creyendo que sobra, ni la vuelva a poner a ciegas.
+        i = SERVER.index('ensure_column(conn, "hipotecas", "workspace_id"')
+        self.assertIn("colgaba a la vez de Modernia y de Verifika", SERVER[i: i + 900])
 
 
 class ElEstampadoTests(unittest.TestCase):
@@ -66,3 +72,22 @@ class ElResolvedorSigueSiendoPrudenteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ElHoldingNoHeredaSociedadesTests(unittest.TestCase):
+    """Verifika² enlazaba las 8 sociedades de Modernia y la de Modernia Centro.
+
+    Mientras una empresa colgaba de dos workspaces, `resolve_workspace_id_for_empresa`
+    no podía deducir nada —y hacía bien: estampar el workspace equivocado sería una
+    fuga entre tenants—. Eso bloqueaba el NOT NULL de `hipotecas.workspace_id` y
+    hacía que Verifika² "viera" 2009 clientes y 110 hipotecas que no son suyos.
+
+    Este test no puede comprobar los datos de producción; fija la regla que los
+    hizo posibles.
+    """
+
+    def test_el_resolvedor_no_adivina_con_varios_workspaces(self):
+        i = SERVER.index("def resolve_workspace_id_for_empresa")
+        f = SERVER[i: SERVER.index("\ndef ", i + 10)]
+        self.assertIn("NO adivinamos", f)
+        self.assertIn("fuga entre tenants", f)

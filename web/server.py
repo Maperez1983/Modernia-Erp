@@ -38376,12 +38376,12 @@ def ensure_tables(db_path):
         # mismo punto de partida que dejó 2014 clientes invisibles: sin esta columna
         # no hay frontera de tenant, solo de sociedad.
         ensure_column(conn, "hipotecas", "workspace_id", "workspace_id TEXT")
-        # Sin NOT NULL todavía, y no por descuido: la empresa Financiaciones Modernia
-        # cuelga de dos workspaces (Modernia y Verifika²), así que
-        # `resolve_workspace_id_for_empresa` se niega a adivinar —bien hecho— y
-        # devuelve ''. Con la restricción puesta, el alta de una hipoteca fallaría.
-        # Se pondrá cuando el holding deje de compartir sociedades con sus
-        # participadas y el workspace se pueda deducir sin ambigüedad.
+        # Ya con NOT NULL: hasta el 2026-08-03 la empresa Financiaciones Modernia
+        # colgaba a la vez de Modernia y de Verifika², así que el resolvedor se negaba
+        # a adivinar y devolvía '' — con la restricción puesta, el alta habría fallado.
+        # Al dejar de heredar el holding las sociedades de sus participadas, cada
+        # empresa pertenece a un solo workspace y el estampado no puede quedar vacío.
+        ensure_not_null(conn, "hipotecas", "workspace_id")
         ensure_column(conn, "hipotecas", "cliente_id", "cliente_id TEXT")
         ensure_column(conn, "hipotecas", "cliente_inmueble_json", "cliente_inmueble_json TEXT")
         ensure_column(conn, "hipotecas", "hipoteca_detalle_json", "hipoteca_detalle_json TEXT")
