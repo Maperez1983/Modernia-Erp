@@ -6039,13 +6039,19 @@ def compute_hipotecas_commission_by_bank(conn, empresa_id, year=None):
     return {str(row["label"] or "").strip(): round(parse_money_value(row["total"]), 2) for row in rows}
 
 
-def collect_hipoteca_dashboard_entity_total_rows(conn, empresa_id):
+def collect_hipoteca_dashboard_entity_total_rows(conn, empresa_id, workspace_id=""):
+    # El ámbito es el workspace: el CRM es del tenant, no de una sociedad suelta.
+    # Filtrando por una empresa, los expedientes de las demás desaparecían de la
+    # pantalla aunque estuvieran en la base.
+    ambito, ambito_valores = build_service_scope_filter(
+        conn, "hipotecas", "hipotecas", workspace_id, empresa_id
+    )
     signed_expr = hipoteca_dashboard_closed_signed_expr()
     return conn.execute(
         """
         SELECT banco AS label, COUNT(*) AS total
         FROM hipotecas
-        WHERE empresa_id = ?
+        WHERE """ + ambito + """
           AND banco IS NOT NULL
           AND TRIM(banco) != ''
           AND """
@@ -6054,7 +6060,7 @@ def collect_hipoteca_dashboard_entity_total_rows(conn, empresa_id):
         GROUP BY banco
         ORDER BY COUNT(*) DESC
         """,
-        (empresa_id,),
+        tuple(ambito_valores),
     ).fetchall()
 
 
@@ -6686,16 +6692,22 @@ def hipoteca_dashboard_closed_signed_expr():
     )
 
 
-def collect_hipotecas_firmadas_export_rows(conn, empresa_id, selected_year=None):
+def collect_hipotecas_firmadas_export_rows(conn, empresa_id, selected_year=None, workspace_id=""):
+    # El ámbito es el workspace: el CRM es del tenant, no de una sociedad suelta.
+    # Filtrando por una empresa, los expedientes de las demás desaparecían de la
+    # pantalla aunque estuvieran en la base.
+    ambito, ambito_valores = build_service_scope_filter(
+        conn, "hipotecas", "hipotecas", workspace_id, empresa_id
+    )
     year_filter = str(selected_year or "").strip()
     raw_rows = conn.execute(
         """
         SELECT *
         FROM hipotecas
-        WHERE empresa_id = ?
+        WHERE """ + ambito + """
         ORDER BY COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), created_at) DESC, created_at DESC
         """,
-        (empresa_id,),
+        tuple(ambito_valores),
     ).fetchall()
     items = []
     for raw in raw_rows:
@@ -6717,16 +6729,22 @@ def collect_hipotecas_firmadas_export_rows(conn, empresa_id, selected_year=None)
     return items
 
 
-def collect_hipotecas_firmadas_rows(conn, empresa_id, selected_year=None):
+def collect_hipotecas_firmadas_rows(conn, empresa_id, selected_year=None, workspace_id=""):
+    # El ámbito es el workspace: el CRM es del tenant, no de una sociedad suelta.
+    # Filtrando por una empresa, los expedientes de las demás desaparecían de la
+    # pantalla aunque estuvieran en la base.
+    ambito, ambito_valores = build_service_scope_filter(
+        conn, "hipotecas", "hipotecas", workspace_id, empresa_id
+    )
     year_filter = str(selected_year or "").strip()
     raw_rows = conn.execute(
         """
         SELECT *
         FROM hipotecas
-        WHERE empresa_id = ?
+        WHERE """ + ambito + """
         ORDER BY COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), created_at) DESC, created_at DESC
         """,
-        (empresa_id,),
+        tuple(ambito_valores),
     ).fetchall()
     items = []
     for raw in raw_rows:
@@ -6751,18 +6769,26 @@ def collect_hipotecas_export_rows(
     selected_order="desc",
     signed_only=False,
     record_ids=None,
+    workspace_id="",
 ):
+    # El ámbito es el workspace: el CRM es del tenant, no de una sociedad suelta.
+    # Filtrando por una empresa, los expedientes de las demás desaparecían de la
+    # pantalla aunque estuvieran en la base.
     empresa_id = str(empresa_id or "").strip()
-    if not empresa_id:
+    workspace_id = str(workspace_id or "").strip()
+    if not empresa_id and not workspace_id:
         return []
+    ambito, ambito_valores = build_service_scope_filter(
+        conn, "hipotecas", "hipotecas", workspace_id, empresa_id
+    )
     raw_rows = conn.execute(
         """
         SELECT *
         FROM hipotecas
-        WHERE empresa_id = ?
+        WHERE """ + ambito + """
         ORDER BY COALESCE(NULLIF(fecha_firma, ''), NULLIF(fecha_encargo, ''), updated_at, created_at) DESC
         """,
-        (empresa_id,),
+        tuple(ambito_valores),
     ).fetchall()
     record_id_set = {
         str(item or "").strip()
@@ -92637,17 +92663,19 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = params.get("empresa_id", [""])[0]
             workspace_id = params.get("workspace_id", [""])[0]
             requested_year = (params.get("year", [""])[0] or "").strip()
-            if not empresa_id and workspace_id:
-                empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
-                if empresa_ids:
-                    # Compat: dashboard legacy funciona por empresa. En modo workspace usamos la primera para no bloquear.
-                    empresa_id = empresa_ids[0]
-            if not empresa_id:
+            # Antes, llamando por workspace se quedaba con la PRIMERA empresa de la
+            # lista —"para no bloquear"— y devolvía su dashboard como si fuera el del
+            # workspace. Con Estudio Velázquez de primera, que no tiene hipotecas, la
+            # pantalla salía vacía y sin un solo ejercicio en el desplegable. Ahora el
+            # ámbito lo resuelve `build_service_scope_filter`, que abarca todas las
+            # empresas del workspace.
+            if not empresa_id and not workspace_id:
                 json_response(self, {"error": "empresa_id o workspace_id requerido"}, status=400)
                 return
             now_ts = time.time()
             cache_key = (
                 str(empresa_id or "").strip(),
+                str(workspace_id or "").strip(),
                 requested_year if (requested_year.isdigit() and len(requested_year) == 4) else "",
             )
             cached_payload = None
@@ -92707,6 +92735,13 @@ class Handler(BaseHTTPRequestHandler):
             )
             signed_year_expr = _year_from_expr("NULLIF(fecha_firma, '')")
             signed_month_expr = _month_from_expr("NULLIF(fecha_firma, '')")
+            # Ámbito: el workspace, no una empresa suelta. Las 17 consultas de abajo
+            # filtraban por `empresa_id = ?`, así que llamar al dashboard con
+            # workspace_id devolvía cero años y la pantalla se quedaba en "elige un
+            # ejercicio" sin ejercicios que elegir.
+            ambito, ambito_valores = build_service_scope_filter(
+                conn, "hipotecas", "hipotecas", workspace_id, empresa_id
+            )
             closed_expr = "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion')"
             signed_expr = "fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
             signed_closed_expr = hipoteca_dashboard_closed_signed_expr()
@@ -92767,7 +92802,7 @@ class Handler(BaseHTTPRequestHandler):
                 + signed_year_expr
                 + """ AS year, COUNT(*) AS total
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND """
                 + signed_closed_expr
                 + """
@@ -92781,7 +92816,7 @@ class Handler(BaseHTTPRequestHandler):
                 + signed_year_expr
                 + """
                 """,
-                (empresa_id,),
+                tuple(ambito_valores),
             ).fetchall()
             available_set = {str(r["year"]) for r in available_years if r["year"] is not None}
             selected_year = requested_year or current_year
@@ -92808,7 +92843,7 @@ class Handler(BaseHTTPRequestHandler):
                 + duration_expr
                 + """) AS plazo_medio_dias
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND """
                 + signed_year_expr
                 + """ = ?
@@ -92816,7 +92851,7 @@ class Handler(BaseHTTPRequestHandler):
                 + signed_closed_expr
                 + """
                 """,
-                (empresa_id, selected_year),
+                tuple([*ambito_valores, selected_year]),
             ).fetchone()
 
             totals = conn.execute(
@@ -92839,19 +92874,19 @@ class Handler(BaseHTTPRequestHandler):
                 + duration_expr
                 + """) AS plazo_medio_dias
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND """
                 + signed_closed_expr
                 + """
                 """,
-                (empresa_id,),
+                tuple(ambito_valores),
             ).fetchone()
 
             firmadas_anio = conn.execute(
                 """
                 SELECT COUNT(*) AS total
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND """
                 + signed_year_expr
                 + """ = ?
@@ -92859,14 +92894,14 @@ class Handler(BaseHTTPRequestHandler):
                 + signed_closed_expr
                 + """
                 """,
-                (empresa_id, selected_year),
+                tuple([*ambito_valores, selected_year]),
             ).fetchone()
 
             estudio_anio = conn.execute(
                 """
                 SELECT COUNT(*) AS total
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND """
                 + year_expr
                 + """ = ?
@@ -92874,26 +92909,26 @@ class Handler(BaseHTTPRequestHandler):
                 + estudio_expr
                 + """
                 """,
-                (empresa_id, selected_year),
+                tuple([*ambito_valores, selected_year]),
             ).fetchone()
 
             estudio_total = conn.execute(
                 """
                 SELECT COUNT(*) AS total
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND """
                 + estudio_expr
                 + """
                 """,
-                (empresa_id,),
+                tuple(ambito_valores),
             ).fetchone()
 
             pendientes_firma_anio = conn.execute(
                 """
                 SELECT COUNT(*) AS total
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND """
                 + year_expr
                 + """ = ?
@@ -92901,26 +92936,26 @@ class Handler(BaseHTTPRequestHandler):
                 + pendientes_firma_expr
                 + """
                 """,
-                (empresa_id, selected_year),
+                tuple([*ambito_valores, selected_year]),
             ).fetchone()
 
             pendientes_firma_total = conn.execute(
                 """
                 SELECT COUNT(*) AS total
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND """
                 + pendientes_firma_expr
                 + """
                 """,
-                (empresa_id,),
+                tuple(ambito_valores),
             ).fetchone()
 
             encargos_anio = conn.execute(
                 """
                 SELECT COUNT(*) AS total
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND """
                 + year_expr
                 + """ = ?
@@ -92928,31 +92963,31 @@ class Handler(BaseHTTPRequestHandler):
                 + encargo_expr
                 + """
                 """,
-                (empresa_id, selected_year),
+                tuple([*ambito_valores, selected_year]),
             ).fetchone()
 
             encargos_total = conn.execute(
                 """
                 SELECT COUNT(*) AS total
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND """
                 + encargo_expr
                 + """
                 """,
-                (empresa_id,),
+                tuple(ambito_valores),
             ).fetchone()
 
             firmadas_mes = conn.execute(
                 f"""
                 SELECT COUNT(*) AS total
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND {signed_expr}
                   AND {closed_expr}
                   AND {signed_month_expr} = ?
                 """,
-                (empresa_id, current_month),
+                tuple([*ambito_valores, current_month]),
             ).fetchone()
 
             series_totales = available_years
@@ -92963,7 +92998,7 @@ class Handler(BaseHTTPRequestHandler):
                 + signed_year_expr
                 + """ AS year, SUM(COALESCE(importe_hipoteca, 0)) AS total
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND """
                 + signed_closed_expr
                 + """
@@ -92977,7 +93012,7 @@ class Handler(BaseHTTPRequestHandler):
                 + signed_year_expr
                 + """
                 """,
-                (empresa_id,),
+                tuple(ambito_valores),
             ).fetchall()
 
             series_plazo = conn.execute(
@@ -92988,7 +93023,7 @@ class Handler(BaseHTTPRequestHandler):
                 + duration_expr
                 + """) AS total
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND """
                 + signed_closed_expr
                 + """
@@ -93002,7 +93037,7 @@ class Handler(BaseHTTPRequestHandler):
                 + signed_year_expr
                 + """
                 """,
-                (empresa_id,),
+                tuple(ambito_valores),
             ).fetchall()
 
             series_comision = compute_hipotecas_commission_series(conn, empresa_id)
@@ -93022,7 +93057,7 @@ class Handler(BaseHTTPRequestHandler):
                          END
                        ) AS total
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND """
                 + signed_closed_expr
                 + """
@@ -93036,7 +93071,7 @@ class Handler(BaseHTTPRequestHandler):
                 + signed_year_expr
                 + """
                 """,
-                (empresa_id,),
+                tuple(ambito_valores),
             ).fetchall()
 
             entity_total_rows = collect_hipoteca_dashboard_entity_total_rows(conn, empresa_id)
@@ -93045,7 +93080,7 @@ class Handler(BaseHTTPRequestHandler):
                 """
                 SELECT banco AS label, COUNT(*) AS total
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND banco IS NOT NULL
                   AND TRIM(banco) != ''
                   AND """
@@ -93058,7 +93093,7 @@ class Handler(BaseHTTPRequestHandler):
                 ORDER BY COUNT(*) DESC
                 LIMIT 12
                 """,
-                (empresa_id, selected_year),
+                tuple([*ambito_valores, selected_year]),
             ).fetchall()
 
             entity_data = build_hipoteca_dashboard_entity_rows(entity_total_rows, entity_year_rows)
@@ -93087,7 +93122,7 @@ class Handler(BaseHTTPRequestHandler):
                     + duration_expr
                     + """) AS plazo_medio_dias
                     FROM hipotecas
-                    WHERE empresa_id = ?
+                    WHERE """ + ambito + """
                       AND """
                     + where_bank
                     + """
@@ -93098,7 +93133,7 @@ class Handler(BaseHTTPRequestHandler):
                     + signed_closed_expr
                     + """
                     """,
-                    tuple([empresa_id] + bank_values + [selected_year]),
+                    tuple([*ambito_valores] + bank_values + [selected_year]),
                 ).fetchone()
                 entities.append(
                     {
@@ -93115,7 +93150,7 @@ class Handler(BaseHTTPRequestHandler):
                 """
                 SELECT oficina AS label, COUNT(*) AS total
                 FROM hipotecas
-                WHERE empresa_id = ?
+                WHERE """ + ambito + """
                   AND oficina IS NOT NULL
                   AND TRIM(oficina) != ''
                   AND """
@@ -93124,7 +93159,7 @@ class Handler(BaseHTTPRequestHandler):
                 GROUP BY oficina
                 ORDER BY COUNT(*) DESC
                 """,
-                (empresa_id,),
+                tuple(ambito_valores),
             ).fetchall()
 
             conta_year = compute_hipotecas_contabilidad_totals(conn, empresa_id, selected_year)
@@ -93439,11 +93474,17 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/hipoteca_registros":
             empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
             municipio = (params.get("municipio", [""])[0] or "").strip()
             provincia = (params.get("provincia", [""])[0] or "").strip()
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
+            if not empresa_id and not workspace_id:
+                json_response(self, {"error": "empresa_id o workspace_id requerido"}, status=400)
                 return
+            # Ámbito por workspace: el CRM es del tenant, no de una sociedad suelta.
+            # Filtrando por una empresa, los expedientes de las demás desaparecían.
+            ambito, ambito_valores = build_service_scope_filter(
+                conn, "hipotecas", "hipotecas", workspace_id, empresa_id
+            )
 
             target_mun = normalize_lookup_text(municipio)
             target_prov = normalize_lookup_text(provincia)
@@ -93454,11 +93495,11 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     SELECT liquidacion_json
                     FROM hipotecas
-                    WHERE empresa_id = ?
+                    WHERE """ + ambito + """
                     ORDER BY updated_at DESC, created_at DESC
                     LIMIT 2000
                     """,
-                    (empresa_id,),
+                    tuple(ambito_valores),
                 ).fetchall()
             except Exception:
                 rows = []

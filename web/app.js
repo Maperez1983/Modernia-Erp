@@ -48419,7 +48419,14 @@ const loadHipotecaDashboard = () => {
   if (hipotecaDashboardInfo) {
     hipotecaDashboardInfo.textContent = "Cargando dashboard...";
   }
+  // Se manda el workspace, no solo la empresa: el CRM es del tenant. Pidiéndolo por
+  // empresa activa, con Estudio Velázquez seleccionada el dashboard salía vacío
+  // porque esa sociedad no tiene hipotecas; las 110 están en Financiaciones.
   const params = new URLSearchParams({ empresa_id: empresaId });
+  const wsId = String(state.currentWorkspaceId || "").trim();
+  if (wsId) {
+    params.set("workspace_id", wsId);
+  }
   const requestedYear = String(hipotecaDashboardYearSelect?.value || "").trim();
   if (requestedYear) {
     params.set("year", requestedYear);
