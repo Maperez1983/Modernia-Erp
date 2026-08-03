@@ -78729,6 +78729,11 @@ class Handler(BaseHTTPRequestHandler):
             if not servicio:
                 json_response(self, {"error": "servicio requerido"}, status=400)
                 return
+            # Se guarda la clave, no la etiqueta. Escribir "Gestoría" tal cual dejaba el
+            # vínculo fuera de cualquier consulta que compare LOWER(servicio) = 'gestoria',
+            # porque en minúsculas la tilde sigue ahí: 617 de 2264 vínculos invisibles.
+            # El formulario además manda "financiacion" en singular y la base usa el plural.
+            servicio = normalize_service_key(servicio) or servicio
             session = getattr(self, "auth_session", None) or self._current_session()
             actor_user_id = str(getattr(session, "user_id", "") or "").strip() if session else ""
             procedencia_canal = str(payload.get("procedencia_canal") or "").strip()
