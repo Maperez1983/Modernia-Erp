@@ -20,10 +20,10 @@
     "lighthouse:local": "node scripts/lighthouse-local.cjs"
   },
   "devDependencies": {
-    "@lhci/cli": "^0.14.0",
+    "@lhci/cli": "^0.15.1",
     "axe-core": "^4.12.1",
-    "eslint": "^10.7.0",
-    "globals": "^17.7.0",
+    "eslint": "^10.8.0",
+    "globals": "^17.8.0",
     "jsdom": "^26.1.0",
     "puppeteer-core": "^22.15.0",
     "vitest": "^3.2.0"
