@@ -92979,13 +92979,21 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
 
             firmadas_mes = conn.execute(
-                f"""
+                """
                 SELECT COUNT(*) AS total
                 FROM hipotecas
-                WHERE """ + ambito + """
-                  AND {signed_expr}
-                  AND {closed_expr}
-                  AND {signed_month_expr} = ?
+                WHERE """
+                + ambito
+                + """
+                  AND """
+                + signed_expr
+                + """
+                  AND """
+                + closed_expr
+                + """
+                  AND """
+                + signed_month_expr
+                + """ = ?
                 """,
                 tuple([*ambito_valores, current_month]),
             ).fetchone()

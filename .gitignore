@@ -35,3 +35,8 @@ lighthouse-results/
 /manifest.json
 .eslintcache
 .semgrep/
+
+# Entornos virtuales locales
+.venv/
+.venv-test/
+venv/
