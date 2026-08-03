@@ -5708,7 +5708,21 @@ def has_malaga_bonus_office(value):
 
 
 def stamp_hipoteca_workspace(conn, hipoteca_id, empresa_id):
-    """Pone el workspace en una hipoteca recién creada.
+    """Pone el workspace en una hipoteca recién creada. HOY NO SE LLAMA.
+
+    Está desactivado a propósito, y conviene entender por qué antes de reactivarlo.
+
+    `build_service_scope_filter` trata el workspace vacío como "visible desde
+    cualquier workspace que tenga esa empresa". En cuanto se estampa, el registro
+    solo se ve desde el suyo. Al estampar las 110 hipotecas con Modernia
+    desaparecieron de Verifika², que es el workspace por defecto de la aplicación:
+    el usuario abrió el módulo y no había ni una.
+
+    Estampar solo las nuevas sería peor: las viejas visibles desde los dos sitios y
+    las nuevas solo desde uno, sin que nada lo explique.
+
+    Se reactiva junto con el estampado del histórico, y cuando esté decidido si el
+    holding debe ver la cartera de sus participadas —hoy la ve—.
 
     Se hace en un UPDATE aparte y no en el INSERT a propósito: la tabla vive en
     bases que aún no han migrado —y en los propios tests— y un INSERT con una
@@ -29307,7 +29321,7 @@ def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
         detalles={"asesoramiento_id": row["id"], "cliente_id": row["cliente1_id"]},
         now=now,
     )
-    stamp_hipoteca_workspace(conn, hipoteca_id, empresa_id)
+    # Sin estampar por ahora: ver `stamp_hipoteca_workspace`.
     return hipoteca_id
 
 
@@ -81230,7 +81244,7 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
-                stamp_hipoteca_workspace(conn, out_id, empresa["id"])
+                # Sin estampar por ahora: ver `stamp_hipoteca_workspace`.
         else:
             hipoteca_id = payload.get("id")
             fecha_firma = payload.get("fecha_firma")

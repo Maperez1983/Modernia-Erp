@@ -57,9 +57,16 @@ class ElEstampadoTests(unittest.TestCase):
         self.assertIn("resolve_workspace_id_for_empresa(conn, empresa_id)", f)
         self.assertIn("if not ws:", f)
 
-    def test_se_llama_en_las_dos_altas(self):
+    def test_hoy_no_se_llama_y_se_dice_por_que(self):
+        """Estampar esconde el registro de los demás workspaces que tienen esa empresa.
+
+        Al estampar las 110 hipotecas con Modernia desaparecieron de Verifika², que
+        es el workspace por defecto: el módulo se quedó vacío en pantalla.
+        """
         llamadas = SERVER.count("stamp_hipoteca_workspace(conn,") - SERVER.count("def stamp_hipoteca_workspace(conn,")
-        self.assertEqual(llamadas, 2, "las dos vías de alta tienen que estampar")
+        self.assertEqual(llamadas, 0)
+        i = SERVER.index("def stamp_hipoteca_workspace")
+        self.assertIn("HOY NO SE LLAMA", SERVER[i: i + 400])
 
     def test_el_insert_no_lleva_la_columna(self):
         # A propósito: ver el docstring del módulo.
