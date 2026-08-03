@@ -5185,17 +5185,31 @@ def bootstrap_default_workspace(conn):
                 ),
             )
 
-    empresas = conn.execute("SELECT id FROM empresas ORDER BY nombre").fetchall()
-    for row in empresas:
-        empresa_id = str(row_value(row, "id") or row_value(row, 0) or "").strip()
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO workspace_empresas (
-              id, workspace_id, empresa_id, rol, created_at, updated_at
-            ) VALUES (?, ?, ?, 'operativa', datetime(?), datetime(?))
-            """,
-            (os.urandom(16).hex(), workspace_id, empresa_id, now, now),
-        )
+    # Sembrar las empresas SOLO la primera vez, cuando el workspace nace vacío.
+    #
+    # Antes se reenganchaban todas en cada arranque, y eso es lo que hacía que el
+    # holding heredara la cartera de sus participadas: cada sociedad acababa colgando
+    # de su workspace operativo y además del de por defecto. Con una empresa en dos
+    # workspaces, `resolve_workspace_id_for_empresa` se niega a adivinar —bien hecho,
+    # estampar el equivocado sería una fuga entre tenants— y las altas se quedaban sin
+    # ámbito. Además deshacía cualquier desenganche hecho a mano en el siguiente
+    # despliegue.
+    ya_tiene = conn.execute(
+        "SELECT COUNT(*) AS total FROM workspace_empresas WHERE workspace_id = ?",
+        (workspace_id,),
+    ).fetchone()
+    if not int(row_value(ya_tiene, "total", 0) or 0):
+        empresas = conn.execute("SELECT id FROM empresas ORDER BY nombre").fetchall()
+        for row in empresas:
+            empresa_id = str(row_value(row, "id") or row_value(row, 0) or "").strip()
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO workspace_empresas (
+                  id, workspace_id, empresa_id, rol, created_at, updated_at
+                ) VALUES (?, ?, ?, 'operativa', datetime(?), datetime(?))
+                """,
+                (os.urandom(16).hex(), workspace_id, empresa_id, now, now),
+            )
     for module in WORKSPACE_MODULE_CATALOG:
         conn.execute(
             """
@@ -38390,12 +38404,14 @@ def ensure_tables(db_path):
         # mismo punto de partida que dejó 2014 clientes invisibles: sin esta columna
         # no hay frontera de tenant, solo de sociedad.
         ensure_column(conn, "hipotecas", "workspace_id", "workspace_id TEXT")
-        # Ya con NOT NULL: hasta el 2026-08-03 la empresa Financiaciones Modernia
-        # colgaba a la vez de Modernia y de Verifika², así que el resolvedor se negaba
-        # a adivinar y devolvía '' — con la restricción puesta, el alta habría fallado.
-        # Al dejar de heredar el holding las sociedades de sus participadas, cada
-        # empresa pertenece a un solo workspace y el estampado no puede quedar vacío.
-        ensure_not_null(conn, "hipotecas", "workspace_id")
+        # Sin NOT NULL, y con el motivo escrito para que nadie lo reponga a ciegas:
+        # lo puse el 2026-08-03 dando por hecho que cada empresa colgaba de un solo
+        # workspace, y el siguiente arranque volvió a engancharlas todas al de por
+        # defecto. Con la empresa en dos workspaces el estampado se queda vacío y el
+        # alta de hipotecas dejó de funcionar en producción.
+        #
+        # Se repondrá cuando el desenganche del holding aguante un arranque, que es lo
+        # que arregla `bootstrap_default_workspace` unas líneas más arriba.
         ensure_column(conn, "hipotecas", "cliente_id", "cliente_id TEXT")
         ensure_column(conn, "hipotecas", "cliente_inmueble_json", "cliente_inmueble_json TEXT")
         ensure_column(conn, "hipotecas", "hipoteca_detalle_json", "hipoteca_detalle_json TEXT")

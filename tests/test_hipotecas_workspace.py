@@ -7,11 +7,15 @@ El estampado va en un UPDATE aparte, no dentro del INSERT, porque la tabla vive
 en bases que aún no han migrado y en los propios tests: un INSERT con una columna
 que no existe revienta el alta entera.
 
-Al principio se dejó sin NOT NULL a propósito: la empresa Financiaciones Modernia
-colgaba a la vez de Modernia y de Verifika², el resolvedor se negaba a adivinar y
-devolvía '', y con la restricción puesta el alta habría fallado. Al dejar de
-heredar el holding las sociedades de sus participadas, cada empresa pertenece a un
-solo workspace y la restricción ya se puede sostener.
+Sigue sin NOT NULL, y esta vez con la lección aprendida a base de romper
+producción: el 2026-08-03 se desenganchó el holding, se dio por bueno que cada
+empresa colgaba de un solo workspace y se puso la restricción. El siguiente
+arranque volvió a enganchar todas las empresas al workspace por defecto
+—`bootstrap_default_workspace` lo hacía en cada arranque— y dar de alta una
+hipoteca empezó a fallar con violación de NOT NULL.
+
+Se repondrá cuando el desenganche aguante un arranque. Ver
+`test_bootstrap_no_reengancha`.
 """
 
 import unittest
@@ -26,15 +30,15 @@ class LaColumnaTests(unittest.TestCase):
     def test_se_crea_al_arrancar(self):
         self.assertIn('ensure_column(conn, "hipotecas", "workspace_id", "workspace_id TEXT")', SERVER)
 
-    def test_lleva_not_null(self):
+    def test_no_lleva_not_null_todavia(self):
         i = SERVER.index('ensure_column(conn, "hipotecas", "workspace_id"')
         tramo = SERVER[i: i + 900]
-        self.assertIn('ensure_not_null(conn, "hipotecas", "workspace_id")', tramo)
+        self.assertNotIn('ensure_not_null(conn, "hipotecas"', tramo)
 
-    def test_queda_escrito_por_que_no_se_pudo_antes(self):
-        # Para que nadie la quite creyendo que sobra, ni la vuelva a poner a ciegas.
+    def test_queda_escrito_por_que(self):
+        # Para que nadie la reponga a ciegas: ya tumbó el alta de hipotecas una vez.
         i = SERVER.index('ensure_column(conn, "hipotecas", "workspace_id"')
-        self.assertIn("colgaba a la vez de Modernia y de Verifika", SERVER[i: i + 900])
+        self.assertIn("alta de hipotecas dejó de funcionar", SERVER[i: i + 1200])
 
 
 class ElEstampadoTests(unittest.TestCase):
