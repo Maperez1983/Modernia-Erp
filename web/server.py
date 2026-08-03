@@ -5535,6 +5535,14 @@ def add_year_to_date(value):
 def parse_money_value(value):
     if value is None:
         return 0.0
+    # Con las columnas de dinero en NUMERIC, Postgres devuelve Decimal. Antes acababa
+    # en la rama de texto y salía bien de rebote, porque str(Decimal) usa el punto como
+    # separador decimal. De rebote no es un sitio donde dejar el dinero.
+    if isinstance(value, Decimal):
+        try:
+            return float(value)
+        except Exception:
+            return 0.0
     if isinstance(value, (int, float)):
         return float(value)
     text = str(value).strip()
