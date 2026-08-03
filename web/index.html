@@ -9938,11 +9938,10 @@
                   <button type="submit">Guardar socio</button>
                   <span id="gestoriaSocioStatus" class="muted"></span>
                 </div>
-                <div class="form-actions span-2">
-                  <button type="button" id="gestoriaLibroSociosBtn">Generar primera hoja del libro de socios</button>
-                  <a id="gestoriaLibroSociosPdf" class="muted hidden" target="_blank" rel="noopener">Abrir PDF</a>
-                  <span id="gestoriaLibroSociosStatus" class="muted"></span>
-                </div>
+                <!-- Aquí había un botón "Generar primera hoja del libro de socios" con su
+                     enlace a PDF y su estado. No estaba conectado a nada: ni manejador en
+                     app.js ni ruta en el servidor. Pulsarlo no hacía absolutamente nada.
+                     Se retira hasta que la función exista de verdad. -->
               </form>
               <div id="gestoriaSocioTable"></div>
               <form id="gestoriaSocioCambioForm" class="form-grid" style="margin-top: 16px;">

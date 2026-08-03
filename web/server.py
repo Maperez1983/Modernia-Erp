@@ -57863,6 +57863,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_archive_pending_actions",
             "/api/inmueble_encargo_close",
             "/api/demandas",
+            "/api/demandas_update",
             "/api/visitas",
             "/api/usuarios",
             "/api/usuarios_update",
@@ -58272,6 +58273,7 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/inmueble_delete": "inmobiliaria",
                         "/api/inmueble_docs": "inmobiliaria",
                         "/api/demandas": "inmobiliaria",
+                        "/api/demandas_update": "inmobiliaria",
                         "/api/visitas": "inmobiliaria",
                         "/api/acciones": "inmobiliaria",
                         "/api/acciones_update": "inmobiliaria",
@@ -78398,6 +78400,64 @@ class Handler(BaseHTTPRequestHandler):
                 f"INSERT INTO demandas ({', '.join(cols)}) VALUES ({placeholders})",
                 values,
             )
+        elif parsed.path == "/api/demandas_update":
+            # Mover pedidos de fase en bloque desde el tablero de demandas. La pantalla
+            # llamaba aquí desde siempre, pero la ruta no existía: los botones "Aceptar"
+            # y "Descartar" respondían "Endpoint no valido" y no movían nada.
+            ws_id = str(payload.get("workspace_id") or "").strip()
+            if ws_id:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, ws_id, write=True)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+            raw_ids = payload.get("ids")
+            if isinstance(raw_ids, str):
+                ids = [item.strip() for item in raw_ids.split(",") if item.strip()]
+            elif isinstance(raw_ids, (list, tuple)):
+                ids = [str(item).strip() for item in raw_ids if str(item).strip()]
+            else:
+                ids = []
+            ids = list(dict.fromkeys(ids))
+            if not ids:
+                json_response(self, {"error": "ids requeridos"}, status=400)
+                return
+            fase = str(payload.get("fase") or "").strip()
+            if not fase:
+                json_response(self, {"error": "fase requerida"}, status=400)
+                return
+            # El ámbito manda: nunca se toca una demanda de otro workspace, aunque
+            # llegue su id en la lista.
+            ambito, ambito_valores = build_service_scope_filter(
+                conn, "demandas", "demandas", ws_id, str(payload.get("empresa_id") or "").strip()
+            )
+            marcas = ",".join(["?"] * len(ids))
+            alcanzadas = conn.execute(
+                "SELECT id FROM demandas WHERE id IN (" + marcas + ") AND " + ambito,
+                (*ids, *ambito_valores),
+            ).fetchall()
+            alcanzadas = [str(row_value(row, "id", "") or "").strip() for row in alcanzadas]
+            alcanzadas = [item for item in alcanzadas if item]
+            if not alcanzadas:
+                json_response(self, {"error": "No hay pedidos accesibles con esos ids"}, status=404)
+                return
+            d_cols = table_columns(conn, "demandas") or set()
+            sets = ["fase = ?"]
+            valores = [fase]
+            if "updated_at" in d_cols:
+                sets.append("updated_at = ?")
+                valores.append(now)
+            marcas_ok = ",".join(["?"] * len(alcanzadas))
+            conn.execute(
+                "UPDATE demandas SET " + ", ".join(sets) + " WHERE id IN (" + marcas_ok + ")",
+                (*valores, *alcanzadas),
+            )
+            conn.commit()
+            json_response(
+                self,
+                {"ok": True, "actualizadas": len(alcanzadas), "ignoradas": len(ids) - len(alcanzadas)},
+            )
+            return
         elif parsed.path == "/api/visitas":
             ws_id = str(payload.get("workspace_id") or "").strip()
             if ws_id:
