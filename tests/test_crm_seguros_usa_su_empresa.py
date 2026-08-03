@@ -54,5 +54,37 @@ class LaEmpresaDelServicioMandaTests(unittest.TestCase):
         self.assertLess(primera, activa)
 
 
+class LosCincoCrmResuelvenIgualTests(unittest.TestCase):
+    """Que no quede ninguno con la regla vieja.
+
+    Medido en producción el 2026-08-03, con "Estudio Velazquez 2012 SL" activa:
+
+      - gestoría: 1788 de 1840 clientes invisibles (viven en Fincas Velázquez)
+      - seguros:  408 de 408 pólizas invisibles (Fincas Velázquez)
+      - financiaciones: 110 de 110 hipotecas invisibles (Financiaciones Modernia)
+      - inmobiliaria: 0 perdidos hoy, porque la matriz apunta a Estudio Velázquez;
+        se cambia igual para que los cinco resuelvan con la misma regla.
+    """
+
+    CASOS = {
+        "resolveCrmFinEmpresa": "financiaciones",
+        "resolveCrmSegurosEmpresa": "seguros",
+        "resolveCrmGestoriaEmpresa": "gestoria",
+        "resolveCrmInmoEmpresa": "inmobiliaria",
+    }
+
+    def test_la_matriz_va_antes_que_la_empresa_activa(self):
+        for funcion, servicio in self.CASOS.items():
+            with self.subTest(funcion=funcion):
+                cuerpo = bloque(funcion)
+                primera = cuerpo.index(f'resolveWorkspaceDefaultEmpresa("{servicio}")')
+                activa = cuerpo.index("state.currentWorkspaceCompanyId")
+                self.assertLess(
+                    primera,
+                    activa,
+                    f"{funcion} deja ganar a la empresa activa sobre la del servicio",
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

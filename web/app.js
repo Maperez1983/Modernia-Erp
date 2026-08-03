@@ -27893,8 +27893,14 @@ const resolveWorkspaceDefaultEmpresa = (serviceKey = "") => {
 };
 
 const resolveCrmInmoEmpresa = () => {
-  // En modo tenant, la empresa activa del workspace es la fuente de verdad.
-  // Evita reusar una selección almacenada de Inmobiliaria que pertenezca a otro contexto.
+  // La empresa del servicio manda sobre la empresa activa del workspace, igual que en
+  // los otros cuatro CRM. Hoy no cambia nada —la matriz dice Estudio Velázquez y ahí
+  // están los 81 inmuebles—, pero deja los cinco resolviendo con la misma regla: el
+  // día que la inmobiliaria pase a otra sociedad, esto ya no se rompe.
+  const fromMatrixFirst = resolveWorkspaceDefaultEmpresa("inmobiliaria");
+  if (fromMatrixFirst) return fromMatrixFirst;
+  // Sin matriz, la empresa activa del workspace es la fuente de verdad: evita reusar
+  // una selección guardada de Inmobiliaria que venga de otro contexto.
   try {
     if (isTenantWorkspaceMode()) {
       const activeWsCompanyId = String(state.currentWorkspaceCompanyId || "").trim();
@@ -28003,8 +28009,15 @@ const resolveSegurosDashboardEmpresaId = () => {
 };
 
 const resolveCrmGestoriaEmpresa = () => {
-  // En modo tenant, la "fuente de verdad" es la empresa activa del workspace (o su matriz de servicio),
-  // nunca el fallback por nombre ("Fincas...") que pertenece al modo global.
+  // La empresa del servicio manda sobre la empresa activa del workspace.
+  //
+  // Es el caso más sangrante de los cinco: la matriz dice que gestoría es de Fincas
+  // Velázquez, y ahí están 1788 de los 1840 clientes del servicio. Con Estudio
+  // Velázquez activa se veían 52.
+  const fromMatrixFirst = resolveWorkspaceDefaultEmpresa("gestoria");
+  if (fromMatrixFirst) return fromMatrixFirst;
+  // Sin matriz, en modo tenant manda la empresa activa del workspace, nunca el
+  // respaldo por nombre ("Fincas...") que pertenece al modo global.
   try {
     if (isTenantWorkspaceMode()) {
       const activeWsCompanyId = String(state.currentWorkspaceCompanyId || "").trim();
