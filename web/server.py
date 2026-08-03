@@ -5693,6 +5693,34 @@ def has_malaga_bonus_office(value):
     return key in MALAGA_BONUS_OFFICES
 
 
+def stamp_hipoteca_workspace(conn, hipoteca_id, empresa_id):
+    """Pone el workspace en una hipoteca recién creada.
+
+    Se hace en un UPDATE aparte y no en el INSERT a propósito: la tabla vive en
+    bases que aún no han migrado —y en los propios tests— y un INSERT con una
+    columna que no existe revienta el alta entera. Aquí, si no está la columna,
+    no se hace nada y la hipoteca se crea igual.
+    """
+    hid = str(hipoteca_id or "").strip()
+    if not hid:
+        return ""
+    try:
+        if "workspace_id" not in (table_columns(conn, "hipotecas") or set()):
+            return ""
+    except Exception:
+        _rollback_best_effort(conn)
+        return ""
+    ws = resolve_workspace_id_for_empresa(conn, empresa_id)
+    if not ws:
+        return ""
+    try:
+        conn.execute("UPDATE hipotecas SET workspace_id = ? WHERE id = ?", (ws, hid))
+    except Exception:
+        _rollback_best_effort(conn)
+        return ""
+    return ws
+
+
 def derive_hipoteca_commissions(comision_total, oficina_o_agencia):
     total = max(parse_money_value(comision_total), 0.0)
     juan = round(total * 0.20, 2)
@@ -29251,6 +29279,7 @@ def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
         detalles={"asesoramiento_id": row["id"], "cliente_id": row["cliente1_id"]},
         now=now,
     )
+    stamp_hipoteca_workspace(conn, hipoteca_id, empresa_id)
     return hipoteca_id
 
 
@@ -38343,6 +38372,16 @@ def ensure_tables(db_path):
     except Exception:
         pass
     try:
+        # El workspace es el tenant. `hipotecas` solo tenía `empresa_id`, que es el
+        # mismo punto de partida que dejó 2014 clientes invisibles: sin esta columna
+        # no hay frontera de tenant, solo de sociedad.
+        ensure_column(conn, "hipotecas", "workspace_id", "workspace_id TEXT")
+        # Sin NOT NULL todavía, y no por descuido: la empresa Financiaciones Modernia
+        # cuelga de dos workspaces (Modernia y Verifika²), así que
+        # `resolve_workspace_id_for_empresa` se niega a adivinar —bien hecho— y
+        # devuelve ''. Con la restricción puesta, el alta de una hipoteca fallaría.
+        # Se pondrá cuando el holding deje de compartir sociedades con sus
+        # participadas y el workspace se pueda deducir sin ambigüedad.
         ensure_column(conn, "hipotecas", "cliente_id", "cliente_id TEXT")
         ensure_column(conn, "hipotecas", "cliente_inmueble_json", "cliente_inmueble_json TEXT")
         ensure_column(conn, "hipotecas", "hipoteca_detalle_json", "hipoteca_detalle_json TEXT")
@@ -81133,6 +81172,7 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
+                stamp_hipoteca_workspace(conn, out_id, empresa["id"])
         else:
             hipoteca_id = payload.get("id")
             fecha_firma = payload.get("fecha_firma")
