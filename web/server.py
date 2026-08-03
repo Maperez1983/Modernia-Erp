@@ -6634,12 +6634,26 @@ def hipoteca_signed_export_year(row):
 def is_hipoteca_signed_for_export(row):
     if not parse_iso_date(row["fecha_firma"]):
         return False
-    return normalize_hipoteca_estado(row["estado"]) in ("firmada", "firmado")
+    return normalize_hipoteca_estado(row["estado"]) in HIPOTECA_ESTADOS_FIRMADOS
+
+
+#: Estados que cuentan como hipoteca firmada. Único sitio donde se decide.
+#:
+#: El dashboard incluía además "Indemnización" y el informe anual no, así que el
+#: mismo ejercicio salía con dos cifras: 79.500 € en pantalla y 78.000 € en el
+#: declarativo de 2025. La diferencia era una indemnización con fecha de firma
+#: (Carolina López Méndez, 1.500 €).
+#:
+#: Manda el informe: una indemnización no es una hipoteca firmada, por mucho que
+#: haya comisión cobrada. Esa comisión sigue estando en el desglose por estado.
+HIPOTECA_ESTADOS_FIRMADOS = ("firmada", "firmado")
 
 
 def hipoteca_dashboard_closed_signed_expr():
+    """La misma regla que `is_hipoteca_signed_for_export`, en SQL."""
+    lista = ", ".join(f"'{estado}'" for estado in HIPOTECA_ESTADOS_FIRMADOS)
     return (
-        "LOWER(TRIM(COALESCE(estado, ''))) IN ('firmado', 'firmada', 'indemnización', 'indemnizacion') "
+        f"LOWER(TRIM(COALESCE(estado, ''))) IN ({lista}) "
         "AND fecha_firma IS NOT NULL AND TRIM(fecha_firma) <> ''"
     )
 
@@ -92598,8 +92612,12 @@ class Handler(BaseHTTPRequestHandler):
 
             # Evita depender de funciones SQLite (strftime/datetime) en Postgres: además, algunos valores de fecha
             # pueden venir como DD/MM/YYYY. Extraemos año/mes de forma robusta con substr/LIKE.
-            current_year = str(datetime.now().year)
-            current_month = datetime.now().strftime("%Y-%m")
+            # `datetime.now()` en Render es UTC: el 1 de enero a las 00:30 de Madrid
+            # el dashboard seguía en el año anterior. Mismo arreglo que en el registro
+            # horario.
+            _ahora_local = app_now()
+            current_year = str(_ahora_local.year)
+            current_month = _ahora_local.strftime("%Y-%m")
 
             def _year_from_expr(expr):
                 value = f"TRIM(COALESCE({expr}, ''))"
