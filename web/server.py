@@ -7370,6 +7370,7 @@ def add_hipotecas_dashboard_sheet(wb, items, selected_year=None, brand_name=None
     comision = sum(_num(i.get("honorarios")) for i in items)
     de_juan = sum(_num(i.get("comision_juan")) for i in items)
     de_modernia = sum(_num(i.get("comision_modernia")) for i in items)
+    de_cesion = sum(_num(i.get("cesion")) for i in items)
 
     kpis = [
         ("Operaciones", total, "0"),
@@ -7558,7 +7559,7 @@ def add_hipotecas_dashboard_sheet(wb, items, selected_year=None, brand_name=None
         hoja.add_chart(grafico, f"F{fila_mes}")
 
     # Reparto de la comisión, solo si está informado: un quesito de ceros engaña.
-    if de_juan or de_modernia:
+    if de_juan or de_modernia or de_cesion:
         fila_reparto = fila_mes + max(len(meses), 1) + 4
         hoja.cell(row=fila_reparto, column=1, value="Reparto de la comisión").font = Font(
             name="IBM Plex Sans", size=11, bold=True, color=VERDE
@@ -7568,10 +7569,15 @@ def add_hipotecas_dashboard_sheet(wb, items, selected_year=None, brand_name=None
             celda.font = cabecera
             celda.fill = relleno
             celda.alignment = Alignment(horizontal="center")
-        reparto = [("Juan", de_juan), ("Modernia", de_modernia)]
-        resto = comision - de_juan - de_modernia
+        # La comisión se reparte en tres, no en dos: Juan, Modernia y la cesión.
+        # Comprobado sobre las 79 operaciones con comisión del workspace: sumando las
+        # tres cuadran al céntimo. Antes faltaba la cesión y su importe aparecía como
+        # "Resto / sin repartir", que hacía pensar en un descuadre que no existe.
+        reparto = [("Juan", de_juan), ("Modernia", de_modernia), ("Cesión", de_cesion)]
+        reparto = [(concepto, importe) for concepto, importe in reparto if round(importe, 2)]
+        resto = comision - de_juan - de_modernia - de_cesion
         if round(resto, 2) > 0:
-            reparto.append(("Resto / sin repartir", resto))
+            reparto.append(("Sin asignar", resto))
         for desplazamiento, (concepto, importe) in enumerate(reparto):
             fila = fila_reparto + 2 + desplazamiento
             etiqueta = hoja.cell(row=fila, column=1, value=concepto)

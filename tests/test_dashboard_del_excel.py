@@ -125,6 +125,35 @@ class LoQuePinta(unittest.TestCase):
         hoja = server.add_hipotecas_dashboard_sheet(wb, items, "2026", "X")
         self.assertIsNotNone(hoja)
 
+class LaComisionSeRepartTEnTresTests(unittest.TestCase):
+    """El reparto es Juan + Modernia + cesión, no solo los dos primeros.
+
+    Comprobado el 2026-08-04 sobre las 79 operaciones con comisión del workspace:
+    sumando las tres partes cuadran al céntimo, las 79. Antes faltaba la cesión y su
+    importe aparecía como "Resto / sin repartir", que hacía pensar en un descuadre
+    que no existe: 45.275 € de 219.200 € parecían sin asignar y eran cesiones.
+    """
+
+    def _bloque(self):
+        i = SERVER.index("def add_hipotecas_dashboard_sheet")
+        return SERVER[i: SERVER.index("\ndef ", i + 10)]
+
+    def test_la_cesion_cuenta_como_parte_del_reparto(self):
+        bloque = self._bloque()
+        self.assertIn('de_cesion = sum(_num(i.get("cesion")) for i in items)', bloque)
+        self.assertIn('("Cesión", de_cesion)', bloque)
+
+    def test_lo_que_sobre_ya_no_se_llama_resto(self):
+        # Se mira la etiqueta que se pinta, no la palabra: el comentario que explica
+        # el cambio menciona el nombre viejo, y eso no es lo que ve el usuario.
+        bloque = self._bloque()
+        self.assertNotIn('("Resto / sin repartir"', bloque)
+        self.assertIn('reparto.append(("Sin asignar", resto))', bloque)
+
+    def test_no_se_pintan_trozos_a_cero(self):
+        """Un quesito con una porción de 0 € confunde más que informa."""
+        self.assertIn("if round(importe, 2)]", self._bloque())
+
 
 if __name__ == "__main__":
     unittest.main()
