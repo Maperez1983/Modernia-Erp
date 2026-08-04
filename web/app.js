@@ -44977,7 +44977,12 @@ const ensureHipotecaFichaPanel = () => {
         <button class="tab" type="button" data-hipoteca-ficha-tab="hipoteca">Datos de hipoteca</button>
         <button class="tab" type="button" data-hipoteca-ficha-tab="liquidacion">Ficha de liquidación</button>
       </div>
-      <form id="hipotecaFichaForm">
+      <!-- data-ui-persist="0": esto no es un panel de filtros, es la ficha de un
+           registro concreto. Recordar sus valores entre aperturas hace que una
+           hipoteca enseñe el banco y el estado de la anterior, y guardar entonces
+           escribe ese dato en la base. data-ui-draft="0" por lo mismo: no tiene
+           sentido "recuperar el borrador" de otro expediente. -->
+      <form id="hipotecaFichaForm" data-ui-persist="0" data-ui-draft="0">
         <input type="hidden" name="cliente" />
         <input type="hidden" name="cliente_id" />
         <div id="hipotecaFichaTabCliente" class="stack">

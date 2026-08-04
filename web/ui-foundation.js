@@ -44,8 +44,14 @@
     if (form && String(form.dataset.uiPersist || "") === "0") return false;
     if (String(el.dataset?.uiPersist || "") === "0") return false;
     if (el.type && /password|file|hidden/.test(el.type)) return false;
-    if ((el.tagName || "").toLowerCase() === "textarea") return true;
-    if ((el.tagName || "").toLowerCase() === "select") return true;
+    // Antes cualquier select o textarea se recordaba, sin más. Recordar un filtro es
+    // útil; recordar un campo de una ficha es grave: al abrir otro registro se repone
+    // el valor guardado encima del real. Visto en producción el 2026-08-04, una
+    // hipoteca "Pendiente" se mostraba como "Firmada" —el estado de la ficha anterior—
+    // y guardar el formulario lo habría escrito en la base.
+    //
+    // Se aplica el mismo criterio que al resto: solo se recuerda lo que parece un
+    // filtro o una preferencia de vista.
     return CONTROL_PERSIST_RE.test(getElementKey(el));
   };
 
