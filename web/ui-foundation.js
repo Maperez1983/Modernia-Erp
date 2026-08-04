@@ -474,6 +474,10 @@
     const typing = ["input", "textarea", "select"].includes(activeTag);
     if (event.key === "/" && !typing) {
       event.preventDefault();
+      // La búsqueda global vive en app.js, que es quien sabe del workspace. Si está
+      // disponible, manda ella; si no, se cae al comportamiento de siempre: enfocar
+      // la caja de búsqueda que haya en pantalla (y no hacer nada si no hay).
+      if (window.abrirBusquedaGlobal?.()) return;
       const target = Array.from(
         document.querySelectorAll('input[type="search"], input[id*="Search"], input[placeholder*="Buscar"], input[placeholder*="buscar"]')
       ).find(isVisible);
@@ -539,6 +543,8 @@
       contextBar.addEventListener("click", (event) => {
         const action = event.target.closest("[data-ui-action]")?.dataset.uiAction;
         if (action === "focus-search") {
+          // Igual que el atajo "/": si hay búsqueda global, manda ella.
+          if (window.abrirBusquedaGlobal?.()) return;
           const target = Array.from(
             document.querySelectorAll('input[type="search"], input[id*="Search"], input[placeholder*="Buscar"], input[placeholder*="buscar"]')
           ).find(isVisible);

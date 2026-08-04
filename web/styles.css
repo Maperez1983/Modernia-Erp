@@ -15070,3 +15070,72 @@ kbd,
 samp {
   font-family: var(--font-mono);
 }
+
+/* Búsqueda global -----------------------------------------------------------
+   Se abre sobre cualquier pantalla, así que se ancla arriba en vez de al centro:
+   la lista crece hacia abajo y el cuadro de texto no se mueve mientras escribes. */
+.busqueda-global-content {
+  width: min(640px, 94vw);
+  align-self: start;
+  margin-top: min(12vh, 90px);
+}
+
+.busqueda-global-input {
+  width: 100%;
+  font-size: 1.05rem;
+  padding: 12px 14px;
+}
+
+.busqueda-global-resultados {
+  display: grid;
+  gap: 6px;
+  max-height: min(52vh, 420px);
+  overflow: auto;
+}
+
+.busqueda-global-item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.busqueda-global-item:hover,
+.busqueda-global-item:focus-visible,
+/* La fila marcada con las flechas se ve igual que la que tienes bajo el ratón:
+   si no, al bajar con el teclado no sabes dónde estás. */
+.busqueda-global-item[aria-selected="true"] {
+  border-color: var(--brand, #2f7d4f);
+  background: var(--crema, #f7f5ef);
+}
+
+.busqueda-global-item strong {
+  font-weight: 600;
+}
+
+.busqueda-global-meta {
+  font-size: 0.86rem;
+  color: var(--muted, #6b7280);
+}
+
+.busqueda-global-servicios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.busqueda-global-servicios span {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted, #6b7280);
+}

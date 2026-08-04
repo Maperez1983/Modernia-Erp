@@ -93391,3 +93391,159 @@ try {
 try {
   syncGestoriaRentaRemesaToggles();
 } catch (e) {}
+
+// ---------------------------------------------------------------------------
+// Búsqueda global
+//
+// Antes, tanto el botón "Buscar" como el atajo "/" se limitaban a mover el cursor
+// a la caja de búsqueda que hubiera en pantalla; en una vista sin caja no pasaba
+// nada. Y cada CRM busca solo en lo suyo, así que para dar con un cliente había que
+// acertar primero el módulo. Con más de dos mil fichas eso es un peaje diario.
+//
+// Esto busca en todo el workspace por nombre, NIF, teléfono o email, y lleva a la
+// ficha. `ui-foundation.js` llama a `window.abrirBusquedaGlobal` y, si no existe,
+// se queda con el comportamiento de antes.
+// ---------------------------------------------------------------------------
+(() => {
+  const modal = document.getElementById("busquedaGlobal");
+  const input = document.getElementById("busquedaGlobalInput");
+  const lista = document.getElementById("busquedaGlobalResultados");
+  const estado = document.getElementById("busquedaGlobalEstado");
+  const cerrar = document.getElementById("busquedaGlobalCerrar");
+  if (!modal || !input || !lista || !estado) return;
+
+  let seq = 0;
+  let temporizador = null;
+  let marcado = -1;
+  let filas = [];
+
+  const cerrarPanel = () => {
+    modal.classList.add("hidden");
+    lista.innerHTML = "";
+    estado.textContent = "";
+    input.value = "";
+    filas = [];
+    marcado = -1;
+  };
+
+  const marcar = (indice) => {
+    const items = Array.from(lista.querySelectorAll(".busqueda-global-item"));
+    if (!items.length) return;
+    marcado = (indice + items.length) % items.length;
+    items.forEach((item, i) => item.setAttribute("aria-selected", i === marcado ? "true" : "false"));
+    items[marcado].scrollIntoView({ block: "nearest" });
+  };
+
+  const abrir = (cliente) => {
+    cerrarPanel();
+    try {
+      openClienteDetail(cliente.id);
+    } catch (e) {
+      console.error("No se pudo abrir la ficha", e);
+    }
+  };
+
+  const pintar = () => {
+    if (!filas.length) {
+      lista.innerHTML = "";
+      return;
+    }
+    lista.innerHTML = filas
+      .map((fila, i) => {
+        const meta = [fila.nif, fila.telefono, fila.email].filter(Boolean).join(" · ");
+        const servicios = (fila.servicios || [])
+          .map((s) => `<span>${escapeHtml(s)}</span>`)
+          .join("");
+        return `
+          <button type="button" class="busqueda-global-item" data-indice="${i}" aria-selected="${i === 0 ? "true" : "false"}">
+            <strong>${escapeHtml(fila.nombre || "(sin nombre)")}</strong>
+            ${meta ? `<span class="busqueda-global-meta">${escapeHtml(meta)}</span>` : ""}
+            ${servicios ? `<span class="busqueda-global-servicios">${servicios}</span>` : ""}
+          </button>`;
+      })
+      .join("");
+    marcado = 0;
+  };
+
+  const buscar = async (texto) => {
+    const wsId = String(state.currentWorkspaceId || "").trim();
+    if (!wsId) {
+      estado.textContent = "Sin workspace activo.";
+      return;
+    }
+    const mio = ++seq;
+    estado.textContent = "Buscando…";
+    try {
+      const params = new URLSearchParams({ q: texto, workspace_id: wsId, limit: "25" });
+      const res = await fetch(`/api/buscar_global?${params.toString()}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      // Escribir es más rápido que la red: si ha salido otra petición después de
+      // esta, su respuesta es la buena y esta ya no vale.
+      if (mio !== seq) return;
+      const data = await res.json();
+      filas = Array.isArray(data?.rows) ? data.rows : [];
+      pintar();
+      if (!filas.length) {
+        estado.textContent = data?.motivo || `Sin resultados para "${texto}".`;
+      } else {
+        estado.textContent = `${filas.length} ${filas.length === 1 ? "resultado" : "resultados"}.`;
+      }
+    } catch (e) {
+      if (mio !== seq) return;
+      filas = [];
+      lista.innerHTML = "";
+      estado.textContent = "No se pudo buscar.";
+    }
+  };
+
+  input.addEventListener("input", () => {
+    const texto = input.value.trim();
+    clearTimeout(temporizador);
+    if (texto.length < 2) {
+      filas = [];
+      lista.innerHTML = "";
+      estado.textContent = texto ? "Escribe al menos dos caracteres." : "";
+      return;
+    }
+    // Sin esperar, cada tecla sería una consulta contra 2000 fichas.
+    temporizador = setTimeout(() => buscar(texto), 220);
+  });
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      marcar(marcado + 1);
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      marcar(marcado - 1);
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      if (filas[marcado]) abrir(filas[marcado]);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      cerrarPanel();
+    }
+  });
+
+  lista.addEventListener("click", (event) => {
+    const item = event.target.closest(".busqueda-global-item");
+    if (!item) return;
+    const fila = filas[Number(item.dataset.indice)];
+    if (fila) abrir(fila);
+  });
+
+  cerrar?.addEventListener("click", cerrarPanel);
+  modal.addEventListener("click", (event) => {
+    if (event.target === modal) cerrarPanel();
+  });
+
+  window.abrirBusquedaGlobal = () => {
+    if (!String(state.currentWorkspaceId || "").trim()) return false;
+    modal.classList.remove("hidden");
+    input.focus();
+    input.select();
+    return true;
+  };
+})();

@@ -9,7 +9,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=300" />
+	    <link rel="stylesheet" href="styles.css?v=301" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -11900,11 +11900,11 @@
             const LEAFLET_CSS_HREF = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
             const DEEP_LINK_KEYS = ["activar_token", "portal_token", "firma_inmo", "portal_inmo", "holding", "workspace", "crm", "cliente", "poliza", "agenda", "admin", "token"];
             const APP_SHELL_SCRIPTS = [
-              "ui-foundation.js?v=5",
+              "ui-foundation.js?v=6",
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=833",
+              "app.js?v=834",
             ];
 
             const getParams = () => {
@@ -12497,5 +12497,32 @@
 	        <path d="M7 14c2 0 2-1 4-1s2 1 4 1 2-1 4-1 2 1 4 1" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>
 	      </symbol>
 	    </svg>
+
+    <!-- Búsqueda global. Vive fuera de las secciones a propósito: se abre desde
+         cualquier pantalla, y para encontrar a alguien no hay que acertar antes el CRM
+         en el que está. Se abre con "/" o con el botón Buscar de la barra. -->
+    <div id="busquedaGlobal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="busquedaGlobalTitulo">
+      <div class="modal-content busqueda-global-content">
+        <div class="modal-header">
+          <div>
+            <h3 id="busquedaGlobalTitulo">Buscar</h3>
+            <p class="muted">Por nombre, NIF, teléfono o email. En todo el workspace.</p>
+          </div>
+          <button type="button" id="busquedaGlobalCerrar" class="secondary ghost">Cerrar</button>
+        </div>
+        <div class="modal-body">
+          <input
+            type="search"
+            id="busquedaGlobalInput"
+            class="busqueda-global-input"
+            placeholder="Escribe un nombre, un NIF o un teléfono…"
+            autocomplete="off"
+            aria-controls="busquedaGlobalResultados"
+          />
+          <p class="muted" id="busquedaGlobalEstado" role="status" aria-live="polite"></p>
+          <div id="busquedaGlobalResultados" class="busqueda-global-resultados"></div>
+        </div>
+      </div>
+    </div>
 	  </body>
 	</html>

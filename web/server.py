@@ -84172,6 +84172,122 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"total": total["total"] if total else 0})
             return
 
+        if path == "/api/buscar_global":
+            # Encontrar a alguien sin saber en qué CRM está.
+            #
+            # El botón "Buscar" de la barra solo movía el cursor a la caja de búsqueda
+            # que hubiera en pantalla; en una vista sin caja no hacía nada. Y cada CRM
+            # busca solo en lo suyo, así que para dar con un cliente había que acertar
+            # primero el módulo. Con 2045 fichas eso es un peaje diario.
+            texto = (params.get("q", [""])[0] or "").strip()
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            try:
+                limite = max(1, min(int(params.get("limit", ["25"])[0] or 25), 50))
+            except Exception:
+                limite = 25
+            if len(texto) < 2:
+                json_response(self, {"rows": [], "motivo": "Escribe al menos dos caracteres."})
+                return
+            if not workspace_id:
+                # Sin ámbito no se busca: devolver toda la base sería una fuga.
+                json_response(self, {"rows": [], "motivo": "Sin workspace."})
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+
+            ambito, ambito_valores = clientes_workspace_scope_sql(conn, workspace_id, alias="c")
+            if not ambito:
+                json_response(self, {"rows": [], "motivo": "Sin workspace."})
+                return
+
+            patron = f"%{texto.lower()}%"
+            # El NIF se compara sin puntos, guiones ni espacios: nadie lo teclea igual
+            # que está guardado.
+            nif_busqueda = re.sub(r"[^0-9A-Za-z]", "", texto).upper()
+            # El teléfono, solo dígitos, por el mismo motivo.
+            tel_busqueda = re.sub(r"\D", "", texto)
+
+            columnas = table_columns(conn, "clientes") or set()
+            campos_texto = [x for x in ("nombre", "email") if x in columnas]
+            campos_tel = [x for x in ("telefono", "movil", "otro_telefono") if x in columnas]
+
+            condiciones = []
+            valores = []
+            for campo in campos_texto:
+                condiciones.append(f"LOWER(COALESCE(c.{campo}, '')) LIKE ?")
+                valores.append(patron)
+            if nif_busqueda and "nif" in columnas:
+                condiciones.append(
+                    "REPLACE(REPLACE(REPLACE(UPPER(COALESCE(c.nif, '')), ' ', ''), '-', ''), '.', '') LIKE ?"
+                )
+                valores.append(f"%{nif_busqueda}%")
+            if tel_busqueda and len(tel_busqueda) >= 3:
+                for campo in campos_tel:
+                    condiciones.append(
+                        f"REPLACE(REPLACE(REPLACE(COALESCE(c.{campo}, ''), ' ', ''), '-', ''), '+', '') LIKE ?"
+                    )
+                    valores.append(f"%{tel_busqueda}%")
+            if not condiciones:
+                json_response(self, {"rows": [], "motivo": "Nada que buscar."})
+                return
+
+            seleccion = ["c.id", "c.nombre"]
+            for extra in ("nif", "telefono", "movil", "email", "estado"):
+                if extra in columnas:
+                    seleccion.append(f"c.{extra}")
+
+            filas = conn.execute(
+                "SELECT " + ", ".join(seleccion) + " FROM clientes c"
+                " WHERE " + ambito + " AND (" + " OR ".join(condiciones) + ")"
+                " ORDER BY c.nombre LIMIT ?",
+                (*ambito_valores, *valores, limite),
+            ).fetchall()
+
+            clave = normalize_lookup_text(texto)
+            resultados = []
+            for fila in filas:
+                cliente_id = str(row_value(fila, "id", "") or "")
+                nombre = str(row_value(fila, "nombre", "") or "")
+                servicios = [
+                    normalize_service_key(str(row_value(s, "servicio", "") or ""))
+                    for s in conn.execute(
+                        "SELECT DISTINCT servicio FROM clientes_empresas WHERE cliente_id = ?",
+                        (cliente_id,),
+                    ).fetchall()
+                ]
+                resultados.append(
+                    {
+                        "tipo": "cliente",
+                        "id": cliente_id,
+                        "nombre": nombre,
+                        "nif": str(row_value(fila, "nif", "") or ""),
+                        "telefono": str(row_value(fila, "telefono", "") or row_value(fila, "movil", "") or ""),
+                        "email": str(row_value(fila, "email", "") or ""),
+                        "estado": str(row_value(fila, "estado", "") or ""),
+                        "servicios": sorted({s for s in servicios if s}),
+                    }
+                )
+
+            # Quien escribe el nombre entero o el NIF exacto quiere ese, no el que va
+            # antes por orden alfabético.
+            def peso(item):
+                nombre_clave = normalize_lookup_text(item["nombre"])
+                nif_clave = re.sub(r"[^0-9A-Z]", "", str(item["nif"]).upper())
+                if nif_busqueda and nif_clave == nif_busqueda:
+                    return (0, item["nombre"])
+                if nombre_clave == clave:
+                    return (1, item["nombre"])
+                if nombre_clave.startswith(clave):
+                    return (2, item["nombre"])
+                return (3, item["nombre"])
+
+            resultados.sort(key=peso)
+            json_response(self, {"rows": resultados, "total": len(resultados)})
+            return
+
         if path == "/api/postal_lookup":
             cp_raw = params.get("cp", [""])[0]
             cp = normalize_postal_code(cp_raw)
