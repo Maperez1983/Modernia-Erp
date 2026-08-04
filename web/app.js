@@ -48207,7 +48207,7 @@ const HIPOTECA_BANK_BRANDS = [
   {
     name: "Unicaja Banco",
     short: "Unicaja",
-    logo: "/assets/logos/unicaja.png",
+    logo: "/assets/logos/unicaja.svg",
     color: "#007a53",
     aliases: ["unicaja", "unicaja banco", "unicaja banco sa", "unicaja banco s a"],
   },
