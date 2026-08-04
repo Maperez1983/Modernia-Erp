@@ -7251,6 +7251,67 @@ def _num(valor):
         return 0.0
 
 
+def add_logos_de_banco_al_listado(hoja, columna_titulo="Banco"):
+    """Pone el logo de la entidad junto a su nombre en la hoja de detalle.
+
+    Excel no admite SVG y la mayoría de los logos del CRM lo son, así que se sirven
+    PNG rasterizados una vez en `assets/logos/excel/`. El servidor solo los incrusta:
+    no hace falta un rasterizador en producción.
+
+    El logo se ancla a la izquierda de la celda y el nombre se alinea a la derecha,
+    así conviven sin taparse y la columna sigue sirviendo para filtrar y buscar. Un
+    logo que no se encuentre no rompe nada: queda el nombre, como hasta ahora.
+    """
+    try:
+        from openpyxl.drawing.image import Image as OpenpyxlImage
+        from openpyxl.styles import Alignment
+    except Exception:
+        return 0
+
+    cabeceras = {
+        str(celda.value or "").strip().lower(): celda.column
+        for celda in hoja[1]
+        if celda.value
+    }
+    columna = cabeceras.get(str(columna_titulo).strip().lower())
+    if not columna:
+        return 0
+
+    from openpyxl.utils import get_column_letter
+
+    letra = get_column_letter(columna)
+    # 34 caracteres: el logo ocupa unos 11 por la izquierda y el nombre más largo del
+    # catálogo, "Caja Rural de Granada", pide 21. Con 27 el logo le comía la primera
+    # letra.
+    hoja.column_dimensions[letra].width = 34
+
+    puestos = 0
+    for fila in range(2, hoja.max_row + 1):
+        celda = hoja.cell(row=fila, column=columna)
+        nombre = str(celda.value or "").strip()
+        if not nombre:
+            continue
+        celda.alignment = Alignment(horizontal="right", vertical="center")
+        hoja.row_dimensions[fila].height = 21
+        try:
+            marca = resolve_hipoteca_bank_brand(nombre)
+            ruta_logo = str(marca.get("logo") or "").strip()
+            if not ruta_logo:
+                continue
+            fichero = ASSETS / "logos" / "excel" / (Path(ruta_logo).stem + ".png")
+            if not fichero.exists():
+                continue
+            imagen = OpenpyxlImage(str(fichero))
+            imagen.width = 74
+            imagen.height = 23
+            hoja.add_image(imagen, f"{letra}{fila}")
+            puestos += 1
+        except Exception:
+            # Un logo que falle no puede dejar sin listado a quien pidió el listado.
+            continue
+    return puestos
+
+
 def add_hipotecas_dashboard_sheet(wb, items, selected_year=None, brand_name=None):
     """Hoja de dashboard del listado: KPIs y gráficos.
 
@@ -7578,6 +7639,10 @@ def build_hipotecas_listado_excel_workbook(items, selected_year=None, brand_name
         detail = wb[wb.sheetnames[1]]
         detail.title = "Operaciones listado"
         detail["A1"] = "Año"
+        try:
+            add_logos_de_banco_al_listado(detail)
+        except Exception:
+            pass
     # El dashboard se añade al final pero se coloca el primero: al abrir el fichero
     # se ve el resumen visual, no una tabla de 24 filas.
     try:
