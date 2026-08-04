@@ -46993,6 +46993,12 @@ const getHipotecaBdtExportSelection = async (mode = "listado") => {
     filters,
     ids,
     empresaId,
+    // El servidor exige `empresa_nombre` en todo POST salvo que venga `workspace_id`
+    // (server.py, `empresa_scope_exempt`). Sin él, imprimir el listado respondía
+    // "empresa_nombre requerido" y no salía el PDF. Va aquí para que los tres
+    // caminos de exportación —PDF de listado, PDF de fichas y Excel— lo manden
+    // igual: si se añade solo en uno, el fallo vuelve por otro botón.
+    workspaceId: String(state.currentWorkspaceId || "").trim(),
     selectedYear,
     selectedEstado,
     selectedOrder: filters.order,
@@ -47008,6 +47014,7 @@ const downloadHipotecaBdtPdf = async (mode = "listado", popup = null) => {
     "/api/hipotecas_export_pdf",
     {
       empresa_id: selection.empresaId,
+      workspace_id: selection.workspaceId,
       mode: modeKey,
       ids,
       year: selectedYear,
@@ -47036,6 +47043,7 @@ const downloadHipotecaBdtExcel = async () => {
     credentials: "same-origin",
     body: JSON.stringify({
       empresa_id: selection.empresaId,
+      workspace_id: selection.workspaceId,
       ids: selection.ids,
       year: selection.selectedYear,
       estado: selection.selectedEstado,
