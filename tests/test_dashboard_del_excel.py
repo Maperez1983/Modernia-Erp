@@ -94,9 +94,12 @@ class LoQuePinta(unittest.TestCase):
         self.assertEqual(filas[0][2], 350000)
 
     def test_los_kpis_cuadran(self):
-        fila = self.valores[3]  # la de las cifras
-        self.assertEqual(fila[0], 3)          # operaciones
-        self.assertEqual(fila[2], 350000)     # volumen
+        # Se busca la fila por su rótulo en vez de por número: así el test sobrevive a
+        # que la cabecera crezca, que es justo lo que pasó al darle formato.
+        i = next(n for n, f in enumerate(self.valores) if f[0] == "Operaciones")
+        cifras = self.valores[i + 1]
+        self.assertEqual(cifras[0], 3)          # operaciones
+        self.assertEqual(cifras[2], 350000)     # volumen
 
     def test_la_comision_por_mes_suma_el_total(self):
         i = next(n for n, f in enumerate(self.valores) if f[0] == "Comisión cobrada por mes")

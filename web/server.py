@@ -7263,7 +7263,8 @@ def add_hipotecas_dashboard_sheet(wb, items, selected_year=None, brand_name=None
     """
     try:
         from openpyxl.chart import BarChart, PieChart, Reference
-        from openpyxl.styles import Alignment, Font, PatternFill
+        from openpyxl.chart.label import DataLabelList
+        from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
     except Exception:
         return None
 
@@ -7272,19 +7273,36 @@ def add_hipotecas_dashboard_sheet(wb, items, selected_year=None, brand_name=None
     hoja.sheet_view.showGridLines = False
 
     VERDE = "1F5C3A"
+    VERDE_CLARO = "E8F1EA"
     CREMA = "F4F8F5"
-    titulo = Font(name="IBM Plex Sans", size=15, bold=True, color=VERDE)
-    rotulo = Font(name="IBM Plex Sans", size=9, bold=True, color="5C6B60")
-    cifra = Font(name="IBM Plex Sans", size=16, bold=True, color="12291C")
+    LINEA = "D8E3DB"
+    TINTA = "12291C"
+    GRIS = "5C6B60"
+    titulo = Font(name="IBM Plex Sans", size=18, bold=True, color=VERDE)
+    subtitulo = Font(name="IBM Plex Sans", size=10, color=GRIS)
+    rotulo = Font(name="IBM Plex Sans", size=9, bold=True, color=GRIS)
+    cifra = Font(name="IBM Plex Sans", size=17, bold=True, color=TINTA)
     cabecera = Font(name="IBM Plex Sans", size=10, bold=True, color="FFFFFF")
+    cuerpo = Font(name="IBM Plex Sans", size=10, color=TINTA)
+    total_font = Font(name="IBM Plex Sans", size=10, bold=True, color=VERDE)
     relleno = PatternFill("solid", fgColor=VERDE)
     suave = PatternFill("solid", fgColor=CREMA)
+    alterna = PatternFill("solid", fgColor=VERDE_CLARO)
+    fino = Side(style="thin", color=LINEA)
+    borde = Border(bottom=fino)
+    caja = Border(left=fino, right=fino, top=fino, bottom=fino)
 
     ejercicio = str(selected_year or "").strip() or "Histórico"
-    hoja.merge_cells("A1:H1")
-    hoja["A1"] = f"{str(brand_name or '').strip() or 'Verifika²'} · Hipotecas · {ejercicio}"
+    hoja.merge_cells("A1:J1")
+    hoja["A1"] = f"Hipotecas · {ejercicio}"
     hoja["A1"].font = titulo
-    hoja.row_dimensions[1].height = 26
+    hoja["A1"].alignment = Alignment(vertical="center")
+    hoja.row_dimensions[1].height = 32
+    hoja.merge_cells("A2:J2")
+    hoja["A2"] = f"{str(brand_name or '').strip() or 'Verifika²'} · {len(items)} operaciones"
+    hoja["A2"].font = subtitulo
+    hoja.row_dimensions[2].height = 16
+    hoja.row_dimensions[3].height = 6
 
     total = len(items)
     volumen = sum(_num(i.get("importe_hipoteca")) for i in items)
@@ -7299,16 +7317,29 @@ def add_hipotecas_dashboard_sheet(wb, items, selected_year=None, brand_name=None
         ("Importe medio", (volumen / total) if total else 0, '#,##0.00 "€"'),
         ("Comisión media", (comision / total) if total else 0, '#,##0.00 "€"'),
     ]
+    hoja.row_dimensions[4].height = 15
+    hoja.row_dimensions[5].height = 26
     for indice, (nombre, valor, formato) in enumerate(kpis):
         col = 1 + indice * 2
-        celda_rotulo = hoja.cell(row=3, column=col, value=nombre)
+        celda_rotulo = hoja.cell(row=4, column=col, value=nombre)
         celda_rotulo.font = rotulo
-        celda_valor = hoja.cell(row=4, column=col, value=valor)
+        celda_rotulo.alignment = Alignment(horizontal="left", vertical="center")
+        celda_valor = hoja.cell(row=5, column=col, value=valor)
         celda_valor.font = cifra
         celda_valor.number_format = formato
-        for fila in (3, 4):
+        celda_valor.alignment = Alignment(horizontal="left", vertical="center")
+        # Cada KPI es una tarjeta de dos celdas: fondo suave y un filete alrededor,
+        # para que se lean como bloques y no como una fila de números sueltos.
+        for fila in (4, 5):
             for desplazamiento in (0, 1):
-                hoja.cell(row=fila, column=col + desplazamiento).fill = suave
+                celda = hoja.cell(row=fila, column=col + desplazamiento)
+                celda.fill = suave
+                celda.border = caja
+        # Fusionadas: en una sola celda, "3.347.700,00 €" no cabe y Excel lo enseña
+        # como ###. Con las dos columnas juntas el importe se lee entero.
+        for fila in (4, 5):
+            hoja.merge_cells(start_row=fila, start_column=col, end_row=fila, end_column=col + 1)
+    hoja.row_dimensions[6].height = 10
 
     def agrupar(clave):
         # Se agrupa por el nombre normalizado, no por el literal: "Malaga Norte",
@@ -7352,35 +7383,71 @@ def add_hipotecas_dashboard_sheet(wb, items, selected_year=None, brand_name=None
             celda.alignment = Alignment(horizontal="center")
         for desplazamiento, (nombre, registro) in enumerate(datos):
             fila = fila_inicial + 2 + desplazamiento
-            hoja.cell(row=fila, column=1, value=nombre)
-            hoja.cell(row=fila, column=2, value=registro["n"])
-            celda_volumen = hoja.cell(row=fila, column=3, value=round(registro["volumen"], 2))
-            celda_volumen.number_format = '#,##0.00 "€"'
-            celda_comision = hoja.cell(row=fila, column=4, value=round(registro["comision"], 2))
-            celda_comision.number_format = '#,##0.00 "€"'
+            celdas = [
+                hoja.cell(row=fila, column=1, value=nombre),
+                hoja.cell(row=fila, column=2, value=registro["n"]),
+                hoja.cell(row=fila, column=3, value=round(registro["volumen"], 2)),
+                hoja.cell(row=fila, column=4, value=round(registro["comision"], 2)),
+            ]
+            celdas[2].number_format = '#,##0.00 "€"'
+            celdas[3].number_format = '#,##0.00 "€"'
+            for indice_celda, celda in enumerate(celdas):
+                celda.font = cuerpo
+                celda.border = borde
+                # Franjas alternas: con 8 entidades y cuatro columnas, seguir una fila
+                # con la vista es más fácil con el fondo cambiando.
+                if desplazamiento % 2:
+                    celda.fill = alterna
+                if indice_celda:
+                    celda.alignment = Alignment(horizontal="right")
+        # Fila de total: sin ella hay que sumar a ojo para saber si la tabla cuadra.
+        fila_total = fila_inicial + 2 + len(datos)
+        totales = [
+            ("Total", None),
+            (sum(r["n"] for _, r in datos), "0"),
+            (round(sum(r["volumen"] for _, r in datos), 2), '#,##0.00 "€"'),
+            (round(sum(r["comision"] for _, r in datos), 2), '#,##0.00 "€"'),
+        ]
+        for indice_celda, (valor, formato) in enumerate(totales):
+            celda = hoja.cell(row=fila_total, column=1 + indice_celda, value=valor)
+            celda.font = total_font
+            celda.fill = suave
+            celda.border = Border(top=Side(style="medium", color=VERDE), bottom=fino)
+            if formato:
+                celda.number_format = formato
+            if indice_celda:
+                celda.alignment = Alignment(horizontal="right")
         return fila_inicial + 1, fila_inicial + 1 + len(datos)
 
     def barras(titulo_grafico, fila_cabecera, fila_final, ancla):
         grafico = BarChart()
         grafico.type = "bar"
+        grafico.style = 12
         grafico.title = titulo_grafico
-        grafico.height = 7.5
-        grafico.width = 13
+        grafico.height = 8
+        grafico.width = 15
         grafico.legend = None
+        grafico.y_axis.majorGridlines = None
         datos = Reference(hoja, min_col=2, min_row=fila_cabecera, max_row=fila_final)
         categorias = Reference(hoja, min_col=1, min_row=fila_cabecera + 1, max_row=fila_final)
         grafico.add_data(datos, titles_from_data=True)
         grafico.set_categories(categorias)
+        # El número encima de cada barra ahorra ir a buscarlo a la tabla.
+        grafico.dataLabels = DataLabelList()
+        grafico.dataLabels.showVal = True
         hoja.add_chart(grafico, ancla)
 
     por_banco = agrupar("banco")
     por_inmo = agrupar("inmobiliaria")
 
-    cab_banco, fin_banco = tabla(6, "Operaciones por banco", "Banco", por_banco)
+    # La primera tabla arranca en la 7: arriba quedan título, subtítulo, las tarjetas
+    # de KPI y una fila de aire. Cada bloque deja 4 filas hasta el siguiente para que
+    # la fila de totales no toque el título de abajo.
+    cab_banco, fin_banco = tabla(7, "Operaciones por banco", "Banco", por_banco)
     if fin_banco > cab_banco:
-        barras("Operaciones por banco", cab_banco, fin_banco, "F6")
+        barras("Operaciones por banco", cab_banco, fin_banco, "F7")
 
-    fila_inmo = fin_banco + 3
+    fila_inmo = fin_banco + 4
     cab_inmo, fin_inmo = tabla(fila_inmo, "Operaciones por inmobiliaria", "Inmobiliaria", por_inmo)
     if fin_inmo > cab_inmo:
         barras("Operaciones por inmobiliaria", cab_inmo, fin_inmo, f"F{fila_inmo}")
@@ -7394,7 +7461,7 @@ def add_hipotecas_dashboard_sheet(wb, items, selected_year=None, brand_name=None
         por_mes[mes] = por_mes.get(mes, 0.0) + _num(item.get("honorarios"))
     meses = sorted(por_mes.items())
 
-    fila_mes = fin_inmo + 3
+    fila_mes = fin_inmo + 4
     hoja.cell(row=fila_mes, column=1, value="Comisión cobrada por mes").font = Font(
         name="IBM Plex Sans", size=11, bold=True, color=VERDE
     )
@@ -7405,9 +7472,17 @@ def add_hipotecas_dashboard_sheet(wb, items, selected_year=None, brand_name=None
         celda.alignment = Alignment(horizontal="center")
     for desplazamiento, (mes, importe) in enumerate(meses):
         fila = fila_mes + 2 + desplazamiento
-        hoja.cell(row=fila, column=1, value=mes)
+        etiqueta = hoja.cell(row=fila, column=1, value=mes)
+        etiqueta.font = cuerpo
+        etiqueta.border = borde
         celda = hoja.cell(row=fila, column=2, value=round(importe, 2))
         celda.number_format = '#,##0.00 "€"'
+        celda.font = cuerpo
+        celda.border = borde
+        celda.alignment = Alignment(horizontal="right")
+        if desplazamiento % 2:
+            etiqueta.fill = alterna
+            celda.fill = alterna
     if meses:
         grafico = BarChart()
         grafico.type = "col"
@@ -7438,9 +7513,14 @@ def add_hipotecas_dashboard_sheet(wb, items, selected_year=None, brand_name=None
             reparto.append(("Resto / sin repartir", resto))
         for desplazamiento, (concepto, importe) in enumerate(reparto):
             fila = fila_reparto + 2 + desplazamiento
-            hoja.cell(row=fila, column=1, value=concepto)
+            etiqueta = hoja.cell(row=fila, column=1, value=concepto)
+            etiqueta.font = cuerpo
+            etiqueta.border = borde
             celda = hoja.cell(row=fila, column=2, value=round(importe, 2))
             celda.number_format = '#,##0.00 "€"'
+            celda.font = cuerpo
+            celda.border = borde
+            celda.alignment = Alignment(horizontal="right")
         quesito = PieChart()
         quesito.title = "Reparto de la comisión"
         quesito.height = 7.5
@@ -7449,10 +7529,28 @@ def add_hipotecas_dashboard_sheet(wb, items, selected_year=None, brand_name=None
         categorias = Reference(hoja, min_col=1, min_row=fila_reparto + 2, max_row=fila_reparto + 1 + len(reparto))
         quesito.add_data(datos, titles_from_data=True)
         quesito.set_categories(categorias)
+        quesito.dataLabels = DataLabelList()
+        quesito.dataLabels.showPercent = True
         hoja.add_chart(quesito, f"F{fila_reparto}")
 
-    for columna, ancho in (("A", 34), ("B", 13), ("C", 17), ("D", 15), ("E", 3)):
+    # A-D son las tablas; E hace de separador; F en adelante sostiene las tarjetas de
+    # KPI fusionadas y es donde flotan los gráficos.
+    for columna, ancho in (
+        ("A", 34), ("B", 13), ("C", 18), ("D", 16), ("E", 13),
+        ("F", 13), ("G", 13), ("H", 13), ("I", 13), ("J", 13),
+    ):
         hoja.column_dimensions[columna].width = ancho
+    # Al abrir se ve la cabecera y los KPIs, no una celda cualquiera.
+    hoja.sheet_view.zoomScale = 90
+    hoja.freeze_panes = "A7"
+    hoja.sheet_properties.tabColor = VERDE
+    # Al imprimir, apaisado y ajustado al ancho: en vertical las tarjetas de KPI se
+    # parten y la mitad se va a una segunda hoja.
+    hoja.page_setup.orientation = "landscape"
+    hoja.page_setup.fitToWidth = 1
+    hoja.page_setup.fitToHeight = 0
+    hoja.sheet_properties.pageSetUpPr.fitToPage = True
+    hoja.print_options.horizontalCentered = True
     return hoja
 
 

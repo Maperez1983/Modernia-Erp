@@ -279,8 +279,16 @@
     restoreFormDraft(form);
     const controls = getDraftControls(form);
     controls.forEach((field) => {
-      const handleFieldChange = () => {
+      const handleFieldChange = (event) => {
         validateField(field);
+        // Solo cuenta como "tocado" lo que ha tocado una persona. La aplicación
+        // rellena los formularios y dispara `change` para que los filtros reaccionen
+        // —al abrir una ficha, al sincronizar el año, al cargar una lista—, y eso
+        // marcaba el formulario como sucio sin que nadie hubiera escrito nada. El
+        // aviso de "cambios sin guardar" saltaba en cada navegación, así que dejaba
+        // de significar algo. Los eventos que dispara el código llevan isTrusted en
+        // false; los de teclado y ratón, en true.
+        if (event && event.isTrusted === false) return;
         dirtyForms.add(form.id);
         touchedForms.add(form.id);
         form.classList.add("is-dirty");
