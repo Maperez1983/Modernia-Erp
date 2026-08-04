@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Da de alta como cliente al titular de cada hipoteca firmada que no lo tenga.
+"""Da de alta como cliente al titular de un expediente que no lo tenga.
 
 Contexto
 --------
@@ -62,9 +62,25 @@ if str(REPO_ROOT) not in sys.path:
 
 from web.db_backend import is_postgres_enabled, open_db_conn  # noqa: E402
 
-SERVICIO = "financiaciones"
 ESTADOS_FIRMADOS = ("firmada", "firmado")
 TABLA_RESPALDO = "hipotecas_titulares_alta_backup"
+
+# Cada CRM guarda el titular en una columna distinta y lo vincula por `cliente_id`.
+# El resto del guion es idéntico, así que se parametriza en vez de copiarse.
+MODULOS = {
+    "hipotecas": {
+        "tabla": "hipotecas",
+        "columna_nombre": "cliente",
+        "servicio": "financiaciones",
+        "orden": "COALESCE(NULLIF(fecha_firma, ''), '9999')",
+    },
+    "seguros": {
+        "tabla": "seguros",
+        "columna_nombre": "tomador",
+        "servicio": "seguros",
+        "orden": "COALESCE(NULLIF(fecha_efecto, ''), '9999')",
+    },
+}
 
 
 def clave_de_nombre(valor):
@@ -97,7 +113,7 @@ def cargar_indice_de_clientes(conn, workspace_id):
     return indice
 
 
-def pendientes(conn, workspace_id, todos_los_estados=False):
+def pendientes(conn, workspace_id, todos_los_estados=False, modulo="hipotecas"):
     """Hipotecas del workspace cuyo titular no tiene ficha de cliente.
 
     Por defecto solo las firmadas, que es la regla de negocio original. Con
@@ -105,6 +121,8 @@ def pendientes(conn, workspace_id, todos_los_estados=False):
     indemnización: el titular de un expediente existe aunque la operación no llegara
     a firmarse, y si no está de alta no se le puede buscar ni volver a llamar.
     """
+    cfg = MODULOS[modulo]
+    tabla, columna, orden = cfg["tabla"], cfg["columna_nombre"], cfg["orden"]
     filtro_estado = ""
     valores = []
     if not todos_los_estados:
@@ -113,21 +131,26 @@ def pendientes(conn, workspace_id, todos_los_estados=False):
         valores.extend(ESTADOS_FIRMADOS)
     return conn.execute(
         f"""
-        SELECT id, cliente, empresa_id, estado, fecha_firma
-        FROM hipotecas
+        SELECT id, {columna} AS cliente, empresa_id, estado
+        FROM {tabla}
         WHERE COALESCE(TRIM(COALESCE(cliente_id, '')), '') = ''
-          AND TRIM(COALESCE(cliente, '')) <> ''
+          AND TRIM(COALESCE({columna}, '')) <> ''
           {filtro_estado}
           AND (COALESCE(workspace_id, '') = ? OR empresa_id IN (
                 SELECT empresa_id FROM workspace_empresas WHERE workspace_id = ?
               ))
-        ORDER BY COALESCE(NULLIF(fecha_firma, ''), '9999'), cliente
+        ORDER BY {orden}, {columna}
         """,
         (*valores, workspace_id, workspace_id),
     ).fetchall()
 
 
 def asegurar_respaldo(conn):
+    """Crea el respaldo y le añade `tabla_origen` si viene de antes de los módulos.
+
+    Las 45 anotaciones que ya existían son todas de hipotecas: se rellenan con ese
+    valor para que el rollback siga sabiendo dónde deshacerlas.
+    """
     conn.execute(
         f"""
         CREATE TABLE IF NOT EXISTS {TABLA_RESPALDO} (
@@ -139,6 +162,17 @@ def asegurar_respaldo(conn):
         )
         """
     )
+    try:
+        conn.execute(f"ALTER TABLE {TABLA_RESPALDO} ADD COLUMN tabla_origen TEXT")
+    except Exception:
+        pass
+    try:
+        conn.execute(
+            f"UPDATE {TABLA_RESPALDO} SET tabla_origen = 'hipotecas'"
+            " WHERE COALESCE(tabla_origen, '') = ''"
+        )
+    except Exception:
+        pass
 
 
 def main(argv=None):
@@ -146,6 +180,7 @@ def main(argv=None):
     parser.add_argument("--db", default=str(REPO_ROOT / "data" / "crm.sqlite"))
     parser.add_argument("--backend", choices=["auto", "sqlite", "postgres"], default="auto")
     parser.add_argument("--workspace-id", required=True)
+    parser.add_argument("--modulo", choices=sorted(MODULOS), default="hipotecas")
     parser.add_argument("--apply", action="store_true", help="Escribe. Sin esto va en seco.")
     parser.add_argument("--rollback", action="store_true", help="Deshace lo que hizo este script.")
     parser.add_argument("--yes", action="store_true", help="No preguntar antes de escribir en Postgres.")
@@ -174,6 +209,7 @@ def main(argv=None):
     try:
         asegurar_respaldo(conn)
 
+        cfg = MODULOS[args.modulo]
         if args.rollback:
             filas = conn.execute(f"SELECT * FROM {TABLA_RESPALDO}").fetchall()
             print(f"Anotaciones de respaldo ..... {len(filas)}")
@@ -181,8 +217,11 @@ def main(argv=None):
                 print("(en seco: no se toca nada)")
                 return 0
             for fila in filas:
+                origen = str(fila["tabla_origen"] or "hipotecas")
+                if origen not in {cfg["tabla"] for cfg in MODULOS.values()}:
+                    continue
                 conn.execute(
-                    "UPDATE hipotecas SET cliente_id = '' WHERE id = ?", (fila["hipoteca_id"],)
+                    f"UPDATE {origen} SET cliente_id = '' WHERE id = ?", (fila["hipoteca_id"],)
                 )
                 if fila["vinculo_id"]:
                     conn.execute("DELETE FROM clientes_empresas WHERE id = ?", (fila["vinculo_id"],))
@@ -194,8 +233,9 @@ def main(argv=None):
             return 0
 
         indice = cargar_indice_de_clientes(conn, args.workspace_id)
-        filas = pendientes(conn, args.workspace_id, args.todos_los_estados)
-        etiqueta = "Hipotecas sin ficha" if args.todos_los_estados else "Hipotecas firmadas sin ficha"
+        filas = pendientes(conn, args.workspace_id, args.todos_los_estados, args.modulo)
+        cfg = MODULOS[args.modulo]
+        etiqueta = f"{cfg['tabla'].capitalize()} sin ficha"
         print(f"{etiqueta:<30}{len(filas)}")
 
         a_enlazar, a_crear, ambiguas = [], [], []
@@ -227,13 +267,13 @@ def main(argv=None):
         creados = enlazados = 0
         for fila, cliente_id in a_enlazar:
             conn.execute(
-                "UPDATE hipotecas SET cliente_id = ?, updated_at = ? WHERE id = ?",
+                f"UPDATE {cfg['tabla']} SET cliente_id = ?, updated_at = ? WHERE id = ?",
                 (cliente_id, ahora, fila["id"]),
             )
             conn.execute(
-                f"INSERT INTO {TABLA_RESPALDO} (hipoteca_id, cliente_id, cliente_creado, vinculo_id, creado_en)"
-                " VALUES (?, ?, 0, '', ?)",
-                (fila["id"], cliente_id, ahora),
+                f"INSERT INTO {TABLA_RESPALDO} (hipoteca_id, cliente_id, cliente_creado, vinculo_id, creado_en, tabla_origen)"
+                " VALUES (?, ?, 0, '', ?, ?)",
+                (fila["id"], cliente_id, ahora, cfg["tabla"]),
             )
             enlazados += 1
 
@@ -252,16 +292,16 @@ def main(argv=None):
                 INSERT INTO clientes_empresas (id, cliente_id, empresa_id, servicio, estado, workspace_id, created_at, updated_at)
                 VALUES (?, ?, ?, ?, 'Activo', ?, ?, ?)
                 """,
-                (vinculo_id, cliente_id, fila["empresa_id"], SERVICIO, args.workspace_id, ahora, ahora),
+                (vinculo_id, cliente_id, fila["empresa_id"], cfg["servicio"], args.workspace_id, ahora, ahora),
             )
             conn.execute(
-                "UPDATE hipotecas SET cliente_id = ?, updated_at = ? WHERE id = ?",
+                f"UPDATE {cfg['tabla']} SET cliente_id = ?, updated_at = ? WHERE id = ?",
                 (cliente_id, ahora, fila["id"]),
             )
             conn.execute(
-                f"INSERT INTO {TABLA_RESPALDO} (hipoteca_id, cliente_id, cliente_creado, vinculo_id, creado_en)"
-                " VALUES (?, ?, 1, ?, ?)",
-                (fila["id"], cliente_id, vinculo_id, ahora),
+                f"INSERT INTO {TABLA_RESPALDO} (hipoteca_id, cliente_id, cliente_creado, vinculo_id, creado_en, tabla_origen)"
+                " VALUES (?, ?, 1, ?, ?, ?)",
+                (fila["id"], cliente_id, vinculo_id, ahora, cfg["tabla"]),
             )
             creados += 1
 
