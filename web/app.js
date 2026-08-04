@@ -93482,6 +93482,20 @@ try {
       // Escribir es más rápido que la red: si ha salido otra petición después de
       // esta, su respuesta es la buena y esta ya no vale.
       if (mio !== seq) return;
+      // Un 401 con "Sin resultados" haría creer que esa persona no existe. Dos cosas
+      // muy distintas: una es "no está" y la otra "no puedes verlo ahora mismo".
+      if (res.status === 401) {
+        filas = [];
+        lista.innerHTML = "";
+        estado.textContent = "Tu sesión ha caducado. Vuelve a entrar.";
+        return;
+      }
+      if (!res.ok) {
+        filas = [];
+        lista.innerHTML = "";
+        estado.textContent = `No se pudo buscar (error ${res.status}).`;
+        return;
+      }
       const data = await res.json();
       filas = Array.isArray(data?.rows) ? data.rows : [];
       pintar();
@@ -93541,6 +93555,11 @@ try {
 
   window.abrirBusquedaGlobal = () => {
     if (!String(state.currentWorkspaceId || "").trim()) return false;
+    // Sin sesión no hay nada que buscar, y el panel taparía el formulario de acceso.
+    // `currentWorkspaceId` sale de la URL, así que sigue puesto aunque hayas caducado.
+    const login = document.getElementById("authLoginOverlay");
+    if (login && !login.classList.contains("hidden")) return false;
+    if (document.body.classList.contains("auth-pending")) return false;
     modal.classList.remove("hidden");
     input.focus();
     input.select();

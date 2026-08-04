@@ -123,6 +123,31 @@ class LaPantallaTests(unittest.TestCase):
         self.assertNotIn("${fila.nombre}", bloque)
         self.assertIn("escapeHtml(fila.nombre", bloque)
 
+class NoConfundirNoEstaConNoPuedesVerloTests(unittest.TestCase):
+    """Un 401 pintado como "Sin resultados" hace creer que la persona no existe.
+
+    Visto en producción el 2026-08-04: con la sesión caducada, el panel decía
+    'Sin resultados para "bouzyane"' sobre una ficha que existe. Y se abría encima
+    del formulario de acceso, tapándolo.
+    """
+
+    def setUp(self):
+        i = APP.index("// Búsqueda global")
+        self.bloque = APP[i:]
+
+    def test_la_sesion_caducada_se_dice_tal_cual(self):
+        self.assertIn("res.status === 401", self.bloque)
+        self.assertIn("Tu sesión ha caducado", self.bloque)
+
+    def test_cualquier_otro_error_tampoco_es_sin_resultados(self):
+        self.assertIn("if (!res.ok)", self.bloque)
+
+    def test_no_se_abre_sobre_la_pantalla_de_acceso(self):
+        i = self.bloque.index("window.abrirBusquedaGlobal = ")
+        apertura = self.bloque[i: i + 700]
+        self.assertIn("authLoginOverlay", apertura)
+        self.assertIn('classList.contains("auth-pending")', apertura)
+
 
 if __name__ == "__main__":
     unittest.main()
