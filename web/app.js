@@ -93566,3 +93566,83 @@ try {
     return true;
   };
 })();
+
+// ---------------------------------------------------------------------------
+// Derecho de supresión (RGPD art. 17)
+//
+// No existía forma de ejercerlo: ni botón, ni endpoint, ni guion. Un derecho que
+// la aplicación no sabía cumplir.
+//
+// Suprimir no borra la fila. El art. 17.3 b) y e) permite —y la Ley General
+// Tributaria obliga— conservar facturación y contabilidad. Lo que desaparece es la
+// identidad: quien mire esas filas después no puede saber de quién eran.
+// ---------------------------------------------------------------------------
+(() => {
+  const boton = document.getElementById("clienteSuprimirBtn");
+  if (!boton) return;
+
+  boton.addEventListener("click", async () => {
+    const clienteId = String(state.currentClienteId || "").trim();
+    const wsId = String(state.currentWorkspaceId || "").trim();
+    if (!clienteId) {
+      alert("Abre primero la ficha del cliente.");
+      return;
+    }
+    if (!wsId) {
+      alert("Sin workspace activo.");
+      return;
+    }
+    const nombre = document.getElementById("clienteDetailTitle")?.textContent?.trim() || "este cliente";
+
+    // Sin vuelta atrás, así que no basta con un "¿seguro?": hay que escribirlo.
+    const confirmacion = window.prompt(
+      `Vas a suprimir los datos personales de ${nombre}.\n\n` +
+        "Se borran documentos, notas de seguimiento, preferencias y datos de contacto.\n" +
+        "Se conservan facturas, asientos y pólizas, porque la ley obliga, pero dejan de " +
+        "identificar a nadie.\n\n" +
+        'Esto no se puede deshacer. Escribe SUPRIMIR para confirmar:'
+    );
+    if (String(confirmacion || "").trim().toUpperCase() !== "SUPRIMIR") return;
+
+    const motivo = window.prompt("Motivo (queda registrado junto a quién y cuándo):", "Solicitud del interesado") || "";
+
+    boton.disabled = true;
+    try {
+      const res = await fetch("/api/cliente_suprimir", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cliente_id: clienteId, workspace_id: wsId, motivo }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) {
+        alert(data?.error || `No se pudo suprimir (error ${res.status}).`);
+        return;
+      }
+      const borrado = Object.entries(data?.borrado || {});
+      const conservado = Object.entries(data?.conservado || {});
+      const detalle = [
+        borrado.length
+          ? "Borrado:\n" + borrado.map(([t, n]) => `  · ${t}: ${n}`).join("\n")
+          : "No había datos personales que borrar aparte de la ficha.",
+        conservado.length
+          ? "Conservado por obligación legal (ya anónimo):\n" +
+            conservado.map(([t, v]) => `  · ${v.motivo}: ${v.filas}`).join("\n")
+          : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      alert(`Ficha suprimida.\n\n${detalle}`);
+      try {
+        loadClientes();
+      } catch (e) {}
+      try {
+        openClienteDetail(clienteId);
+      } catch (e) {}
+    } catch (e) {
+      alert("No se pudo suprimir: " + (e?.message || e));
+    } finally {
+      boton.disabled = false;
+    }
+  });
+})();

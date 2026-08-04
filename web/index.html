@@ -9615,7 +9615,13 @@
               <h3 id="clienteDetailTitle">Ficha de cliente</h3>
               <p class="muted" id="clienteDetailSubtitle">Información general y asignaciones.</p>
             </div>
-            <button class="ghost" type="button" id="clienteDetailBack">Volver</button>
+            <div class="section-head-actions">
+              <!-- Derecho de supresión (RGPD art. 17). Hasta ahora no había ninguna
+                   forma de ejercerlo en la aplicación. Va aquí, junto a la ficha, que
+                   es donde alguien atiende una solicitud. -->
+              <button class="ghost" type="button" id="clienteSuprimirBtn">Suprimir (RGPD)</button>
+              <button class="ghost" type="button" id="clienteDetailBack">Volver</button>
+            </div>
           </div>
           <div id="clientePremiumHeader" class="cliente-premium-header hidden"></div>
           <div id="clienteTabs" class="tc-modulebar tc-modulebar--micro crm-lightning-subbar" role="navigation" aria-label="Cliente">
@@ -11904,7 +11910,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=835",
+              "app.js?v=836",
             ];
 
             const getParams = () => {

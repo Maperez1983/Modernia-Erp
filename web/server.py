@@ -6594,6 +6594,66 @@ def normalize_hipoteca_estado(value):
     return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
+# --- Derecho de supresión (RGPD art. 17) -------------------------------------
+#
+# Suprimir no es borrar la fila. El art. 17.3 b) y e) permite —y la Ley General
+# Tributaria obliga— conservar lo que sostiene una obligación legal: facturación,
+# contabilidad y los contratos que la respaldan. Lo que desaparece es la identidad:
+# quien mire esas filas después no puede saber de quién eran.
+#
+# Estas dos listas son la política, y están aquí para que un asesor pueda leerlas y
+# corregirlas sin bucear en el código. Ante la duda, una tabla NO listada no se toca:
+# borrar de más tampoco tiene vuelta atrás.
+
+# Datos personales sin obligación de conservación: se borran.
+RGPD_TABLAS_A_BORRAR = (
+    ("cliente_profesional", "cliente_id"),      # actividad, IAE
+    ("demandas", "cliente_id"),                 # preferencias de búsqueda
+    ("acciones", "cliente_id"),                 # notas de seguimiento comercial
+    ("seguros_eventos", "cliente_id"),          # trazas de gestión
+    ("inmueble_compradores", "cliente_id"),
+    ("inmueble_propietarios", "cliente_id"),
+    ("fiscal_scenarios", "cliente_id"),         # simulaciones fiscales
+    ("gestoria_import_reglas", "cliente_id"),   # reglas de conciliación por cliente
+    ("gestoria_docs", "cliente_id"),            # documentación aportada (DNI, nóminas...)
+)
+
+# Obligación legal de conservación: se quedan, apuntando a una ficha ya anónima.
+RGPD_TABLAS_QUE_SE_CONSERVAN = (
+    ("gestoria_facturas", "facturas emitidas"),
+    ("gestoria_asientos", "asientos contables"),
+    ("gestoria_contabilidad", "contabilidad"),
+    ("gestoria_trabajos", "encargos facturados"),
+    ("gestoria_modelos", "modelos presentados"),
+    ("cliente_gestoria", "expediente de gestoría"),
+    ("hipotecas", "operaciones y comisiones"),
+    ("seguros", "pólizas mediadas"),
+    ("workspace_presupuestos", "presupuestos"),
+    ("clientes_empresas", "vínculo de servicio"),
+)
+
+# Columnas de `clientes` que identifican a una persona. Se vacían todas.
+RGPD_COLUMNAS_IDENTIFICATIVAS = (
+    "nif",
+    "telefono",
+    "movil",
+    "otro_telefono",
+    "email",
+    "fecha_nacimiento",
+    "direccion",
+    "direccion_numero",
+    "codigo_postal",
+    "poblacion",
+    "provincia",
+    "localidad",
+    "id_personal",
+    "perfil",
+    "perfil_kiron",
+    "procedencia_detalle",
+    "hijos_count",
+)
+
+
 HIPOTECA_BDT_STATE_ORDER = (
     "Pendiente",
     "Estudio",
@@ -57880,6 +57940,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_encargo_close",
             "/api/demandas",
             "/api/demandas_update",
+            "/api/cliente_suprimir",
             "/api/visitas",
             "/api/usuarios",
             "/api/usuarios_update",
@@ -78416,6 +78477,127 @@ class Handler(BaseHTTPRequestHandler):
                 f"INSERT INTO demandas ({', '.join(cols)}) VALUES ({placeholders})",
                 values,
             )
+        elif parsed.path == "/api/cliente_suprimir":
+            # Derecho de supresión del RGPD. Hasta ahora no había ninguna forma de
+            # ejercerlo: ni endpoint, ni botón, ni script. Un derecho que la aplicación
+            # no sabe cumplir.
+            ws_id = str(payload.get("workspace_id") or "").strip()
+            cliente_id = str(payload.get("cliente_id") or "").strip()
+            motivo = str(payload.get("motivo") or "").strip()
+            if not cliente_id:
+                json_response(self, {"error": "cliente_id requerido"}, status=400)
+                return
+            if not ws_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, ws_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            # Suprimir no es una edición más: no lo hace cualquiera que pueda escribir.
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(
+                    self,
+                    {"error": "Solo un responsable del workspace puede suprimir una ficha."},
+                    status=403,
+                )
+                return
+
+            ambito, ambito_valores = clientes_workspace_scope_sql(conn, ws_id, alias="c")
+            if not ambito:
+                json_response(self, {"error": "Sin ámbito"}, status=400)
+                return
+            fila = conn.execute(
+                "SELECT c.id, c.nombre FROM clientes c WHERE c.id = ? AND " + ambito,
+                (cliente_id, *ambito_valores),
+            ).fetchone()
+            if not fila:
+                json_response(self, {"error": "Cliente no encontrado en este workspace"}, status=404)
+                return
+            nombre_previo = str(row_value(fila, "nombre", "") or "")
+
+            columnas = table_columns(conn, "clientes") or set()
+            borrados = {}
+            for tabla, columna in RGPD_TABLAS_A_BORRAR:
+                cols = table_columns(conn, tabla) or set()
+                if columna not in cols:
+                    continue
+                cuenta = conn.execute(
+                    f"SELECT COUNT(*) AS total FROM {tabla} WHERE {columna} = ?", (cliente_id,)
+                ).fetchone()
+                cuantos = int(row_value(cuenta, "total", 0) or 0)
+                if cuantos:
+                    conn.execute(f"DELETE FROM {tabla} WHERE {columna} = ?", (cliente_id,))
+                    borrados[tabla] = cuantos
+
+            conservados = {}
+            for tabla, etiqueta in RGPD_TABLAS_QUE_SE_CONSERVAN:
+                cols = table_columns(conn, tabla) or set()
+                if "cliente_id" not in cols:
+                    continue
+                cuenta = conn.execute(
+                    f"SELECT COUNT(*) AS total FROM {tabla} WHERE cliente_id = ?", (cliente_id,)
+                ).fetchone()
+                cuantos = int(row_value(cuenta, "total", 0) or 0)
+                if cuantos:
+                    conservados[tabla] = {"filas": cuantos, "motivo": etiqueta}
+
+            # La ficha se queda, pero deja de identificar a nadie. Borrarla rompería
+            # las facturas y los asientos que sí hay que conservar.
+            sets = []
+            valores = []
+            for columna in RGPD_COLUMNAS_IDENTIFICATIVAS:
+                if columna in columnas:
+                    sets.append(f"{columna} = NULL")
+            if "nombre" in columnas:
+                sets.append("nombre = ?")
+                valores.append(f"Cliente suprimido · {cliente_id[:8]}")
+            if "estado" in columnas:
+                sets.append("estado = ?")
+                valores.append("Suprimido")
+            if "updated_at" in columnas:
+                sets.append("updated_at = ?")
+                valores.append(now)
+            conn.execute(
+                "UPDATE clientes SET " + ", ".join(sets) + " WHERE id = ?",
+                (*valores, cliente_id),
+            )
+
+            resumen = {
+                "cliente_id": cliente_id,
+                "motivo": motivo,
+                "borrado": borrados,
+                "conservado": conservados,
+                "columnas_vaciadas": [c for c in RGPD_COLUMNAS_IDENTIFICATIVAS if c in columnas],
+            }
+            # Queda constancia de quién y cuándo: el propio registro de la supresión es
+            # lo que permite demostrar que se atendió la solicitud.
+            audit_event(
+                conn,
+                str(payload.get("empresa_id") or "").strip(),
+                "cliente",
+                cliente_id,
+                "supresion_rgpd",
+                usuario=(session or {}).get("usuario") or "",
+                detalles=resumen,
+                now=now,
+            )
+            conn.commit()
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "nombre_previo": nombre_previo,
+                    "borrado": borrados,
+                    "conservado": conservados,
+                    "aviso": (
+                        "La ficha ya no identifica a nadie. Se conservan los registros con "
+                        "obligación legal de conservación, ahora anónimos."
+                    ),
+                },
+            )
+            return
         elif parsed.path == "/api/demandas_update":
             # Mover pedidos de fase en bloque desde el tablero de demandas. La pantalla
             # llamaba aquí desde siempre, pero la ruta no existía: los botones "Aceptar"
