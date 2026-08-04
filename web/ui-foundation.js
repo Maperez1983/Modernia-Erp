@@ -44,6 +44,11 @@
     if (form && String(form.dataset.uiPersist || "") === "0") return false;
     if (String(el.dataset?.uiPersist || "") === "0") return false;
     if (el.type && /password|file|hidden/.test(el.type)) return false;
+    // Un formulario con campo oculto `id` es la ficha de un registro, no un panel de
+    // filtros: lo que hay dentro son datos de ese expediente. Marcarlos uno a uno se
+    // olvida en el siguiente que se escriba, así que se reconoce por la forma. Había
+    // 8 así solo en index.html, la mayoría por un `select` de empresa_id.
+    if (form && form.querySelector && form.querySelector('input[type="hidden"][name="id"]')) return false;
     // Antes cualquier select o textarea se recordaba, sin más. Recordar un filtro es
     // útil; recordar un campo de una ficha es grave: al abrir otro registro se repone
     // el valor guardado encima del real. Visto en producción el 2026-08-04, una
@@ -173,8 +178,27 @@
     });
   };
 
+  // A qué registro pertenece lo que hay ahora mismo en el formulario.
+  //
+  // El borrador se guarda con el id del formulario, no con el del expediente. Sin
+  // esto, dejar a medias la ficha de una hipoteca y abrir otra restauraba encima los
+  // valores de la primera: el mismo fallo que el de los controles recordados, pero
+  // por otra puerta. Guardando el ámbito solo se restaura lo que es de ese registro.
+  const getFormScope = (form) => {
+    if (!form) return "";
+    try {
+      const campoId = form.querySelector('input[name="id"]');
+      const porCampo = String(campoId?.value || "").trim();
+      if (porCampo) return porCampo;
+      const contenedor = form.closest("[data-record-id]");
+      return String(contenedor?.dataset?.recordId || "").trim();
+    } catch {
+      return "";
+    }
+  };
+
   const serializeFormDraft = (form) => {
-    const payload = {};
+    const payload = { __scope: getFormScope(form) };
     getDraftControls(form).forEach((el) => {
       const key = getElementKey(el);
       if (!key) return;
@@ -216,10 +240,17 @@
       draft = null;
     }
     if (!draft || typeof draft !== "object") return;
+    // Un borrador solo vuelve al expediente del que salió. Si es de otro, se tira:
+    // restaurarlo pondría datos de una hipoteca encima de otra, y quien guardara
+    // después los estaría escribiendo en el registro equivocado.
+    if (String(draft.__scope || "") !== getFormScope(form)) {
+      clearFormDraft(form);
+      return;
+    }
     let restored = 0;
     getDraftControls(form).forEach((el) => {
       const key = getElementKey(el);
-      if (!(key in draft)) return;
+      if (key === "__scope" || !(key in draft)) return;
       const value = draft[key];
       if (el.type === "checkbox") {
         el.checked = !!value;

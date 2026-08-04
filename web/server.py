@@ -7316,7 +7316,14 @@ def add_hipotecas_dashboard_sheet(wb, items, selected_year=None, brand_name=None
         # barras distintas, cada una con un trozo del volumen.
         acumulado = {}
         for item in items:
-            nombre = str(item.get(clave) or "").strip() or "Sin especificar"
+            nombre = str(item.get(clave) or "").strip()
+            if clave == "inmobiliaria" and not nombre:
+                # `oficina` e `inmobiliaria` llevan lo mismo en 69 de las 110 hipotecas,
+                # y cuando difieren a veces la inmobiliaria está vacía. El negocio ha
+                # decidido que todo se llame inmobiliaria, así que la oficina hace de
+                # respaldo en vez de quedar la fila como "Sin especificar".
+                nombre = str(item.get("oficina") or "").strip()
+            nombre = nombre or "Sin especificar"
             llave = normalize_lookup_text(nombre) or nombre.upper()
             registro = acumulado.setdefault(
                 llave, {"n": 0, "volumen": 0.0, "comision": 0.0, "grafias": {}}
