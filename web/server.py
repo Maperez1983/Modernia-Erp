@@ -58017,6 +58017,33 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_contabilidad_import_preview",
             "/api/workspace_fincas_contabilidad_import",
             "/api/gestoria_import_diario_excel",
+            # Estas se quedaron sin dar de alta al escribirse su manejador, así que
+            # respondían "Endpoint no valido" pese a existir: entre ellas las dos
+            # exportaciones de listados y la recuperación de acceso, que además está
+            # marcada como pública pero se rechazaba antes de llegar a comprobarlo.
+            "/api/ai_inmo_encargo_copilot",
+            "/api/auth_request_access_recovery",
+            "/api/gestoria_asiento_punteo_banco",
+            "/api/gestoria_conta_config",
+            "/api/gestoria_conta_task_update",
+            "/api/gestoria_conta_tasks_bulk",
+            "/api/gestoria_cuentas_bancarias_save",
+            "/api/gestoria_import_documento_conciliar",
+            "/api/gestoria_movimientos_bancarios_import",
+            "/api/gestoria_movimientos_bancarios_import_preview",
+            "/api/gestoria_socios_cambios",
+            "/api/hipotecas_export_pdf",
+            "/api/hipotecas_listado_excel",
+            "/api/inmueble_propietario_create",
+            "/api/inmueble_renovar",
+            "/api/renta_campaign_document",
+            "/api/workspace_fincas_comunidad_delete",
+            "/api/workspace_fincas_convert_presupuesto",
+            "/api/workspace_fincas_documentos",
+            "/api/workspace_fincas_vecinos",
+            "/api/workspace_presupuesto_delete",
+            "/api/workspace_rrhh_nominas_import",
+            "/api/workspace_portal_presign",
         ):
             json_response(self, {"error": "Endpoint no valido"}, status=404)
             return
