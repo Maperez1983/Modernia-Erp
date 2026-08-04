@@ -97,21 +97,33 @@ def cargar_indice_de_clientes(conn, workspace_id):
     return indice
 
 
-def pendientes(conn, workspace_id):
-    marcas = ",".join(["?"] * len(ESTADOS_FIRMADOS))
+def pendientes(conn, workspace_id, todos_los_estados=False):
+    """Hipotecas del workspace cuyo titular no tiene ficha de cliente.
+
+    Por defecto solo las firmadas, que es la regla de negocio original. Con
+    `todos_los_estados` entran también las pendientes, canceladas y las de
+    indemnización: el titular de un expediente existe aunque la operación no llegara
+    a firmarse, y si no está de alta no se le puede buscar ni volver a llamar.
+    """
+    filtro_estado = ""
+    valores = []
+    if not todos_los_estados:
+        marcas = ",".join(["?"] * len(ESTADOS_FIRMADOS))
+        filtro_estado = f"AND LOWER(TRIM(COALESCE(estado, ''))) IN ({marcas})"
+        valores.extend(ESTADOS_FIRMADOS)
     return conn.execute(
         f"""
         SELECT id, cliente, empresa_id, estado, fecha_firma
         FROM hipotecas
-        WHERE LOWER(TRIM(COALESCE(estado, ''))) IN ({marcas})
-          AND COALESCE(TRIM(COALESCE(cliente_id, '')), '') = ''
+        WHERE COALESCE(TRIM(COALESCE(cliente_id, '')), '') = ''
           AND TRIM(COALESCE(cliente, '')) <> ''
+          {filtro_estado}
           AND (COALESCE(workspace_id, '') = ? OR empresa_id IN (
                 SELECT empresa_id FROM workspace_empresas WHERE workspace_id = ?
               ))
-        ORDER BY fecha_firma
+        ORDER BY COALESCE(NULLIF(fecha_firma, ''), '9999'), cliente
         """,
-        (*ESTADOS_FIRMADOS, workspace_id, workspace_id),
+        (*valores, workspace_id, workspace_id),
     ).fetchall()
 
 
@@ -137,6 +149,11 @@ def main(argv=None):
     parser.add_argument("--apply", action="store_true", help="Escribe. Sin esto va en seco.")
     parser.add_argument("--rollback", action="store_true", help="Deshace lo que hizo este script.")
     parser.add_argument("--yes", action="store_true", help="No preguntar antes de escribir en Postgres.")
+    parser.add_argument(
+        "--todos-los-estados",
+        action="store_true",
+        help="No limitarse a las firmadas: dar de alta al titular de cualquier expediente.",
+    )
     args = parser.parse_args(argv)
 
     if args.backend in ("sqlite", "postgres"):
@@ -177,8 +194,9 @@ def main(argv=None):
             return 0
 
         indice = cargar_indice_de_clientes(conn, args.workspace_id)
-        filas = pendientes(conn, args.workspace_id)
-        print(f"Hipotecas firmadas sin ficha  {len(filas)}")
+        filas = pendientes(conn, args.workspace_id, args.todos_los_estados)
+        etiqueta = "Hipotecas sin ficha" if args.todos_los_estados else "Hipotecas firmadas sin ficha"
+        print(f"{etiqueta:<30}{len(filas)}")
 
         a_enlazar, a_crear, ambiguas = [], [], []
         for fila in filas:
