@@ -7237,6 +7237,218 @@ def build_hipotecas_firmadas_excel_workbook(items, selected_year=None, brand_nam
     return wb
 
 
+def _num(valor):
+    """Un importe como float, venga como venga.
+
+    Las columnas de dinero son NUMERIC desde el 2026-08-04, así que Postgres
+    devuelve Decimal. Mezclar Decimal con float al sumar revienta.
+    """
+    if valor is None or valor == "":
+        return 0.0
+    try:
+        return float(valor)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def add_hipotecas_dashboard_sheet(wb, items, selected_year=None, brand_name=None):
+    """Hoja de dashboard del listado: KPIs y gráficos.
+
+    El Excel salía con el detalle y un resumen de cifras sueltas. Para ver de un
+    vistazo con qué banco se firma más, qué inmobiliaria trae más operaciones o
+    cómo se reparte la comisión había que montarse una tabla dinámica a mano.
+
+    Los gráficos son nativos de Excel (openpyxl), no imágenes: se recalculan solos
+    si alguien filtra o edita las tablas de apoyo, que quedan a la vista debajo.
+    """
+    try:
+        from openpyxl.chart import BarChart, PieChart, Reference
+        from openpyxl.styles import Alignment, Font, PatternFill
+    except Exception:
+        return None
+
+    items = list(items or [])
+    hoja = wb.create_sheet("Dashboard", 0)
+    hoja.sheet_view.showGridLines = False
+
+    VERDE = "1F5C3A"
+    CREMA = "F4F8F5"
+    titulo = Font(name="IBM Plex Sans", size=15, bold=True, color=VERDE)
+    rotulo = Font(name="IBM Plex Sans", size=9, bold=True, color="5C6B60")
+    cifra = Font(name="IBM Plex Sans", size=16, bold=True, color="12291C")
+    cabecera = Font(name="IBM Plex Sans", size=10, bold=True, color="FFFFFF")
+    relleno = PatternFill("solid", fgColor=VERDE)
+    suave = PatternFill("solid", fgColor=CREMA)
+
+    ejercicio = str(selected_year or "").strip() or "Histórico"
+    hoja.merge_cells("A1:H1")
+    hoja["A1"] = f"{str(brand_name or '').strip() or 'Verifika²'} · Hipotecas · {ejercicio}"
+    hoja["A1"].font = titulo
+    hoja.row_dimensions[1].height = 26
+
+    total = len(items)
+    volumen = sum(_num(i.get("importe_hipoteca")) for i in items)
+    comision = sum(_num(i.get("honorarios")) for i in items)
+    de_juan = sum(_num(i.get("comision_juan")) for i in items)
+    de_modernia = sum(_num(i.get("comision_modernia")) for i in items)
+
+    kpis = [
+        ("Operaciones", total, "0"),
+        ("Volumen hipotecario", volumen, '#,##0.00 "€"'),
+        ("Comisión cobrada", comision, '#,##0.00 "€"'),
+        ("Importe medio", (volumen / total) if total else 0, '#,##0.00 "€"'),
+        ("Comisión media", (comision / total) if total else 0, '#,##0.00 "€"'),
+    ]
+    for indice, (nombre, valor, formato) in enumerate(kpis):
+        col = 1 + indice * 2
+        celda_rotulo = hoja.cell(row=3, column=col, value=nombre)
+        celda_rotulo.font = rotulo
+        celda_valor = hoja.cell(row=4, column=col, value=valor)
+        celda_valor.font = cifra
+        celda_valor.number_format = formato
+        for fila in (3, 4):
+            for desplazamiento in (0, 1):
+                hoja.cell(row=fila, column=col + desplazamiento).fill = suave
+
+    def agrupar(clave):
+        # Se agrupa por el nombre normalizado, no por el literal: "Malaga Norte",
+        # "MALAGA NORTE" y "MÁLAGA NORTE" son la misma oficina y salían como tres
+        # barras distintas, cada una con un trozo del volumen.
+        acumulado = {}
+        for item in items:
+            nombre = str(item.get(clave) or "").strip() or "Sin especificar"
+            llave = normalize_lookup_text(nombre) or nombre.upper()
+            registro = acumulado.setdefault(
+                llave, {"n": 0, "volumen": 0.0, "comision": 0.0, "grafias": {}}
+            )
+            registro["n"] += 1
+            registro["volumen"] += _num(item.get("importe_hipoteca"))
+            registro["comision"] += _num(item.get("honorarios"))
+            registro["grafias"][nombre] = registro["grafias"].get(nombre, 0) + 1
+        salida = []
+        for registro in acumulado.values():
+            # Se enseña la grafía más usada, que es la que el equipo reconoce.
+            etiqueta = max(registro["grafias"].items(), key=lambda par: (par[1], par[0]))[0]
+            salida.append((etiqueta, registro))
+        # De más a menos operaciones: la primera fila del gráfico es la que interesa.
+        return sorted(salida, key=lambda par: (-par[1]["n"], par[0]))
+
+    def tabla(fila_inicial, titulo_tabla, etiqueta_col, datos):
+        hoja.cell(row=fila_inicial, column=1, value=titulo_tabla).font = Font(
+            name="IBM Plex Sans", size=11, bold=True, color=VERDE
+        )
+        encabezados = [etiqueta_col, "Operaciones", "Volumen", "Comisión"]
+        for indice, texto in enumerate(encabezados):
+            celda = hoja.cell(row=fila_inicial + 1, column=1 + indice, value=texto)
+            celda.font = cabecera
+            celda.fill = relleno
+            celda.alignment = Alignment(horizontal="center")
+        for desplazamiento, (nombre, registro) in enumerate(datos):
+            fila = fila_inicial + 2 + desplazamiento
+            hoja.cell(row=fila, column=1, value=nombre)
+            hoja.cell(row=fila, column=2, value=registro["n"])
+            celda_volumen = hoja.cell(row=fila, column=3, value=round(registro["volumen"], 2))
+            celda_volumen.number_format = '#,##0.00 "€"'
+            celda_comision = hoja.cell(row=fila, column=4, value=round(registro["comision"], 2))
+            celda_comision.number_format = '#,##0.00 "€"'
+        return fila_inicial + 1, fila_inicial + 1 + len(datos)
+
+    def barras(titulo_grafico, fila_cabecera, fila_final, ancla):
+        grafico = BarChart()
+        grafico.type = "bar"
+        grafico.title = titulo_grafico
+        grafico.height = 7.5
+        grafico.width = 13
+        grafico.legend = None
+        datos = Reference(hoja, min_col=2, min_row=fila_cabecera, max_row=fila_final)
+        categorias = Reference(hoja, min_col=1, min_row=fila_cabecera + 1, max_row=fila_final)
+        grafico.add_data(datos, titles_from_data=True)
+        grafico.set_categories(categorias)
+        hoja.add_chart(grafico, ancla)
+
+    por_banco = agrupar("banco")
+    por_inmo = agrupar("inmobiliaria")
+
+    cab_banco, fin_banco = tabla(6, "Operaciones por banco", "Banco", por_banco)
+    if fin_banco > cab_banco:
+        barras("Operaciones por banco", cab_banco, fin_banco, "F6")
+
+    fila_inmo = fin_banco + 3
+    cab_inmo, fin_inmo = tabla(fila_inmo, "Operaciones por inmobiliaria", "Inmobiliaria", por_inmo)
+    if fin_inmo > cab_inmo:
+        barras("Operaciones por inmobiliaria", cab_inmo, fin_inmo, f"F{fila_inmo}")
+
+    # Comisión cobrada, mes a mes. El mes sale de la fecha de firma, que es cuando
+    # se devenga; usar la de encargo movería el ingreso a otro periodo.
+    por_mes = {}
+    for item in items:
+        firma = str(item.get("fecha_firma") or "").strip()
+        mes = firma[:7] if len(firma) >= 7 else "Sin fecha"
+        por_mes[mes] = por_mes.get(mes, 0.0) + _num(item.get("honorarios"))
+    meses = sorted(por_mes.items())
+
+    fila_mes = fin_inmo + 3
+    hoja.cell(row=fila_mes, column=1, value="Comisión cobrada por mes").font = Font(
+        name="IBM Plex Sans", size=11, bold=True, color=VERDE
+    )
+    for indice, texto in enumerate(["Mes", "Comisión"]):
+        celda = hoja.cell(row=fila_mes + 1, column=1 + indice, value=texto)
+        celda.font = cabecera
+        celda.fill = relleno
+        celda.alignment = Alignment(horizontal="center")
+    for desplazamiento, (mes, importe) in enumerate(meses):
+        fila = fila_mes + 2 + desplazamiento
+        hoja.cell(row=fila, column=1, value=mes)
+        celda = hoja.cell(row=fila, column=2, value=round(importe, 2))
+        celda.number_format = '#,##0.00 "€"'
+    if meses:
+        grafico = BarChart()
+        grafico.type = "col"
+        grafico.title = "Comisión cobrada por mes"
+        grafico.height = 7.5
+        grafico.width = 13
+        grafico.legend = None
+        datos = Reference(hoja, min_col=2, min_row=fila_mes + 1, max_row=fila_mes + 1 + len(meses))
+        categorias = Reference(hoja, min_col=1, min_row=fila_mes + 2, max_row=fila_mes + 1 + len(meses))
+        grafico.add_data(datos, titles_from_data=True)
+        grafico.set_categories(categorias)
+        hoja.add_chart(grafico, f"F{fila_mes}")
+
+    # Reparto de la comisión, solo si está informado: un quesito de ceros engaña.
+    if de_juan or de_modernia:
+        fila_reparto = fila_mes + max(len(meses), 1) + 4
+        hoja.cell(row=fila_reparto, column=1, value="Reparto de la comisión").font = Font(
+            name="IBM Plex Sans", size=11, bold=True, color=VERDE
+        )
+        for indice, texto in enumerate(["Concepto", "Importe"]):
+            celda = hoja.cell(row=fila_reparto + 1, column=1 + indice, value=texto)
+            celda.font = cabecera
+            celda.fill = relleno
+            celda.alignment = Alignment(horizontal="center")
+        reparto = [("Juan", de_juan), ("Modernia", de_modernia)]
+        resto = comision - de_juan - de_modernia
+        if round(resto, 2) > 0:
+            reparto.append(("Resto / sin repartir", resto))
+        for desplazamiento, (concepto, importe) in enumerate(reparto):
+            fila = fila_reparto + 2 + desplazamiento
+            hoja.cell(row=fila, column=1, value=concepto)
+            celda = hoja.cell(row=fila, column=2, value=round(importe, 2))
+            celda.number_format = '#,##0.00 "€"'
+        quesito = PieChart()
+        quesito.title = "Reparto de la comisión"
+        quesito.height = 7.5
+        quesito.width = 11
+        datos = Reference(hoja, min_col=2, min_row=fila_reparto + 1, max_row=fila_reparto + 1 + len(reparto))
+        categorias = Reference(hoja, min_col=1, min_row=fila_reparto + 2, max_row=fila_reparto + 1 + len(reparto))
+        quesito.add_data(datos, titles_from_data=True)
+        quesito.set_categories(categorias)
+        hoja.add_chart(quesito, f"F{fila_reparto}")
+
+    for columna, ancho in (("A", 34), ("B", 13), ("C", 17), ("D", 15), ("E", 3)):
+        hoja.column_dimensions[columna].width = ancho
+    return hoja
+
+
 def build_hipotecas_listado_excel_workbook(items, selected_year=None, brand_name=None, brand_logo_url=None):
     normalized_items = []
     for item in items or []:
@@ -7261,6 +7473,13 @@ def build_hipotecas_listado_excel_workbook(items, selected_year=None, brand_name
         detail = wb[wb.sheetnames[1]]
         detail.title = "Operaciones listado"
         detail["A1"] = "Año"
+    # El dashboard se añade al final pero se coloca el primero: al abrir el fichero
+    # se ve el resumen visual, no una tabla de 24 filas.
+    try:
+        add_hipotecas_dashboard_sheet(wb, normalized_items, selected_year, brand_name)
+    except Exception:
+        # Un gráfico que falle no puede dejar sin Excel a quien solo quería el listado.
+        pass
     return wb
 
 
