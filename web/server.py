@@ -41150,6 +41150,53 @@ def ensure_workspace_product_tables(conn):
     # vecino los vea por descuido es peor que tener que marcar los que sí.
     ensure_column(conn, "workspace_fincas_documentos", "visible_portal", "visible_portal INTEGER NOT NULL DEFAULT 0")
     # --- Contabilidad de comunidad: plan de cuentas, diario y extracto ---------
+    # Grupos de reparto: no todos los propietarios pagan todos los gastos. Los bajos
+    # sin acceso al portal no pagan la limpieza de la escalera, el garaje lo pagan
+    # los que tienen plaza, y en una urbanización cada portal lleva lo suyo. Cada
+    # propietario tiene un coeficiente **distinto en cada grupo**, y sin esto la
+    # liquidación de cualquier finca con locales o plazas sale mal.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_grupos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          comunidad_id TEXT NOT NULL,
+          clave TEXT NOT NULL,
+          nombre TEXT NOT NULL,
+          cuenta_gasto TEXT,
+          activo INTEGER NOT NULL DEFAULT 1,
+          orden INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_grupos_unico "
+                     "ON workspace_fincas_grupos (comunidad_id, clave)")
+    except Exception:
+        pass
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_coeficientes (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          grupo_id TEXT NOT NULL,
+          vecino_id TEXT NOT NULL,
+          coeficiente NUMERIC NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_coef_unico "
+                     "ON workspace_fincas_coeficientes (grupo_id, vecino_id)")
+    except Exception:
+        pass
+    # Cada partida del presupuesto se imputa a un grupo: es lo que decide quién la
+    # paga. Sin grupo, va al general y la pagan todos.
+    ensure_column(conn, "workspace_fincas_presupuesto_partidas", "grupo_id", "grupo_id TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_cuentas (
@@ -50527,31 +50574,90 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
     }
 
 
-#: Plan de cuentas de una comunidad de propietarios. No es el PGC de una empresa: una
-#: comunidad no tiene beneficio ni capital, y lo que se lleva es de dónde entra el
-#: dinero y en qué se va. Se sigue la costumbre del sector —grupo 5 para tesorería,
-#: 4 para deudores y acreedores, 6 para gastos y 7 para ingresos— para que a un
-#: administrador le suene, y se deja editable por si la comunidad usa otro.
+#: Plan de cuentas de comunidades, siguiendo el normalizado del Instituto Profesional
+#: de Administración Inmobiliaria. La primera versión me la inventé por analogía con
+#: el PGC de empresa y tenía tres códigos mal, uno de ellos grave: cobraba las cuotas
+#: contra la 700, que es «ventas de mercaderías». Aquí van los del sector, para que
+#: un administrador reconozca sus cuentas y para que las cuentas anuales que salgan
+#: de aquí se parezcan a las que ha visto toda la vida.
+#:
+#: (código, nombre, grupo, orden)
 FINCAS_CUENTAS_DEFECTO = [
-    ("572", "Banco", "tesoreria", 1),
-    ("570", "Caja", "tesoreria", 2),
-    ("440", "Propietarios, cuotas pendientes", "deudores", 3),
-    ("410", "Acreedores y proveedores", "acreedores", 4),
-    ("555", "Partidas pendientes de aplicar", "tesoreria", 5),
-    ("113", "Fondo de reserva", "fondos", 6),
-    ("129", "Resultado del ejercicio", "fondos", 7),
-    ("621", "Suministros (luz, agua, gas)", "gasto", 10),
-    ("622", "Mantenimiento y reparaciones", "gasto", 11),
-    ("623", "Servicios profesionales (administración)", "gasto", 12),
-    ("625", "Primas de seguros", "gasto", 13),
-    ("628", "Limpieza y portería", "gasto", 14),
-    ("629", "Otros gastos de la comunidad", "gasto", 15),
-    ("631", "Tributos y tasas", "gasto", 16),
-    ("700", "Cuotas ordinarias", "ingreso", 20),
-    ("705", "Derramas", "ingreso", 21),
-    ("759", "Otros ingresos", "ingreso", 22),
+    # Fondos y resultados
+    ("112", "Fondo de reserva", "fondos", 1),
+    ("113", "Fondo de obras", "fondos", 2),
+    ("120", "Remanente", "fondos", 3),
+    ("121", "Resultados negativos de ejercicios anteriores", "fondos", 4),
+    ("122", "Aportaciones de propietarios para compensar resultados", "fondos", 5),
+    ("129", "Resultado del ejercicio", "fondos", 6),
+    ("143", "Provisión para grandes reparaciones", "fondos", 7),
+    ("148", "Provisión para impagados reclamados judicialmente", "fondos", 8),
+    # Acreedores
+    ("400", "Proveedores", "acreedores", 10),
+    ("410", "Acreedores por prestación de servicios", "acreedores", 11),
+    # Propietarios y deudores
+    ("4310", "Propietarios deudores por cuotas ordinarias", "deudores", 20),
+    ("4311", "Propietarios deudores por cuotas extraordinarias", "deudores", 21),
+    ("4312", "Propietarios deudores por fondo de reserva", "deudores", 22),
+    ("4319", "Propietarios deudores por resultados negativos", "deudores", 23),
+    ("432", "Propietarios deudores por gastos privativos", "deudores", 24),
+    ("433", "Recibos al cobro", "deudores", 25),
+    ("435", "Recibos impagados", "deudores", 26),
+    ("437", "Anticipos de propietarios", "deudores", 27),
+    ("440", "Deudores no propietarios", "deudores", 28),
+    ("445", "Deudores de dudoso cobro", "deudores", 29),
+    ("4459", "Recibos reclamados judicialmente", "deudores", 30),
+    # Hacienda y Seguridad Social
+    ("4750", "Hacienda Pública, acreedora por IVA", "fiscal", 35),
+    ("4751", "Hacienda Pública, acreedora por retenciones practicadas", "fiscal", 36),
+    ("4760", "Seguridad Social, acreedora por cotizaciones", "fiscal", 37),
+    ("472", "Hacienda Pública, IVA soportado deducible", "fiscal", 38),
+    # Tesorería
+    ("570", "Caja", "tesoreria", 40),
+    ("572", "Bancos", "tesoreria", 41),
+    ("553", "Cuenta corriente con el administrador", "tesoreria", 42),
+    ("555", "Partidas pendientes de aplicación", "tesoreria", 43),
+    # Gastos: el 621 es el general; cada grupo de reparto crea el suyo.
+    ("621", "Gastos generales", "gasto", 50),
+    ("622", "Servicios generales y mantenimiento", "gasto", 51),
+    ("6222", "Administración del edificio", "gasto", 52),
+    ("625", "Primas de seguros", "gasto", 53),
+    ("628", "Limpieza y portería", "gasto", 54),
+    ("631", "Tributos y tasas", "gasto", 55),
+    ("640", "Sueldos y salarios", "gasto", 56),
+    ("650", "Deudas incobrables", "gasto", 57),
+    ("6693", "Comisiones bancarias", "gasto", 58),
+    ("6699", "Gastos por devolución de recibos", "gasto", 59),
+    ("678", "Gastos extraordinarios", "gasto", 60),
+    ("6790", "Gastos de ejercicios anteriores", "gasto", 61),
+    ("695", "Dotación a la provisión por insolvencias", "gasto", 62),
+    # Ingresos
+    ("7310", "Ingresos por cuotas ordinarias", "ingreso", 70),
+    ("7311", "Ingresos por cuotas extraordinarias y derramas", "ingreso", 71),
+    ("752", "Ingresos por arrendamientos", "ingreso", 72),
+    ("7623", "Intereses de cuentas bancarias", "ingreso", 73),
+    ("759", "Ingresos por servicios diversos", "ingreso", 74),
+    ("778", "Ingresos excepcionales", "ingreso", 75),
+    ("7790", "Ingresos de ejercicios anteriores", "ingreso", 76),
 ]
 
+#: Las cuentas que el resto del código nombra por su papel, para no repartir códigos
+#: literales por medio programa. Cambiar una convención es cambiarla aquí.
+CUENTA_BANCO = "572"
+CUENTA_PROPIETARIOS = "4310"
+CUENTA_CUOTAS = "7310"
+CUENTA_DERRAMAS = "7311"
+CUENTA_FONDO_RESERVA = "112"
+CUENTA_RESULTADO = "129"
+CUENTA_REMANENTE = "120"
+CUENTA_PENDIENTE = "555"
+CUENTA_IMPAGADOS = "435"
+CUENTA_DEVOLUCIONES = "6699"
+CUENTA_COMISIONES = "6693"
+CUENTA_RETENCIONES = "4751"
+#: Prefijo de las cuentas de gasto que se crean por grupo de reparto: 6300 garaje,
+#: 6301 portal 1, etc., como en el plan normalizado.
+CUENTA_GRUPO_PREFIJO = "63"
 
 def _n43_fecha(crudo):
     """AAMMDD del cuaderno 43 a ISO. El siglo se decide por el año: 80 es 1980."""
@@ -51180,19 +51286,283 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
     }
 
 
+#: Grupo que existe siempre: lo que paga toda la comunidad.
+FINCAS_GRUPO_GENERAL = "general"
+
+
+#: Umbral del modelo 347: solo se declaran los terceros con los que se ha superado
+#: esta cifra en el año natural, IVA incluido. Es el importe que fija la norma; se
+#: deja como constante para poder cambiarlo si cambia.
+MODELO_347_UMBRAL = 3005.06
+
+
+def registrar_factura_proveedor(conn, workspace_id, comunidad_id, *, fecha, concepto, base,
+                                cuenta_gasto="622", iva=0, retencion=0, proveedor=None, now=None):
+    """Asiento de una factura de proveedor, con su IVA y su retención.
+
+    Las comunidades de propietarios están obligadas a practicar retención e
+    ingresarla en el Tesoro. Sin esta pieza, el administrador tenía que hacer el
+    asiento a mano y acordarse de la 4751, que es justo lo que se olvida.
+
+    El asiento sale así: el gasto por la base (más el IVA si no es deducible, que en
+    una comunidad es lo normal), el proveedor por lo que se le debe de verdad —base
+    más IVA menos retención— y la retención a Hacienda.
+    """
+    base = round(parse_money_value(base), 2)
+    iva = round(parse_money_value(iva), 2)
+    retencion = round(parse_money_value(retencion), 2)
+    if base <= 0:
+        raise AsientoDescuadrado("La factura no tiene base imponible.")
+    if retencion > base:
+        raise AsientoDescuadrado("La retención no puede superar la base imponible.")
+    # En una comunidad el IVA soportado no suele ser deducible, así que engorda el
+    # gasto en vez de ir a la 472. Si algún día una comunidad lo dedujera, se cambia
+    # aquí y no en cada asiento.
+    apuntes = [{"cuenta": cuenta_gasto, "debe": round(base + iva, 2)},
+               {"cuenta": "400", "haber": round(base + iva - retencion, 2)}]
+    if retencion:
+        apuntes.append({"cuenta": CUENTA_RETENCIONES, "haber": retencion})
+    texto = str(concepto or "").strip() or "Factura de proveedor"
+    if proveedor:
+        texto = f"{texto} · {str(proveedor).strip()}"
+    return registrar_asiento(conn, workspace_id, comunidad_id, fecha=fecha, concepto=texto,
+                             apuntes=apuntes, origen="factura", now=now)
+
+
+def fetch_modelo_347(conn, workspace_id, comunidad_id, ejercicio):
+    """Terceros con los que se ha superado el umbral del 347 en el año.
+
+    Las comunidades en régimen de propiedad horizontal están obligadas a presentarlo
+    desde el Real Decreto 828/2013, aunque no desarrollen actividad empresarial. Aquí
+    no se genera el fichero de la AEAT —eso lo hace la asesoría con su programa—: se
+    da el listado que hay que declarar, que es el trabajo que de verdad cuesta.
+
+    Se agrupa por el nombre del proveedor tal y como aparece en el concepto del
+    asiento, así que **conviene revisarlo**: dos formas de escribir el mismo
+    proveedor salen como dos terceros. Se avisa de los que se parecen.
+    """
+    ejercicio = str(ejercicio or "")[:4]
+    filas = conn.execute(
+        """
+        SELECT a.concepto, a.fecha, COALESCE(SUM(p.debe), 0) AS importe
+        FROM workspace_fincas_asientos a
+        JOIN workspace_fincas_apuntes p ON p.asiento_id = a.id
+        WHERE a.workspace_id = ? AND a.comunidad_id = ? AND a.ejercicio = ?
+          AND a.origen = 'factura' AND p.cuenta LIKE '6%'
+        GROUP BY a.id, a.concepto, a.fecha
+        """,
+        (workspace_id, comunidad_id, ejercicio),
+    ).fetchall()
+
+    por_tercero = {}
+    for fila in filas:
+        concepto = str(row_value(fila, "concepto", "") or "")
+        # El proveedor va detrás del separador que pone `registrar_factura_proveedor`.
+        tercero = concepto.split("·")[-1].strip() if "·" in concepto else concepto.strip()
+        if not tercero:
+            continue
+        importe = round(parse_money_value(row_value(fila, "importe", 0)), 2)
+        acumulado = por_tercero.setdefault(tercero, {"tercero": tercero, "importe": 0.0, "facturas": 0,
+                                                     "trimestres": {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0}})
+        acumulado["importe"] = round(acumulado["importe"] + importe, 2)
+        acumulado["facturas"] += 1
+        try:
+            mes = int(str(row_value(fila, "fecha", ""))[5:7])
+            acumulado["trimestres"][(mes - 1) // 3 + 1] = round(
+                acumulado["trimestres"][(mes - 1) // 3 + 1] + importe, 2)
+        except (ValueError, TypeError, KeyError):
+            pass
+
+    declarables = sorted((t for t in por_tercero.values() if t["importe"] >= MODELO_347_UMBRAL),
+                         key=lambda t: -t["importe"])
+    por_debajo = sorted((t for t in por_tercero.values() if t["importe"] < MODELO_347_UMBRAL),
+                        key=lambda t: -t["importe"])
+
+    # Terceros que se parecen: casi siempre es el mismo escrito de dos formas, y
+    # separados pueden quedarse los dos por debajo del umbral.
+    avisos = []
+    nombres = list(por_tercero)
+    for i, uno in enumerate(nombres):
+        for otro in nombres[i + 1:]:
+            if normalize_lookup_text(uno)[:12] == normalize_lookup_text(otro)[:12]:
+                avisos.append(f"«{uno}» y «{otro}» pueden ser el mismo proveedor escrito de dos formas.")
+    return {
+        "ejercicio": ejercicio,
+        "umbral": MODELO_347_UMBRAL,
+        "declarables": declarables,
+        "por_debajo": por_debajo,
+        "avisos": avisos,
+        "total_declarable": round(sum(t["importe"] for t in declarables), 2),
+    }
+
+
+def fetch_retenciones_practicadas(conn, workspace_id, comunidad_id, ejercicio):
+    """Lo retenido y pendiente de ingresar en Hacienda, por trimestre."""
+    ejercicio = str(ejercicio or "")[:4]
+    filas = conn.execute(
+        "SELECT a.fecha, COALESCE(SUM(p.haber) - SUM(p.debe), 0) AS importe "
+        "FROM workspace_fincas_apuntes p JOIN workspace_fincas_asientos a ON a.id = p.asiento_id "
+        "WHERE a.workspace_id = ? AND a.comunidad_id = ? AND a.ejercicio = ? AND p.cuenta = ? "
+        "GROUP BY a.id, a.fecha",
+        (workspace_id, comunidad_id, ejercicio, CUENTA_RETENCIONES),
+    ).fetchall()
+    trimestres = {1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0}
+    for fila in filas:
+        importe = round(parse_money_value(row_value(fila, "importe", 0)), 2)
+        try:
+            mes = int(str(row_value(fila, "fecha", ""))[5:7])
+            trimestres[(mes - 1) // 3 + 1] = round(trimestres[(mes - 1) // 3 + 1] + importe, 2)
+        except (ValueError, TypeError, KeyError):
+            pass
+    return {"ejercicio": ejercicio, "trimestres": trimestres,
+            "total": round(sum(trimestres.values()), 2)}
+
+
+def fetch_workspace_fincas_grupos(conn, workspace_id, comunidad_id, *, sembrar=True):
+    """Grupos de reparto de una comunidad, con su cuenta de gasto y sus coeficientes.
+
+    Se siembra siempre el grupo general con el coeficiente que cada propietario ya
+    tenía en el censo: así una comunidad que hoy reparte todo igual sigue igual, y
+    quien necesite separar garaje o portales añade grupos sin rehacer nada.
+    """
+    workspace_id, comunidad_id = str(workspace_id or "").strip(), str(comunidad_id or "").strip()
+    if not workspace_id or not comunidad_id:
+        return []
+
+    def leer():
+        return conn.execute(
+            "SELECT id, clave, nombre, cuenta_gasto, activo, orden FROM workspace_fincas_grupos "
+            "WHERE workspace_id = ? AND comunidad_id = ? ORDER BY orden, nombre",
+            (workspace_id, comunidad_id),
+        ).fetchall()
+
+    filas = leer()
+    if not filas and sembrar:
+        ahora = datetime.now().isoformat(timespec="seconds")
+        grupo_id = os.urandom(16).hex()
+        conn.execute(
+            "INSERT INTO workspace_fincas_grupos "
+            "(id, workspace_id, comunidad_id, clave, nombre, cuenta_gasto, activo, orden, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, 'Gastos generales', '621', 1, 1, ?, ?)",
+            (grupo_id, workspace_id, comunidad_id, FINCAS_GRUPO_GENERAL, ahora, ahora),
+        )
+        for vecino in conn.execute(
+            "SELECT id, COALESCE(coeficiente, 0) AS coeficiente FROM workspace_fincas_vecinos "
+            "WHERE workspace_id = ? AND comunidad_id = ?",
+            (workspace_id, comunidad_id),
+        ).fetchall():
+            conn.execute(
+                "INSERT INTO workspace_fincas_coeficientes "
+                "(id, workspace_id, grupo_id, vecino_id, coeficiente, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (os.urandom(16).hex(), workspace_id, grupo_id, row_value(vecino, "id", ""),
+                 round(parse_money_value(row_value(vecino, "coeficiente", 0)), 6), ahora, ahora),
+            )
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        filas = leer()
+
+    grupos = []
+    for fila in filas:
+        grupo_id = row_value(fila, "id", "")
+        coeficientes = conn.execute(
+            "SELECT vecino_id, coeficiente FROM workspace_fincas_coeficientes WHERE grupo_id = ?",
+            (grupo_id,),
+        ).fetchall()
+        reparto = {row_value(c, "vecino_id", ""): round(parse_money_value(row_value(c, "coeficiente", 0)), 6)
+                   for c in coeficientes}
+        suma = round(sum(reparto.values()), 4)
+        grupos.append({
+            "id": grupo_id,
+            "clave": row_value(fila, "clave", ""),
+            "nombre": row_value(fila, "nombre", ""),
+            "cuenta_gasto": row_value(fila, "cuenta_gasto", "") or "621",
+            "activo": int(row_value(fila, "activo", 1) or 0),
+            "orden": int(row_value(fila, "orden", 0) or 0),
+            "coeficientes": reparto,
+            "participantes": sum(1 for v in reparto.values() if v),
+            "suma_coeficientes": suma,
+            # Cada grupo tiene que sumar 100 por su cuenta: si el de garaje suma 80,
+            # el 20 % de ese gasto no se le cobra a nadie.
+            "cuadra": abs(suma - 100.0) < 0.01,
+        })
+    return grupos
+
+
+def reparte_por_grupos(conn, workspace_id, comunidad_id, partidas):
+    """Reparte cada partida entre quienes participan en su grupo.
+
+    Devuelve {vecino_id: importe} con la suma exactamente igual al total de las
+    partidas. Cada partida se reparte por separado y con resto mayor, así que un
+    local que no participa en la limpieza no paga ni un céntimo de ella, y la suma
+    de todo sigue cuadrando al céntimo.
+
+    Es la diferencia entre una liquidación correcta y una que reparte la limpieza
+    de la escalera entre los del garaje.
+    """
+    grupos = {g["id"]: g for g in fetch_workspace_fincas_grupos(conn, workspace_id, comunidad_id)}
+    general = next((g for g in grupos.values() if g["clave"] == FINCAS_GRUPO_GENERAL), None)
+    propietarios = conn.execute(
+        "SELECT id FROM workspace_fincas_vecinos WHERE workspace_id = ? AND comunidad_id = ? ORDER BY piso, nombre",
+        (workspace_id, comunidad_id),
+    ).fetchall()
+    orden = [row_value(v, "id", "") for v in propietarios]
+
+    total = {vid: 0 for vid in orden}
+    detalle, avisos = [], []
+    for partida in partidas or []:
+        importe = round(parse_money_value((partida or {}).get("importe")), 2)
+        if not importe:
+            continue
+        grupo = grupos.get(str((partida or {}).get("grupo_id") or "")) or general
+        if not grupo:
+            avisos.append(f"«{partida.get('concepto', '')}» no tiene grupo y la comunidad no tiene grupo general.")
+            continue
+        if not grupo["cuadra"]:
+            avisos.append(
+                f"El grupo «{grupo['nombre']}» suma {grupo['suma_coeficientes']:.4f} %, no 100 %: "
+                f"lo repartido de «{partida.get('concepto', '')}» no cuadrará."
+            )
+        # Se reparte con la misma máquina que los recibos, para que el resto mayor
+        # sea el mismo criterio en todo el programa.
+        participantes = [{"id": vid, "coeficiente": grupo["coeficientes"].get(vid, 0)} for vid in orden]
+        if not any(p["coeficiente"] for p in participantes):
+            avisos.append(f"Nadie participa en el grupo «{grupo['nombre']}»: «{partida.get('concepto','')}» no se reparte.")
+            continue
+        reparto, _ = reparte_por_coeficiente(importe, participantes)
+        for vecino, cuota in reparto:
+            total[vecino["id"]] = round(total[vecino["id"]] + cuota, 2)
+        detalle.append({
+            "concepto": partida.get("concepto", ""),
+            "importe": importe,
+            "grupo": grupo["nombre"],
+            "participantes": grupo["participantes"],
+        })
+    return {"reparto": total, "detalle": detalle, "avisos": avisos,
+            "total": round(sum(total.values()), 2)}
+
+
 def fetch_workspace_fincas_liquidacion(conn, workspace_id, comunidad_id, ejercicio):
-    """Liquidación del ejercicio, propietario a propietario.
+    """Liquidación del ejercicio, propietario a propietario y **por grupos de reparto**.
 
     Es el documento que se reparte en la junta ordinaria: a cada uno, lo que le
-    correspondía según su coeficiente y lo que efectivamente pagó.
+    correspondía y lo que efectivamente pagó.
 
-    **Lo que le correspondía se calcula sobre el gasto real, no sobre el presupuesto.**
-    Un presupuesto es una previsión: la liquidación reparte lo que de verdad se ha
-    gastado, que es lo que hay que aprobar. Si se repartiera lo presupuestado, la
-    suma de las liquidaciones no cuadraría con la caja.
+    Dos decisiones que cambian el resultado:
 
-    El reparto usa el mismo resto mayor que los recibos, así que la suma de lo
-    imputado es exactamente el gasto del ejercicio, sin céntimos perdidos.
+    - **Se reparte el gasto real, no el presupuestado.** Un presupuesto es una
+      previsión; lo que se aprueba en junta es lo gastado. Repartiendo lo
+      presupuestado, la suma de las liquidaciones no cuadraría con la caja.
+    - **Cada gasto lo pagan los de su grupo.** La primera versión repartía todo con
+      un único coeficiente, y eso le cobra la limpieza de la escalera al local del
+      bajo que no tiene acceso al portal. Ahora cada partida va a su grupo y solo la
+      pagan quienes participan en él.
+
+    Si la comunidad no tiene el presupuesto desglosado por partidas, se reparte el
+    gasto total por el grupo general, que es como estaba antes: no se deja a nadie
+    sin liquidación por no haber configurado grupos.
     """
     ejercicio = str(ejercicio or "")[:4]
     propietarios = conn.execute(
@@ -51201,16 +51571,23 @@ def fetch_workspace_fincas_liquidacion(conn, workspace_id, comunidad_id, ejercic
         (workspace_id, comunidad_id),
     ).fetchall()
     if not propietarios:
-        return {"rows": [], "resumen": {"gasto": 0.0, "imputado": 0.0, "pagado": 0.0, "diferencia": 0.0,
-                                        "propietarios": 0, "reparto_por_partes": False}}
+        return {"rows": [], "grupos": [], "detalle": [], "avisos": [],
+                "resumen": {"gasto": 0.0, "imputado": 0.0, "pagado": 0.0, "diferencia": 0.0,
+                            "propietarios": 0, "ejercicio": ejercicio, "origen_gasto": "", "por_grupos": False}}
 
-    # El gasto del ejercicio sale del diario si lo hay, y si no del libro simple.
-    gasto = round(parse_money_value(row_value(conn.execute(
-        "SELECT COALESCE(SUM(p.debe) - SUM(p.haber), 0) AS total FROM workspace_fincas_apuntes p "
+    # El gasto real del ejercicio, por cuenta, para poder llevarlo a su grupo.
+    por_cuenta = {}
+    for fila in conn.execute(
+        "SELECT p.cuenta, COALESCE(SUM(p.debe) - SUM(p.haber), 0) AS total FROM workspace_fincas_apuntes p "
         "JOIN workspace_fincas_asientos a ON a.id = p.asiento_id "
-        "WHERE a.workspace_id = ? AND a.comunidad_id = ? AND a.ejercicio = ? AND p.cuenta LIKE '6%'",
+        "WHERE a.workspace_id = ? AND a.comunidad_id = ? AND a.ejercicio = ? AND p.cuenta LIKE '6%' "
+        "GROUP BY p.cuenta",
         (workspace_id, comunidad_id, ejercicio),
-    ).fetchone(), "total", 0)), 2)
+    ).fetchall():
+        importe = round(parse_money_value(row_value(fila, "total", 0)), 2)
+        if importe:
+            por_cuenta[row_value(fila, "cuenta", "")] = importe
+    gasto = round(sum(por_cuenta.values()), 2)
     origen_gasto = "diario"
     if gasto <= 0:
         gasto = round(parse_money_value(row_value(conn.execute(
@@ -51220,9 +51597,22 @@ def fetch_workspace_fincas_liquidacion(conn, workspace_id, comunidad_id, ejercic
             (workspace_id, comunidad_id, ejercicio),
         ).fetchone(), "total", 0)), 2)
         origen_gasto = "libro simple"
+        por_cuenta = {}
 
-    reparto, por_partes = reparte_por_coeficiente(gasto, propietarios)
-    imputado = {row_value(v, "id", ""): importe for v, importe in reparto}
+    grupos = fetch_workspace_fincas_grupos(conn, workspace_id, comunidad_id)
+    por_grupo_cuenta = {g["cuenta_gasto"]: g["id"] for g in grupos if g["cuenta_gasto"]}
+    general = next((g for g in grupos if g["clave"] == FINCAS_GRUPO_GENERAL), None)
+
+    # Cada cuenta de gasto se lleva al grupo que la tenga asignada; el resto, al
+    # general. Así el reparto sigue al plan de cuentas y no a una tabla aparte.
+    partidas = [
+        {"concepto": cuenta, "importe": importe,
+         "grupo_id": por_grupo_cuenta.get(cuenta) or (general or {}).get("id")}
+        for cuenta, importe in sorted(por_cuenta.items())
+    ] or [{"concepto": "Gasto del ejercicio", "importe": gasto, "grupo_id": (general or {}).get("id")}]
+
+    repartido = reparte_por_grupos(conn, workspace_id, comunidad_id, partidas)
+    imputado = repartido["reparto"]
 
     filas = []
     for propietario in propietarios:
@@ -51232,7 +51622,7 @@ def fetch_workspace_fincas_liquidacion(conn, workspace_id, comunidad_id, ejercic
             "WHERE workspace_id = ? AND vecino_id = ? AND estado = 'Cobrado' AND substr(periodo, 1, 4) = ?",
             (workspace_id, vecino_id, ejercicio),
         ).fetchone(), "total", 0)), 2)
-        le_toca = imputado.get(vecino_id, 0.0)
+        le_toca = round(imputado.get(vecino_id, 0.0), 2)
         filas.append({
             "vecino_id": vecino_id,
             "nombre": row_value(propietario, "nombre", ""),
@@ -51245,6 +51635,10 @@ def fetch_workspace_fincas_liquidacion(conn, workspace_id, comunidad_id, ejercic
         })
     return {
         "rows": filas,
+        "grupos": [{k: g[k] for k in ("id", "clave", "nombre", "cuenta_gasto", "participantes",
+                                      "suma_coeficientes", "cuadra")} for g in grupos],
+        "detalle": repartido["detalle"],
+        "avisos": repartido["avisos"],
         "resumen": {
             "ejercicio": ejercicio,
             "propietarios": len(filas),
@@ -51253,7 +51647,7 @@ def fetch_workspace_fincas_liquidacion(conn, workspace_id, comunidad_id, ejercic
             "imputado": round(sum(f["imputado"] for f in filas), 2),
             "pagado": round(sum(f["pagado"] for f in filas), 2),
             "diferencia": round(sum(f["saldo"] for f in filas), 2),
-            "reparto_por_partes": por_partes,
+            "por_grupos": len(grupos) > 1,
         },
     }
 
@@ -61405,6 +61799,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_extracto_conciliar",
             "/api/workspace_fincas_asiento",
             "/api/workspace_fincas_cerrar_ejercicio",
+            "/api/workspace_fincas_grupos",
+            "/api/workspace_fincas_factura",
             "/api/workspace_fincas_carta",
             "/api/workspace_fincas_portal_alta",
             "/api/workspace_fincas_portal_revocar",
@@ -74449,6 +74845,104 @@ class Handler(BaseHTTPRequestHandler):
                 return
             conn.commit()
             json_response(self, {"ok": True, **resultado})
+            return
+        elif parsed.path in ("/api/workspace_fincas_grupos", "/api/workspace_fincas_factura"):
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            comunidad_id = str(payload.get("comunidad_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not comunidad_id:
+                json_response(self, {"error": "workspace_id y comunidad_id requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+
+            if parsed.path == "/api/workspace_fincas_factura":
+                try:
+                    resultado = registrar_factura_proveedor(
+                        conn, workspace_id, comunidad_id,
+                        fecha=str(payload.get("fecha") or "").strip() or datetime.now().date().isoformat(),
+                        concepto=payload.get("concepto"), base=payload.get("base"),
+                        cuenta_gasto=str(payload.get("cuenta_gasto") or "622").strip() or "622",
+                        iva=payload.get("iva"), retencion=payload.get("retencion"),
+                        proveedor=payload.get("proveedor"), now=now,
+                    )
+                except AsientoDescuadrado as err:
+                    json_response(self, {"error": str(err)}, status=400)
+                    return
+                conn.commit()
+                json_response(self, {"ok": True, **resultado})
+                return
+
+            # Guardado de grupos: llega la tabla entera con sus coeficientes.
+            items = payload.get("items")
+            if isinstance(items, str):
+                try:
+                    items = json.loads(items)
+                except Exception:
+                    items = None
+            if not isinstance(items, list):
+                json_response(self, {"error": "items requerido"}, status=400)
+                return
+            vistas = set()
+            for orden, item in enumerate(items, start=1):
+                if not isinstance(item, dict):
+                    continue
+                nombre = str(item.get("nombre") or "").strip()
+                if not nombre:
+                    continue
+                clave = normalize_lookup_text(item.get("clave") or nombre).replace(" ", "_").lower()[:60]
+                if not clave or clave in vistas:
+                    continue
+                vistas.add(clave)
+                cuenta = str(item.get("cuenta_gasto") or "").strip() or "621"
+                existente = conn.execute(
+                    "SELECT id FROM workspace_fincas_grupos WHERE comunidad_id = ? AND clave = ? LIMIT 1",
+                    (comunidad_id, clave),
+                ).fetchone()
+                if existente:
+                    grupo_id = row_value(existente, "id", "")
+                    conn.execute(
+                        "UPDATE workspace_fincas_grupos SET nombre = ?, cuenta_gasto = ?, orden = ?, "
+                        "updated_at = ? WHERE id = ?", (nombre, cuenta, orden, now, grupo_id))
+                else:
+                    grupo_id = os.urandom(16).hex()
+                    conn.execute(
+                        "INSERT INTO workspace_fincas_grupos "
+                        "(id, workspace_id, comunidad_id, clave, nombre, cuenta_gasto, activo, orden, "
+                        " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                        (grupo_id, workspace_id, comunidad_id, clave, nombre, cuenta, orden, now, now))
+                coeficientes = item.get("coeficientes")
+                if isinstance(coeficientes, dict):
+                    conn.execute("DELETE FROM workspace_fincas_coeficientes WHERE grupo_id = ?", (grupo_id,))
+                    for vecino_id, valor in coeficientes.items():
+                        coef = round(parse_money_value(valor), 6)
+                        if not coef:
+                            continue
+                        conn.execute(
+                            "INSERT INTO workspace_fincas_coeficientes "
+                            "(id, workspace_id, grupo_id, vecino_id, coeficiente, created_at, updated_at) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (os.urandom(16).hex(), workspace_id, grupo_id, str(vecino_id), coef, now, now))
+            # Un grupo que ya no viene se borra, con sus coeficientes.
+            if vistas:
+                huecos = ",".join("?" for _ in vistas)
+                for fila in conn.execute(
+                    f"SELECT id FROM workspace_fincas_grupos WHERE comunidad_id = ? AND clave NOT IN ({huecos})",
+                    (comunidad_id, *vistas),
+                ).fetchall():
+                    conn.execute("DELETE FROM workspace_fincas_coeficientes WHERE grupo_id = ?",
+                                 (row_value(fila, "id", ""),))
+                conn.execute(
+                    f"DELETE FROM workspace_fincas_grupos WHERE comunidad_id = ? AND clave NOT IN ({huecos})",
+                    (comunidad_id, *vistas))
+            conn.commit()
+            json_response(self, {"ok": True,
+                                 "items": fetch_workspace_fincas_grupos(conn, workspace_id, comunidad_id, sembrar=False)})
             return
         elif parsed.path == "/api/workspace_fincas_vecino_delete":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -88327,6 +88821,29 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             json_response(self, fetch_workspace_fincas_liquidacion(conn, workspace_id, comunidad_id, ejercicio))
+            return
+
+        if path in ("/api/workspace_fincas_grupos", "/api/workspace_fincas_347"):
+            workspace_id = params.get("workspace_id", [""])[0]
+            comunidad_id = (params.get("comunidad_id", [""])[0] or "").strip()
+            if not workspace_id or not comunidad_id:
+                json_response(self, {"error": "workspace_id y comunidad_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            if path == "/api/workspace_fincas_grupos":
+                json_response(self, {"items": fetch_workspace_fincas_grupos(conn, workspace_id, comunidad_id)})
+                return
+            ejercicio = (params.get("ejercicio", [""])[0] or "").strip() or str(datetime.now().year)
+            datos = fetch_modelo_347(conn, workspace_id, comunidad_id, ejercicio)
+            datos["retenciones"] = fetch_retenciones_practicadas(conn, workspace_id, comunidad_id, ejercicio)
+            json_response(self, datos)
             return
 
         if path == "/api/workspace_fincas_ejercicio":

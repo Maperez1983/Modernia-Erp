@@ -428,3 +428,233 @@ class LosEndpointsEstanGuardadosTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ElPlanDeCuentasEsElDelSectorTests(unittest.TestCase):
+    """Mi primera versión me la inventé por analogía con el PGC de empresa y tenía
+    tres códigos mal. El usuario preguntó si había mirado cómo lo hacen los programas
+    del sector; no lo había hecho. El plan normalizado del Instituto Profesional de
+    Administración Inmobiliaria dice otra cosa, y ahora se sigue ese.
+    """
+
+    def codigos(self):
+        return {c[0]: c[1] for c in server.FINCAS_CUENTAS_DEFECTO}
+
+    def test_los_tres_que_estaban_mal(self):
+        codigos = self.codigos()
+        self.assertIn("112", codigos)   # fondo de reserva, no la 113
+        self.assertIn("4310", codigos)  # propietarios deudores, no la 440
+        self.assertIn("7310", codigos)  # cuotas ordinarias, no la 700
+
+    def test_la_700_ya_no_se_usa_para_cobrar_cuotas(self):
+        """700 es «ventas de mercaderías»: cobrar cuotas contra ella era el peor."""
+        self.assertNotIn("700", self.codigos())
+        self.assertEqual(server.CUENTA_CUOTAS, "7310")
+
+    def test_el_113_es_fondo_de_obras_no_de_reserva(self):
+        self.assertIn("obras", self.codigos()["113"].lower())
+        self.assertEqual(server.CUENTA_FONDO_RESERVA, "112")
+
+    def test_la_440_es_de_deudores_que_no_son_propietarios(self):
+        self.assertIn("no propietarios", self.codigos()["440"])
+        self.assertEqual(server.CUENTA_PROPIETARIOS, "4310")
+
+    def test_estan_las_cuentas_del_dia_a_dia(self):
+        codigos = self.codigos()
+        for cuenta, para_que in (("6699", "devolución de recibos"), ("6693", "comisiones bancarias"),
+                                 ("4751", "retenciones"), ("120", "remanente"), ("435", "impagados"),
+                                 ("437", "anticipos"), ("4459", "reclamados judicialmente")):
+            with self.subTest(cuenta=cuenta, para_que=para_que):
+                self.assertIn(cuenta, codigos)
+
+    def test_no_hay_codigos_repetidos(self):
+        codigos = [c[0] for c in server.FINCAS_CUENTAS_DEFECTO]
+        self.assertEqual(len(codigos), len(set(codigos)))
+
+    def test_el_codigo_no_reparte_literales_por_ahi(self):
+        """Cambiar una convención tiene que ser cambiar una constante."""
+        for nombre in ("CUENTA_BANCO", "CUENTA_PROPIETARIOS", "CUENTA_CUOTAS",
+                       "CUENTA_FONDO_RESERVA", "CUENTA_RETENCIONES"):
+            with self.subTest(nombre=nombre):
+                self.assertIn(getattr(server, nombre), self.codigos())
+
+
+class NoTodosPaganTodoTests(BaseConta):
+    """El hueco de fondo: la primera versión repartía todo con un único coeficiente,
+    y eso le cobra la limpieza de la escalera al local del bajo que no tiene acceso
+    al portal. El ejemplo es el del artículo de referencia: un bajo y 16 viviendas,
+    presupuesto de 10.000 € de los que 4.000 son servicios de vivienda.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.conn.execute(
+            "INSERT INTO workspace_fincas_vecinos (id, workspace_id, comunidad_id, nombre, piso, coeficiente, "
+            "created_at, updated_at) VALUES ('bajo',?,?,'Local','Bajo',10,datetime(?),datetime(?))",
+            (self.ws, self.com, self.ahora, self.ahora))
+        for i in range(16):
+            self.conn.execute(
+                "INSERT INTO workspace_fincas_vecinos (id, workspace_id, comunidad_id, nombre, piso, "
+                "coeficiente, created_at, updated_at) VALUES (?,?,?,?,?,?,datetime(?),datetime(?))",
+                (f"v{i}", self.ws, self.com, f"Vivienda {i}", f"{i//4+1}{'ABCD'[i%4]}", 90 / 16,
+                 self.ahora, self.ahora))
+        self.conn.commit()
+        self.general = server.fetch_workspace_fincas_grupos(self.conn, self.ws, self.com)[0]
+        self.viviendas = os.urandom(8).hex()
+        self.conn.execute(
+            "INSERT INTO workspace_fincas_grupos (id, workspace_id, comunidad_id, clave, nombre, cuenta_gasto, "
+            "activo, orden, created_at, updated_at) "
+            "VALUES (?,?,?,'viviendas','Gastos de viviendas','6223',1,2,?,?)",
+            (self.viviendas, self.ws, self.com, self.ahora, self.ahora))
+        for i in range(16):
+            self.conn.execute(
+                "INSERT INTO workspace_fincas_coeficientes (id, workspace_id, grupo_id, vecino_id, coeficiente, "
+                "created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+                (os.urandom(8).hex(), self.ws, self.viviendas, f"v{i}", 100 / 16, self.ahora, self.ahora))
+        self.conn.commit()
+
+    def reparte(self):
+        return server.reparte_por_grupos(self.conn, self.ws, self.com, [
+            {"concepto": "Gastos generales", "importe": 6000, "grupo_id": self.general["id"]},
+            {"concepto": "Servicios de viviendas", "importe": 4000, "grupo_id": self.viviendas},
+        ])
+
+    def test_el_general_se_siembra_con_el_censo(self):
+        self.assertEqual(self.general["clave"], "general")
+        self.assertEqual(self.general["participantes"], 17)
+        self.assertTrue(self.general["cuadra"])
+
+    def test_el_bajo_no_paga_los_servicios_de_vivienda(self):
+        """10 % de 6.000 y nada de los 4.000."""
+        self.assertEqual(self.reparte()["reparto"]["bajo"], 600.0)
+
+    def test_cada_vivienda_paga_de_los_dos_grupos(self):
+        """5,625 % de 6.000 más 6,25 % de 4.000."""
+        self.assertEqual(self.reparte()["reparto"]["v0"], 587.50)
+
+    def test_la_suma_es_exactamente_el_gasto(self):
+        self.assertEqual(self.reparte()["total"], 10000.0)
+
+    def test_un_grupo_que_no_suma_cien_se_avisa(self):
+        """Lo que falte no se le cobra a nadie."""
+        self.conn.execute("UPDATE workspace_fincas_coeficientes SET coeficiente = 3 "
+                          "WHERE grupo_id = ? AND vecino_id = 'v0'", (self.viviendas,))
+        self.conn.commit()
+        self.assertTrue(any("no 100 %" in a for a in self.reparte()["avisos"]))
+
+    def test_la_liquidacion_reparte_por_grupos(self):
+        self.asiento("Limpieza de viviendas", [{"cuenta": "6223", "debe": 4000},
+                                               {"cuenta": "572", "haber": 4000}], fecha="2026-05-01")
+        self.asiento("Seguro del edificio", [{"cuenta": "621", "debe": 6000},
+                                             {"cuenta": "572", "haber": 6000}], fecha="2026-05-02")
+        self.conn.commit()
+        liq = server.fetch_workspace_fincas_liquidacion(self.conn, self.ws, self.com, "2026")
+        porv = {f["vecino_id"]: f["imputado"] for f in liq["rows"]}
+        self.assertEqual(porv["bajo"], 600.0)
+        self.assertEqual(porv["v0"], 587.50)
+        self.assertEqual(liq["resumen"]["imputado"], 10000.0)
+        self.assertTrue(liq["resumen"]["por_grupos"])
+
+    def test_sin_grupos_configurados_sigue_funcionando(self):
+        """Quien no configure grupos reparte todo por el general, como antes."""
+        self.conn.execute("DELETE FROM workspace_fincas_coeficientes WHERE grupo_id = ?", (self.viviendas,))
+        self.conn.execute("DELETE FROM workspace_fincas_grupos WHERE id = ?", (self.viviendas,))
+        self.asiento("Gasto único", [{"cuenta": "621", "debe": 1000}, {"cuenta": "572", "haber": 1000}],
+                     fecha="2026-05-01")
+        self.conn.commit()
+        liq = server.fetch_workspace_fincas_liquidacion(self.conn, self.ws, self.com, "2026")
+        self.assertEqual(liq["resumen"]["imputado"], 1000.0)
+        self.assertFalse(liq["resumen"]["por_grupos"])
+
+
+class RetencionesYModelo347Tests(BaseConta):
+    def factura(self, **kw):
+        base = {"fecha": "2026-03-10", "concepto": "Servicios", "base": 1000, "cuenta_gasto": "628"}
+        base.update(kw)
+        r = server.registrar_factura_proveedor(self.conn, self.ws, self.com, **base)
+        self.conn.commit()
+        return r
+
+    def test_la_factura_con_retencion_cuadra(self):
+        self.factura(iva=210, retencion=150, proveedor="Fincas Velazquez SL")
+        d = server.fetch_workspace_fincas_diario(self.conn, self.ws, self.com, "2026")
+        self.assertEqual(d["totales"]["descuadre"], 0.0)
+
+    def test_el_proveedor_cobra_menos_la_retencion(self):
+        self.factura(iva=210, retencion=150, proveedor="X")
+        apuntes = {p["cuenta"]: p for a in server.fetch_workspace_fincas_diario(
+            self.conn, self.ws, self.com, "2026")["asientos"] for p in a["apuntes"]}
+        self.assertEqual(apuntes["400"]["haber"], 1060.0)
+        self.assertEqual(apuntes[server.CUENTA_RETENCIONES]["haber"], 150.0)
+
+    def test_el_iva_no_deducible_engorda_el_gasto(self):
+        """En una comunidad el IVA soportado no suele ser deducible."""
+        self.factura(iva=210, proveedor="X")
+        apuntes = {p["cuenta"]: p for a in server.fetch_workspace_fincas_diario(
+            self.conn, self.ws, self.com, "2026")["asientos"] for p in a["apuntes"]}
+        self.assertEqual(apuntes["628"]["debe"], 1210.0)
+
+    def test_una_retencion_mayor_que_la_base_se_rechaza(self):
+        with self.assertRaises(server.AsientoDescuadrado):
+            self.factura(base=100, retencion=200)
+
+    def test_las_retenciones_se_agrupan_por_trimestre(self):
+        self.factura(fecha="2026-02-10", retencion=100, proveedor="A")
+        self.factura(fecha="2026-08-10", retencion=50, proveedor="B")
+        r = server.fetch_retenciones_practicadas(self.conn, self.ws, self.com, "2026")
+        self.assertEqual(r["trimestres"][1], 100.0)
+        self.assertEqual(r["trimestres"][3], 50.0)
+        self.assertEqual(r["total"], 150.0)
+
+    def test_el_347_solo_declara_a_quien_supera_el_umbral(self):
+        self.factura(base=4000, proveedor="Grande SL")
+        self.factura(base=500, proveedor="Pequeña SL")
+        m = server.fetch_modelo_347(self.conn, self.ws, self.com, "2026")
+        self.assertEqual([t["tercero"] for t in m["declarables"]], ["Grande SL"])
+        self.assertEqual([t["tercero"] for t in m["por_debajo"]], ["Pequeña SL"])
+
+    def test_el_umbral_es_el_de_la_norma(self):
+        self.assertEqual(server.MODELO_347_UMBRAL, 3005.06)
+
+    def test_acumula_varias_facturas_del_mismo_tercero(self):
+        self.factura(fecha="2026-02-01", base=2000, proveedor="Limpiezas SL")
+        self.factura(fecha="2026-07-01", base=1500, proveedor="Limpiezas SL")
+        m = server.fetch_modelo_347(self.conn, self.ws, self.com, "2026")
+        self.assertEqual(m["declarables"][0]["importe"], 3500.0)
+        self.assertEqual(m["declarables"][0]["facturas"], 2)
+
+    def test_avisa_de_proveedores_que_parecen_el_mismo(self):
+        """Separados pueden quedarse los dos por debajo del umbral."""
+        self.factura(base=2000, proveedor="Limpiezas del Sur SL")
+        self.factura(base=1500, proveedor="Limpiezas del Sur, S.L.")
+        m = server.fetch_modelo_347(self.conn, self.ws, self.com, "2026")
+        self.assertTrue(m["avisos"])
+
+    def test_reparte_por_trimestres(self):
+        self.factura(fecha="2026-02-01", base=4000, proveedor="X")
+        m = server.fetch_modelo_347(self.conn, self.ws, self.com, "2026")
+        self.assertEqual(m["declarables"][0]["trimestres"][1], 4000.0)
+
+
+class ElModuloSigueExponiendoLoSuyoTests(unittest.TestCase):
+    """Guardián contra un error que cometí de verdad: al sustituir el plan de cuentas
+    con un reemplazo por rangos, me llevé por delante el lector de norma 43, que
+    estaba justo en medio del tramo. Lo cazaron los tests del extracto, pero una
+    comprobación explícita cuesta cuatro líneas y falla con un mensaje claro.
+    """
+
+    PIEZAS = (
+        "parse_norma43", "huella_movimiento", "sugerir_conciliacion",
+        "registrar_asiento", "AsientoDescuadrado", "cerrar_ejercicio_fincas",
+        "fetch_workspace_fincas_diario", "fetch_workspace_fincas_sumas_y_saldos",
+        "fetch_workspace_fincas_liquidacion", "fetch_workspace_fincas_grupos",
+        "reparte_por_grupos", "registrar_factura_proveedor", "fetch_modelo_347",
+        "fetch_retenciones_practicadas", "build_mapa_estatico", "nif_valido",
+        "iban_valido", "reparte_por_coeficiente", "parse_censo_vecinos",
+        "render_carta_presentacion", "fetch_fincas_portal_public",
+    )
+
+    def test_estan_todas(self):
+        for pieza in self.PIEZAS:
+            with self.subTest(pieza=pieza):
+                self.assertTrue(hasattr(server, pieza), f"falta {pieza}: ¿un reemplazo se la ha llevado?")

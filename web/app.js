@@ -24215,7 +24215,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
         <div class="form-actions span-2"><span class="muted" data-lib-status></span></div>
       </div>
       <div class="tabs" role="tablist">
-        ${[["extracto","Banco y conciliación"],["diario","Libro diario"],["saldos","Sumas y saldos"],["liquidacion","Liquidación"],["cierre","Cierre"]]
+        ${[["extracto","Banco y conciliación"],["diario","Libro diario"],["saldos","Sumas y saldos"],["grupos","Grupos de reparto"],["liquidacion","Liquidación"],["fiscal","Fiscal"],["cierre","Cierre"]]
           .map(([k,t],i)=>`<button type="button" class="tab${i?"":" active"}" data-lib-sub="${k}">${t}</button>`).join("")}
       </div>
       <div data-lib-cuerpo><p class="muted">Cargando…</p></div>
@@ -24329,7 +24329,13 @@ const renderWorkspaceFincasCommunityFicha = async () => {
           <div class="workspace-mini-kpi"><span>Pagado</span><strong>${eur(r.pagado)}</strong></div>
           <div class="workspace-mini-kpi"><span>Diferencia</span><strong>${eur(r.diferencia)}</strong></div>
         </div>
-        <p class="muted">El reparto se hace sobre el gasto real, no sobre el presupuesto: un presupuesto es una previsión y lo que se aprueba en junta es lo que se ha gastado.</p>
+        <p class="muted">El reparto se hace sobre el gasto real, no sobre el presupuesto: un presupuesto es una previsión y lo que se aprueba en junta es lo que se ha gastado. Cada gasto lo pagan los de su grupo.</p>
+        ${(d.avisos || []).length ? `<p class="censo-aviso">${d.avisos.map(escapeHtml).join(" ")}</p>` : ""}
+        ${(d.detalle || []).length > 1 ? `<details class="presu-plegable"><summary>Cómo se ha repartido cada gasto</summary>
+          <table class="table"><thead><tr><th>Cuenta</th><th>Grupo</th><th class="num">Participantes</th><th class="num">Importe</th></tr></thead><tbody>
+          ${d.detalle.map((x) => `<tr><td>${escapeHtml(x.concepto)}</td><td>${escapeHtml(x.grupo)}</td>
+            <td class="num">${x.participantes}</td><td class="num">${eur(x.importe)}</td></tr>`).join("")}
+          </tbody></table></details>` : ""}
         ${r.reparto_por_partes ? `<p class="censo-aviso">Nadie tiene coeficiente: se ha repartido a partes iguales.</p>` : ""}
         <table class="table"><thead><tr><th>Inmueble</th><th>Propietario</th><th class="num">Coef.</th><th class="num">Le corresponde</th><th class="num">Ha pagado</th><th class="num">Saldo</th></tr></thead><tbody>
           ${(d.rows||[]).map((f) => `<tr><td>${escapeHtml(f.piso)}</td><td>${escapeHtml(f.nombre)}</td>
@@ -24361,12 +24367,100 @@ const renderWorkspaceFincasCommunityFicha = async () => {
       });
     };
 
+    const pintaGrupos = async () => {
+      const [g, v] = await Promise.all([
+        api(`/api/workspace_fincas_grupos?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}`),
+        api(`/api/workspace_fincas_vecinos?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}&limit=500`),
+      ]);
+      const grupos = g.items || [];
+      const vecinos = v.rows || [];
+      cuerpo.innerHTML = `
+        <p class="muted">No todos pagan todo: los bajos sin acceso al portal no pagan la escalera y el garaje
+        lo pagan quienes tienen plaza. Cada grupo lleva su cuenta de gasto y su propio reparto, y
+        <strong>cada grupo tiene que sumar 100 % por su cuenta</strong>.</p>
+        ${grupos.map((gr) => `
+          <details class="presu-plegable" data-grupo="${escapeHtml(gr.clave)}">
+            <summary>${escapeHtml(gr.nombre)} · cuenta ${escapeHtml(gr.cuenta_gasto)} ·
+              ${gr.participantes} participantes ·
+              <strong>${Number(gr.suma_coeficientes).toFixed(4)} %</strong>
+              ${gr.cuadra ? "" : " — no cuadra"}</summary>
+            ${gr.cuadra ? "" : `<p class="censo-aviso">Este grupo suma ${Number(gr.suma_coeficientes).toFixed(4)} %.
+              Lo que falte no se le cobra a nadie.</p>`}
+            <table class="table"><thead><tr><th>Inmueble</th><th>Propietario</th><th class="num">Coeficiente (%)</th></tr></thead><tbody>
+              ${vecinos.map((x) => `<tr>
+                <td>${escapeHtml(x.piso || "—")}</td><td>${escapeHtml(x.nombre || "")}</td>
+                <td class="num"><input type="number" step="0.0001" min="0" style="max-width:120px;"
+                  data-coef data-grupo-clave="${escapeHtml(gr.clave)}" data-vecino="${escapeHtml(String(x.id))}"
+                  value="${Number(gr.coeficientes?.[x.id] || 0)}" /></td></tr>`).join("")}
+            </tbody></table>
+          </details>`).join("")}
+        <div class="form-actions">
+          <button type="button" data-grupo-nuevo class="secondary ghost">Añadir grupo</button>
+          <button type="button" data-grupos-guardar>Guardar grupos</button>
+        </div>`;
+      cuerpo.querySelector("[data-grupo-nuevo]")?.addEventListener("click", async () => {
+        const nombre = window.prompt("Nombre del grupo (por ejemplo, Garaje o Portal 1):");
+        if (!nombre?.trim()) return;
+        const cuenta = window.prompt("Cuenta de gasto para este grupo:", "6300") || "6300";
+        grupos.push({ clave: "", nombre: nombre.trim(), cuenta_gasto: cuenta.trim(), coeficientes: {} });
+        await guardar(grupos);
+      });
+      const guardar = async (lista) => {
+        try {
+          di("Guardando…");
+          const res = await postJsonWithDbRetry("/api/workspace_fincas_grupos",
+            { workspace_id: workspaceId, comunidad_id: comunidadId, items: lista });
+          const malos = (res.items || []).filter((x) => !x.cuadra);
+          di(malos.length ? `Guardado. Ojo: ${malos.map((x) => x.nombre).join(", ")} no suma${malos.length > 1 ? "n" : ""} 100 %.` : "Guardado.");
+          await pinta();
+        } catch (e) { di(e?.message || "No se pudo guardar."); }
+      };
+      cuerpo.querySelector("[data-grupos-guardar]")?.addEventListener("click", () => {
+        const lista = grupos.map((gr) => {
+          const coeficientes = {};
+          cuerpo.querySelectorAll(`[data-coef][data-grupo-clave="${gr.clave}"]`).forEach((el) => {
+            const valor = Number(el.value || 0);
+            if (valor) coeficientes[el.dataset.vecino] = valor;
+          });
+          return { clave: gr.clave, nombre: gr.nombre, cuenta_gasto: gr.cuenta_gasto, coeficientes };
+        });
+        void guardar(lista);
+      });
+    };
+
+    const pintaFiscal = async () => {
+      const d = await api(`/api/workspace_fincas_347?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}&ejercicio=${encodeURIComponent(anyo())}`);
+      const ret = d.retenciones || { trimestres: {}, total: 0 };
+      cuerpo.innerHTML = `
+        <div class="form-grid-section">Retenciones practicadas</div>
+        <p class="muted">La comunidad está obligada a practicar retención e ingresarla en Hacienda.</p>
+        <div class="workspace-mini-kpis">
+          ${[1,2,3,4].map((t) => `<div class="workspace-mini-kpi"><span>${t}T</span><strong>${eur(ret.trimestres[t])}</strong></div>`).join("")}
+          <div class="workspace-mini-kpi"><span>Total ${escapeHtml(anyo())}</span><strong>${eur(ret.total)}</strong></div>
+        </div>
+        <div class="form-grid-section">Modelo 347 · operaciones con terceros</div>
+        <p class="muted">Terceros que superan ${eur(d.umbral)} en el año. Este listado es lo que hay que declarar;
+        el fichero para la AEAT lo genera la asesoría con su programa.</p>
+        ${(d.avisos || []).length ? `<p class="censo-aviso">${d.avisos.map(escapeHtml).join(" ")}</p>` : ""}
+        <table class="table"><thead><tr><th>Tercero</th><th class="num">1T</th><th class="num">2T</th><th class="num">3T</th><th class="num">4T</th><th class="num">Total</th></tr></thead><tbody>
+          ${(d.declarables || []).map((t) => `<tr><td>${escapeHtml(t.tercero)}</td>
+            ${[1,2,3,4].map((q) => `<td class="num">${eur(t.trimestres[q])}</td>`).join("")}
+            <td class="num"><strong>${eur(t.importe)}</strong></td></tr>`).join("")
+            || `<tr><td colspan="6" class="muted">Ningún tercero supera el umbral en ${escapeHtml(anyo())}.</td></tr>`}
+        </tbody></table>
+        ${(d.por_debajo || []).length ? `<details class="presu-plegable"><summary>Por debajo del umbral (${d.por_debajo.length})</summary>
+          <table class="table"><tbody>${d.por_debajo.map((t) => `<tr><td>${escapeHtml(t.tercero)}</td><td class="num">${eur(t.importe)}</td></tr>`).join("")}</tbody></table>
+        </details>` : ""}`;
+    };
+
     const pinta = async () => {
       try {
         cuerpo.innerHTML = `<p class="muted">Cargando…</p>`;
         if (sub === "extracto") await pintaExtracto();
         else if (sub === "diario") await pintaDiario();
         else if (sub === "saldos") await pintaSaldos();
+        else if (sub === "grupos") await pintaGrupos();
+        else if (sub === "fiscal") await pintaFiscal();
         else if (sub === "liquidacion") await pintaLiquidacion();
         else await pintaCierre();
       } catch (e) {
