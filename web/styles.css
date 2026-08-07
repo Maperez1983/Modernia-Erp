@@ -15251,3 +15251,13 @@ samp {
 }
 .presu-plegable > summary { cursor: pointer; font-weight: 600; }
 .presu-plegable > .form-grid { margin-top: 12px; }
+
+/* Donde se pega un fichero del banco: monoespaciada, que los registros del
+   cuaderno 43 son de 80 posiciones fijas y así se ve si alguna viene corta. */
+.pegar-fichero {
+  width: 100%;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre;
+  overflow-x: auto;
+}

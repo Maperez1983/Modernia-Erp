@@ -24207,6 +24207,182 @@ const renderWorkspaceFincasCommunityFicha = async () => {
     return;
   }
 
+  if (tab === "libros") {
+    const anyoActual = String(new Date().getFullYear());
+    workspaceFincasCommunityFichaPanel.innerHTML = `
+      <div class="form-grid" style="align-items:end;">
+        <label>Ejercicio <input data-lib-anyo inputmode="numeric" maxlength="4" value="${anyoActual}" /></label>
+        <div class="form-actions span-2"><span class="muted" data-lib-status></span></div>
+      </div>
+      <div class="tabs" role="tablist">
+        ${[["extracto","Banco y conciliación"],["diario","Libro diario"],["saldos","Sumas y saldos"],["liquidacion","Liquidación"],["cierre","Cierre"]]
+          .map(([k,t],i)=>`<button type="button" class="tab${i?"":" active"}" data-lib-sub="${k}">${t}</button>`).join("")}
+      </div>
+      <div data-lib-cuerpo><p class="muted">Cargando…</p></div>
+    `;
+    const panel = workspaceFincasCommunityFichaPanel;
+    const cuerpo = panel.querySelector("[data-lib-cuerpo]");
+    const estado = panel.querySelector("[data-lib-status]");
+    const anyo = () => String(panel.querySelector("[data-lib-anyo]")?.value || anyoActual).slice(0, 4);
+    const di = (t) => { if (estado) estado.textContent = t; };
+    let sub = "extracto";
+    const eur = (v) => euroFormatter.format(Number(v || 0));
+
+    const pintaExtracto = async () => {
+      const d = await api(`/api/workspace_fincas_extracto?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}`);
+      const r = d.resumen || {};
+      cuerpo.innerHTML = `
+        <div class="workspace-mini-kpis">
+          <div class="workspace-mini-kpi"><span>Movimientos</span><strong>${numberFormatter.format(r.movimientos || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Conciliados</span><strong>${numberFormatter.format(r.conciliados || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Sin conciliar</span><strong>${numberFormatter.format(r.pendientes || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Importe sin casar</span><strong>${eur(r.importe_pendiente)}</strong></div>
+        </div>
+        <details class="presu-plegable" ${d.rows?.length ? "" : "open"}>
+          <summary>Importar extracto del banco (norma 43)</summary>
+          <p class="muted">Descarga el fichero en cuaderno 43 desde tu banca electrónica y pégalo aquí. Los movimientos que ya estén no se duplican.</p>
+          <textarea data-n43 rows="6" class="pegar-fichero" placeholder="11210004180200051332..."></textarea>
+          <div class="form-actions"><button type="button" data-n43-importar>Importar</button></div>
+        </details>
+        ${(d.rows || []).length ? `<table class="table"><thead><tr><th>Fecha</th><th>Concepto</th><th class="num">Importe</th><th>Conciliado</th></tr></thead><tbody>
+          ${d.rows.map((m) => `<tr>
+            <td>${escapeHtml(String(m.fecha).slice(0,10))}</td>
+            <td>${escapeHtml(m.concepto || "")}</td>
+            <td class="num">${eur(m.importe)}</td>
+            <td>${m.conciliado_con
+                ? `<span class="recibo-estado" data-estado="Cobrado">${escapeHtml(m.conciliado_tipo || "sí")}</span>`
+                : `<button type="button" class="secondary ghost" data-conciliar="${escapeHtml(String(m.id))}">Conciliar…</button>`}</td>
+          </tr>`).join("")}
+        </tbody></table>` : `<p class="muted">Todavía no hay movimientos importados.</p>`}
+      `;
+      cuerpo.querySelector("[data-n43-importar]")?.addEventListener("click", async () => {
+        const texto = cuerpo.querySelector("[data-n43]")?.value || "";
+        if (!texto.trim()) { di("Pega antes el fichero."); return; }
+        try {
+          di("Importando…");
+          let res;
+          try {
+            res = await postJsonWithDbRetry("/api/workspace_fincas_extracto_importar",
+              { workspace_id: workspaceId, comunidad_id: comunidadId, fichero: texto });
+          } catch (err) {
+            if (!/no cuadra/i.test(String(err?.message || ""))) throw err;
+            if (!window.confirm(`${err.message}\n\n¿Lo importo igualmente?`)) { di(""); return; }
+            res = await postJsonWithDbRetry("/api/workspace_fincas_extracto_importar",
+              { workspace_id: workspaceId, comunidad_id: comunidadId, fichero: texto, forzar: "1" });
+          }
+          di(`${res.nuevos} movimientos nuevos, ${res.casados} casados solos, ${res.repetidos} ya estaban.`
+             + (res.avisos?.length ? ` Avisos: ${res.avisos.join(" ")}` : ""));
+          await pinta();
+        } catch (e) { di(e?.message || "No se pudo importar."); }
+      });
+      cuerpo.querySelectorAll("[data-conciliar]").forEach((b) => b.addEventListener("click", async () => {
+        const destino = window.prompt("Referencia del recibo o del gasto con el que se concilia (déjalo vacío para anotar solo que está revisado):");
+        if (destino === null) return;
+        await postJsonWithDbRetry("/api/workspace_fincas_extracto_conciliar",
+          { workspace_id: workspaceId, id: b.dataset.conciliar, conciliado_con: destino || "revisado", tipo: "manual" });
+        await pinta();
+      }));
+    };
+
+    const pintaDiario = async () => {
+      const d = await api(`/api/workspace_fincas_diario?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}&ejercicio=${encodeURIComponent(anyo())}`);
+      const t = d.totales || {};
+      cuerpo.innerHTML = `
+        <div class="workspace-mini-kpis">
+          <div class="workspace-mini-kpi"><span>Asientos</span><strong>${numberFormatter.format((d.asientos||[]).length)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Debe</span><strong>${eur(t.debe)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Haber</span><strong>${eur(t.haber)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Descuadre</span><strong>${eur(t.descuadre)}</strong></div>
+        </div>
+        ${Number(t.descuadre || 0) ? `<p class="censo-aviso">El diario está descuadrado. No debería poder pasar: avisa antes de tocar nada.</p>` : ""}
+        ${(d.asientos||[]).length ? d.asientos.map((a) => `
+          <div class="junta-acuerdo">
+            <div class="junta-acuerdo-cabeza">
+              <strong>Asiento ${a.numero} · ${escapeHtml(a.fecha)}</strong>
+              <span class="muted">${escapeHtml(a.concepto)}${a.origen !== "manual" ? ` · ${escapeHtml(a.origen)}` : ""}</span>
+            </div>
+            <table class="table"><tbody>${a.apuntes.map((p) => `<tr>
+              <td>${escapeHtml(p.cuenta)}</td>
+              <td class="num">${p.debe ? eur(p.debe) : ""}</td>
+              <td class="num">${p.haber ? eur(p.haber) : ""}</td></tr>`).join("")}</tbody></table>
+          </div>`).join("") : `<p class="muted">Sin asientos en ${escapeHtml(anyo())}.</p>`}
+      `;
+    };
+
+    const pintaSaldos = async () => {
+      const d = await api(`/api/workspace_fincas_diario?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}&ejercicio=${encodeURIComponent(anyo())}`);
+      const s = d.sumas_y_saldos || { cuentas: [], totales: {} };
+      cuerpo.innerHTML = `<table class="table"><thead><tr><th>Cuenta</th><th></th><th class="num">Debe</th><th class="num">Haber</th><th class="num">Saldo</th></tr></thead><tbody>
+        ${s.cuentas.map((c) => `<tr><td>${escapeHtml(c.cuenta)}</td><td>${escapeHtml(c.nombre)}</td>
+          <td class="num">${eur(c.debe)}</td><td class="num">${eur(c.haber)}</td><td class="num">${eur(c.saldo)}</td></tr>`).join("")
+          || `<tr><td colspan="5" class="muted">Sin movimientos.</td></tr>`}
+        </tbody><tfoot><tr><th colspan="2">Totales</th><th class="num">${eur(s.totales.debe)}</th><th class="num">${eur(s.totales.haber)}</th><th></th></tr></tfoot></table>`;
+    };
+
+    const pintaLiquidacion = async () => {
+      const d = await api(`/api/workspace_fincas_liquidacion?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}&ejercicio=${encodeURIComponent(anyo())}`);
+      const r = d.resumen || {};
+      cuerpo.innerHTML = `
+        <div class="workspace-mini-kpis">
+          <div class="workspace-mini-kpi"><span>Gasto del ejercicio</span><strong>${eur(r.gasto)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Imputado</span><strong>${eur(r.imputado)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Pagado</span><strong>${eur(r.pagado)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Diferencia</span><strong>${eur(r.diferencia)}</strong></div>
+        </div>
+        <p class="muted">El reparto se hace sobre el gasto real, no sobre el presupuesto: un presupuesto es una previsión y lo que se aprueba en junta es lo que se ha gastado.</p>
+        ${r.reparto_por_partes ? `<p class="censo-aviso">Nadie tiene coeficiente: se ha repartido a partes iguales.</p>` : ""}
+        <table class="table"><thead><tr><th>Inmueble</th><th>Propietario</th><th class="num">Coef.</th><th class="num">Le corresponde</th><th class="num">Ha pagado</th><th class="num">Saldo</th></tr></thead><tbody>
+          ${(d.rows||[]).map((f) => `<tr><td>${escapeHtml(f.piso)}</td><td>${escapeHtml(f.nombre)}</td>
+            <td class="num">${Number(f.coeficiente).toFixed(4)} %</td><td class="num">${eur(f.imputado)}</td>
+            <td class="num">${eur(f.pagado)}</td><td class="num">${eur(f.saldo)}</td></tr>`).join("")
+            || `<tr><td colspan="6" class="muted">Sin censo.</td></tr>`}
+        </tbody></table>`;
+    };
+
+    const pintaCierre = async () => {
+      cuerpo.innerHTML = `
+        <p class="muted">Cerrar el ejercicio ${escapeHtml(anyo())} salda las cuentas de gasto e ingreso contra el
+        resultado y abre el año siguiente con lo que queda vivo. Se hace con asientos, así que queda en el diario
+        y se puede revisar. No se puede cerrar dos veces.</p>
+        <div class="form-grid" style="align-items:end;">
+          <label>Dotación al fondo de reserva (€) <input data-cierre-fondo inputmode="decimal" placeholder="Opcional" /></label>
+          <div class="form-actions"><button type="button" data-cerrar>Cerrar ejercicio ${escapeHtml(anyo())}</button></div>
+        </div>`;
+      cuerpo.querySelector("[data-cerrar]")?.addEventListener("click", async () => {
+        if (!window.confirm(`Se va a cerrar ${anyo()} y abrir ${Number(anyo())+1}. ¿Seguimos?`)) return;
+        try {
+          di("Cerrando…");
+          const res = await postJsonWithDbRetry("/api/workspace_fincas_cerrar_ejercicio", {
+            workspace_id: workspaceId, comunidad_id: comunidadId, ejercicio: anyo(),
+            dotacion_fondo: cuerpo.querySelector("[data-cierre-fondo]")?.value || "",
+          });
+          di(`Cerrado. Resultado ${eur(res.resultado)}. Apertura de ${res.ejercicio_siguiente} creada.`);
+        } catch (e) { di(e?.message || "No se pudo cerrar."); }
+      });
+    };
+
+    const pinta = async () => {
+      try {
+        cuerpo.innerHTML = `<p class="muted">Cargando…</p>`;
+        if (sub === "extracto") await pintaExtracto();
+        else if (sub === "diario") await pintaDiario();
+        else if (sub === "saldos") await pintaSaldos();
+        else if (sub === "liquidacion") await pintaLiquidacion();
+        else await pintaCierre();
+      } catch (e) {
+        cuerpo.innerHTML = `<p class="muted">${escapeHtml(e?.message || "No se pudo cargar.")}</p>`;
+      }
+    };
+    panel.querySelectorAll("[data-lib-sub]").forEach((b) => b.addEventListener("click", () => {
+      sub = b.dataset.libSub;
+      panel.querySelectorAll("[data-lib-sub]").forEach((x) => x.classList.toggle("active", x === b));
+      void pinta();
+    }));
+    panel.querySelector("[data-lib-anyo]")?.addEventListener("change", pinta);
+    await pinta();
+    return;
+  }
+
   if (tab === "proveedores") {
     workspaceFincasCommunityFichaPanel.innerHTML = `
       <div class="workspace-two-cols">

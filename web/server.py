@@ -41149,6 +41149,93 @@ def ensure_workspace_product_tables(conn):
     # invisible: en esa carpeta hay contratos y facturas de proveedores, y que un
     # vecino los vea por descuido es peor que tener que marcar los que sí.
     ensure_column(conn, "workspace_fincas_documentos", "visible_portal", "visible_portal INTEGER NOT NULL DEFAULT 0")
+    # --- Contabilidad de comunidad: plan de cuentas, diario y extracto ---------
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_cuentas (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          codigo TEXT NOT NULL,
+          nombre TEXT NOT NULL,
+          grupo TEXT NOT NULL,
+          activo INTEGER NOT NULL DEFAULT 1,
+          orden INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_cuentas_unico "
+                     "ON workspace_fincas_cuentas (workspace_id, codigo)")
+    except Exception:
+        pass
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_asientos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          comunidad_id TEXT NOT NULL,
+          ejercicio TEXT NOT NULL,
+          numero INTEGER NOT NULL,
+          fecha TEXT NOT NULL,
+          concepto TEXT NOT NULL,
+          origen TEXT NOT NULL DEFAULT 'manual',
+          origen_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_asiento_numero "
+                     "ON workspace_fincas_asientos (comunidad_id, ejercicio, numero)")
+    except Exception:
+        pass
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_apuntes (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          asiento_id TEXT NOT NULL,
+          orden INTEGER NOT NULL DEFAULT 1,
+          cuenta TEXT NOT NULL,
+          vecino_id TEXT,
+          debe NUMERIC NOT NULL DEFAULT 0,
+          haber NUMERIC NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_extracto (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          comunidad_id TEXT NOT NULL,
+          fecha TEXT NOT NULL,
+          fecha_valor TEXT,
+          concepto TEXT NOT NULL,
+          importe NUMERIC NOT NULL DEFAULT 0,
+          saldo NUMERIC,
+          referencia TEXT,
+          huella TEXT NOT NULL,
+          conciliado_con TEXT,
+          conciliado_tipo TEXT,
+          conciliado_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        # La huella impide meter dos veces el mismo extracto: importar el fichero de
+        # un mes por segunda vez duplicaría todos los movimientos.
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_extracto_huella "
+                     "ON workspace_fincas_extracto (comunidad_id, huella)")
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_cartas (
@@ -50440,6 +50527,465 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
     }
 
 
+#: Plan de cuentas de una comunidad de propietarios. No es el PGC de una empresa: una
+#: comunidad no tiene beneficio ni capital, y lo que se lleva es de dónde entra el
+#: dinero y en qué se va. Se sigue la costumbre del sector —grupo 5 para tesorería,
+#: 4 para deudores y acreedores, 6 para gastos y 7 para ingresos— para que a un
+#: administrador le suene, y se deja editable por si la comunidad usa otro.
+FINCAS_CUENTAS_DEFECTO = [
+    ("572", "Banco", "tesoreria", 1),
+    ("570", "Caja", "tesoreria", 2),
+    ("440", "Propietarios, cuotas pendientes", "deudores", 3),
+    ("410", "Acreedores y proveedores", "acreedores", 4),
+    ("555", "Partidas pendientes de aplicar", "tesoreria", 5),
+    ("113", "Fondo de reserva", "fondos", 6),
+    ("129", "Resultado del ejercicio", "fondos", 7),
+    ("621", "Suministros (luz, agua, gas)", "gasto", 10),
+    ("622", "Mantenimiento y reparaciones", "gasto", 11),
+    ("623", "Servicios profesionales (administración)", "gasto", 12),
+    ("625", "Primas de seguros", "gasto", 13),
+    ("628", "Limpieza y portería", "gasto", 14),
+    ("629", "Otros gastos de la comunidad", "gasto", 15),
+    ("631", "Tributos y tasas", "gasto", 16),
+    ("700", "Cuotas ordinarias", "ingreso", 20),
+    ("705", "Derramas", "ingreso", 21),
+    ("759", "Otros ingresos", "ingreso", 22),
+]
+
+
+def _n43_fecha(crudo):
+    """AAMMDD del cuaderno 43 a ISO. El siglo se decide por el año: 80 es 1980."""
+    crudo = str(crudo or "").strip()
+    if len(crudo) != 6 or not crudo.isdigit():
+        return ""
+    anio, mes, dia = int(crudo[:2]), int(crudo[2:4]), int(crudo[4:6])
+    siglo = 2000 if anio < 80 else 1900
+    try:
+        return date(siglo + anio, mes, dia).isoformat()
+    except ValueError:
+        return ""
+
+
+def _n43_importe(crudo, signo):
+    """14 dígitos en céntimos. El signo va aparte: 1 es cargo y 2 es abono."""
+    crudo = str(crudo or "").strip() or "0"
+    if not crudo.isdigit():
+        return 0.0
+    valor = int(crudo) / 100.0
+    return -valor if str(signo).strip() == "1" else valor
+
+
+def parse_norma43(texto):
+    """Lee un extracto bancario en cuaderno 43 de la AEB.
+
+    Es el formato que descarga cualquier banco español, y el que hace que conciliar
+    deje de ser leer un PDF y teclear. Registros de 80 posiciones: 11 cabecera de
+    cuenta, 22 movimiento, 23 ampliación del concepto, 33 cierre de cuenta y 88 fin
+    de fichero.
+
+    Se devuelve también lo que declara el propio fichero —saldo inicial, saldo final
+    y número de apuntes— para **contrastarlo** con lo leído. Si un banco coloca algún
+    campo medio hueco distinto y se leen mal los importes, el contraste lo canta;
+    dar por bueno un extracto mal leído es peor que no importarlo.
+
+    Los importes vienen en céntimos sin separador decimal, y el signo es un dígito
+    aparte: por eso no se parsea como número con coma.
+    """
+    lineas = [l.rstrip("\r\n") for l in str(texto or "").replace("\r\n", "\n").split("\n") if l.strip()]
+    cuentas, actual, movimientos = [], None, []
+    avisos = []
+    for numero, linea in enumerate(lineas, start=1):
+        tipo = linea[:2]
+        if tipo == "11":
+            if actual:
+                cuentas.append(actual)
+            actual = {
+                "banco": linea[2:6].strip(),
+                "oficina": linea[6:10].strip(),
+                "cuenta": linea[10:20].strip(),
+                "fecha_inicial": _n43_fecha(linea[20:26]),
+                "fecha_final": _n43_fecha(linea[26:32]),
+                "saldo_inicial": _n43_importe(linea[33:47], linea[32:33]),
+                "divisa": linea[47:50].strip(),
+                "titular": linea[51:77].strip(),
+                "movimientos": [],
+            }
+            movimientos = actual["movimientos"]
+        elif tipo == "22":
+            if actual is None:
+                avisos.append(f"Línea {numero}: hay un movimiento antes de la cabecera de cuenta.")
+                continue
+            movimientos.append({
+                "fecha": _n43_fecha(linea[10:16]),
+                "fecha_valor": _n43_fecha(linea[16:22]),
+                "concepto_comun": linea[22:24].strip(),
+                "concepto_propio": linea[24:27].strip(),
+                "importe": _n43_importe(linea[28:42], linea[27:28]),
+                "documento": linea[42:52].strip(),
+                "referencia": (linea[52:64] + linea[64:80]).strip(),
+                "concepto": "",
+            })
+        elif tipo == "23":
+            if movimientos:
+                extra = (linea[4:42] + " " + linea[42:80]).strip()
+                anterior = movimientos[-1]["concepto"]
+                movimientos[-1]["concepto"] = (anterior + " " + extra).strip() if anterior else extra
+        elif tipo == "33":
+            if actual is None:
+                continue
+            # El registro 33 declara los apuntes y los importes del debe y del haber
+            # por separado. La primera versión leía el contador del debe como si
+            # fuera el total, y avisaba de un descuadre que no existía.
+            def _entero(trozo):
+                return int(trozo) if trozo.strip().isdigit() else None
+
+            apuntes_debe = _entero(linea[20:25])
+            apuntes_haber = _entero(linea[39:44])
+            actual["apuntes_declarados"] = (
+                (apuntes_debe or 0) + (apuntes_haber or 0)
+                if apuntes_debe is not None or apuntes_haber is not None else None
+            )
+            actual["total_debe_declarado"] = round(int(linea[25:39]) / 100.0, 2) if linea[25:39].strip().isdigit() else None
+            actual["total_haber_declarado"] = round(int(linea[44:58]) / 100.0, 2) if linea[44:58].strip().isdigit() else None
+            actual["saldo_final"] = _n43_importe(linea[59:73], linea[58:59])
+            cuentas.append(actual)
+            actual, movimientos = None, []
+        elif tipo == "88":
+            continue
+        else:
+            avisos.append(f"Línea {numero}: registro «{tipo}» desconocido, se ignora.")
+    if actual:
+        cuentas.append(actual)
+
+    # Contraste: lo que suma el fichero contra lo que declara su propio cierre.
+    for cuenta in cuentas:
+        movs = cuenta.get("movimientos") or []
+        cuenta["apuntes_leidos"] = len(movs)
+        suma = round(sum(m["importe"] for m in movs), 2)
+        cuenta["suma_movimientos"] = suma
+        declarado = cuenta.get("saldo_final")
+        if declarado is not None:
+            calculado = round(cuenta.get("saldo_inicial", 0.0) + suma, 2)
+            cuenta["saldo_calculado"] = calculado
+            cuenta["cuadra"] = abs(calculado - declarado) < 0.005
+        else:
+            cuenta["saldo_calculado"] = None
+            cuenta["cuadra"] = None
+        n = cuenta.get("apuntes_declarados")
+        if n is not None and n != len(movs):
+            avisos.append(f"La cuenta {cuenta.get('cuenta')} declara {n} apuntes y se han leído {len(movs)}.")
+        # Y los importes, por separado: un signo mal leído no cambia el número de
+        # apuntes pero sí cambia el dinero.
+        cuenta["total_debe"] = round(-sum(m["importe"] for m in movs if m["importe"] < 0), 2)
+        cuenta["total_haber"] = round(sum(m["importe"] for m in movs if m["importe"] > 0), 2)
+        for etiqueta, leido, declarado in (
+            ("cargos", cuenta["total_debe"], cuenta.get("total_debe_declarado")),
+            ("abonos", cuenta["total_haber"], cuenta.get("total_haber_declarado")),
+        ):
+            if declarado is not None and abs(leido - declarado) >= 0.005:
+                avisos.append(
+                    f"La cuenta {cuenta.get('cuenta')} declara {declarado:.2f} € en {etiqueta} "
+                    f"y se han leído {leido:.2f} €."
+                )
+    return {"cuentas": cuentas, "avisos": avisos}
+
+
+def huella_movimiento(mov):
+    """Identifica un movimiento para no importarlo dos veces.
+
+    Se usa fecha, importe, documento y concepto: dos cargos idénticos el mismo día
+    existen —dos recibos del mismo importe—, y por eso entra el documento, que el
+    banco no repite.
+    """
+    crudo = "|".join(str(mov.get(c) or "") for c in ("fecha", "importe", "documento", "referencia", "concepto"))
+    return hashlib.sha256(crudo.encode("utf-8")).hexdigest()[:32]
+
+
+def fetch_workspace_fincas_cuentas(conn, workspace_id, *, sembrar=True):
+    """Plan de cuentas del workspace, sembrando el de partida la primera vez."""
+    workspace_id = str(workspace_id or "").strip()
+    if not workspace_id:
+        return []
+
+    def leer():
+        return conn.execute(
+            "SELECT codigo, nombre, grupo, activo, orden FROM workspace_fincas_cuentas "
+            "WHERE workspace_id = ? ORDER BY orden, codigo",
+            (workspace_id,),
+        ).fetchall()
+
+    filas = leer()
+    if not filas and sembrar:
+        ahora = datetime.now().isoformat(timespec="seconds")
+        for codigo, nombre, grupo, orden in FINCAS_CUENTAS_DEFECTO:
+            conn.execute(
+                "INSERT INTO workspace_fincas_cuentas "
+                "(id, workspace_id, codigo, nombre, grupo, activo, orden, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                (os.urandom(16).hex(), workspace_id, codigo, nombre, grupo, orden, ahora, ahora),
+            )
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        filas = leer()
+    return [
+        {
+            "codigo": row_value(f, "codigo", ""),
+            "nombre": row_value(f, "nombre", ""),
+            "grupo": row_value(f, "grupo", ""),
+            "activo": int(row_value(f, "activo", 1) or 0),
+            "orden": int(row_value(f, "orden", 0) or 0),
+        }
+        for f in filas
+    ]
+
+
+class AsientoDescuadrado(ValueError):
+    """Un asiento cuyo debe no iguala a su haber. No se guarda, nunca."""
+
+
+def registrar_asiento(conn, workspace_id, comunidad_id, *, fecha, concepto, apuntes,
+                      origen="manual", origen_id=None, now=None):
+    """Anota un asiento en el diario. Si no cuadra, no entra.
+
+    Es la única regla que hace que una contabilidad sirva para algo: la suma del debe
+    tiene que ser exactamente la del haber. Permitir un asiento descuadrado «para
+    arreglarlo luego» es lo que convierte un libro en un montón de apuntes sueltos,
+    que es justo lo que había aquí antes.
+
+    Se compara en céntimos enteros, no en flotantes: `0.1 + 0.2 != 0.3` habría dejado
+    pasar descuadres de un céntimo.
+    """
+    now = now or datetime.now().isoformat(timespec="seconds")
+    lineas = []
+    for orden, apunte in enumerate(apuntes or [], start=1):
+        cuenta = str((apunte or {}).get("cuenta") or "").strip()
+        if not cuenta:
+            continue
+        debe = int(round(parse_money_value(apunte.get("debe")) * 100))
+        haber = int(round(parse_money_value(apunte.get("haber")) * 100))
+        if debe < 0 or haber < 0:
+            raise AsientoDescuadrado("Un apunte no puede llevar importes negativos: usa la otra columna.")
+        if debe and haber:
+            raise AsientoDescuadrado(f"El apunte de la cuenta {cuenta} lleva debe y haber a la vez.")
+        if not debe and not haber:
+            continue
+        lineas.append({"orden": orden, "cuenta": cuenta, "vecino_id": (apunte.get("vecino_id") or None),
+                       "debe": debe, "haber": haber})
+    if not lineas:
+        raise AsientoDescuadrado("El asiento no tiene apuntes.")
+    total_debe = sum(l["debe"] for l in lineas)
+    total_haber = sum(l["haber"] for l in lineas)
+    if total_debe != total_haber:
+        raise AsientoDescuadrado(
+            f"El asiento no cuadra: debe {total_debe / 100:.2f} € y haber {total_haber / 100:.2f} €."
+        )
+
+    ejercicio = str(fecha or "")[:4]
+    siguiente = int(row_value(conn.execute(
+        "SELECT COALESCE(MAX(numero), 0) AS n FROM workspace_fincas_asientos "
+        "WHERE comunidad_id = ? AND ejercicio = ?",
+        (comunidad_id, ejercicio),
+    ).fetchone(), "n", 0) or 0) + 1
+
+    asiento_id = os.urandom(16).hex()
+    conn.execute(
+        "INSERT INTO workspace_fincas_asientos "
+        "(id, workspace_id, comunidad_id, ejercicio, numero, fecha, concepto, origen, origen_id, "
+        " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (asiento_id, workspace_id, comunidad_id, ejercicio, siguiente, str(fecha)[:10],
+         str(concepto or "").strip() or "Sin concepto", origen, origen_id, now, now),
+    )
+    for linea in lineas:
+        conn.execute(
+            "INSERT INTO workspace_fincas_apuntes "
+            "(id, workspace_id, asiento_id, orden, cuenta, vecino_id, debe, haber, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (os.urandom(16).hex(), workspace_id, asiento_id, linea["orden"], linea["cuenta"],
+             linea["vecino_id"], linea["debe"] / 100.0, linea["haber"] / 100.0, now, now),
+        )
+    return {"id": asiento_id, "numero": siguiente, "ejercicio": ejercicio,
+            "total": round(total_debe / 100.0, 2)}
+
+
+def fetch_workspace_fincas_diario(conn, workspace_id, comunidad_id, ejercicio, limit=500):
+    """El libro diario del ejercicio, con sus apuntes y los totales de comprobación."""
+    asientos = conn.execute(
+        "SELECT id, numero, fecha, concepto, origen, origen_id FROM workspace_fincas_asientos "
+        "WHERE workspace_id = ? AND comunidad_id = ? AND ejercicio = ? ORDER BY numero LIMIT ?",
+        (workspace_id, comunidad_id, str(ejercicio)[:4], max(1, min(int(limit or 500), 2000))),
+    ).fetchall()
+    salida, total_debe, total_haber = [], 0.0, 0.0
+    for asiento in asientos:
+        apuntes = []
+        for apunte in conn.execute(
+            "SELECT orden, cuenta, vecino_id, debe, haber FROM workspace_fincas_apuntes "
+            "WHERE asiento_id = ? ORDER BY orden",
+            (row_value(asiento, "id", ""),),
+        ).fetchall():
+            debe = round(parse_money_value(row_value(apunte, "debe", 0)), 2)
+            haber = round(parse_money_value(row_value(apunte, "haber", 0)), 2)
+            total_debe += debe
+            total_haber += haber
+            apuntes.append({
+                "cuenta": row_value(apunte, "cuenta", ""),
+                "vecino_id": row_value(apunte, "vecino_id", "") or "",
+                "debe": debe, "haber": haber,
+            })
+        salida.append({
+            "id": row_value(asiento, "id", ""),
+            "numero": int(row_value(asiento, "numero", 0) or 0),
+            "fecha": row_value(asiento, "fecha", ""),
+            "concepto": row_value(asiento, "concepto", ""),
+            "origen": row_value(asiento, "origen", ""),
+            "apuntes": apuntes,
+        })
+    return {
+        "asientos": salida,
+        "totales": {
+            "debe": round(total_debe, 2),
+            "haber": round(total_haber, 2),
+            # Si esto no da cero, hay un asiento mal guardado: no debería poder pasar,
+            # y por eso se enseña.
+            "descuadre": round(total_debe - total_haber, 2) + 0.0 or 0.0,
+        },
+    }
+
+
+def fetch_workspace_fincas_sumas_y_saldos(conn, workspace_id, comunidad_id, ejercicio):
+    """Sumas y saldos por cuenta: lo que se mira para cerrar un ejercicio."""
+    filas = conn.execute(
+        """
+        SELECT p.cuenta,
+               COALESCE(SUM(p.debe), 0) AS debe,
+               COALESCE(SUM(p.haber), 0) AS haber
+        FROM workspace_fincas_apuntes p
+        JOIN workspace_fincas_asientos a ON a.id = p.asiento_id
+        WHERE a.workspace_id = ? AND a.comunidad_id = ? AND a.ejercicio = ?
+        GROUP BY p.cuenta ORDER BY p.cuenta
+        """,
+        (workspace_id, comunidad_id, str(ejercicio)[:4]),
+    ).fetchall()
+    nombres = {c["codigo"]: c for c in fetch_workspace_fincas_cuentas(conn, workspace_id)}
+    cuentas = []
+    for fila in filas:
+        codigo = row_value(fila, "cuenta", "")
+        debe = round(parse_money_value(row_value(fila, "debe", 0)), 2)
+        haber = round(parse_money_value(row_value(fila, "haber", 0)), 2)
+        cuentas.append({
+            "cuenta": codigo,
+            "nombre": (nombres.get(codigo) or {}).get("nombre", ""),
+            "grupo": (nombres.get(codigo) or {}).get("grupo", ""),
+            "debe": debe, "haber": haber, "saldo": round(debe - haber, 2),
+        })
+    return {
+        "cuentas": cuentas,
+        "totales": {
+            "debe": round(sum(c["debe"] for c in cuentas), 2),
+            "haber": round(sum(c["haber"] for c in cuentas), 2),
+        },
+    }
+
+
+#: Cuántos días de diferencia se admiten al casar un movimiento del banco con un
+#: recibo. El banco apunta con fecha de operación y el recibo lleva la del periodo,
+#: y entre una y otra pasan días.
+CONCILIACION_MARGEN_DIAS = 10
+
+
+def _dias_entre(a, b):
+    try:
+        return abs((date.fromisoformat(str(a)[:10]) - date.fromisoformat(str(b)[:10])).days)
+    except (TypeError, ValueError):
+        return 999
+
+
+def sugerir_conciliacion(conn, workspace_id, comunidad_id, movimiento):
+    """Busca a qué recibo corresponde un movimiento del extracto.
+
+    Se casa por importe exacto y fecha cercana, y **solo se propone si hay un único
+    candidato**. Con dos recibos del mismo importe la máquina no puede saber cuál es,
+    y elegir uno al azar es peor que dejarlo para que lo mire una persona: marcar
+    cobrado el recibo del vecino equivocado se descubre cuando reclamas a quien sí
+    había pagado.
+    """
+    importe = round(parse_money_value(movimiento.get("importe")), 2)
+    fecha = str(movimiento.get("fecha") or "")[:10]
+    if not importe or not fecha:
+        return None
+
+    # Un abono es un cobro de recibos; un cargo es una devolución o un gasto.
+    if importe > 0:
+        candidatos = conn.execute(
+            "SELECT r.id, r.periodo, r.importe, v.nombre, v.piso FROM workspace_fincas_recibos r "
+            "LEFT JOIN workspace_fincas_vecinos v ON v.id = r.vecino_id "
+            "WHERE r.workspace_id = ? AND r.comunidad_id = ? AND r.estado = 'Pendiente' "
+            "AND ABS(r.importe - ?) < 0.005",
+            (workspace_id, comunidad_id, importe),
+        ).fetchall()
+        tipo = "recibo"
+    else:
+        candidatos = conn.execute(
+            "SELECT r.id, r.periodo, r.importe, v.nombre, v.piso FROM workspace_fincas_recibos r "
+            "LEFT JOIN workspace_fincas_vecinos v ON v.id = r.vecino_id "
+            "WHERE r.workspace_id = ? AND r.comunidad_id = ? AND r.estado = 'Cobrado' "
+            "AND ABS(r.importe - ?) < 0.005",
+            (workspace_id, comunidad_id, abs(importe)),
+        ).fetchall()
+        tipo = "devolucion"
+
+    cercanos = [
+        c for c in candidatos
+        if _dias_entre(fecha, (row_value(c, "periodo", "") or "") + "-15") <= 45
+    ]
+    # Una remesa entera cobrada de golpe: el abono es la suma, no un recibo suelto.
+    if importe > 0 and not cercanos:
+        remesa = conn.execute(
+            "SELECT id, referencia, total, fecha_cobro FROM workspace_fincas_remesas "
+            "WHERE workspace_id = ? AND comunidad_id = ? AND ABS(total - ?) < 0.005",
+            (workspace_id, comunidad_id, importe),
+        ).fetchall()
+        cerca = [r for r in remesa if _dias_entre(fecha, row_value(r, "fecha_cobro", "")) <= CONCILIACION_MARGEN_DIAS]
+        if len(cerca) == 1:
+            return {"tipo": "remesa", "id": row_value(cerca[0], "id", ""),
+                    "texto": f"Remesa {row_value(cerca[0], 'referencia', '')} · {importe:.2f} €"}
+        return None
+
+    if len(cercanos) == 1:
+        c = cercanos[0]
+        quien = f"{row_value(c, 'piso', '') or ''} {row_value(c, 'nombre', '') or ''}".strip()
+        return {"tipo": tipo, "id": row_value(c, "id", ""),
+                "texto": f"Recibo {row_value(c, 'periodo', '')} · {quien}".strip()}
+    return None
+
+
+def fetch_workspace_fincas_extracto(conn, workspace_id, comunidad_id, *, solo_pendientes=False, limit=500):
+    """Movimientos importados, con lo que se ha casado y lo que no."""
+    condiciones = ["workspace_id = ?", "comunidad_id = ?"]
+    valores = [workspace_id, comunidad_id]
+    if solo_pendientes:
+        condiciones.append("conciliado_con IS NULL")
+    filas = conn.execute(
+        f"SELECT id, fecha, fecha_valor, concepto, importe, saldo, referencia, conciliado_con, "
+        f"       conciliado_tipo, conciliado_at "
+        f"FROM workspace_fincas_extracto WHERE {' AND '.join(condiciones)} "
+        f"ORDER BY fecha DESC, created_at DESC LIMIT ?",
+        (*valores, max(1, min(int(limit or 500), 2000))),
+    ).fetchall()
+    movimientos = [dict(f) for f in filas]
+    sin_conciliar = [m for m in movimientos if not m.get("conciliado_con")]
+    return {
+        "rows": movimientos,
+        "resumen": {
+            "movimientos": len(movimientos),
+            "conciliados": len(movimientos) - len(sin_conciliar),
+            "pendientes": len(sin_conciliar),
+            "importe_pendiente": round(sum(parse_money_value(m["importe"]) for m in sin_conciliar), 2),
+        },
+    }
+
+
 def fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio):
     """Presupuesto del ejercicio frente a lo realmente ingresado y gastado.
 
@@ -50632,6 +51178,167 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
         "documentos": documentos,
         "caduca": caduca,
     }
+
+
+def fetch_workspace_fincas_liquidacion(conn, workspace_id, comunidad_id, ejercicio):
+    """Liquidación del ejercicio, propietario a propietario.
+
+    Es el documento que se reparte en la junta ordinaria: a cada uno, lo que le
+    correspondía según su coeficiente y lo que efectivamente pagó.
+
+    **Lo que le correspondía se calcula sobre el gasto real, no sobre el presupuesto.**
+    Un presupuesto es una previsión: la liquidación reparte lo que de verdad se ha
+    gastado, que es lo que hay que aprobar. Si se repartiera lo presupuestado, la
+    suma de las liquidaciones no cuadraría con la caja.
+
+    El reparto usa el mismo resto mayor que los recibos, así que la suma de lo
+    imputado es exactamente el gasto del ejercicio, sin céntimos perdidos.
+    """
+    ejercicio = str(ejercicio or "")[:4]
+    propietarios = conn.execute(
+        "SELECT id, nombre, piso, COALESCE(coeficiente, 0) AS coeficiente FROM workspace_fincas_vecinos "
+        "WHERE workspace_id = ? AND comunidad_id = ? ORDER BY piso, nombre",
+        (workspace_id, comunidad_id),
+    ).fetchall()
+    if not propietarios:
+        return {"rows": [], "resumen": {"gasto": 0.0, "imputado": 0.0, "pagado": 0.0, "diferencia": 0.0,
+                                        "propietarios": 0, "reparto_por_partes": False}}
+
+    # El gasto del ejercicio sale del diario si lo hay, y si no del libro simple.
+    gasto = round(parse_money_value(row_value(conn.execute(
+        "SELECT COALESCE(SUM(p.debe) - SUM(p.haber), 0) AS total FROM workspace_fincas_apuntes p "
+        "JOIN workspace_fincas_asientos a ON a.id = p.asiento_id "
+        "WHERE a.workspace_id = ? AND a.comunidad_id = ? AND a.ejercicio = ? AND p.cuenta LIKE '6%'",
+        (workspace_id, comunidad_id, ejercicio),
+    ).fetchone(), "total", 0)), 2)
+    origen_gasto = "diario"
+    if gasto <= 0:
+        gasto = round(parse_money_value(row_value(conn.execute(
+            "SELECT COALESCE(SUM(importe), 0) AS total FROM workspace_fincas_contabilidad "
+            "WHERE workspace_id = ? AND comunidad_id = ? AND substr(COALESCE(fecha,''), 1, 4) = ? "
+            "AND UPPER(COALESCE(tipo,'')) != 'INGRESO'",
+            (workspace_id, comunidad_id, ejercicio),
+        ).fetchone(), "total", 0)), 2)
+        origen_gasto = "libro simple"
+
+    reparto, por_partes = reparte_por_coeficiente(gasto, propietarios)
+    imputado = {row_value(v, "id", ""): importe for v, importe in reparto}
+
+    filas = []
+    for propietario in propietarios:
+        vecino_id = row_value(propietario, "id", "")
+        pagado = round(parse_money_value(row_value(conn.execute(
+            "SELECT COALESCE(SUM(importe), 0) AS total FROM workspace_fincas_recibos "
+            "WHERE workspace_id = ? AND vecino_id = ? AND estado = 'Cobrado' AND substr(periodo, 1, 4) = ?",
+            (workspace_id, vecino_id, ejercicio),
+        ).fetchone(), "total", 0)), 2)
+        le_toca = imputado.get(vecino_id, 0.0)
+        filas.append({
+            "vecino_id": vecino_id,
+            "nombre": row_value(propietario, "nombre", ""),
+            "piso": row_value(propietario, "piso", "") or "",
+            "coeficiente": round(float(row_value(propietario, "coeficiente", 0) or 0), 4),
+            "imputado": le_toca,
+            "pagado": pagado,
+            # Positivo: ha pagado de más y se le devuelve. Negativo: debe.
+            "saldo": round(pagado - le_toca, 2),
+        })
+    return {
+        "rows": filas,
+        "resumen": {
+            "ejercicio": ejercicio,
+            "propietarios": len(filas),
+            "gasto": gasto,
+            "origen_gasto": origen_gasto,
+            "imputado": round(sum(f["imputado"] for f in filas), 2),
+            "pagado": round(sum(f["pagado"] for f in filas), 2),
+            "diferencia": round(sum(f["saldo"] for f in filas), 2),
+            "reparto_por_partes": por_partes,
+        },
+    }
+
+
+def cerrar_ejercicio_fincas(conn, workspace_id, comunidad_id, ejercicio, *, now=None, dotacion_fondo=None):
+    """Cierra el ejercicio: lleva el resultado a fondos y arrastra el saldo al siguiente.
+
+    Se hace con asientos de verdad, no tocando saldos a mano: el cierre queda en el
+    diario y se puede auditar. Son dos:
+
+    1. **Regularización**: se saldan las cuentas de gasto (6) y de ingreso (7) contra
+       el resultado del ejercicio (129).
+    2. **Apertura del siguiente**: el saldo de tesorería y el de deudores pasan al
+       ejercicio nuevo con fecha 1 de enero.
+
+    Si se indica dotación al fondo de reserva, se lleva del resultado al fondo (113).
+
+    No se cierra dos veces: si ya hay un asiento de cierre del ejercicio, se rechaza.
+    """
+    now = now or datetime.now().isoformat(timespec="seconds")
+    ejercicio = str(ejercicio or "")[:4]
+    ya = conn.execute(
+        "SELECT id FROM workspace_fincas_asientos WHERE comunidad_id = ? AND ejercicio = ? "
+        "AND origen = 'cierre' LIMIT 1",
+        (comunidad_id, ejercicio),
+    ).fetchone()
+    if ya:
+        raise AsientoDescuadrado(f"El ejercicio {ejercicio} ya está cerrado.")
+
+    saldos = fetch_workspace_fincas_sumas_y_saldos(conn, workspace_id, comunidad_id, ejercicio)["cuentas"]
+    apuntes, resultado = [], 0.0
+    for cuenta in saldos:
+        codigo, saldo = cuenta["cuenta"], cuenta["saldo"]
+        if not codigo[:1] in ("6", "7") or not round(saldo, 2):
+            continue
+        # Una cuenta de gasto queda con saldo deudor: se salda por el haber.
+        if saldo > 0:
+            apuntes.append({"cuenta": codigo, "haber": saldo})
+            resultado -= saldo
+        else:
+            apuntes.append({"cuenta": codigo, "debe": -saldo})
+            resultado += -saldo
+    if not apuntes:
+        raise AsientoDescuadrado(f"El ejercicio {ejercicio} no tiene gastos ni ingresos que regularizar.")
+    # El resultado cierra el asiento por el otro lado.
+    if resultado > 0:
+        apuntes.append({"cuenta": "129", "haber": round(resultado, 2)})
+    else:
+        apuntes.append({"cuenta": "129", "debe": round(-resultado, 2)})
+    cierre = registrar_asiento(
+        conn, workspace_id, comunidad_id,
+        fecha=f"{ejercicio}-12-31", concepto=f"Regularización y cierre del ejercicio {ejercicio}",
+        apuntes=apuntes, origen="cierre", now=now,
+    )
+
+    dotacion = round(parse_money_value(dotacion_fondo), 2)
+    if dotacion > 0:
+        registrar_asiento(
+            conn, workspace_id, comunidad_id,
+            fecha=f"{ejercicio}-12-31", concepto=f"Dotación al fondo de reserva {ejercicio}",
+            apuntes=[{"cuenta": "129", "debe": dotacion}, {"cuenta": "113", "haber": dotacion}],
+            origen="cierre", now=now,
+        )
+
+    # Apertura del siguiente con lo que queda vivo: tesorería, deudores y acreedores.
+    siguiente = str(int(ejercicio) + 1)
+    arrastre = [
+        {"cuenta": c["cuenta"], ("debe" if c["saldo"] > 0 else "haber"): abs(c["saldo"])}
+        for c in fetch_workspace_fincas_sumas_y_saldos(conn, workspace_id, comunidad_id, ejercicio)["cuentas"]
+        if c["cuenta"][:1] in ("1", "4", "5") and round(c["saldo"], 2)
+    ]
+    apertura = None
+    if arrastre:
+        descuadre = round(sum(a.get("debe", 0) for a in arrastre) - sum(a.get("haber", 0) for a in arrastre), 2)
+        if descuadre:
+            # No debería pasar si el ejercicio cuadraba; si pasa, se deja constancia
+            # en una cuenta puente en vez de forzar el asiento en silencio.
+            arrastre.append({"cuenta": "555", ("haber" if descuadre > 0 else "debe"): abs(descuadre)})
+        apertura = registrar_asiento(
+            conn, workspace_id, comunidad_id,
+            fecha=f"{siguiente}-01-01", concepto=f"Apertura del ejercicio {siguiente}",
+            apuntes=arrastre, origen="apertura", now=now,
+        )
+    return {"cierre": cierre, "apertura": apertura, "resultado": round(resultado, 2),
+            "dotacion_fondo": dotacion, "ejercicio_siguiente": siguiente}
 
 
 def fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id):
@@ -60694,6 +61401,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_mayorias",
             "/api/workspace_fincas_junta_convocatoria",
             "/api/workspace_fincas_presupuesto_anual",
+            "/api/workspace_fincas_extracto_importar",
+            "/api/workspace_fincas_extracto_conciliar",
+            "/api/workspace_fincas_asiento",
+            "/api/workspace_fincas_cerrar_ejercicio",
             "/api/workspace_fincas_carta",
             "/api/workspace_fincas_portal_alta",
             "/api/workspace_fincas_portal_revocar",
@@ -73571,6 +74282,173 @@ class Handler(BaseHTTPRequestHandler):
                 "plantilla": plantilla["clave"],
                 "carta": render_carta_presentacion(plantilla["cuerpo"], datos),
             })
+            return
+        elif parsed.path == "/api/workspace_fincas_extracto_importar":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            comunidad_id = str(payload.get("comunidad_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not comunidad_id:
+                json_response(self, {"error": "workspace_id y comunidad_id requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            leido = parse_norma43(payload.get("fichero") or "")
+            if not leido["cuentas"]:
+                json_response(self, {"error": "No se ha reconocido ningún extracto en el fichero"}, status=400)
+                return
+            # Si el fichero no cuadra consigo mismo, no se importa: dar por bueno un
+            # extracto mal leído es peor que no importarlo.
+            descuadradas = [c for c in leido["cuentas"] if c.get("cuadra") is False]
+            if descuadradas and str(payload.get("forzar") or "").strip().lower() not in {"1", "true", "si", "sí"}:
+                json_response(self, {
+                    "error": "El fichero no cuadra con el saldo que él mismo declara. Revísalo antes de importar.",
+                    "code": "no_cuadra", "avisos": leido["avisos"],
+                    "cuentas": [{"cuenta": c.get("cuenta"), "calculado": c.get("saldo_calculado"),
+                                 "declarado": c.get("saldo_final")} for c in descuadradas],
+                }, status=409)
+                return
+
+            nuevos = repetidos = casados = 0
+            for cuenta in leido["cuentas"]:
+                for mov in cuenta.get("movimientos") or []:
+                    huella = huella_movimiento(mov)
+                    existe = conn.execute(
+                        "SELECT id FROM workspace_fincas_extracto WHERE comunidad_id = ? AND huella = ? LIMIT 1",
+                        (comunidad_id, huella),
+                    ).fetchone()
+                    if existe:
+                        repetidos += 1
+                        continue
+                    sugerencia = sugerir_conciliacion(conn, workspace_id, comunidad_id, mov)
+                    conn.execute(
+                        "INSERT INTO workspace_fincas_extracto "
+                        "(id, workspace_id, comunidad_id, fecha, fecha_valor, concepto, importe, saldo, "
+                        " referencia, huella, conciliado_con, conciliado_tipo, conciliado_at, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?)",
+                        (os.urandom(16).hex(), workspace_id, comunidad_id, mov["fecha"], mov["fecha_valor"],
+                         (mov.get("concepto") or mov.get("referencia") or "Movimiento").strip(),
+                         mov["importe"], mov.get("referencia") or None, huella,
+                         (sugerencia or {}).get("id"), (sugerencia or {}).get("tipo"),
+                         now if sugerencia else None, now, now),
+                    )
+                    nuevos += 1
+                    if sugerencia:
+                        casados += 1
+            conn.commit()
+            json_response(self, {
+                "ok": True, "nuevos": nuevos, "repetidos": repetidos, "casados": casados,
+                "avisos": leido["avisos"],
+                "cuentas": [{"cuenta": c.get("cuenta"), "titular": c.get("titular"),
+                             "desde": c.get("fecha_inicial"), "hasta": c.get("fecha_final"),
+                             "saldo_inicial": c.get("saldo_inicial"), "saldo_final": c.get("saldo_final"),
+                             "cuadra": c.get("cuadra")} for c in leido["cuentas"]],
+            })
+            return
+        elif parsed.path == "/api/workspace_fincas_extracto_conciliar":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            movimiento_id = str(payload.get("id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not movimiento_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            destino = str(payload.get("conciliado_con") or "").strip()
+            tipo = str(payload.get("tipo") or "").strip() or None
+            conn.execute(
+                "UPDATE workspace_fincas_extracto SET conciliado_con = ?, conciliado_tipo = ?, "
+                "conciliado_at = ?, updated_at = ? WHERE id = ? AND workspace_id = ?",
+                (destino or None, tipo if destino else None, now if destino else None,
+                 now, movimiento_id, workspace_id),
+            )
+            # Conciliar un cobro marca el recibo como cobrado: es lo que se busca al
+            # conciliar, y hacerlo en dos pasos separados se olvida a la mitad.
+            if destino and tipo == "recibo":
+                conn.execute(
+                    "UPDATE workspace_fincas_recibos SET estado = 'Cobrado', fecha_cobro = ?, updated_at = ? "
+                    "WHERE id = ? AND workspace_id = ?",
+                    (str(payload.get("fecha") or "")[:10] or datetime.now().date().isoformat(),
+                     now, destino, workspace_id),
+                )
+            elif destino and tipo == "devolucion":
+                conn.execute(
+                    "UPDATE workspace_fincas_recibos SET estado = 'Devuelto', updated_at = ? "
+                    "WHERE id = ? AND workspace_id = ?",
+                    (now, destino, workspace_id),
+                )
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/workspace_fincas_asiento":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            comunidad_id = str(payload.get("comunidad_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not comunidad_id:
+                json_response(self, {"error": "workspace_id y comunidad_id requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            apuntes = payload.get("apuntes")
+            if isinstance(apuntes, str):
+                try:
+                    apuntes = json.loads(apuntes)
+                except Exception:
+                    apuntes = None
+            try:
+                resultado = registrar_asiento(
+                    conn, workspace_id, comunidad_id,
+                    fecha=str(payload.get("fecha") or "").strip() or datetime.now().date().isoformat(),
+                    concepto=payload.get("concepto"),
+                    apuntes=apuntes if isinstance(apuntes, list) else [],
+                    origen=str(payload.get("origen") or "manual"),
+                    origen_id=str(payload.get("origen_id") or "").strip() or None,
+                    now=now,
+                )
+            except AsientoDescuadrado as err:
+                json_response(self, {"error": str(err), "code": "descuadre"}, status=400)
+                return
+            conn.commit()
+            json_response(self, {"ok": True, **resultado})
+            return
+        elif parsed.path == "/api/workspace_fincas_cerrar_ejercicio":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            comunidad_id = str(payload.get("comunidad_id") or "").strip()
+            ejercicio = str(payload.get("ejercicio") or "").strip()[:4]
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not comunidad_id or not re.fullmatch(r"\d{4}", ejercicio):
+                json_response(self, {"error": "workspace_id, comunidad_id y ejercicio (AAAA) requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            try:
+                resultado = cerrar_ejercicio_fincas(
+                    conn, workspace_id, comunidad_id, ejercicio,
+                    now=now, dotacion_fondo=payload.get("dotacion_fondo"))
+            except AsientoDescuadrado as err:
+                json_response(self, {"error": str(err)}, status=409)
+                return
+            conn.commit()
+            json_response(self, {"ok": True, **resultado})
             return
         elif parsed.path == "/api/workspace_fincas_vecino_delete":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -87397,6 +88275,58 @@ class Handler(BaseHTTPRequestHandler):
                 (workspace_id,),
             ).fetchall()
             json_response(self, {"rows": [dict(f) for f in filas]})
+            return
+
+        if path in ("/api/workspace_fincas_diario", "/api/workspace_fincas_extracto",
+                    "/api/workspace_fincas_cuentas"):
+            workspace_id = params.get("workspace_id", [""])[0]
+            comunidad_id = (params.get("comunidad_id", [""])[0] or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            if path == "/api/workspace_fincas_cuentas":
+                json_response(self, {"items": fetch_workspace_fincas_cuentas(conn, workspace_id)})
+                return
+            if not comunidad_id:
+                json_response(self, {"error": "comunidad_id requerido"}, status=400)
+                return
+            if path == "/api/workspace_fincas_extracto":
+                json_response(self, fetch_workspace_fincas_extracto(
+                    conn, workspace_id, comunidad_id,
+                    solo_pendientes=(params.get("pendientes", [""])[0] or "").strip() in {"1", "true"},
+                ))
+                return
+            ejercicio = (params.get("ejercicio", [""])[0] or "").strip() or str(datetime.now().year)
+            datos = fetch_workspace_fincas_diario(conn, workspace_id, comunidad_id, ejercicio)
+            datos["sumas_y_saldos"] = fetch_workspace_fincas_sumas_y_saldos(
+                conn, workspace_id, comunidad_id, ejercicio)
+            json_response(self, datos)
+            return
+
+        if path == "/api/workspace_fincas_liquidacion":
+            workspace_id = params.get("workspace_id", [""])[0]
+            comunidad_id = (params.get("comunidad_id", [""])[0] or "").strip()
+            ejercicio = (params.get("ejercicio", [""])[0] or "").strip() or str(datetime.now().year)
+            if not workspace_id or not comunidad_id:
+                json_response(self, {"error": "workspace_id y comunidad_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_fincas_liquidacion(conn, workspace_id, comunidad_id, ejercicio))
             return
 
         if path == "/api/workspace_fincas_ejercicio":
