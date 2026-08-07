@@ -65404,6 +65404,13 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not factura_id:
                 json_response(self, {"error": "workspace_id y factura_id requeridos"}, status=400)
                 return
+            # El workspace_id llega del cuerpo: sin esto, cualquiera con sesión podía
+            # escribir en el tenant que quisiera con solo saber su id.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
             factura = conn.execute(
                 """
                 SELECT id, empresa_id, cliente_id, total
@@ -65508,6 +65515,13 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not empresa_id:
                 json_response(self, {"error": "workspace_id y empresa_id requeridos"}, status=400)
                 return
+            # El workspace_id llega del cuerpo: sin esto, cualquiera con sesión podía
+            # escribir en el tenant que quisiera con solo saber su id.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
             raw_ids = payload.get("factura_ids") or payload.get("factura_ids_json") or []
             if isinstance(raw_ids, str):
                 try:
@@ -65603,6 +65617,13 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not empresa_id or not serie:
                 json_response(self, {"error": "workspace_id, empresa_id y serie requeridos"}, status=400)
                 return
+            # El workspace_id llega del cuerpo: sin esto, cualquiera con sesión podía
+            # escribir en el tenant que quisiera con solo saber su id.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
             active = 1 if str(payload.get("activa") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"} else 0
             siguiente_numero = max(1, int(parse_money_value(payload.get("siguiente_numero")) or 1))
             if record_id:
@@ -65655,6 +65676,13 @@ class Handler(BaseHTTPRequestHandler):
             nombre = str(payload.get("nombre") or "").strip()
             if not workspace_id or not empresa_id or not nombre:
                 json_response(self, {"error": "workspace_id, empresa_id y nombre requeridos"}, status=400)
+                return
+            # El workspace_id llega del cuerpo: sin esto, cualquiera con sesión podía
+            # escribir en el tenant que quisiera con solo saber su id.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             cliente_id = str(payload.get("cliente_id") or "").strip() or None
             suggested_cliente_id = str(payload.get("suggested_cliente_id") or "").strip() or None
@@ -65755,6 +65783,13 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not record_id or not action:
                 json_response(self, {"error": "workspace_id, id y action requeridos"}, status=400)
                 return
+            # El workspace_id llega del cuerpo: sin esto bastaba con saber el id de
+            # otro tenant para revisar y reasignar sus documentos.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
             row = conn.execute(
                 "SELECT * FROM workspace_documentos_inbox WHERE id = ? AND workspace_id = ? LIMIT 1",
                 (record_id, workspace_id),
@@ -65844,6 +65879,13 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not cliente_id:
                 json_response(self, {"error": "workspace_id y cliente_id requeridos"}, status=400)
                 return
+            # El workspace_id llega del cuerpo: sin esto, cualquiera con sesión podía
+            # escribir en el tenant que quisiera con solo saber su id.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
             importador_facturas = 1 if str(payload.get("importador_facturas") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"} else 0
             existing = conn.execute(
                 "SELECT id FROM workspace_portal_clientes WHERE workspace_id = ? AND cliente_id = ? LIMIT 1",
@@ -65910,6 +65952,13 @@ class Handler(BaseHTTPRequestHandler):
             titulo = str(payload.get("titulo") or "").strip()
             if not workspace_id or not portal_cliente_id or not titulo:
                 json_response(self, {"error": "workspace_id, portal_cliente_id y titulo requeridos"}, status=400)
+                return
+            # El workspace_id llega del cuerpo: sin esto, cualquiera con sesión podía
+            # escribir en el tenant que quisiera con solo saber su id.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             portal = conn.execute(
                 "SELECT id, cliente_id FROM workspace_portal_clientes WHERE id = ? AND workspace_id = ? LIMIT 1",
@@ -66271,6 +66320,13 @@ class Handler(BaseHTTPRequestHandler):
             trigger_key = str(payload.get("trigger_key") or "").strip()
             if not workspace_id or not nombre or not trigger_key:
                 json_response(self, {"error": "workspace_id, nombre y trigger_key requeridos"}, status=400)
+                return
+            # El workspace_id llega del cuerpo: sin esto, cualquiera con sesión podía
+            # escribir en el tenant que quisiera con solo saber su id.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             enabled = 1 if str(payload.get("enabled") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"} else 0
             config_json = payload.get("config_json")
@@ -69337,6 +69393,13 @@ class Handler(BaseHTTPRequestHandler):
             titulo = str(payload.get("titulo") or "").strip()
             if not workspace_id or not empresa_id or not titulo:
                 json_response(self, {"error": "workspace_id, empresa_id y titulo requeridos"}, status=400)
+                return
+            # El workspace_id llega del cuerpo: sin esto, cualquiera con sesión podía
+            # escribir en el tenant que quisiera con solo saber su id.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             current = None
             if record_id:
@@ -76620,6 +76683,13 @@ class Handler(BaseHTTPRequestHandler):
                 inmueble_id = os.urandom(16).hex()
                 captacion_id = os.urandom(16).hex()
                 ws_id = str(payload.get("workspace_id") or "").strip()
+                # El workspace se guarda en la fila: si viene del cuerpo sin comprobar,
+                # la captación aparece en el listado de otro tenant.
+                if ws_id:
+                    ok, err = enforce_workspace_membership(conn, session, ws_id, write=True)
+                    if not ok:
+                        json_response(self, {"error": err or "No autorizado"}, status=403)
+                        return
                 etapa_value = (payload.get("etapa") or "").strip() or "Inmueble"
                 conn.execute(
                     """
@@ -80962,6 +81032,14 @@ class Handler(BaseHTTPRequestHandler):
             related_id_fk = str(payload.get("related_id") or "").strip() or None
             related_tipo_fk = str(payload.get("related_tipo") or "").strip() or None
             workspace_id_fk = str(payload.get("workspace_id") or "").strip() or None
+            # En agenda el workspace es opcional, pero si viene hay que comprobarlo:
+            # sin esto se podían crear citas en el calendario de otro tenant.
+            if workspace_id_fk:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id_fk, write=True)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
             action_id = os.urandom(16).hex()
             # En agenda (acciones) no dependemos de empresa. Por compatibilidad con el esquema legacy,
             # usamos `empresa_id` si viene y existe; si no, una empresa técnica de plataforma.
