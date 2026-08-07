@@ -23359,13 +23359,13 @@ const renderWorkspaceFincasCommunityFicha = async () => {
     }
     workspaceFincasCommunityFichaTabs.querySelectorAll("[data-community-ficha-tab]").forEach((btn) => {
       btn.addEventListener("click", () => {
-        state.workspaceFincasCommunityFichaTab = String(btn.dataset.communityFichaTab || "datos");
+        state.workspaceFincasCommunityFichaTab = String(btn.dataset.communityFichaTab || "resumen");
         void renderWorkspaceFincasCommunityFicha();
       });
     });
   }
 
-  const tab = String(state.workspaceFincasCommunityFichaTab || "datos").trim() || "datos";
+  const tab = String(state.workspaceFincasCommunityFichaTab || "resumen").trim() || "resumen";
   workspaceFincasCommunityFichaTabs.querySelectorAll("[data-community-ficha-tab]").forEach((btn) => {
     btn.classList.toggle("active", String(btn.dataset.communityFichaTab || "") === tab);
   });
@@ -23487,6 +23487,68 @@ const renderWorkspaceFincasCommunityFicha = async () => {
         if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
       }
     };
+    return;
+  }
+
+  if (tab === "resumen") {
+    workspaceFincasCommunityFichaPanel.innerHTML = `<p class="muted">Cargando…</p>`;
+    const panel = workspaceFincasCommunityFichaPanel;
+    const irA = (destino) => {
+      state.workspaceFincasCommunityFichaTab = destino;
+      void renderWorkspaceFincasCommunityFicha();
+    };
+    try {
+      const d = await api(`/api/workspace_fincas_comunidad_dashboard?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}`);
+      const c = d.censo || {}, r = d.recibos || {}, m = d.morosidad || {}, e = d.cuentas || {};
+      const pct = (v) => `${Number(v || 0).toFixed(2)} %`;
+      // Cobrado sobre emitido: es la cifra que dice si el mes va bien, y no estaba
+      // en ninguna pantalla porque exigía dividir a mano.
+      const cobrado = r.emitido ? (r.cobrado / r.emitido) * 100 : 0;
+      panel.innerHTML = `
+        ${(d.avisos || []).length ? `
+          <div class="resumen-avisos">
+            ${d.avisos.map((a) => `
+              <button type="button" class="resumen-aviso" data-nivel="${escapeHtml(a.nivel)}" data-ir="${escapeHtml(a.ir)}">
+                <span>${escapeHtml(a.texto)}</span><em>Ir →</em>
+              </button>`).join("")}
+          </div>` : `<p class="resumen-ok">Todo en orden: censo cuadrado, recibos al día y nada pendiente de configurar.</p>`}
+
+        <div class="form-grid-section">Censo y cuota</div>
+        <div class="workspace-mini-kpis">
+          <div class="workspace-mini-kpi"><span>Propietarios</span><strong>${numberFormatter.format(c.propietarios || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Coeficientes</span><strong>${pct(c.suma_coeficientes)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Cuota mensual</span><strong>${euroFormatter.format(d.comunidad?.cuota_mensual || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Con portal</span><strong>${d.portal?.con_acceso || 0} / ${d.portal?.de || 0}</strong></div>
+        </div>
+
+        <div class="form-grid-section">Recibos de ${escapeHtml(d.periodo)}</div>
+        <div class="workspace-mini-kpis">
+          <div class="workspace-mini-kpi"><span>Emitido</span><strong>${euroFormatter.format(r.emitido || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Cobrado</span><strong>${euroFormatter.format(r.cobrado || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>% cobrado</span><strong>${pct(cobrado)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Devuelto</span><strong>${euroFormatter.format(r.devuelto || 0)}</strong></div>
+        </div>
+
+        <div class="form-grid-section">Morosidad e incidencias</div>
+        <div class="workspace-mini-kpis">
+          <div class="workspace-mini-kpi"><span>Deudores</span><strong>${numberFormatter.format(m.deudores || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Deuda acumulada</span><strong>${euroFormatter.format(m.deuda_total || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Incidencias abiertas</span><strong>${numberFormatter.format(d.incidencias_abiertas || 0)}</strong></div>
+        </div>
+
+        <div class="form-grid-section">Ejercicio ${escapeHtml(d.ejercicio)} y juntas</div>
+        <div class="workspace-mini-kpis">
+          <div class="workspace-mini-kpi"><span>Presupuestado</span><strong>${euroFormatter.format(e.presupuestado || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Gastado</span><strong>${euroFormatter.format(e.gastado || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Fondo de reserva</span><strong>${e.fondo_reserva_sin_configurar ? "sin configurar" : euroFormatter.format(e.fondo_reserva || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Próxima junta</span><strong>${d.junta_proxima ? escapeHtml(d.junta_proxima.fecha) : "—"}</strong></div>
+        </div>
+        ${d.junta_ultima ? `<p class="muted">Última junta celebrada: ${escapeHtml(d.junta_ultima.fecha)} (${escapeHtml(d.junta_ultima.tipo || "ordinaria")}).</p>` : ""}
+      `;
+      panel.querySelectorAll("[data-ir]").forEach((b) => b.addEventListener("click", () => irA(b.dataset.ir)));
+    } catch (err) {
+      panel.innerHTML = `<p class="muted">${escapeHtml(err?.message || "No se pudo cargar el resumen.")}</p>`;
+    }
     return;
   }
 
@@ -26470,6 +26532,23 @@ const syncWorkspaceFincasBudgetQuickComputed = (options = {}) => {
   const ivaInput = workspaceFincasBudgetQuickForm.querySelector('[name="impuestos"]');
   const totalInput = workspaceFincasBudgetQuickForm.querySelector('[name="total"]');
   if (suggestedInput) suggestedInput.value = formatEurosCompact(suggestedSubtotal);
+
+  // El resumen pegado arriba: la cuota mensual y el pago único separados, que es
+  // como se lee el presupuesto. Antes había que bajar hasta el final del
+  // formulario para ver la cifra, y lo mensual y lo puntual salían sumados.
+  const extrasImporte = fincasImporteExtras();
+  const baseMensual = Math.max(0, suggestedSubtotal - extrasImporte);
+  const pon = (clave, valor) => {
+    const el = document.querySelector(`#workspaceFincasBudgetResumen [data-resumen="${clave}"]`);
+    if (el) el.textContent = euroFormatter.format(valor);
+  };
+  pon("base", baseMensual);
+  pon("mensual", Math.round(baseMensual * (1 + FINCAS_IVA_PCT) * 100) / 100);
+  const cajaPuntual = document.querySelector("#workspaceFincasBudgetResumen [data-resumen-puntual]");
+  if (cajaPuntual) {
+    cajaPuntual.hidden = !extrasImporte;
+    if (extrasImporte) pon("puntual", Math.round(extrasImporte * (1 + FINCAS_IVA_PCT) * 100) / 100);
+  }
 
   const manualSource = String(workspaceFincasBudgetQuickForm?.dataset?.manualSource || "").trim();
   const rawSubtotal = String(subtotalInput?.value || "").trim();

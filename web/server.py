@@ -50714,6 +50714,108 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
     )
 
 
+def fetch_workspace_fincas_comunidad_dashboard(conn, workspace_id, comunidad_id, *, periodo=""):
+    """Lo que hay que saber de una comunidad antes de tocar nada.
+
+    Reúne lo que ya calculan las otras pantallas —censo, recibos, morosidad,
+    incidencias, junta, ejercicio— para no tener que recorrer siete pestañas y
+    reconstruirlo mentalmente cada vez.
+
+    La parte que más se usa no son las cifras sino los **avisos**: qué le falta a
+    esta comunidad para poder trabajar. Un censo vacío o un IBAN sin poner no se ven
+    en un KPI, se ven cuando intentas emitir y no puedes; aquí salen antes.
+    """
+    comunidad = conn.execute(
+        "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+        (comunidad_id, workspace_id),
+    ).fetchone()
+    if not comunidad:
+        return None
+    periodo = str(periodo or "").strip() or datetime.now().strftime("%Y-%m")
+    ejercicio = periodo[:4]
+
+    censo = fetch_workspace_fincas_censo_resumen(conn, workspace_id, comunidad_id)
+    recibos = fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo=periodo)["resumen"]
+    morosidad = fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id)["resumen"]
+    cuentas = fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio)["resumen"]
+
+    incidencias = int(row_value(conn.execute(
+        "SELECT COUNT(*) AS n FROM workspace_fincas_incidencias WHERE workspace_id = ? AND comunidad_id = ? "
+        "AND COALESCE(estado, 'Abierta') NOT IN ('Cerrada', 'Resuelta')",
+        (workspace_id, comunidad_id),
+    ).fetchone(), "n", 0) or 0)
+
+    hoy = datetime.now().date().isoformat()
+    proxima = conn.execute(
+        "SELECT fecha, tipo FROM workspace_fincas_juntas WHERE workspace_id = ? AND comunidad_id = ? "
+        "AND COALESCE(fecha, '') >= ? ORDER BY fecha LIMIT 1",
+        (workspace_id, comunidad_id, hoy),
+    ).fetchone()
+    ultima = conn.execute(
+        "SELECT fecha, tipo FROM workspace_fincas_juntas WHERE workspace_id = ? AND comunidad_id = ? "
+        "AND COALESCE(fecha, '') < ? ORDER BY fecha DESC LIMIT 1",
+        (workspace_id, comunidad_id, hoy),
+    ).fetchone()
+
+    con_portal = int(row_value(conn.execute(
+        "SELECT COUNT(DISTINCT vecino_id) AS n FROM workspace_fincas_portal_accesos "
+        "WHERE workspace_id = ? AND comunidad_id = ? AND revocado = 0 "
+        "AND (expires_at IS NULL OR expires_at >= ?)",
+        (workspace_id, comunidad_id, hoy),
+    ).fetchone(), "n", 0) or 0)
+
+    # Los avisos van ordenados por lo que bloquea antes: sin censo no hay nada que
+    # hacer; sin IBAN no hay remesa; el resto son flecos.
+    avisos = []
+    if not censo["propietarios"]:
+        avisos.append({"nivel": "alto", "texto": "No hay censo de propietarios. Sin él no se pueden emitir recibos ni celebrar una junta.", "ir": "vecinos"})
+    else:
+        if not censo["cuadra"]:
+            avisos.append({"nivel": "alto", "texto": f"Los coeficientes suman {censo['suma_coeficientes']:.4f} %, no 100 %.", "ir": "vecinos"})
+        if censo["sin_coeficiente"]:
+            avisos.append({"nivel": "medio", "texto": f"{censo['sin_coeficiente']} propietario(s) sin coeficiente.", "ir": "vecinos"})
+        if censo["viviendas_declaradas"] and censo["propietarios"] != censo["viviendas_declaradas"]:
+            avisos.append({"nivel": "medio", "texto": f"La ficha declara {censo['viviendas_declaradas']} viviendas y el censo tiene {censo['propietarios']}.", "ir": "datos"})
+    if not iban_valido(row_value(comunidad, "iban", "")):
+        avisos.append({"nivel": "alto", "texto": "La comunidad no tiene IBAN válido: no se puede generar la remesa.", "ir": "datos"})
+    if not str(row_value(comunidad, "acreedor_sepa", "") or "").strip():
+        avisos.append({"nivel": "alto", "texto": "Falta el identificador de acreedor SEPA (lo asigna el banco).", "ir": "datos"})
+    if censo["propietarios"] and not recibos["recibos"]:
+        avisos.append({"nivel": "medio", "texto": f"No hay recibos emitidos de {periodo}.", "ir": "recibos"})
+    if recibos["sin_iban"]:
+        avisos.append({"nivel": "medio", "texto": f"{recibos['sin_iban']} recibo(s) de {periodo} sin cuenta válida: quedarán fuera de la remesa.", "ir": "recibos"})
+    if morosidad["deuda_total"]:
+        avisos.append({"nivel": "medio", "texto": f"{morosidad['deudores']} propietario(s) deben {format_eur(morosidad['deuda_total'])}.", "ir": "recibos"})
+    if incidencias:
+        avisos.append({"nivel": "bajo", "texto": f"{incidencias} incidencia(s) abierta(s).", "ir": "incidencias"})
+    if not cuentas["presupuestado"]:
+        avisos.append({"nivel": "medio", "texto": f"No hay presupuesto aprobado para {ejercicio}.", "ir": "ejercicio"})
+    elif cuentas["fondo_reserva_sin_configurar"]:
+        avisos.append({"nivel": "bajo", "texto": "El fondo de reserva está sin configurar.", "ir": "ejercicio"})
+    if censo["propietarios"] and not con_portal:
+        avisos.append({"nivel": "bajo", "texto": "Ningún propietario tiene acceso al portal.", "ir": "vecinos"})
+
+    return {
+        "comunidad": {
+            "nombre": row_value(comunidad, "nombre", ""),
+            "direccion": row_value(comunidad, "direccion", "") or "",
+            "estado": row_value(comunidad, "estado", "") or "",
+            "cuota_mensual": round(parse_money_value(row_value(comunidad, "cuota_mensual", 0)), 2),
+        },
+        "periodo": periodo,
+        "ejercicio": ejercicio,
+        "censo": censo,
+        "recibos": recibos,
+        "morosidad": morosidad,
+        "cuentas": cuentas,
+        "incidencias_abiertas": incidencias,
+        "junta_proxima": {"fecha": row_value(proxima, "fecha", ""), "tipo": row_value(proxima, "tipo", "") or ""} if proxima else None,
+        "junta_ultima": {"fecha": row_value(ultima, "fecha", ""), "tipo": row_value(ultima, "tipo", "") or ""} if ultima else None,
+        "portal": {"con_acceso": con_portal, "de": censo["propietarios"]},
+        "avisos": avisos,
+    }
+
+
 def build_certificado_deuda_pdf(comunidad, vecino, recibos, workspace=None, company=None):
     """Certificado del estado de deuda de un propietario.
 
@@ -86860,6 +86962,28 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if datos.get("error") == "caducado":
                 json_response(self, {"error": "Este enlace ha caducado. Pide uno nuevo a tu administrador."}, status=403)
+                return
+            json_response(self, datos)
+            return
+
+        if path == "/api/workspace_fincas_comunidad_dashboard":
+            workspace_id = params.get("workspace_id", [""])[0]
+            comunidad_id = (params.get("comunidad_id", [""])[0] or "").strip()
+            periodo = (params.get("periodo", [""])[0] or "").strip()
+            if not workspace_id or not comunidad_id:
+                json_response(self, {"error": "workspace_id y comunidad_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            datos = fetch_workspace_fincas_comunidad_dashboard(conn, workspace_id, comunidad_id, periodo=periodo)
+            if not datos:
+                json_response(self, {"error": "comunidad no encontrada"}, status=404)
                 return
             json_response(self, datos)
             return

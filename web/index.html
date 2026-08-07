@@ -9,7 +9,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=305" />
+	    <link rel="stylesheet" href="styles.css?v=307" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2406,6 +2406,11 @@
             <div class="muted">Colegiado nº 3079</div>
 	          </div>
 			          <form id="workspaceFincasBudgetQuickForm" class="form-grid fincas-budget-grid">
+		            <div class="presu-resumen" id="workspaceFincasBudgetResumen" aria-live="polite">
+		              <div><span>Cuota mensual (IVA incl.)</span><strong data-resumen="mensual">—</strong></div>
+		              <div><span>Base mensual (sin IVA)</span><strong data-resumen="base">—</strong></div>
+		              <div data-resumen-puntual hidden><span>Pago único (IVA incl.)</span><strong data-resumen="puntual">—</strong></div>
+		            </div>
 		            <input type="hidden" name="comunidad_id" />
 		            <input type="hidden" name="edificio_foto_key" />
 		            <input type="hidden" name="map_lat" />
@@ -2445,15 +2450,6 @@
 	              Ref. catastral
 	              <input name="referencia_catastral" placeholder="Opcional" />
 	            </label>
-	            <label>
-	              Estado
-	              <select name="estado">
-	                <option>Borrador</option>
-                <option>Estudio</option>
-                <option>Aceptado</option>
-                <option>Rechazado</option>
-              </select>
-            </label>
 	            <div class="form-grid-section">Datos del presidente / solicitante</div>
             <label class="span-2">
               Nombre
@@ -2493,13 +2489,16 @@
               <input name="num_aparcamientos" type="number" min="0" step="1" value="0" />
             </label>
 	            <div class="span-2" id="workspaceFincasBudgetExtras"></div>
+	            <div class="form-grid-section">Importes</div>
 	            <label>
 	              Base sugerida (sin IVA)
 	              <input name="subtotal_sugerido" type="text" inputmode="decimal" readonly />
+	              <span class="muted">La calcula la tarifa. No se edita.</span>
 	            </label>
 	            <label>
 	              Subtotal (sin IVA)
-	              <input name="subtotal" type="text" inputmode="decimal" placeholder="Auto. Vacía para recalcular" />
+	              <input name="subtotal" type="text" inputmode="decimal" placeholder="Déjalo vacío para usar la base" />
+	              <span class="muted">Solo si quieres cerrar otro precio.</span>
 	            </label>
 	            <label>
 	              IVA (21%)
@@ -2515,6 +2514,16 @@
 	              <div id="workspaceFincasBudgetBuildingPhotoStatus" class="muted"></div>
 	              <img id="workspaceFincasBudgetBuildingPhotoPreview" class="hidden" alt="Foto edificio" style="margin-top:10px;width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
 	            </label>
+            <div class="form-grid-section">El presupuesto</div>
+            <label>
+              Estado
+              <select name="estado">
+                <option>Borrador</option>
+                <option>Estudio</option>
+                <option>Aceptado</option>
+                <option>Rechazado</option>
+              </select>
+            </label>
             <label class="span-2">
               Título (opcional)
               <input name="titulo" placeholder="Si lo dejas en blanco se autogenera" />
@@ -2695,7 +2704,8 @@
               <button type="button" class="secondary ghost" id="workspaceFincasCommunityFichaBackBtn">Volver</button>
             </div>
             <div class="crm-workspace-tabs" style="margin-top: 8px; flex-wrap: wrap;" id="workspaceFincasCommunityFichaTabs">
-              <button class="tab active" type="button" data-community-ficha-tab="datos">Datos</button>
+              <button class="tab active" type="button" data-community-ficha-tab="resumen">Resumen</button>
+              <button class="tab" type="button" data-community-ficha-tab="datos">Datos</button>
               <button class="tab" type="button" data-community-ficha-tab="vecinos">Vecinos</button>
               <button class="tab" type="button" data-community-ficha-tab="recibos">Recibos</button>
               <button class="tab" type="button" data-community-ficha-tab="juntas">Juntas</button>
@@ -11944,7 +11954,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=850",
+              "app.js?v=852",
             ];
 
             const getParams = () => {

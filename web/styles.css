@@ -15206,3 +15206,37 @@ samp {
 .junta-acuerdo-cabeza { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
 .junta-votos { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 6px; margin-top: 10px; }
 .junta-votos .fincas-extra { padding: 6px 10px; }
+
+/* Resumen de comunidad: los avisos son el contenido, no la decoración.
+   Van arriba y se pulsan para ir a la pestaña que los resuelve. */
+.resumen-avisos { display: grid; gap: 8px; margin-bottom: 18px; }
+.resumen-aviso {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  width: 100%; text-align: left; padding: 11px 14px; border-radius: 12px; cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.1); background: rgba(0, 0, 0, 0.02);
+  font: inherit; font-size: 14px; color: inherit;
+}
+.resumen-aviso em { font-style: normal; opacity: 0.65; white-space: nowrap; font-size: 13px; }
+.resumen-aviso:hover { background: rgba(0, 0, 0, 0.05); }
+/* El nivel se distingue por el texto y por la barra lateral, no solo por color. */
+.resumen-aviso[data-nivel="alto"] { border-left: 4px solid #dc2626; background: rgba(220, 38, 38, 0.06); }
+.resumen-aviso[data-nivel="medio"] { border-left: 4px solid #d97706; background: rgba(217, 119, 6, 0.06); }
+.resumen-aviso[data-nivel="bajo"] { border-left: 4px solid #9ca3af; }
+.resumen-ok {
+  padding: 12px 14px; border-radius: 12px; margin: 0 0 18px;
+  border: 1px solid rgba(22, 163, 74, 0.35); background: rgba(22, 163, 74, 0.08); color: #15803d;
+}
+
+/* Resumen del presupuesto, pegado arriba del formulario: son 28 campos y sin esto
+   había que bajar hasta el final para ver cuánto sale. */
+.presu-resumen {
+  position: sticky; top: 0; z-index: 4; grid-column: 1 / -1;
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px;
+  padding: 12px 14px; margin-bottom: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.08); border-radius: 14px;
+  background: var(--surface, #fff);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+.presu-resumen span { display: block; font-size: 12px; opacity: 0.7; }
+.presu-resumen strong { font-size: 19px; }
+.presu-resumen div[hidden] { display: none; }
