@@ -24215,7 +24215,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
         <div class="form-actions span-2"><span class="muted" data-lib-status></span></div>
       </div>
       <div class="tabs" role="tablist">
-        ${[["extracto","Banco y conciliación"],["diario","Libro diario"],["saldos","Sumas y saldos"],["grupos","Grupos de reparto"],["liquidacion","Liquidación"],["fiscal","Fiscal"],["cierre","Cierre"]]
+        ${[["extracto","Banco y conciliación"],["diario","Libro diario"],["saldos","Sumas y saldos"],["grupos","Grupos de reparto"],["liquidacion","Liquidación"],["balance","Balance y memoria"],["fiscal","Fiscal"],["cierre","Cierre"]]
           .map(([k,t],i)=>`<button type="button" class="tab${i?"":" active"}" data-lib-sub="${k}">${t}</button>`).join("")}
       </div>
       <div data-lib-cuerpo><p class="muted">Cargando…</p></div>
@@ -24337,12 +24337,32 @@ const renderWorkspaceFincasCommunityFicha = async () => {
             <td class="num">${x.participantes}</td><td class="num">${eur(x.importe)}</td></tr>`).join("")}
           </tbody></table></details>` : ""}
         ${r.reparto_por_partes ? `<p class="censo-aviso">Nadie tiene coeficiente: se ha repartido a partes iguales.</p>` : ""}
-        <table class="table"><thead><tr><th>Inmueble</th><th>Propietario</th><th class="num">Coef.</th><th class="num">Le corresponde</th><th class="num">Ha pagado</th><th class="num">Saldo</th></tr></thead><tbody>
+        <table class="table"><thead><tr><th>Inmueble</th><th>Propietario</th><th class="num">Coef.</th><th class="num">Le corresponde</th><th class="num">Ha pagado</th><th class="num">Saldo</th><th></th></tr></thead><tbody>
           ${(d.rows||[]).map((f) => `<tr><td>${escapeHtml(f.piso)}</td><td>${escapeHtml(f.nombre)}</td>
             <td class="num">${Number(f.coeficiente).toFixed(4)} %</td><td class="num">${eur(f.imputado)}</td>
-            <td class="num">${eur(f.pagado)}</td><td class="num">${eur(f.saldo)}</td></tr>`).join("")
-            || `<tr><td colspan="6" class="muted">Sin censo.</td></tr>`}
+            <td class="num">${eur(f.pagado)}</td><td class="num">${eur(f.saldo)}</td>
+            <td><button type="button" class="secondary ghost" data-cc="${escapeHtml(String(f.vecino_id))}">Extracto</button></td></tr>`).join("")
+            || `<tr><td colspan="7" class="muted">Sin censo.</td></tr>`}
         </tbody></table>`;
+      cuerpo.querySelectorAll("[data-cc]").forEach((b) => b.addEventListener("click", async () => {
+        const cc = await api(`/api/workspace_fincas_cuenta_corriente?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}&vecino_id=${encodeURIComponent(b.dataset.cc)}&ejercicio=${encodeURIComponent(anyo())}`);
+        cuerpo.innerHTML = `
+          <button type="button" class="secondary ghost" data-volver>← Volver a la liquidación</button>
+          <h4>${escapeHtml(cc.propietario.piso || "")} · ${escapeHtml(cc.propietario.nombre || "")}</h4>
+          <div class="workspace-mini-kpis">
+            ${(cc.por_cuenta || []).map((x) => `<div class="workspace-mini-kpi"><span>${escapeHtml(x.nombre || x.cuenta)}</span><strong>${eur(x.saldo)}</strong></div>`).join("")}
+            <div class="workspace-mini-kpi"><span>Saldo</span><strong>${eur(cc.saldo)}</strong></div>
+          </div>
+          <p class="muted">Saldo positivo: debe. Negativo: tiene a favor.</p>
+          <table class="table"><thead><tr><th>Fecha</th><th>Nº</th><th>Concepto</th><th>Cuenta</th><th class="num">Debe</th><th class="num">Haber</th><th class="num">Saldo</th></tr></thead><tbody>
+            ${(cc.movimientos || []).map((x) => `<tr><td>${escapeHtml(x.fecha)}</td><td>${x.asiento}</td>
+              <td>${escapeHtml(x.concepto)}</td><td>${escapeHtml(x.cuenta)}</td>
+              <td class="num">${x.debe ? eur(x.debe) : ""}</td><td class="num">${x.haber ? eur(x.haber) : ""}</td>
+              <td class="num">${eur(x.saldo)}</td></tr>`).join("")
+              || `<tr><td colspan="7" class="muted">Sin movimientos en el diario.</td></tr>`}
+          </tbody></table>`;
+        cuerpo.querySelector("[data-volver]")?.addEventListener("click", pinta);
+      }));
     };
 
     const pintaCierre = async () => {
@@ -24453,10 +24473,39 @@ const renderWorkspaceFincasCommunityFicha = async () => {
         </details>` : ""}`;
     };
 
+    const pintaBalance = async () => {
+      const d = await api(`/api/workspace_fincas_balance?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}&ejercicio=${encodeURIComponent(anyo())}`);
+      const m = d.memoria || {};
+      const fila = (e) => `<tr><td>${escapeHtml(e.cuenta)}</td><td>${escapeHtml(e.nombre)}</td><td class="num">${eur(e.importe)}</td></tr>`;
+      cuerpo.innerHTML = `
+        <div class="form-grid-section">Memoria del ejercicio ${escapeHtml(anyo())}</div>
+        <div class="workspace-mini-kpis">
+          <div class="workspace-mini-kpi"><span>Presupuestado</span><strong>${eur(m.presupuestado)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Gastado</span><strong>${eur(m.gastado)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Ingresado</span><strong>${eur(m.ingresado)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Resultado</span><strong>${eur(m.resultado)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Fondo de reserva</span><strong>${eur(m.fondo_reserva)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Morosidad</span><strong>${eur(m.morosidad?.deuda_total)}</strong></div>
+        </div>
+        <p class="muted">Las cifras del año se cuentan sin los asientos de cierre, así que la memoria dice lo mismo antes y después de cerrar.</p>
+        ${(m.avisos || []).length ? `<p class="censo-aviso">${m.avisos.map(escapeHtml).join(" ")}</p>` : ""}
+        <div class="form-grid-section">Balance de situación</div>
+        ${d.cuadra ? "" : `<p class="censo-aviso">El balance no cuadra por ${eur(d.descuadre)}. Hay algún asiento mal.</p>`}
+        <div class="workspace-two-cols">
+          <div><h4>Activo · lo que tiene</h4>
+            <table class="table"><tbody>${(d.activo || []).map(fila).join("") || `<tr><td class="muted">Sin saldos.</td></tr>`}</tbody>
+            <tfoot><tr><th colspan="2">Total</th><th class="num">${eur(d.total_activo)}</th></tr></tfoot></table></div>
+          <div><h4>Pasivo · lo que debe y sus fondos</h4>
+            <table class="table"><tbody>${(d.pasivo || []).map(fila).join("") || `<tr><td class="muted">Sin saldos.</td></tr>`}</tbody>
+            <tfoot><tr><th colspan="2">Total</th><th class="num">${eur(d.total_pasivo)}</th></tr></tfoot></table></div>
+        </div>`;
+    };
+
     const pinta = async () => {
       try {
         cuerpo.innerHTML = `<p class="muted">Cargando…</p>`;
-        if (sub === "extracto") await pintaExtracto();
+        if (sub === "balance") await pintaBalance();
+        else if (sub === "extracto") await pintaExtracto();
         else if (sub === "diario") await pintaDiario();
         else if (sub === "saldos") await pintaSaldos();
         else if (sub === "grupos") await pintaGrupos();

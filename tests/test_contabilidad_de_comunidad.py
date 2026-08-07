@@ -344,11 +344,14 @@ class ElCierreDelEjercicioTests(LaLiquidacionRepartElGastoRealTests):
         self.assertEqual(r["resultado"], 1500.0)
 
     def test_la_dotacion_al_fondo_sale_del_resultado(self):
+        """La 113 es «fondo de obras»: el de reserva es la 112, y lo que sobra del
+        resultado ya no se queda en la 129 sino que pasa a remanente."""
         self.cerrar(dotacion_fondo=330)
         saldos = {c["cuenta"]: c["saldo"]
                   for c in server.fetch_workspace_fincas_sumas_y_saldos(self.conn, self.ws, self.com, "2026")["cuentas"]}
-        self.assertEqual(saldos["113"], -330.0)
-        self.assertEqual(saldos["129"], -1170.0)
+        self.assertEqual(saldos[server.CUENTA_FONDO_RESERVA], -330.0)
+        self.assertEqual(saldos[server.CUENTA_REMANENTE], -1170.0)
+        self.assertEqual(saldos.get(server.CUENTA_RESULTADO, 0.0), 0.0)
 
     def test_el_ejercicio_siguiente_abre_cuadrado(self):
         self.cerrar()
@@ -658,3 +661,183 @@ class ElModuloSigueExponiendoLoSuyoTests(unittest.TestCase):
         for pieza in self.PIEZAS:
             with self.subTest(pieza=pieza):
                 self.assertTrue(hasattr(server, pieza), f"falta {pieza}: ¿un reemplazo se la ha llevado?")
+
+
+class LaCuentaCorrienteDelPropietarioTests(BaseConta):
+    """El plan separa a propósito lo que se le debe a la comunidad: no es lo mismo
+    deber una cuota ordinaria que una derrama o el fondo de reserva, y al reclamar
+    hay que saber qué se reclama. El saldo sale del diario y no de sumar recibos por
+    otro lado: si los dos sitios pueden discrepar, algún día discrepan.
+    """
+
+    def setUp(self):
+        super().setUp()
+        for i in range(4):
+            self.conn.execute(
+                "INSERT INTO workspace_fincas_vecinos (id, workspace_id, comunidad_id, nombre, piso, "
+                "coeficiente, created_at, updated_at) VALUES (?,?,?,?,?,25,datetime(?),datetime(?))",
+                (f"v{i}", self.ws, self.com, f"P{i+1}", f"{i+1}A", self.ahora, self.ahora))
+            for mes in (1, 2, 3):
+                self.conn.execute(
+                    "INSERT INTO workspace_fincas_recibos (id, workspace_id, comunidad_id, vecino_id, periodo, "
+                    "concepto, importe, estado, created_at, updated_at) "
+                    "VALUES (?,?,?,?,?,'Cuota',100,'Pendiente',datetime(?),datetime(?))",
+                    (f"r{i}_{mes}", self.ws, self.com, f"v{i}", f"2026-{mes:02d}", self.ahora, self.ahora))
+        self.conn.commit()
+
+    def test_emitir_carga_a_cada_propietario_en_su_subcuenta(self):
+        server.contabilizar_recibos_emitidos(self.conn, self.ws, self.com, "2026-01")
+        self.conn.commit()
+        cc = server.fetch_cuenta_corriente_propietario(self.conn, self.ws, self.com, "v0", "2026")
+        self.assertEqual(cc["saldo"], 100.0)
+        self.assertEqual(cc["por_cuenta"][0]["cuenta"], "4310")
+
+    def test_una_derrama_va_a_su_propia_cuenta(self):
+        server.contabilizar_recibos_emitidos(self.conn, self.ws, self.com, "2026-01", tipo="extraordinaria")
+        self.conn.commit()
+        cc = server.fetch_cuenta_corriente_propietario(self.conn, self.ws, self.com, "v0", "2026")
+        self.assertEqual(cc["por_cuenta"][0]["cuenta"], "4311")
+
+    def test_no_se_contabiliza_dos_veces_el_mismo_periodo(self):
+        """Contabilizar dos veces doblaría la deuda de todos."""
+        server.contabilizar_recibos_emitidos(self.conn, self.ws, self.com, "2026-01")
+        self.conn.commit()
+        with self.assertRaises(server.AsientoDescuadrado):
+            server.contabilizar_recibos_emitidos(self.conn, self.ws, self.com, "2026-01")
+
+    def test_cobrar_salda_y_marca_el_recibo(self):
+        """Lo hace en el mismo paso para que el diario y el listado no discrepen."""
+        server.contabilizar_recibos_emitidos(self.conn, self.ws, self.com, "2026-01")
+        server.contabilizar_cobro_recibo(self.conn, self.ws, self.com, "r0_1", fecha="2026-01-05")
+        self.conn.commit()
+        self.assertEqual(server.fetch_cuenta_corriente_propietario(
+            self.conn, self.ws, self.com, "v0", "2026")["saldo"], 0.0)
+        estado = self.conn.execute("SELECT estado FROM workspace_fincas_recibos WHERE id='r0_1'").fetchone()
+        self.assertEqual(server.row_value(estado, "estado", ""), "Cobrado")
+
+    def test_una_devolucion_lo_pasa_a_impagados(self):
+        server.contabilizar_recibos_emitidos(self.conn, self.ws, self.com, "2026-01")
+        server.contabilizar_cobro_recibo(self.conn, self.ws, self.com, "r0_1", fecha="2026-01-05")
+        server.contabilizar_devolucion_recibo(self.conn, self.ws, self.com, "r0_1",
+                                              fecha="2026-01-20", gastos=3.50)
+        self.conn.commit()
+        cc = server.fetch_cuenta_corriente_propietario(self.conn, self.ws, self.com, "v0", "2026")
+        cuentas = {c["cuenta"]: c["saldo"] for c in cc["por_cuenta"]}
+        self.assertEqual(cuentas["435"], 100.0)
+        self.assertEqual(cc["saldo"], 100.0)
+
+    def test_los_gastos_de_devolucion_no_se_le_cargan_al_propietario(self):
+        """Repercutirlos sería decidir por la comunidad algo que no le toca al programa."""
+        server.contabilizar_recibos_emitidos(self.conn, self.ws, self.com, "2026-01")
+        server.contabilizar_cobro_recibo(self.conn, self.ws, self.com, "r0_1")
+        server.contabilizar_devolucion_recibo(self.conn, self.ws, self.com, "r0_1", gastos=3.50)
+        self.conn.commit()
+        cc = server.fetch_cuenta_corriente_propietario(self.conn, self.ws, self.com, "v0", "2026")
+        self.assertEqual(cc["saldo"], 100.0)
+        saldos = {c["cuenta"]: c["saldo"] for c in server.fetch_workspace_fincas_sumas_y_saldos(
+            self.conn, self.ws, self.com, "2026")["cuentas"]}
+        self.assertEqual(saldos["6699"], 3.50)
+
+    def test_el_extracto_lleva_saldo_acumulado(self):
+        for mes in (1, 2, 3):
+            server.contabilizar_recibos_emitidos(self.conn, self.ws, self.com, f"2026-{mes:02d}")
+        self.conn.commit()
+        cc = server.fetch_cuenta_corriente_propietario(self.conn, self.ws, self.com, "v0", "2026")
+        self.assertEqual([m["saldo"] for m in cc["movimientos"]], [100.0, 200.0, 300.0])
+
+
+class ElBalanceYLaMemoriaTests(BaseConta):
+    def setUp(self):
+        super().setUp()
+        for i in range(4):
+            self.conn.execute(
+                "INSERT INTO workspace_fincas_vecinos (id, workspace_id, comunidad_id, nombre, piso, "
+                "coeficiente, created_at, updated_at) VALUES (?,?,?,?,?,25,datetime(?),datetime(?))",
+                (f"v{i}", self.ws, self.com, f"P{i+1}", f"{i+1}A", self.ahora, self.ahora))
+            for mes in range(1, 13):
+                self.conn.execute(
+                    "INSERT INTO workspace_fincas_recibos (id, workspace_id, comunidad_id, vecino_id, periodo, "
+                    "concepto, importe, estado, created_at, updated_at) "
+                    "VALUES (?,?,?,?,?,'Cuota',100,'Pendiente',datetime(?),datetime(?))",
+                    (f"r{i}_{mes}", self.ws, self.com, f"v{i}", f"2026-{mes:02d}", self.ahora, self.ahora))
+        self.conn.commit()
+        for mes in range(1, 13):
+            server.contabilizar_recibos_emitidos(self.conn, self.ws, self.com, f"2026-{mes:02d}")
+            for i in range(4):
+                if i == 3 and mes > 9:
+                    continue
+                server.contabilizar_cobro_recibo(self.conn, self.ws, self.com, f"r{i}_{mes}",
+                                                 fecha=f"2026-{mes:02d}-05")
+        server.registrar_factura_proveedor(self.conn, self.ws, self.com, fecha="2026-06-30",
+                                           concepto="Limpieza", base=2400, cuenta_gasto="628")
+        server.registrar_factura_proveedor(self.conn, self.ws, self.com, fecha="2026-07-15",
+                                           concepto="Luz", base=900, cuenta_gasto="621")
+        self.conn.commit()
+
+    def test_el_balance_cuadra_antes_de_cerrar(self):
+        """Con el resultado del ejercicio como línea de fondos propios: sin ella no
+        cuadraba nunca hasta cerrar el año, que es cuando ya no hace falta mirarlo."""
+        b = server.fetch_balance_fincas(self.conn, self.ws, self.com, "2026")
+        self.assertTrue(b["cuadra"], f"descuadre de {b['descuadre']}")
+        self.assertEqual(b["total_activo"], b["total_pasivo"])
+        self.assertIn("Resultado del ejercicio (sin cerrar)",
+                      [e["nombre"] for e in b["pasivo"]])
+
+    def test_el_balance_no_lleva_gastos_ni_ingresos(self):
+        """Van al resultado, no al balance."""
+        b = server.fetch_balance_fincas(self.conn, self.ws, self.com, "2026")
+        for lado in (b["activo"], b["pasivo"]):
+            for e in lado:
+                with self.subTest(cuenta=e["cuenta"]):
+                    self.assertNotIn(e["cuenta"][:1], ("6", "7"))
+
+    def test_lo_que_deben_los_propietarios_va_al_activo(self):
+        b = server.fetch_balance_fincas(self.conn, self.ws, self.com, "2026")
+        self.assertIn("4310", [e["cuenta"] for e in b["activo"]])
+
+    def test_la_memoria_dice_lo_mismo_antes_y_despues_de_cerrar(self):
+        """Tras regularizar, los grupos 6 y 7 quedan a cero: la memoria salía en
+        blanco justo cuando más falta hace, que es al llevarla a la junta."""
+        antes = server.fetch_memoria_fincas(self.conn, self.ws, self.com, "2026")
+        server.cerrar_ejercicio_fincas(self.conn, self.ws, self.com, "2026", dotacion_fondo=330)
+        self.conn.commit()
+        despues = server.fetch_memoria_fincas(self.conn, self.ws, self.com, "2026")
+        for clave in ("gastado", "ingresado", "resultado"):
+            with self.subTest(clave=clave):
+                self.assertEqual(antes[clave], despues[clave])
+        self.assertEqual(despues["gastado"], 3300.0)
+        self.assertEqual(despues["ingresado"], 4800.0)
+
+    def test_el_balance_sigue_cuadrando_despues_de_cerrar(self):
+        server.cerrar_ejercicio_fincas(self.conn, self.ws, self.com, "2026", dotacion_fondo=330)
+        self.conn.commit()
+        self.assertTrue(server.fetch_balance_fincas(self.conn, self.ws, self.com, "2026")["cuadra"])
+
+    def test_el_resultado_pasa_a_remanente(self):
+        """Dejarlo en la 129 hace que el año siguiente arrastre un «resultado del
+        ejercicio» que no es de ese ejercicio."""
+        server.cerrar_ejercicio_fincas(self.conn, self.ws, self.com, "2026", dotacion_fondo=330)
+        self.conn.commit()
+        saldos = {c["cuenta"]: c["saldo"] for c in server.fetch_workspace_fincas_sumas_y_saldos(
+            self.conn, self.ws, self.com, "2026")["cuentas"]}
+        self.assertEqual(saldos.get(server.CUENTA_RESULTADO, 0.0), 0.0)
+        self.assertEqual(saldos[server.CUENTA_REMANENTE], -1170.0)
+        self.assertEqual(saldos[server.CUENTA_FONDO_RESERVA], -330.0)
+
+    def test_una_perdida_va_a_resultados_negativos(self):
+        server.registrar_factura_proveedor(self.conn, self.ws, self.com, fecha="2026-08-01",
+                                           concepto="Obra grande", base=6000, cuenta_gasto="622")
+        self.conn.commit()
+        server.cerrar_ejercicio_fincas(self.conn, self.ws, self.com, "2026")
+        self.conn.commit()
+        saldos = {c["cuenta"]: c["saldo"] for c in server.fetch_workspace_fincas_sumas_y_saldos(
+            self.conn, self.ws, self.com, "2026")["cuentas"]}
+        self.assertGreater(saldos.get("121", 0.0), 0.0)
+        self.assertEqual(saldos.get(server.CUENTA_RESULTADO, 0.0), 0.0)
+
+    def test_la_memoria_reune_lo_que_se_lleva_a_la_junta(self):
+        m = server.fetch_memoria_fincas(self.conn, self.ws, self.com, "2026")
+        for clave in ("presupuestado", "gastado", "ingresado", "resultado", "fondo_reserva",
+                      "morosidad", "balance", "propietarios"):
+            with self.subTest(clave=clave):
+                self.assertIn(clave, m)
