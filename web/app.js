@@ -23704,6 +23704,8 @@ const renderWorkspaceFincasCommunityFicha = async () => {
       </div>
       <div data-recibos-resumen></div>
       <div data-recibos-list><p class="muted">Cargando…</p></div>
+      <h4>Morosidad</h4>
+      <div data-morosidad><p class="muted">Cargando…</p></div>
     `;
     const panel = workspaceFincasCommunityFichaPanel;
     const periodoDe = () => String(panel.querySelector("[data-recibos-periodo]")?.value || mesActual);
@@ -23764,6 +23766,50 @@ const renderWorkspaceFincasCommunityFicha = async () => {
       }
     };
 
+    /** La deuda no es de un periodo: se acumula. Por eso va aparte del listado
+     *  del mes y cuenta lo pendiente y lo devuelto por igual —un recibo que el
+     *  banco devolvió está impagado exactamente igual que uno sin pasar al cobro. */
+    const cargarMorosidad = async () => {
+      const caja = panel.querySelector("[data-morosidad]");
+      if (!caja) return;
+      try {
+        const data = await api(`/api/workspace_fincas_morosidad?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}`);
+        const filas = Array.isArray(data?.rows) ? data.rows : [];
+        const r = data?.resumen || {};
+        if (!filas.length) {
+          caja.innerHTML = "<p class='muted'>Nadie debe nada. </p>";
+          return;
+        }
+        caja.innerHTML = `
+          <div class="workspace-mini-kpis">
+            <div class="workspace-mini-kpi"><span>Deudores</span><strong>${numberFormatter.format(r.deudores || 0)}</strong></div>
+            <div class="workspace-mini-kpi"><span>Deuda total</span><strong>${euroFormatter.format(r.deuda_total || 0)}</strong></div>
+            <div class="workspace-mini-kpi"><span>Recibos impagados</span><strong>${numberFormatter.format(r.recibos_impagados || 0)}</strong></div>
+          </div>
+          <div class="workspace-billing-list">
+            ${filas.map((f) => `
+              <div class="workspace-billing-row">
+                <div>
+                  <strong>${escapeHtml(f.piso || "—")} · ${escapeHtml(f.nombre || "-")}</strong>
+                  <div class="muted">${numberFormatter.format(f.recibos)} recibo(s), de ${escapeHtml(f.desde)} a ${escapeHtml(f.hasta)}</div>
+                </div>
+                <div class="workspace-billing-meta">
+                  <strong>${euroFormatter.format(Number(f.deuda || 0))}</strong>
+                  <button type="button" class="secondary ghost" data-certificado="${escapeHtml(String(f.vecino_id))}">Certificado de deuda</button>
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        `;
+        caja.querySelectorAll("[data-certificado]").forEach((b) =>
+          b.addEventListener("click", () => window.open(
+            `/api/workspace_fincas_certificado_deuda?workspace_id=${encodeURIComponent(workspaceId)}&vecino_id=${encodeURIComponent(b.dataset.certificado)}`,
+            "_blank")));
+      } catch (e) {
+        caja.innerHTML = `<p class="muted">${escapeHtml(e?.message || "No se pudo cargar la morosidad.")}</p>`;
+      }
+    };
+
     panel.querySelector("[data-recibos-periodo]")?.addEventListener("change", cargar);
     panel.querySelector("[data-recibos-emitir]")?.addEventListener("click", async () => {
       try {
@@ -23805,6 +23851,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
       }
     });
     await cargar();
+    await cargarMorosidad();
     return;
   }
 

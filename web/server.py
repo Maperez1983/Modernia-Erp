@@ -49869,6 +49869,139 @@ def fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo="",
     }
 
 
+def fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id):
+    """Quién debe, cuánto y desde cuándo.
+
+    Cuenta como deuda lo pendiente y lo devuelto: un recibo que el banco devolvió
+    está impagado igual que uno que nunca se pasó al cobro, y tratarlo aparte era
+    la forma de que la mitad de la morosidad no se viera.
+    """
+    filas = conn.execute(
+        """
+        SELECT
+          v.id AS vecino_id,
+          COALESCE(v.nombre, '') AS nombre,
+          COALESCE(v.piso, '') AS piso,
+          COALESCE(v.nif, '') AS nif,
+          COUNT(r.id) AS recibos,
+          COALESCE(SUM(r.importe), 0) AS deuda,
+          MIN(r.periodo) AS desde,
+          MAX(r.periodo) AS hasta
+        FROM workspace_fincas_vecinos v
+        JOIN workspace_fincas_recibos r
+          ON r.vecino_id = v.id AND r.estado IN ('Pendiente', 'Devuelto')
+        WHERE v.workspace_id = ? AND v.comunidad_id = ?
+        GROUP BY v.id, v.nombre, v.piso, v.nif
+        HAVING COALESCE(SUM(r.importe), 0) > 0
+        ORDER BY COALESCE(SUM(r.importe), 0) DESC
+        """,
+        (workspace_id, comunidad_id),
+    ).fetchall()
+    deudores = []
+    for fila in filas:
+        deudores.append({
+            "vecino_id": row_value(fila, "vecino_id", ""),
+            "nombre": row_value(fila, "nombre", ""),
+            "piso": row_value(fila, "piso", ""),
+            "nif": row_value(fila, "nif", ""),
+            "recibos": int(row_value(fila, "recibos", 0) or 0),
+            "deuda": round(parse_money_value(row_value(fila, "deuda", 0)), 2),
+            "desde": row_value(fila, "desde", "") or "",
+            "hasta": row_value(fila, "hasta", "") or "",
+        })
+    return {
+        "rows": deudores,
+        "resumen": {
+            "deudores": len(deudores),
+            "deuda_total": round(sum(d["deuda"] for d in deudores), 2),
+            "recibos_impagados": sum(d["recibos"] for d in deudores),
+        },
+    }
+
+
+def build_certificado_deuda_pdf(comunidad, vecino, recibos, workspace=None, company=None):
+    """Certificado del estado de deuda de un propietario.
+
+    Se limita a lo que el CRM sabe con certeza: qué recibos hay impagados, de qué
+    periodos y cuánto suman. **No** afirma nada sobre plazos, intereses ni efectos
+    legales, y deja el pie de firma en blanco: el certificado lo emite el secretario
+    administrador con el visto bueno del presidente, y ni la firma ni la
+    responsabilidad las pone un programa. Quien lo use para una compraventa o para
+    un procedimiento tiene que revisarlo y firmarlo.
+    """
+    workspace = workspace or {}
+    company = company or {}
+    total = round(sum(parse_money_value(row_value(r, "importe", 0)) for r in recibos), 2)
+    nombre = str(row_value(vecino, "nombre", "") or "").strip()
+    piso = str(row_value(vecino, "piso", "") or "").strip()
+
+    def limpio(valor):
+        texto = str(valor or "").strip()
+        return "" if texto in {"-", "—", "None"} else texto
+
+    sections = [
+        ("Estado de deuda", {"kind": "kpi_cards", "columns": 3, "items": [
+            {"label": "Importe pendiente", "value": format_eur(total), "accent": 1},
+            {"label": "Recibos impagados", "value": str(len(recibos))},
+            {"label": "Periodos", "value": f"{row_value(recibos[0], 'periodo', '') if recibos else '-'} … "
+                                            f"{row_value(recibos[-1], 'periodo', '') if recibos else '-'}"},
+        ]}),
+        ("Comunidad", [linea for linea in (
+            f"Denominación: {limpio(row_value(comunidad, 'nombre', ''))}",
+            f"Dirección: {limpio(row_value(comunidad, 'direccion', ''))}" if limpio(row_value(comunidad, "direccion", "")) else "",
+            f"CIF: {limpio(row_value(comunidad, 'cif', ''))}" if limpio(row_value(comunidad, "cif", "")) else "",
+        ) if linea]),
+        ("Propietario", [linea for linea in (
+            f"Nombre: {nombre}",
+            f"Inmueble: {piso}" if piso else "",
+            f"NIF: {limpio(row_value(vecino, 'nif', ''))}" if limpio(row_value(vecino, "nif", "")) else "",
+        ) if linea]),
+    ]
+    if recibos:
+        sections.append(("Recibos impagados", {
+            "kind": "table",
+            "columns": [
+                {"label": "Periodo", "width": 2},
+                {"label": "Concepto", "width": 5},
+                {"label": "Estado", "width": 2},
+                {"label": "Importe", "width": 2, "align": "right"},
+            ],
+            "rows": [[
+                row_value(r, "periodo", ""),
+                row_value(r, "concepto", ""),
+                row_value(r, "estado", ""),
+                format_eur(row_value(r, "importe", 0)),
+            ] for r in recibos],
+            "total": ["Total", "", "", format_eur(total)],
+        }))
+    sections.append(("Firma", [
+        "Este certificado recoge los recibos impagados que constan en la contabilidad de la",
+        "comunidad a la fecha de emisión. Debe ser firmado por el secretario administrador con",
+        "el visto bueno del presidente para surtir efecto.",
+        "",
+        "",
+        "El secretario administrador                              V.º B.º El presidente",
+    ]))
+    fecha = datetime.now().date()
+    MESES = ("enero", "febrero", "marzo", "abril", "mayo", "junio",
+             "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+    footer = [f"Emitido el {fecha.day} de {MESES[fecha.month - 1]} de {fecha.year}."]
+    try:
+        from .branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    except ImportError:
+        from branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    return build_modernia_branded_document_pdf_vector(
+        "CERTIFICADO DE DEUDA",
+        f"{nombre}{f' · {piso}' if piso else ''}",
+        sections,
+        footer,
+        company=company,
+        brand_logo_url=_load_asset_logo("logos/fincas-velazquez.png", max_width=420),
+        brand_color=workspace.get("primary_color"),
+        seal_image=_load_asset_logo("logos/colegio-administradores-v2.png", max_width=300),
+    )
+
+
 def fetch_workspace_fincas_censo_resumen(conn, workspace_id, comunidad_id):
     """Cuántos propietarios hay y cuánto suman sus coeficientes.
 
@@ -85334,6 +85467,66 @@ class Handler(BaseHTTPRequestHandler):
             binary_response(
                 self, xml, content_type="application/xml",
                 filename=f"remesa_{row_value(remesa, 'referencia', remesa_id)}.xml",
+            )
+            return
+
+        if path == "/api/workspace_fincas_morosidad":
+            workspace_id = params.get("workspace_id", [""])[0]
+            comunidad_id = (params.get("comunidad_id", [""])[0] or "").strip()
+            if not workspace_id or not comunidad_id:
+                json_response(self, {"error": "workspace_id y comunidad_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id))
+            return
+
+        if path == "/api/workspace_fincas_certificado_deuda":
+            workspace_id = params.get("workspace_id", [""])[0]
+            vecino_id = (params.get("vecino_id", [""])[0] or "").strip()
+            if not workspace_id or not vecino_id:
+                json_response(self, {"error": "workspace_id y vecino_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            vecino = conn.execute(
+                "SELECT * FROM workspace_fincas_vecinos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (vecino_id, workspace_id),
+            ).fetchone()
+            if not vecino:
+                json_response(self, {"error": "propietario no encontrado"}, status=404)
+                return
+            comunidad = conn.execute(
+                "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (row_value(vecino, "comunidad_id", ""), workspace_id),
+            ).fetchone()
+            recibos = conn.execute(
+                "SELECT periodo, concepto, importe, estado FROM workspace_fincas_recibos "
+                "WHERE vecino_id = ? AND workspace_id = ? AND estado IN ('Pendiente', 'Devuelto') "
+                "ORDER BY periodo",
+                (vecino_id, workspace_id),
+            ).fetchall()
+            detalle = fetch_workspace_detail(conn, workspace_id)
+            pdf = build_certificado_deuda_pdf(
+                comunidad or {}, vecino, recibos,
+                workspace=detalle.get("workspace") or {},
+                company=(detalle.get("companies") or [{}])[0] if detalle.get("companies") else {},
+            )
+            binary_response(
+                self, pdf, content_type="application/pdf",
+                filename=f"certificado_deuda_{normalize_lookup_text(row_value(vecino, 'piso', '') or vecino_id)[:20].replace(' ', '_')}.pdf",
             )
             return
 
