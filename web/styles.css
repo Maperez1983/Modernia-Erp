@@ -15195,3 +15195,8 @@ samp {
 /* Con dos botones, `workspace-billing-meta` los apilaba y cada fila del censo
    medía el triple: con 177 propietarios la lista era interminable. */
 .censo-acciones { display: inline-flex; gap: 6px; align-items: center; }
+
+/* Estado del recibo: se distingue por texto y color, no solo por color. */
+.recibo-estado { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line, rgba(0,0,0,0.12)); }
+.recibo-estado[data-estado="Cobrado"] { border-color: rgba(22, 163, 74, 0.5); color: #15803d; }
+.recibo-estado[data-estado="Devuelto"] { border-color: rgba(220, 38, 38, 0.5); color: #b91c1c; }

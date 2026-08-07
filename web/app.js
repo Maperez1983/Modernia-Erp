@@ -23447,6 +23447,16 @@ const renderWorkspaceFincasCommunityFicha = async () => {
           Cuota mensual
           <input name="cuota_mensual" inputmode="decimal" value="${escapeHtml(String(record.cuota_mensual ?? ""))}" />
         </label>
+        <div class="form-grid-section span-all">Domiciliación (SEPA)</div>
+        <label class="span-2">
+          IBAN de la comunidad
+          <input name="iban" placeholder="ES00 0000 0000 0000 0000 0000" value="${escapeHtml(String(record.iban ?? ""))}" />
+        </label>
+        <label class="span-2">
+          Identificador de acreedor SEPA
+          <input name="acreedor_sepa" placeholder="ES00ZZZ00000000" value="${escapeHtml(String(record.acreedor_sepa ?? ""))}" />
+        </label>
+        <div class="muted span-all">Los dos hacen falta para generar la remesa. El identificador de acreedor lo asigna el banco.</div>
         <div class="muted span-all" data-community-ficha-status></div>
         <div class="form-actions span-all">
           <button type="submit">Guardar</button>
@@ -23499,6 +23509,9 @@ const renderWorkspaceFincasCommunityFicha = async () => {
             <label>Teléfono <input name="telefono" /></label>
             <label>Email <input name="email" /></label>
             <label>Coeficiente (%) <input name="coeficiente" inputmode="decimal" /></label>
+            <label class="span-all">IBAN <input name="iban" placeholder="ES00 0000 0000 0000 0000 0000" /></label>
+            <label>Ref. mandato <input name="mandato_ref" /></label>
+            <label>Fecha del mandato <input name="mandato_fecha" type="date" /></label>
             <label class="span-all">Notas <textarea name="notas" rows="2"></textarea></label>
             <div class="muted span-all" data-vecino-status></div>
             <div class="form-actions span-all">
@@ -23600,7 +23613,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
             const v = items.find((row) => String(row.id || "") === String(btn.dataset.vecinoEdit || ""));
             if (!v) return;
             form.querySelector('[name="id"]').value = v.id || "";
-            ["nombre","nif","piso","telefono","email","coeficiente","notas"].forEach((k) => {
+            ["nombre","nif","piso","telefono","email","coeficiente","iban","mandato_ref","mandato_fecha","notas"].forEach((k) => {
               const el = form.querySelector(`[name="${k}"]`);
               if (el) el.value = v[k] ?? "";
             });
@@ -23673,6 +23686,125 @@ const renderWorkspaceFincasCommunityFicha = async () => {
         if (statusEl) statusEl.textContent = e?.message || "No se pudo guardar.";
       }
     };
+    return;
+  }
+
+  if (tab === "recibos") {
+    const mesActual = new Date().toISOString().slice(0, 7);
+    workspaceFincasCommunityFichaPanel.innerHTML = `
+      <div class="form-grid" style="align-items:end;">
+        <label>Periodo <input type="month" data-recibos-periodo value="${mesActual}" /></label>
+        <label>Importe a repartir (€) <input data-recibos-importe inputmode="decimal" placeholder="Cuota mensual de la ficha" /></label>
+        <label class="span-2">Concepto <input data-recibos-concepto placeholder="Cuota de comunidad" /></label>
+        <div class="form-actions span-all">
+          <button type="button" data-recibos-emitir>Emitir recibos</button>
+          <button type="button" class="secondary ghost" data-remesa-generar>Generar remesa SEPA</button>
+          <span class="muted" data-recibos-status></span>
+        </div>
+      </div>
+      <div data-recibos-resumen></div>
+      <div data-recibos-list><p class="muted">Cargando…</p></div>
+    `;
+    const panel = workspaceFincasCommunityFichaPanel;
+    const periodoDe = () => String(panel.querySelector("[data-recibos-periodo]")?.value || mesActual);
+    const estado = panel.querySelector("[data-recibos-status]");
+    const di = (texto) => { if (estado) estado.textContent = texto; };
+
+    const cargar = async () => {
+      try {
+        const data = await api(`/api/workspace_fincas_recibos?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}&periodo=${encodeURIComponent(periodoDe())}`);
+        const filas = Array.isArray(data?.rows) ? data.rows : [];
+        const r = data?.resumen || {};
+        panel.querySelector("[data-recibos-resumen]").innerHTML = filas.length ? `
+          <div class="workspace-mini-kpis">
+            <div class="workspace-mini-kpi"><span>Recibos</span><strong>${numberFormatter.format(r.recibos || 0)}</strong></div>
+            <div class="workspace-mini-kpi"><span>Emitido</span><strong>${euroFormatter.format(r.emitido || 0)}</strong></div>
+            <div class="workspace-mini-kpi"><span>Cobrado</span><strong>${euroFormatter.format(r.cobrado || 0)}</strong></div>
+            <div class="workspace-mini-kpi"><span>Pendiente</span><strong>${euroFormatter.format(r.pendiente || 0)}</strong></div>
+            <div class="workspace-mini-kpi"><span>Devuelto</span><strong>${euroFormatter.format(r.devuelto || 0)}</strong></div>
+          </div>
+          ${r.sin_iban ? `<p class="censo-aviso">${r.sin_iban} recibo(s) sin cuenta válida: quedarán fuera de la remesa. Un IBAN mal tecleado tumba el fichero entero en el banco.</p>` : ""}
+        ` : "";
+        panel.querySelector("[data-recibos-list]").innerHTML = filas.length ? `
+          <div class="workspace-billing-list">
+            ${filas.map((f) => `
+              <div class="workspace-billing-row">
+                <div>
+                  <strong>${escapeHtml(f.piso || "—")} · ${escapeHtml(f.nombre || "-")}</strong>
+                  <div class="muted">${escapeHtml(f.concepto || "")}${f.iban_ok ? ` · ····${escapeHtml(f.iban_cola || "")}` : " · <sin cuenta válida>"}${f.remesa_id ? " · en remesa" : ""}</div>
+                </div>
+                <div class="workspace-billing-meta">
+                  <strong>${euroFormatter.format(Number(f.importe || 0))}</strong>
+                  <span class="recibo-estado" data-estado="${escapeHtml(String(f.estado || ""))}">${escapeHtml(f.estado || "")}</span>
+                  <span class="censo-acciones">
+                    <button type="button" class="secondary ghost" data-recibo-cobrado="${escapeHtml(String(f.id))}">Cobrado</button>
+                    <button type="button" class="secondary ghost" data-recibo-devuelto="${escapeHtml(String(f.id))}">Devuelto</button>
+                  </span>
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        ` : `<p class="muted">Sin recibos de ${escapeHtml(periodoDe())}. Emítelos con el botón de arriba.</p>`;
+
+        const marca = async (id, nuevoEstado, motivo) => {
+          await postJsonWithDbRetry("/api/workspace_fincas_recibo_estado", {
+            workspace_id: workspaceId, id, estado: nuevoEstado, motivo: motivo || "",
+          });
+          await cargar();
+        };
+        panel.querySelectorAll("[data-recibo-cobrado]").forEach((b) =>
+          b.addEventListener("click", () => marca(b.dataset.reciboCobrado, "Cobrado")));
+        panel.querySelectorAll("[data-recibo-devuelto]").forEach((b) =>
+          b.addEventListener("click", () => {
+            const motivo = window.prompt("Motivo de la devolución (opcional):") ?? "";
+            marca(b.dataset.reciboDevuelto, "Devuelto", motivo);
+          }));
+      } catch (e) {
+        panel.querySelector("[data-recibos-list]").innerHTML = `<p class="muted">${escapeHtml(e?.message || "No se pudieron cargar los recibos.")}</p>`;
+      }
+    };
+
+    panel.querySelector("[data-recibos-periodo]")?.addEventListener("change", cargar);
+    panel.querySelector("[data-recibos-emitir]")?.addEventListener("click", async () => {
+      try {
+        di("Emitiendo…");
+        const cuerpo = {
+          workspace_id: workspaceId, comunidad_id: comunidadId, periodo: periodoDe(),
+          importe: panel.querySelector("[data-recibos-importe]")?.value || "",
+          concepto: panel.querySelector("[data-recibos-concepto]")?.value || "",
+        };
+        let res;
+        try {
+          res = await postJsonWithDbRetry("/api/workspace_fincas_recibos_emitir", cuerpo);
+        } catch (err) {
+          if (!/Ya hay recibos emitidos/.test(String(err?.message || ""))) throw err;
+          if (!window.confirm(`Ya hay recibos de ${cuerpo.periodo}. ¿Rehacer los que sigan pendientes?`)) { di(""); return; }
+          res = await postJsonWithDbRetry("/api/workspace_fincas_recibos_emitir", { ...cuerpo, reemitir: "1" });
+        }
+        const avisos = [`${res.creados} recibos por ${euroFormatter.format(res.total)}.`];
+        if (res.reparto_por_partes) avisos.push("Nadie tenía coeficiente: se ha repartido a partes iguales.");
+        if (res.sin_iban?.length) avisos.push(`Sin cuenta válida: ${res.sin_iban.join(", ")}.`);
+        di(avisos.join(" "));
+        await cargar();
+      } catch (e) {
+        di(e?.message || "No se pudieron emitir.");
+      }
+    });
+    panel.querySelector("[data-remesa-generar]")?.addEventListener("click", async () => {
+      try {
+        di("Generando remesa…");
+        const res = await postJsonWithDbRetry("/api/workspace_fincas_remesa_generar", {
+          workspace_id: workspaceId, comunidad_id: comunidadId, periodo: periodoDe(),
+        });
+        di(`Remesa ${res.referencia}: ${res.incluidos} recibos, ${euroFormatter.format(res.total)}.` +
+           (res.excluidos_sin_iban ? ` ${res.excluidos_sin_iban} fuera por cuenta inválida.` : ""));
+        window.open(`/api/workspace_fincas_remesa_sepa?workspace_id=${encodeURIComponent(workspaceId)}&id=${encodeURIComponent(res.id)}`, "_blank");
+        await cargar();
+      } catch (e) {
+        di(e?.message || "No se pudo generar la remesa.");
+      }
+    });
+    await cargar();
     return;
   }
 

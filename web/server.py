@@ -40950,6 +40950,61 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    # Para domiciliar hace falta la cuenta del propietario y la referencia de su
+    # mandato: sin las dos, el recibo no se puede enviar al banco.
+    ensure_column(conn, "workspace_fincas_vecinos", "iban", "iban TEXT")
+    ensure_column(conn, "workspace_fincas_vecinos", "mandato_ref", "mandato_ref TEXT")
+    ensure_column(conn, "workspace_fincas_vecinos", "mandato_fecha", "mandato_fecha TEXT")
+    # Y del lado de la comunidad, su cuenta y su identificador de acreedor SEPA.
+    ensure_column(conn, "workspace_fincas_comunidades", "iban", "iban TEXT")
+    ensure_column(conn, "workspace_fincas_comunidades", "acreedor_sepa", "acreedor_sepa TEXT")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_recibos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          comunidad_id TEXT NOT NULL,
+          vecino_id TEXT NOT NULL,
+          periodo TEXT NOT NULL,
+          concepto TEXT NOT NULL,
+          importe NUMERIC NOT NULL DEFAULT 0,
+          coeficiente NUMERIC,
+          estado TEXT NOT NULL DEFAULT 'Pendiente',
+          fecha_emision TEXT,
+          fecha_cobro TEXT,
+          motivo_devolucion TEXT,
+          remesa_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        # Un propietario no puede tener dos recibos del mismo periodo: emitir dos
+        # veces el mismo mes es la forma más rápida de cobrar dos veces.
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_recibos_unico "
+            "ON workspace_fincas_recibos (comunidad_id, vecino_id, periodo)"
+        )
+    except Exception:
+        pass
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_remesas (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          comunidad_id TEXT NOT NULL,
+          periodo TEXT NOT NULL,
+          fecha_cobro TEXT NOT NULL,
+          referencia TEXT NOT NULL,
+          total NUMERIC NOT NULL DEFAULT 0,
+          num_recibos INTEGER NOT NULL DEFAULT 0,
+          estado TEXT NOT NULL DEFAULT 'Generada',
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
 
 
 def infer_workspace_doc_classification(nombre, tipo, servicio):
@@ -48359,6 +48414,8 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
           c.num_aparcamientos,
           c.cuota_sugerida,
           c.cuota_mensual,
+          COALESCE(c.iban, '') AS iban,
+          COALESCE(c.acreedor_sepa, '') AS acreedor_sepa,
           COALESCE(c.activo, 1) AS activo,
           c.created_at,
           c.updated_at,
@@ -49523,6 +49580,7 @@ CENSO_COLUMNAS = {
     "nif": ("NIF", "DNI", "CIF", "DOCUMENTO"),
     "telefono": ("TELEFONO", "TFNO", "MOVIL", "TELEFONOS", "CONTACTO"),
     "email": ("EMAIL", "CORREO", "E MAIL", "MAIL"),
+    "iban": ("IBAN", "CUENTA", "CCC", "BANCO", "NUMERO DE CUENTA"),
     "coeficiente": ("COEFICIENTE", "COEF", "CUOTA", "PARTICIPACION", "PORCENTAJE"),
 }
 
@@ -49601,6 +49659,9 @@ def parse_censo_vecinos(texto):
         if not nombre and not piso:
             continue
         coeficiente = parse_coeficiente(celda("coeficiente"))
+        # El IBAN se normaliza pero no se descarta si viene mal: se guarda igual y
+        # la pantalla lo marca. Tirar la fila entera por un dígito obligaría a
+        # repetir la importación completa.
         filas.append({
             "nombre": nombre or piso,
             "piso": piso,
@@ -49608,8 +49669,204 @@ def parse_censo_vecinos(texto):
             "telefono": celda("telefono"),
             "email": celda("email"),
             "coeficiente": coeficiente,
+            "iban": normalizar_iban(celda("iban")),
         })
     return filas
+
+
+def normalizar_iban(valor):
+    """Quita espacios y guiones y pasa a mayúsculas. No valida."""
+    return re.sub(r"[^A-Za-z0-9]", "", str(valor or "")).upper()
+
+
+def iban_valido(valor):
+    """Comprueba un IBAN con el resto módulo 97 de la norma ISO 13616.
+
+    Un dígito mal tecleado no lo detecta el banco hasta que devuelve la remesa
+    entera, y para entonces ya has dado el mes por cobrado. Comprobarlo aquí
+    cuesta cuatro líneas.
+    """
+    iban = normalizar_iban(valor)
+    if not (15 <= len(iban) <= 34) or not iban[:2].isalpha() or not iban[2:4].isdigit():
+        return False
+    reordenado = iban[4:] + iban[:4]
+    try:
+        numero = "".join(str(int(c, 36)) for c in reordenado)
+    except ValueError:
+        return False
+    return int(numero) % 97 == 1
+
+
+def formatear_iban(valor):
+    """Agrupa el IBAN de cuatro en cuatro, que es como se lee y se comprueba."""
+    iban = normalizar_iban(valor)
+    return " ".join(iban[i:i + 4] for i in range(0, len(iban), 4))
+
+
+def reparte_por_coeficiente(total, propietarios):
+    """Reparte un importe entre propietarios según su coeficiente.
+
+    Devuelve [(vecino, importe)] con la suma **exactamente** igual al total. Los
+    céntimos sueltos se reparten por resto mayor, no todos al mismo: dándoselos al
+    de mayor coeficiente, una comunidad de 24 vecinos al 4,1667 % dejaba a uno
+    pagando 50,23 € y a los otros 49,99 €, y eso lo nota el vecino. Por resto mayor
+    nadie se separa más de un céntimo de los demás y la suma sigue cuadrando, que
+    es lo que impide que la contabilidad se desvíe mes a mes.
+
+    Si nadie tiene coeficiente, se reparte a partes iguales y quien llama decide si
+    eso le vale: `reparto_por_partes` lo dice.
+    """
+    total = round(parse_money_value(total), 2)
+    lista = list(propietarios or [])
+    if not lista or total <= 0:
+        return [], False
+    pesos = []
+    for vecino in lista:
+        try:
+            pesos.append(max(0.0, float(row_value(vecino, "coeficiente", 0) or 0)))
+        except (TypeError, ValueError):
+            pesos.append(0.0)
+    suma = sum(pesos)
+    por_partes = suma <= 0
+    if por_partes:
+        pesos = [1.0] * len(lista)
+        suma = float(len(lista))
+    centimos_total = int(round(total * 100))
+    exactos = [centimos_total * peso / suma for peso in pesos]
+    reparto = [[vecino, int(valor)] for vecino, valor in zip(lista, exactos)]
+    sobra = centimos_total - sum(centimos for _v, centimos in reparto)
+    # Resto mayor: los céntimos que faltan van, de uno en uno, a quien más parte
+    # decimal se dejó por el camino. Con empate manda el orden de la lista, para
+    # que dos emisiones iguales den el mismo resultado.
+    orden = sorted(range(len(reparto)), key=lambda i: (-(exactos[i] - int(exactos[i])), i))
+    for posicion in range(sobra):
+        reparto[orden[posicion % len(orden)]][1] += 1
+    return [(vecino, round(centimos / 100.0, 2)) for vecino, centimos in reparto], por_partes
+
+
+def _sepa_texto(valor, limite=70):
+    """Limpia un texto para el fichero: los bancos rechazan caracteres raros."""
+    crudo = unicodedata.normalize("NFKD", str(valor or ""))
+    limpio = "".join(c for c in crudo if not unicodedata.combining(c))
+    limpio = re.sub(r"[^A-Za-z0-9 /\-?:().,'+]", " ", limpio)
+    return re.sub(r"\s+", " ", limpio).strip()[:limite] or "N/A"
+
+
+def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None):
+    """Fichero de adeudos directos SEPA (pain.008.001.02).
+
+    Se genera con el esquema estándar, pero **cada banco pide lo suyo**: hay quien
+    exige el BIC, quien no admite más de una secuencia por fichero y quien quiere el
+    identificador de acreedor con un sufijo concreto. Antes de usarlo en producción
+    hay que validar un fichero de prueba con la entidad.
+
+    Todos los recibos van como `RCUR` (recurrente). El primer adeudo de un mandato
+    nuevo debería ir como `FRST`, pero eso exige llevar la cuenta de qué mandatos ya
+    han cobrado alguna vez, y hoy el CRM no la lleva: se documenta aquí para no dar
+    por hecho que está resuelto.
+    """
+    from xml.sax.saxutils import escape as _esc
+
+    ahora = ahora or datetime.now()
+    acreedor = _sepa_texto(row_value(comunidad, "nombre", ""), 70)
+    acreedor_id = normalizar_iban(row_value(comunidad, "acreedor_sepa", "") or "")
+    iban_comunidad = normalizar_iban(row_value(comunidad, "iban", "") or "")
+    referencia = _sepa_texto(row_value(remesa, "referencia", ""), 35)
+    fecha_cobro = str(row_value(remesa, "fecha_cobro", "") or ahora.date().isoformat())[:10]
+
+    lineas_recibos = []
+    total = 0.0
+    for numero, recibo in enumerate(recibos, start=1):
+        importe = round(parse_money_value(row_value(recibo, "importe", 0)), 2)
+        total += importe
+        lineas_recibos.append(
+            "      <DrctDbtTxInf>\n"
+            f"        <PmtId><EndToEndId>{_esc(_sepa_texto(f'{referencia}-{numero:04d}', 35))}</EndToEndId></PmtId>\n"
+            f'        <InstdAmt Ccy="EUR">{importe:.2f}</InstdAmt>\n'
+            "        <DrctDbtTx><MndtRltdInf>\n"
+            f"          <MndtId>{_esc(_sepa_texto(row_value(recibo, 'mandato_ref', '') or row_value(recibo, 'vecino_id', ''), 35))}</MndtId>\n"
+            f"          <DtOfSgntr>{_esc(str(row_value(recibo, 'mandato_fecha', '') or fecha_cobro)[:10])}</DtOfSgntr>\n"
+            "        </MndtRltdInf></DrctDbtTx>\n"
+            f"        <Dbtr><Nm>{_esc(_sepa_texto(row_value(recibo, 'nombre', ''), 70))}</Nm></Dbtr>\n"
+            f"        <DbtrAcct><Id><IBAN>{_esc(normalizar_iban(row_value(recibo, 'iban', '')))}</IBAN></Id></DbtrAcct>\n"
+            f"        <RmtInf><Ustrd>{_esc(_sepa_texto(row_value(recibo, 'concepto', ''), 140))}</Ustrd></RmtInf>\n"
+            "      </DrctDbtTxInf>"
+        )
+    total = round(total, 2)
+    cabecera = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.008.001.02">\n'
+        "  <CstmrDrctDbtInitn>\n"
+        "    <GrpHdr>\n"
+        f"      <MsgId>{_esc(_sepa_texto(referencia, 35))}</MsgId>\n"
+        f"      <CreDtTm>{ahora.strftime('%Y-%m-%dT%H:%M:%S')}</CreDtTm>\n"
+        f"      <NbOfTxs>{len(recibos)}</NbOfTxs>\n"
+        f"      <CtrlSum>{total:.2f}</CtrlSum>\n"
+        f"      <InitgPty><Nm>{_esc(acreedor)}</Nm></InitgPty>\n"
+        "    </GrpHdr>\n"
+        "    <PmtInf>\n"
+        f"      <PmtInfId>{_esc(_sepa_texto(referencia, 35))}</PmtInfId>\n"
+        "      <PmtMtd>DD</PmtMtd>\n"
+        f"      <NbOfTxs>{len(recibos)}</NbOfTxs>\n"
+        f"      <CtrlSum>{total:.2f}</CtrlSum>\n"
+        "      <PmtTpInf><SvcLvl><Cd>SEPA</Cd></SvcLvl><LclInstrm><Cd>CORE</Cd></LclInstrm>"
+        "<SeqTp>RCUR</SeqTp></PmtTpInf>\n"
+        f"      <ReqdColltnDt>{_esc(fecha_cobro)}</ReqdColltnDt>\n"
+        f"      <Cdtr><Nm>{_esc(acreedor)}</Nm></Cdtr>\n"
+        f"      <CdtrAcct><Id><IBAN>{_esc(iban_comunidad)}</IBAN></Id></CdtrAcct>\n"
+        "      <CdtrAgt><FinInstnId><Othr><Id>NOTPROVIDED</Id></Othr></FinInstnId></CdtrAgt>\n"
+        "      <ChrgBr>SLEV</ChrgBr>\n"
+        "      <CdtrSchmeId><Id><PrvtId><Othr>\n"
+        f"        <Id>{_esc(acreedor_id)}</Id><SchmeNm><Prtry>SEPA</Prtry></SchmeNm>\n"
+        "      </Othr></PrvtId></Id></CdtrSchmeId>\n"
+    )
+    return (cabecera + "\n".join(lineas_recibos) + "\n    </PmtInf>\n  </CstmrDrctDbtInitn>\n</Document>\n").encode("utf-8")
+
+
+def fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo="", limit=800):
+    """Recibos de una comunidad, con el propietario al lado y el estado de cobro."""
+    condiciones = ["r.workspace_id = ?", "r.comunidad_id = ?"]
+    valores = [workspace_id, comunidad_id]
+    if periodo:
+        condiciones.append("r.periodo = ?")
+        valores.append(periodo)
+    filas = conn.execute(
+        f"""
+        SELECT
+          r.id, r.periodo, r.concepto, r.importe, r.coeficiente, r.estado,
+          r.fecha_emision, r.fecha_cobro, r.motivo_devolucion, r.remesa_id,
+          r.vecino_id,
+          COALESCE(v.nombre, '') AS nombre,
+          COALESCE(v.piso, '') AS piso,
+          COALESCE(v.iban, '') AS iban
+        FROM workspace_fincas_recibos r
+        LEFT JOIN workspace_fincas_vecinos v ON v.id = r.vecino_id
+        WHERE {" AND ".join(condiciones)}
+        ORDER BY r.periodo DESC, v.piso, v.nombre
+        LIMIT ?
+        """,
+        (*valores, max(1, min(int(limit or 800), 2000))),
+    ).fetchall()
+    filas = [dict(f) for f in filas]
+    for fila in filas:
+        # El IBAN no se devuelve entero: en una lista que se enseña en pantalla no
+        # hace falta, y basta con saber si está y si es válido.
+        crudo = fila.pop("iban", "")
+        fila["iban_ok"] = iban_valido(crudo)
+        fila["iban_cola"] = normalizar_iban(crudo)[-4:] if crudo else ""
+    def suma(estado):
+        return round(sum(parse_money_value(f["importe"]) for f in filas if f["estado"] == estado), 2)
+    return {
+        "rows": filas,
+        "resumen": {
+            "recibos": len(filas),
+            "emitido": round(sum(parse_money_value(f["importe"]) for f in filas), 2),
+            "cobrado": suma("Cobrado"),
+            "pendiente": suma("Pendiente"),
+            "devuelto": suma("Devuelto"),
+            "sin_iban": sum(1 for f in filas if not f["iban_ok"]),
+        },
+    }
 
 
 def fetch_workspace_fincas_censo_resumen(conn, workspace_id, comunidad_id):
@@ -58916,6 +59173,9 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_documentos",
             "/api/workspace_fincas_vecinos",
             "/api/workspace_fincas_vecinos_import",
+            "/api/workspace_fincas_recibos_emitir",
+            "/api/workspace_fincas_recibo_estado",
+            "/api/workspace_fincas_remesa_generar",
             "/api/workspace_fincas_vecino_delete",
             "/api/workspace_presupuesto_delete",
             "/api/workspace_rrhh_nominas_import",
@@ -70238,6 +70498,8 @@ class Handler(BaseHTTPRequestHandler):
                 num_aparcamientos,
                 cuota_sugerida,
                 round(parse_money_value(payload.get("cuota_mensual")), 2) or cuota_sugerida,
+                normalizar_iban(payload.get("iban")) or None,
+                (payload.get("acreedor_sepa") or "").strip().upper() or None,
             )
             if record_id:
                 conn.execute(
@@ -70245,7 +70507,8 @@ class Handler(BaseHTTPRequestHandler):
                     UPDATE workspace_fincas_comunidades
                     SET workspace_id = ?, empresa_id = ?, nombre = ?, referencia_catastral = ?, cif = ?, direccion = ?, foto_edificio_key = ?, presidente = ?,
                         secretario = ?, estado = ?, num_vecinos = ?, num_locales = ?, num_trasteros = ?,
-                        num_aparcamientos = ?, cuota_sugerida = ?, cuota_mensual = ?, updated_at = datetime(?)
+                        num_aparcamientos = ?, cuota_sugerida = ?, cuota_mensual = ?,
+                        iban = ?, acreedor_sepa = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
                     (*values, now, record_id, workspace_id),
@@ -70256,8 +70519,9 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     INSERT INTO workspace_fincas_comunidades (
                       id, workspace_id, empresa_id, nombre, referencia_catastral, cif, direccion, foto_edificio_key, presidente, secretario,
-                      estado, num_vecinos, num_locales, num_trasteros, num_aparcamientos, cuota_sugerida, cuota_mensual, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      estado, num_vecinos, num_locales, num_trasteros, num_aparcamientos, cuota_sugerida, cuota_mensual,
+                      iban, acreedor_sepa, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
@@ -71060,6 +71324,9 @@ class Handler(BaseHTTPRequestHandler):
                 (payload.get("email") or "").strip() or None,
                 coeficiente,
                 (payload.get("notas") or "").strip() or None,
+                normalizar_iban(payload.get("iban")) or None,
+                (payload.get("mandato_ref") or "").strip() or None,
+                (payload.get("mandato_fecha") or "").strip()[:10] or None,
             )
             if record_id:
                 current = conn.execute(
@@ -71073,7 +71340,7 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     UPDATE workspace_fincas_vecinos
                     SET workspace_id = ?, comunidad_id = ?, nombre = ?, nif = ?, piso = ?, telefono = ?, email = ?, coeficiente = ?, notas = ?,
-                        updated_at = datetime(?)
+                        iban = ?, mandato_ref = ?, mandato_fecha = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
                     (*values, now, record_id, workspace_id),
@@ -71083,8 +71350,9 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO workspace_fincas_vecinos (
-                      id, workspace_id, comunidad_id, nombre, nif, piso, telefono, email, coeficiente, notas, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      id, workspace_id, comunidad_id, nombre, nif, piso, telefono, email, coeficiente, notas,
+                      iban, mandato_ref, mandato_fecha, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
@@ -71135,26 +71403,211 @@ class Handler(BaseHTTPRequestHandler):
                     fila.get("telefono") or None,
                     fila.get("email") or None,
                     fila.get("coeficiente"),
+                    fila.get("iban") or None,
                 )
                 anterior = existentes.get(clave) if clave else None
                 if anterior:
                     conn.execute(
                         "UPDATE workspace_fincas_vecinos SET nombre = ?, nif = ?, piso = ?, telefono = ?, "
-                        "email = ?, coeficiente = ?, updated_at = datetime(?) WHERE id = ? AND workspace_id = ?",
+                        "email = ?, coeficiente = ?, iban = COALESCE(NULLIF(?, ''), iban), "
+                        "updated_at = datetime(?) WHERE id = ? AND workspace_id = ?",
                         (*valores, now, anterior, workspace_id),
                     )
                     actualizados += 1
                 else:
                     conn.execute(
                         "INSERT INTO workspace_fincas_vecinos "
-                        "(id, workspace_id, comunidad_id, nombre, nif, piso, telefono, email, coeficiente, notas, created_at, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, datetime(?), datetime(?))",
+                        "(id, workspace_id, comunidad_id, nombre, nif, piso, telefono, email, coeficiente, iban, notas, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, datetime(?), datetime(?))",
                         (os.urandom(16).hex(), workspace_id, comunidad_id, *valores, now, now),
                     )
                     creados += 1
             conn.commit()
             resumen = fetch_workspace_fincas_censo_resumen(conn, workspace_id, comunidad_id)
             json_response(self, {"ok": True, "creados": creados, "actualizados": actualizados, "resumen": resumen})
+            return
+        elif parsed.path == "/api/workspace_fincas_recibos_emitir":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            comunidad_id = str(payload.get("comunidad_id") or "").strip()
+            periodo = str(payload.get("periodo") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not comunidad_id or not re.fullmatch(r"\d{4}-\d{2}", periodo):
+                json_response(self, {"error": "workspace_id, comunidad_id y periodo (AAAA-MM) requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            comunidad = conn.execute(
+                "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (comunidad_id, workspace_id),
+            ).fetchone()
+            if not comunidad:
+                json_response(self, {"error": "comunidad no encontrada"}, status=404)
+                return
+            propietarios = conn.execute(
+                "SELECT id, nombre, piso, coeficiente, iban FROM workspace_fincas_vecinos "
+                "WHERE workspace_id = ? AND comunidad_id = ? ORDER BY piso, nombre",
+                (workspace_id, comunidad_id),
+            ).fetchall()
+            if not propietarios:
+                json_response(self, {"error": "La comunidad no tiene censo: cárgalo antes de emitir recibos"}, status=400)
+                return
+            total = round(parse_money_value(payload.get("importe")), 2)
+            if total <= 0:
+                total = round(parse_money_value(row_value(comunidad, "cuota_mensual", 0)), 2)
+            if total <= 0:
+                json_response(self, {"error": "No hay importe que repartir"}, status=400)
+                return
+            ya_emitidos = conn.execute(
+                "SELECT COUNT(*) AS n FROM workspace_fincas_recibos WHERE comunidad_id = ? AND periodo = ?",
+                (comunidad_id, periodo),
+            ).fetchone()
+            if int(row_value(ya_emitidos, "n", 0) or 0):
+                # Volver a emitir el mismo mes es la forma más rápida de cobrar dos
+                # veces: se exige decirlo a propósito y se borra lo pendiente.
+                if str(payload.get("reemitir") or "").strip().lower() not in {"1", "true", "si", "sí"}:
+                    json_response(
+                        self,
+                        {"error": f"Ya hay recibos emitidos de {periodo}. Marca «reemitir» si quieres rehacerlos.",
+                         "code": "ya_emitido"},
+                        status=409,
+                    )
+                    return
+                conn.execute(
+                    "DELETE FROM workspace_fincas_recibos WHERE comunidad_id = ? AND periodo = ? AND estado = 'Pendiente'",
+                    (comunidad_id, periodo),
+                )
+            concepto = str(payload.get("concepto") or "").strip() or f"Cuota de comunidad {periodo}"
+            reparto, por_partes = reparte_por_coeficiente(total, propietarios)
+            creados = 0
+            sin_iban = []
+            for vecino, importe in reparto:
+                vecino_id = row_value(vecino, "id", "")
+                existe = conn.execute(
+                    "SELECT id FROM workspace_fincas_recibos WHERE comunidad_id = ? AND vecino_id = ? AND periodo = ? LIMIT 1",
+                    (comunidad_id, vecino_id, periodo),
+                ).fetchone()
+                if existe:
+                    continue
+                if not iban_valido(row_value(vecino, "iban", "")):
+                    sin_iban.append(row_value(vecino, "piso", "") or row_value(vecino, "nombre", ""))
+                conn.execute(
+                    "INSERT INTO workspace_fincas_recibos "
+                    "(id, workspace_id, comunidad_id, vecino_id, periodo, concepto, importe, coeficiente, estado, "
+                    " fecha_emision, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', ?, datetime(?), datetime(?))",
+                    (os.urandom(16).hex(), workspace_id, comunidad_id, vecino_id, periodo, concepto, importe,
+                     row_value(vecino, "coeficiente", None), datetime.now().date().isoformat(), now, now),
+                )
+                creados += 1
+            conn.commit()
+            json_response(self, {
+                "ok": True,
+                "creados": creados,
+                "total": total,
+                "reparto_por_partes": por_partes,
+                "sin_iban": sin_iban[:50],
+            })
+            return
+        elif parsed.path == "/api/workspace_fincas_recibo_estado":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            estado = str(payload.get("estado") or "").strip().capitalize()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not record_id or estado not in {"Pendiente", "Cobrado", "Devuelto"}:
+                json_response(self, {"error": "workspace_id, id y estado válido requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            conn.execute(
+                "UPDATE workspace_fincas_recibos SET estado = ?, fecha_cobro = ?, motivo_devolucion = ?, "
+                "updated_at = datetime(?) WHERE id = ? AND workspace_id = ?",
+                (
+                    estado,
+                    datetime.now().date().isoformat() if estado == "Cobrado" else None,
+                    str(payload.get("motivo") or "").strip() or None if estado == "Devuelto" else None,
+                    now, record_id, workspace_id,
+                ),
+            )
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/workspace_fincas_remesa_generar":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            comunidad_id = str(payload.get("comunidad_id") or "").strip()
+            periodo = str(payload.get("periodo") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not comunidad_id or not re.fullmatch(r"\d{4}-\d{2}", periodo):
+                json_response(self, {"error": "workspace_id, comunidad_id y periodo (AAAA-MM) requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            comunidad = conn.execute(
+                "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (comunidad_id, workspace_id),
+            ).fetchone()
+            if not comunidad:
+                json_response(self, {"error": "comunidad no encontrada"}, status=404)
+                return
+            faltan = []
+            if not iban_valido(row_value(comunidad, "iban", "")):
+                faltan.append("la cuenta de la comunidad")
+            if not str(row_value(comunidad, "acreedor_sepa", "") or "").strip():
+                faltan.append("el identificador de acreedor SEPA")
+            if faltan:
+                json_response(self, {"error": "Falta " + " y ".join(faltan) + " en la ficha de la comunidad."}, status=400)
+                return
+            candidatos = conn.execute(
+                "SELECT r.id, r.importe, v.iban FROM workspace_fincas_recibos r "
+                "LEFT JOIN workspace_fincas_vecinos v ON v.id = r.vecino_id "
+                "WHERE r.workspace_id = ? AND r.comunidad_id = ? AND r.periodo = ? "
+                "AND r.estado = 'Pendiente' AND r.remesa_id IS NULL",
+                (workspace_id, comunidad_id, periodo),
+            ).fetchall()
+            # Un recibo sin cuenta válida tumba el fichero entero en el banco, así
+            # que se queda fuera y se dice cuántos: la remesa sale igual con el resto.
+            incluidos = [c for c in candidatos if iban_valido(row_value(c, "iban", ""))]
+            if not incluidos:
+                json_response(self, {"error": "No hay recibos pendientes con cuenta válida en ese periodo"}, status=400)
+                return
+            remesa_id = os.urandom(16).hex()
+            referencia = f"{normalize_lookup_text(row_value(comunidad, 'nombre', ''))[:12].replace(' ', '')}-{periodo}"
+            total = round(sum(parse_money_value(row_value(c, "importe", 0)) for c in incluidos), 2)
+            fecha_cobro = str(payload.get("fecha_cobro") or "").strip()[:10] or datetime.now().date().isoformat()
+            conn.execute(
+                "INSERT INTO workspace_fincas_remesas "
+                "(id, workspace_id, comunidad_id, periodo, fecha_cobro, referencia, total, num_recibos, estado, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Generada', datetime(?), datetime(?))",
+                (remesa_id, workspace_id, comunidad_id, periodo, fecha_cobro, referencia, total, len(incluidos), now, now),
+            )
+            for recibo in incluidos:
+                conn.execute(
+                    "UPDATE workspace_fincas_recibos SET remesa_id = ?, updated_at = datetime(?) WHERE id = ?",
+                    (remesa_id, now, row_value(recibo, "id", "")),
+                )
+            conn.commit()
+            json_response(self, {
+                "ok": True,
+                "id": remesa_id,
+                "referencia": referencia,
+                "total": total,
+                "incluidos": len(incluidos),
+                "excluidos_sin_iban": len(candidatos) - len(incluidos),
+            })
             return
         elif parsed.path == "/api/workspace_fincas_vecino_delete":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -84826,6 +85279,62 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             json_response(self, {"items": fetch_workspace_fincas_tarifas(conn, workspace_id)})
+            return
+
+        if path == "/api/workspace_fincas_recibos":
+            workspace_id = params.get("workspace_id", [""])[0]
+            comunidad_id = (params.get("comunidad_id", [""])[0] or "").strip()
+            periodo = (params.get("periodo", [""])[0] or "").strip()
+            if not workspace_id or not comunidad_id:
+                json_response(self, {"error": "workspace_id y comunidad_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo=periodo))
+            return
+
+        if path == "/api/workspace_fincas_remesa_sepa":
+            workspace_id = params.get("workspace_id", [""])[0]
+            remesa_id = (params.get("id", [""])[0] or "").strip()
+            if not workspace_id or not remesa_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            remesa = conn.execute(
+                "SELECT * FROM workspace_fincas_remesas WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (remesa_id, workspace_id),
+            ).fetchone()
+            if not remesa:
+                json_response(self, {"error": "remesa no encontrada"}, status=404)
+                return
+            comunidad = conn.execute(
+                "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (row_value(remesa, "comunidad_id", ""), workspace_id),
+            ).fetchone()
+            recibos = conn.execute(
+                "SELECT r.id, r.concepto, r.importe, r.vecino_id, v.nombre, v.iban, v.mandato_ref, v.mandato_fecha "
+                "FROM workspace_fincas_recibos r LEFT JOIN workspace_fincas_vecinos v ON v.id = r.vecino_id "
+                "WHERE r.remesa_id = ? AND r.workspace_id = ? ORDER BY v.piso, v.nombre",
+                (remesa_id, workspace_id),
+            ).fetchall()
+            xml = build_remesa_sepa_xml(remesa, comunidad or {}, recibos)
+            binary_response(
+                self, xml, content_type="application/xml",
+                filename=f"remesa_{row_value(remesa, 'referencia', remesa_id)}.xml",
+            )
             return
 
         if path == "/api/workspace_fincas_incidencias":
