@@ -69632,6 +69632,14 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not empresa_id or not nombre:
                 json_response(self, {"error": "workspace_id, empresa_id y nombre requeridos"}, status=400)
                 return
+            # Sin esto, el workspace_id llega del cuerpo de la petición y nadie
+            # comprueba que quien llama pertenezca a él: bastaba con saber el id de
+            # otro tenant para leer o tocar sus comunidades.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
             num_vecinos = parse_non_negative_int(payload.get("num_vecinos"))
             num_locales = parse_non_negative_int(payload.get("num_locales"))
             num_trasteros = parse_non_negative_int(payload.get("num_trasteros"))
@@ -69686,6 +69694,14 @@ class Handler(BaseHTTPRequestHandler):
             comunidad_id = str(payload.get("comunidad_id") or payload.get("id") or "").strip()
             if not workspace_id or not comunidad_id:
                 json_response(self, {"error": "workspace_id y comunidad_id requeridos"}, status=400)
+                return
+            # Sin esto, el workspace_id llega del cuerpo de la petición y nadie
+            # comprueba que quien llama pertenezca a él: bastaba con saber el id de
+            # otro tenant para leer o tocar sus comunidades.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             row = conn.execute(
                 "SELECT id, nombre FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
@@ -69771,6 +69787,14 @@ class Handler(BaseHTTPRequestHandler):
             titulo = str(payload.get("titulo") or "").strip()
             if not workspace_id or not comunidad_id or not titulo:
                 json_response(self, {"error": "workspace_id, comunidad_id y titulo requeridos"}, status=400)
+                return
+            # Sin esto, el workspace_id llega del cuerpo de la petición y nadie
+            # comprueba que quien llama pertenezca a él: bastaba con saber el id de
+            # otro tenant para leer o tocar sus comunidades.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             proveedor_id = str(payload.get("proveedor_id") or "").strip() or None
             proveedor_nombre = str(payload.get("proveedor") or "").strip() or None
@@ -70068,6 +70092,14 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not empresa_id or not nombre:
                 json_response(self, {"error": "workspace_id, empresa_id y nombre requeridos"}, status=400)
                 return
+            # Sin esto, el workspace_id llega del cuerpo de la petición y nadie
+            # comprueba que quien llama pertenezca a él: bastaba con saber el id de
+            # otro tenant para leer o tocar sus comunidades.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
             values = (
                 workspace_id,
                 (payload.get("comunidad_id") or "").strip() or None,
@@ -70111,6 +70143,14 @@ class Handler(BaseHTTPRequestHandler):
             fecha = str(payload.get("fecha") or "").strip()
             if not workspace_id or not comunidad_id or not fecha:
                 json_response(self, {"error": "workspace_id, comunidad_id y fecha requeridos"}, status=400)
+                return
+            # Sin esto, el workspace_id llega del cuerpo de la petición y nadie
+            # comprueba que quien llama pertenezca a él: bastaba con saber el id de
+            # otro tenant para leer o tocar sus comunidades.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             values = (
                 workspace_id,
