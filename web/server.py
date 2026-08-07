@@ -54243,6 +54243,13 @@ def _baja_tesela(z, x, y):
 #: viviendas» en un documento que se manda a un cliente.
 CARTA_HUECOS = ("comunidad", "direccion", "viviendas", "unidades", "cuota", "empresa", "colegiado")
 
+#: Marca con la que se firma la administración de fincas. El logo del documento es
+#: el de Fincas Velázquez para todos los presupuestos de fincas, así que el nombre
+#: que se lee debe ser ese: poner «Inmovere Fincas» junto al logo de Velázquez
+#: confunde al cliente. La sociedad que emite y su CIF siguen saliendo bajo la
+#: banda y en el pie, que es lo que identifica con quién se contrata.
+FINCAS_NOMBRE_COMERCIAL = "Fincas Velázquez"
+
 #: Plantillas de partida. La primera es **el texto que ya usaba la casa**: estaba
 #: escrito a fuego dentro del motor de imagen del PDF, no en la base, así que el
 #: campo `carta_presentacion` llevaba desde siempre vacío y nadie podía tocarlo sin
@@ -54500,7 +54507,14 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     # daba siempre falso y el presupuesto salía sin decir que la cuota es mensual.
     servicio_key = normalize_lookup_text(budget.get("servicio") or "")
     es_fincas = servicio_key in {"FINCAS", "ADMINISTRACION FINCAS"}
-    company_name = str(company.get("razon_social") or company.get("nombre") or workspace.get("nombre") or "").strip() or "Empresa"
+    razon_social = str(company.get("razon_social") or company.get("nombre") or "").strip()
+    cif_empresa = str(company.get("nif") or company.get("cif") or "").strip()
+    # En fincas el documento va con el logo de Fincas Velázquez, así que el nombre
+    # que se lee tiene que ser ese aunque la sociedad que emite sea otra del grupo.
+    # La sociedad y el CIF no desaparecen: van bajo la banda y en el pie, que es
+    # donde tienen que estar para saber con quién se contrata.
+    marca = FINCAS_NOMBRE_COMERCIAL if es_fincas else ""
+    company_name = marca or razon_social or str(workspace.get("nombre") or "").strip() or "Empresa"
 
     def limpio(valor):
         texto = str(valor or "").strip()
@@ -54540,7 +54554,11 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
 
     carta = limpio(calc.get("carta_presentacion"))
     if carta:
-        sections.append(("Carta de presentación", [p for p in carta.split("\n") if p.strip()]))
+        # Con la separación por defecto los ocho párrafos salían como un muro: hay
+        # que ver dónde acaba cada idea, que es media página de lectura corrida.
+        sections.append(("Carta de presentación", {
+            "items": [p for p in carta.split("\n") if p.strip()], "espaciado": 7,
+        }))
         foto_equipo = _load_asset_logo("photos/equipo-modernia.jpg", max_width=1100)
         if foto_equipo is not None:
             sections.append(("", {"kind": "image", "image": foto_equipo, "height": 200}))
@@ -54693,8 +54711,13 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         fecha = f"{d.day} de {MESES_ES[d.month - 1]} de {d.year}"
     except Exception:
         fecha = fecha_iso
+    # El pie nombra la marca, pero deja constancia de la sociedad y su CIF: un
+    # presupuesto se acepta y pasa a ser contrato, y ahí importa quién contrata.
+    emisor = company_name
+    if marca and razon_social and normalize_lookup_text(razon_social) != normalize_lookup_text(marca):
+        emisor = f"{marca} ({razon_social}{f' · CIF {cif_empresa}' if cif_empresa else ''})"
     footer = [
-        f"Documento emitido por {company_name} el {fecha}.",
+        f"Documento emitido por {emisor} el {fecha}.",
         "Presupuesto sujeto a aceptación expresa del cliente.",
     ]
     # Fincas Velázquez tiene marca propia y sello del Colegio: el documento lo firma
@@ -54708,11 +54731,11 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     if logo_marca is None:
         logo_marca = _load_brand_logo(company.get("logo_url"), max_width=360)
 
-    # El subtítulo de la banda se corta a 70 caracteres: metiendo ahí el nombre de la
-    # empresa más el título salía «... COMUNIDAD PR». Va solo la referencia.
+    # El subtítulo de la banda va entero: el motor lo mide contra el hueco que queda
+    # a la derecha del título y lo encoge o lo recorta si hace falta. Recortarlo aquí
+    # a un número fijo de caracteres dejaba «... Comunidad de Propietarios R…» aunque
+    # sobrara sitio de sobra.
     referencia = limpio(budget.get("titulo")) or "Propuesta de servicios"
-    if len(referencia) > 58:
-        referencia = referencia[:57].rstrip(" ·,") + "…"
 
     try:
         from .branded_pdf_vector import build_modernia_branded_document_pdf_vector
@@ -54723,7 +54746,7 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         referencia,
         sections,
         footer,
-        company=company,
+        company=dict(company, nombre_comercial=marca) if marca else company,
         brand_logo_url=logo_marca,
         brand_color=workspace.get("primary_color"),
         seal_image=sello,
@@ -74975,7 +74998,9 @@ class Handler(BaseHTTPRequestHandler):
                 "viviendas": str(parse_non_negative_int(payload.get("num_vecinos")) or ""),
                 "unidades": describe_unidades_edificio(calc),
                 "cuota": format_eur(cuota) if cuota else "",
-                "empresa": empresa or "nuestro despacho",
+                # La carta la firma la marca, igual que el logo del PDF. La sociedad
+                # que emite va identificada en el propio presupuesto, no en el texto.
+                "empresa": FINCAS_NOMBRE_COMERCIAL or empresa or "nuestro despacho",
                 "colegiado": str(payload.get("colegiado") or "").strip(),
             }
             json_response(self, {

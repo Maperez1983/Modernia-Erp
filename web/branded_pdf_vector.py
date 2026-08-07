@@ -42,6 +42,17 @@ FONDO_SUAVE = (246 / 255, 248 / 255, 247 / 255)
 #: Relleno de las tarjetas destacadas: el mismo crema del motor de imagen.
 CREMA = (252 / 255, 248 / 255, 235 / 255)
 
+#: Aire entre bloques. El documento salía apelotonado: los encabezados de sección
+#: se pegaban al párrafo anterior y los párrafos entre sí, así que un presupuesto
+#: parecía un muro de texto. Estas cuatro medidas son las que lo separan.
+ESPACIO_ANTES_SECCION = 13.0
+ESPACIO_TRAS_ENCABEZADO = 8.0
+#: Un encabezado no puede quedarse solo al pie: se le reserva sitio para dos o tres
+#: líneas de lo que venga detrás.
+ALTO_ENCABEZADO_CON_ARRANQUE = 78.0
+#: Separación por defecto entre los elementos de una lista (datos, servicios).
+ESPACIO_ENTRE_ITEMS = 2.0
+
 
 def _texto(valor):
     return "" if valor is None else str(valor)
@@ -160,6 +171,12 @@ class _Lienzo:
             self.c.showPage()
         self.pagina += 1
         self.y = self.cabecera(self.c, self.pagina)
+        # Para saber si estamos recién abierta la página: al principio no se separa
+        # nada, porque el hueco lo da ya la cabecera.
+        self.y_inicial = self.y
+
+    def recien_abierta(self):
+        return self.y >= getattr(self, "y_inicial", self.y) - 0.5
 
     def sitio(self, alto):
         if self.y - alto < MARGEN_INF:
@@ -174,6 +191,75 @@ class _Lienzo:
             self.c.setFont(fuente, tamano)
             self.c.drawString(MARGEN_X + sangria, self.y - tamano, trozo)
             self.y -= interlineado
+
+
+def _alto_util_pagina():
+    """Lo que cabe en una página interior, ya descontada cabecera y márgenes."""
+    return A4_ALTO - MARGEN_SUP - 42 - MARGEN_INF
+
+
+def _alto_estimado(cuerpo):
+    """Cuánto ocupa un bloque, para no dejarlo partido entre dos páginas.
+
+    Antes solo se reservaban 22 puntos —el encabezado— así que una tabla de tres
+    filas podía empezar al pie de una página y terminar en la siguiente, con una
+    página casi en blanco para la última fila. Devuelve `None` cuando no se puede
+    estimar (listas de texto, que se ajustan al ancho y se parten sin problema).
+    """
+    if not isinstance(cuerpo, dict):
+        return None
+    clase = str(cuerpo.get("kind") or "").lower()
+    if clase == "table":
+        filas = len([f for f in (cuerpo.get("rows") or []) if isinstance(f, (list, tuple))])
+        if not filas:
+            return None
+        return 17.0 * (filas + 1) + (17.0 if cuerpo.get("total") else 0.0) + 10.0
+    if clase == "waterfall":
+        pasos = [p for p in (cuerpo.get("steps") or []) if isinstance(p, dict)]
+        return sum(22.0 if _es_destacado(p) else 15.0 for p in pasos) + 8.0 if pasos else None
+    if clase == "image":
+        try:
+            return float(cuerpo.get("height") or 0) + (16.0 if cuerpo.get("caption") else 4.0)
+        except (TypeError, ValueError):
+            return None
+    if clase == "kpi_cards":
+        return 62.0 if cuerpo.get("items") else None
+    return None
+
+
+def _lista(lienzo, items, espaciado=None):
+    """Pinta una lista de párrafos dejando aire entre ellos.
+
+    Antes cada elemento se dibujaba pegado al siguiente, así que una carta de ocho
+    párrafos salía como un bloque macizo: no se distinguía dónde acababa uno.
+    """
+    hueco = ESPACIO_ENTRE_ITEMS if espaciado is None else float(espaciado or 0)
+    for item in items:
+        lienzo.linea_texto(_texto(item), sangria=8)
+        if hueco:
+            lienzo.y -= hueco
+
+
+def _cabe_en(c, texto, fuente, tamano, ancho):
+    return c.stringWidth(texto, fuente, tamano) <= ancho
+
+
+def _encoge_para_caber(c, texto, fuente, tamano, ancho, minimo=6.8):
+    """Baja el cuerpo hasta que quepa; si aun así no cabe, recorta con puntos.
+
+    El subtítulo de la banda se cortaba a 70 caracteres a ciegas, sin mirar lo que
+    ocupaba de verdad, y con un nombre largo se comía el título de la izquierda.
+    """
+    # El paso es de 0,25, así que hay que comprobar el siguiente valor y no el
+    # actual: con `while tamano > minimo` se acababa por debajo del mínimo.
+    while tamano - 0.25 >= minimo and not _cabe_en(c, texto, fuente, tamano, ancho):
+        tamano -= 0.25
+    if _cabe_en(c, texto, fuente, tamano, ancho):
+        return texto, tamano
+    recorte = texto
+    while recorte and not _cabe_en(c, recorte + "…", fuente, tamano, ancho):
+        recorte = recorte[:-1]
+    return (recorte.rstrip(" ·,-") + "…") if recorte else "", tamano
 
 
 def _dibuja_cabecera(titulo, subtitulo, meta_empresa, logo_marca=None, color=None, sello=None):
@@ -201,17 +287,25 @@ def _dibuja_cabecera(titulo, subtitulo, meta_empresa, logo_marca=None, color=Non
             c.setFillColorRGB(*color)
             c.rect(0, y - 40, A4_ANCHO, 40, stroke=0, fill=1)
             c.setFillColorRGB(1, 1, 1)
+            texto_titulo = _texto(titulo)[:80]
             c.setFont(PDF_FONT_BOLD, 15)
-            c.drawString(MARGEN_X, y - 26, _texto(titulo)[:80])
+            c.drawString(MARGEN_X, y - 26, texto_titulo)
             if subtitulo:
-                c.setFont(PDF_FONT_REGULAR, 9)
-                c.drawRightString(A4_ANCHO - MARGEN_X, y - 26, _texto(subtitulo)[:70])
+                # Lo que queda libre a la derecha del título, con un respiro en medio:
+                # así el subtítulo se encoge o se recorta, pero nunca se solapa.
+                libre = (A4_ANCHO - MARGEN_X * 2) - c.stringWidth(texto_titulo, PDF_FONT_BOLD, 15) - 18
+                cabido, cuerpo_sub = _encoge_para_caber(c, _texto(subtitulo), PDF_FONT_REGULAR, 9, libre)
+                if cabido:
+                    c.setFont(PDF_FONT_REGULAR, cuerpo_sub)
+                    c.drawRightString(A4_ANCHO - MARGEN_X, y - 26, cabido)
             y -= 56
             if meta_empresa:
                 c.setFillColorRGB(*APAGADO)
-                c.setFont(PDF_FONT_REGULAR, 7.5)
-                c.drawString(MARGEN_X, y, _texto(meta_empresa)[:150])
-                y -= 15
+                cabido, cuerpo_meta = _encoge_para_caber(
+                    c, _texto(meta_empresa), PDF_FONT_REGULAR, 7.5, A4_ANCHO - MARGEN_X * 2, minimo=6.0)
+                c.setFont(PDF_FONT_REGULAR, cuerpo_meta)
+                c.drawString(MARGEN_X, y, cabido)
+                y -= 18
         else:
             if logo_marca:
                 _pinta_logo(c, logo_marca, MARGEN_X, y - 20, 16)
@@ -383,13 +477,24 @@ def _cascada(lienzo, bloque):
     if etiqueta:
         lienzo.linea_texto(etiqueta, PDF_FONT_BOLD, 9, APAGADO)
     for paso in pasos:
-        lienzo.sitio(12)
+        # La cifra final se separa con una línea y se escribe más grande: es el
+        # número que se lee en la junta, y antes iba igual que el IVA.
+        destacado = _es_destacado(paso)
+        alto = 22.0 if destacado else 15.0
+        lienzo.sitio(alto)
+        if destacado:
+            lienzo.y -= 4
+            lienzo.c.setStrokeColorRGB(*LINEA)
+            lienzo.c.setLineWidth(0.5)
+            lienzo.c.line(MARGEN_X + 8, lienzo.y, A4_ANCHO - MARGEN_X, lienzo.y)
+            lienzo.y -= 5
+        cuerpo = 11.0 if destacado else 8.5
         lienzo.c.setFillColorRGB(*TINTA)
-        lienzo.c.setFont(PDF_FONT_REGULAR, 8.5)
-        lienzo.c.drawString(MARGEN_X + 8, lienzo.y - 8, _texto(paso.get("label"))[:60])
-        lienzo.c.setFont(PDF_FONT_BOLD, 8.5)
-        lienzo.c.drawRightString(A4_ANCHO - MARGEN_X, lienzo.y - 8, _texto(paso.get("value"))[:24])
-        lienzo.y -= 12
+        lienzo.c.setFont(PDF_FONT_BOLD if destacado else PDF_FONT_REGULAR, cuerpo)
+        lienzo.c.drawString(MARGEN_X + 8, lienzo.y - cuerpo, _texto(paso.get("label"))[:60])
+        lienzo.c.setFont(PDF_FONT_BOLD, cuerpo)
+        lienzo.c.drawRightString(A4_ANCHO - MARGEN_X, lienzo.y - cuerpo, _texto(paso.get("value"))[:24])
+        lienzo.y -= cuerpo + 6
     lienzo.y -= 4
 
 
@@ -557,10 +662,18 @@ def build_modernia_branded_document_pdf_vector(
     from reportlab.pdfgen import canvas as rl_canvas
 
     company = company or {}
+    # El nombre comercial va delante, porque es el del logo y el que conoce el
+    # cliente; la sociedad y el CIF siguen apareciendo detrás, que son los que
+    # identifican a quién contrata. Si coinciden, no se repite.
+    comercial = _texto(company.get("nombre_comercial")).strip()
+    legal = _texto(company.get("razon_social") or company.get("nombre")).strip()
+    if comercial and _texto(legal).casefold() == comercial.casefold():
+        legal = ""
     meta = " · ".join(
         p
         for p in (
-            _texto(company.get("razon_social") or company.get("nombre")),
+            comercial,
+            legal,
             f"CIF: {company.get('nif') or company.get('cif')}" if (company.get("nif") or company.get("cif")) else "",
             _texto(company.get("direccion_fiscal") or company.get("direccion")),
         )
@@ -596,13 +709,24 @@ def build_modernia_branded_document_pdf_vector(
             lienzo.nueva_pagina()
             continue
         if encabezado:
-            lienzo.sitio(22)
-            lienzo.y -= 4
+            # Se reserva sitio para el encabezado **y para un arranque de contenido**:
+            # con los 22 puntos de antes, un título podía quedarse solo al pie y su
+            # contenido empezar en la página siguiente («Cierre económico» acabó así,
+            # con una página entera para tres cifras).
+            estimado = _alto_estimado(cuerpo)
+            necesario = ALTO_ENCABEZADO_CON_ARRANQUE
+            if estimado:
+                # Con la altura real del bloque se decide bien: si cabe entero en una
+                # página, se pasa a la siguiente antes que partirlo.
+                necesario = min(30.0 + estimado, _alto_util_pagina())
+            lienzo.sitio(necesario)
+            if not lienzo.recien_abierta():
+                lienzo.y -= ESPACIO_ANTES_SECCION
             lienzo.linea_texto(_texto(encabezado), PDF_FONT_BOLD, 11.5, TINTA)
             lienzo.c.setStrokeColorRGB(*LINEA)
             lienzo.c.setLineWidth(0.5)
             lienzo.c.line(MARGEN_X, lienzo.y + 4, A4_ANCHO - MARGEN_X, lienzo.y + 4)
-            lienzo.y -= 6
+            lienzo.y -= ESPACIO_TRAS_ENCABEZADO
         clase = str(cuerpo.get("kind") or "").lower() if isinstance(cuerpo, dict) else ""
         if clase == "kpi_cards":
             _tarjetas_kpi(lienzo, cuerpo)
@@ -617,11 +741,9 @@ def build_modernia_branded_document_pdf_vector(
         elif clase == "image":
             _imagen(lienzo, cuerpo, cache_logos)
         elif isinstance(cuerpo, dict):
-            for item in cuerpo.get("items") or []:
-                lienzo.linea_texto(_texto(item), sangria=8)
+            _lista(lienzo, cuerpo.get("items") or [], cuerpo.get("espaciado"))
         else:
-            for linea in (cuerpo or []):
-                lienzo.linea_texto(_texto(linea), sangria=8)
+            _lista(lienzo, cuerpo or [], None)
 
     for pie in footer_lines or []:
         lienzo.sitio(11)
