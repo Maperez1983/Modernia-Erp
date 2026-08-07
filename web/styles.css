@@ -15139,3 +15139,43 @@ samp {
   border: 1px solid var(--line);
   color: var(--muted, #6b7280);
 }
+
+/* Tarifa de administración de fincas: editor y trabajos puntuales del presupuesto. */
+.fincas-tarifa-panel {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.015);
+}
+.fincas-tarifa-panel > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.fincas-tarifa-tabla input[type="number"] { max-width: 120px; }
+.fincas-tarifa-tabla td { vertical-align: middle; }
+.fincas-extras {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px;
+}
+.fincas-extras .fincas-extra {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  margin: 0;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 12px;
+  cursor: pointer;
+}
+.fincas-extras .fincas-extra > input[type="checkbox"] {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  margin: 0;
+  flex: 0 0 auto;
+}
+.fincas-extras .fincas-extra > span { flex: 1 1 auto; }
+.fincas-extras .fincas-extra > strong { margin-left: auto; white-space: nowrap; }

@@ -9,7 +9,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=301" />
+	    <link rel="stylesheet" href="styles.css?v=302" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2485,9 +2485,14 @@
               <input name="num_locales" type="number" min="0" step="1" value="0" />
             </label>
             <label>
+              Trasteros
+              <input name="num_trasteros" type="number" min="0" step="1" value="0" />
+            </label>
+            <label>
               Aparcamientos
               <input name="num_aparcamientos" type="number" min="0" step="1" value="0" />
             </label>
+	            <div class="span-2" id="workspaceFincasBudgetExtras"></div>
 	            <label>
 	              Base sugerida (sin IVA)
 	              <input name="subtotal_sugerido" type="text" inputmode="decimal" readonly />
@@ -2527,6 +2532,32 @@
 	              <span id="workspaceFincasBudgetQuickStatus" class="muted"></span>
 	            </div>
           </form>
+          <details id="workspaceFincasTarifaPanel" class="fincas-tarifa-panel">
+            <summary>Tarifa de administración</summary>
+            <p class="muted">
+              Los precios por unidad y la cuota mínima con los que se calcula la base sugerida.
+              Los conceptos de tipo <em>puntual</em> no entran en la cuota mensual: aparecen arriba
+              como casillas y, al marcarlos, se suman al presupuesto como línea aparte.
+            </p>
+            <table class="table fincas-tarifa-tabla">
+              <thead>
+                <tr>
+                  <th>Concepto</th>
+                  <th>Tipo</th>
+                  <th>Unidad</th>
+                  <th>Precio (€)</th>
+                  <th>Activo</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="workspaceFincasTarifaBody"></tbody>
+            </table>
+            <div class="form-actions">
+              <button type="button" id="workspaceFincasTarifaAddBtn" class="secondary ghost">Añadir concepto</button>
+              <button type="button" id="workspaceFincasTarifaSaveBtn">Guardar tarifa</button>
+              <span id="workspaceFincasTarifaStatus" class="muted"></span>
+            </div>
+          </details>
         </div>
 
         <div class="form-card crm-workspace-view" data-workspace-view="fincas" data-fincas-tab="presupuestos">
@@ -11910,7 +11941,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=842",
+              "app.js?v=843",
             ];
 
             const getParams = () => {

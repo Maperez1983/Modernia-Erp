@@ -25381,6 +25381,12 @@ const renderWorkspaceFincasDashboard = () => {
 let _workspaceFincasCommunitiesLastFetchAt = 0;
 const refreshWorkspaceFincasCommunities = async ({ force = false, silent = false } = {}) => {
   if (!state.currentWorkspaceId) return;
+  // La tarifa se carga una vez con las comunidades: el presupuesto la necesita para
+  // calcular la base, y sin ella se quedaría con los precios de partida.
+  if (!_fincasTarifasCargadas) {
+    _fincasTarifasCargadas = true;
+    void cargarFincasTarifas();
+  }
   const nowTs = Date.now();
   if (!force && _workspaceFincasCommunitiesLastFetchAt && (nowTs - _workspaceFincasCommunitiesLastFetchAt) < 1500) {
     return;
@@ -25606,14 +25612,190 @@ const normalizeBudgetServiceKey = (value = "") => {
   return raw;
 };
 
-const computeFincasCuotaSuggestedClient = ({ num_vecinos = 0, num_locales = 0, num_trasteros = 0, num_aparcamientos = 0 } = {}) =>
-  Math.max(
-    60,
-    (Number(num_vecinos || 0) || 0) * 5
-      + (Number(num_locales || 0) || 0)
-      + (Number(num_trasteros || 0) || 0)
-      + (Number(num_aparcamientos || 0) || 0)
-  );
+// Tarifa de administración de fincas. Se carga del workspace; mientras no llegue se
+// usan los precios históricos, que son los mismos que se siembran en el servidor.
+const FINCAS_TARIFA_DEFECTO = [
+  { clave: "vivienda", etiqueta: "Por vivienda", tipo: "unitaria", unidad: "vivienda", precio: 5, activo: 1 },
+  { clave: "local", etiqueta: "Por local", tipo: "unitaria", unidad: "local", precio: 1, activo: 1 },
+  { clave: "trastero", etiqueta: "Por trastero", tipo: "unitaria", unidad: "trastero", precio: 1, activo: 1 },
+  { clave: "aparcamiento", etiqueta: "Por aparcamiento", tipo: "unitaria", unidad: "plaza", precio: 1, activo: 1 },
+  { clave: "minimo", etiqueta: "Cuota mínima mensual", tipo: "minimo", unidad: "mes", precio: 60, activo: 1 },
+];
+
+const FINCAS_TARIFA_UNIDADES = {
+  vivienda: "num_vecinos",
+  local: "num_locales",
+  trastero: "num_trasteros",
+  aparcamiento: "num_aparcamientos",
+};
+
+let fincasTarifaActual = FINCAS_TARIFA_DEFECTO.slice();
+let _fincasTarifasCargadas = false;
+
+const computeFincasCuotaSuggestedClient = ({ num_vecinos = 0, num_locales = 0, num_trasteros = 0, num_aparcamientos = 0 } = {}, tarifas = null) => {
+  const lista = Array.isArray(tarifas) && tarifas.length ? tarifas : fincasTarifaActual;
+  const unidades = {
+    num_vecinos: Number(num_vecinos || 0) || 0,
+    num_locales: Number(num_locales || 0) || 0,
+    num_trasteros: Number(num_trasteros || 0) || 0,
+    num_aparcamientos: Number(num_aparcamientos || 0) || 0,
+  };
+  let total = 0;
+  let minimo = 0;
+  lista.forEach((item) => {
+    if (!Number(item?.activo ?? 1)) return;
+    const precio = Number(item?.precio || 0) || 0;
+    if (item?.tipo === "minimo") minimo = Math.max(minimo, precio);
+    else if (FINCAS_TARIFA_UNIDADES[item?.clave]) total += unidades[FINCAS_TARIFA_UNIDADES[item.clave]] * precio;
+  });
+  return Math.round(Math.max(minimo, total) * 100) / 100;
+};
+
+const fincasTarifasFijas = () =>
+  fincasTarifaActual.filter((item) => item?.tipo === "fija" && Number(item?.activo ?? 1));
+
+/** Trabajos puntuales marcados en el formulario: no van en la cuota mensual. */
+const fincasExtrasSeleccionados = () =>
+  Array.from(workspaceFincasBudgetQuickForm?.querySelectorAll('[data-fincas-extra]:checked') || [])
+    .map((el) => String(el.value || "").trim())
+    .filter(Boolean);
+
+const fincasImporteExtras = () => {
+  const marcadas = new Set(fincasExtrasSeleccionados());
+  return fincasTarifasFijas()
+    .filter((item) => marcadas.has(item.clave))
+    .reduce((suma, item) => suma + (Number(item.precio || 0) || 0), 0);
+};
+
+const renderFincasTarifasFijas = () => {
+  const caja = document.getElementById("workspaceFincasBudgetExtras");
+  if (!caja) return;
+  const fijas = fincasTarifasFijas();
+  if (!fijas.length) {
+    caja.innerHTML = '<p class="muted">No hay trabajos puntuales tarifados. Añádelos en «Tarifa».</p>';
+    return;
+  }
+  const marcadas = new Set(fincasExtrasSeleccionados());
+  caja.innerHTML = `
+    <div class="form-grid-section">Trabajos puntuales</div>
+    <div class="fincas-extras">
+      ${fijas.map((item) => `
+        <label class="fincas-extra">
+          <input type="checkbox" data-fincas-extra value="${escapeHtml(item.clave)}" ${marcadas.has(item.clave) ? "checked" : ""} />
+          <span>${escapeHtml(item.etiqueta)}</span>
+          <strong>${euroFormatter.format(Number(item.precio || 0) || 0)}</strong>
+        </label>
+      `).join("")}
+    </div>
+  `;
+};
+
+const cargarFincasTarifas = async () => {
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  if (!workspaceId) return;
+  try {
+    const data = await api(`/api/workspace_fincas_tarifas?workspace_id=${encodeURIComponent(workspaceId)}`);
+    if (Array.isArray(data?.items) && data.items.length) fincasTarifaActual = data.items;
+  } catch {
+    // Sin tarifa cargada se sigue calculando con la de partida: el presupuesto no
+    // puede quedarse en blanco porque falle una llamada.
+  }
+  renderFincasTarifasFijas();
+  renderFincasTarifaEditor();
+  syncWorkspaceFincasBudgetQuickComputed?.({ forceAuto: true });
+};
+
+const FINCAS_TARIFA_TIPOS = [
+  ["unitaria", "Por unidad"],
+  ["minimo", "Cuota mínima"],
+  ["fija", "Puntual"],
+];
+
+const renderFincasTarifaEditor = () => {
+  const cuerpo = document.getElementById("workspaceFincasTarifaBody");
+  if (!cuerpo) return;
+  cuerpo.innerHTML = fincasTarifaActual.map((item, idx) => `
+    <tr data-tarifa-fila="${idx}">
+      <td><input data-tarifa="etiqueta" value="${escapeHtml(item.etiqueta || "")}" /></td>
+      <td>
+        <select data-tarifa="tipo">
+          ${FINCAS_TARIFA_TIPOS.map(([valor, texto]) =>
+            `<option value="${valor}" ${String(item.tipo || "unitaria") === valor ? "selected" : ""}>${texto}</option>`
+          ).join("")}
+        </select>
+      </td>
+      <td><input data-tarifa="unidad" value="${escapeHtml(item.unidad || "")}" /></td>
+      <td><input data-tarifa="precio" type="number" step="0.01" min="0" value="${Number(item.precio || 0) || 0}" /></td>
+      <td><input data-tarifa="activo" type="checkbox" ${Number(item.activo ?? 1) ? "checked" : ""} /></td>
+      <td><button type="button" class="secondary ghost" data-tarifa-quitar="${idx}">Quitar</button></td>
+    </tr>
+  `).join("");
+};
+
+/** Lee la tabla del editor. Las claves de los conceptos que ya existían se conservan;
+ *  los nuevos la reciben del servidor a partir de su etiqueta. */
+const leerFincasTarifaEditor = () => {
+  const cuerpo = document.getElementById("workspaceFincasTarifaBody");
+  if (!cuerpo) return [];
+  return Array.from(cuerpo.querySelectorAll("[data-tarifa-fila]")).map((fila) => {
+    const idx = Number(fila.dataset.tarifaFila || 0) || 0;
+    const dato = (campo) => fila.querySelector(`[data-tarifa="${campo}"]`);
+    return {
+      clave: fincasTarifaActual[idx]?.clave || "",
+      etiqueta: String(dato("etiqueta")?.value || "").trim(),
+      tipo: String(dato("tipo")?.value || "unitaria"),
+      unidad: String(dato("unidad")?.value || "").trim(),
+      precio: Number(dato("precio")?.value || 0) || 0,
+      activo: dato("activo")?.checked ? 1 : 0,
+    };
+  }).filter((item) => item.etiqueta);
+};
+
+const guardarFincasTarifas = async () => {
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  const estado = document.getElementById("workspaceFincasTarifaStatus");
+  if (!workspaceId) {
+    if (estado) estado.textContent = "No hay workspace activo.";
+    return;
+  }
+  const items = leerFincasTarifaEditor();
+  if (estado) estado.textContent = "Guardando…";
+  try {
+    const data = await postJsonWithDbRetry("/api/workspace_fincas_tarifas", { workspace_id: workspaceId, items });
+    if (Array.isArray(data?.items)) fincasTarifaActual = data.items;
+    renderFincasTarifaEditor();
+    renderFincasTarifasFijas();
+    syncWorkspaceFincasBudgetQuickComputed?.({ forceAuto: true });
+    if (estado) estado.textContent = "Tarifa guardada.";
+  } catch (err) {
+    if (estado) estado.textContent = `No se pudo guardar: ${err?.message || err}`;
+  }
+};
+
+document.getElementById("workspaceFincasTarifaAddBtn")?.addEventListener("click", () => {
+  fincasTarifaActual = [
+    ...leerFincasTarifaEditor(),
+    { clave: "", etiqueta: "Nuevo concepto", tipo: "fija", unidad: "servicio", precio: 0, activo: 1 },
+  ];
+  renderFincasTarifaEditor();
+});
+
+document.getElementById("workspaceFincasTarifaBody")?.addEventListener("click", (event) => {
+  const boton = event.target.closest?.("[data-tarifa-quitar]");
+  if (!boton) return;
+  const idx = Number(boton.dataset.tarifaQuitar || -1);
+  const items = leerFincasTarifaEditor();
+  if (idx >= 0 && idx < items.length) items.splice(idx, 1);
+  fincasTarifaActual = items;
+  renderFincasTarifaEditor();
+});
+
+document.getElementById("workspaceFincasTarifaSaveBtn")?.addEventListener("click", guardarFincasTarifas);
+
+// Marcar un trabajo puntual cambia el total, así que hay que recalcular.
+document.getElementById("workspaceFincasBudgetExtras")?.addEventListener("change", () => {
+  syncWorkspaceFincasBudgetQuickComputed?.({ forceAuto: true });
+});
 
 const computeFincasBudgetTotalsClient = (values = {}) => {
   const subtotal = Number(computeFincasCuotaSuggestedClient(values) || 0) || 0;
@@ -25707,9 +25889,17 @@ const syncWorkspaceFincasBudgetQuickComputed = (options = {}) => {
   if (!workspaceFincasBudgetQuickForm) return;
   const numVecinos = Number(workspaceFincasBudgetQuickForm.querySelector('[name="num_vecinos"]')?.value || 0) || 0;
   const numLocales = Number(workspaceFincasBudgetQuickForm.querySelector('[name="num_locales"]')?.value || 0) || 0;
+  // Los trasteros contaban en la fórmula pero el formulario nunca los pedía: una
+  // comunidad con 30 trasteros se presupuestaba como si no tuviera ninguno.
+  const numTrasteros = Number(workspaceFincasBudgetQuickForm.querySelector('[name="num_trasteros"]')?.value || 0) || 0;
   const numAparcamientos = Number(workspaceFincasBudgetQuickForm.querySelector('[name="num_aparcamientos"]')?.value || 0) || 0;
   const suggestedSubtotal =
-    Number(computeFincasCuotaSuggestedClient({ num_vecinos: numVecinos, num_locales: numLocales, num_aparcamientos: numAparcamientos }) || 0) || 0;
+    (Number(computeFincasCuotaSuggestedClient({
+      num_vecinos: numVecinos,
+      num_locales: numLocales,
+      num_trasteros: numTrasteros,
+      num_aparcamientos: numAparcamientos,
+    }) || 0) || 0) + fincasImporteExtras();
   const suggestedInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal_sugerido"]');
   const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
   const ivaInput = workspaceFincasBudgetQuickForm.querySelector('[name="impuestos"]');
@@ -25948,61 +26138,72 @@ const parseWorkspaceBudgetCalc = (row = {}) => {
   }
 };
 
-const buildFincasBudgetLineas = ({ num_vecinos = 0, num_locales = 0, num_aparcamientos = 0 } = {}) => {
-  const viviendas = Math.max(0, Number(num_vecinos || 0) || 0);
-  const locales = Math.max(0, Number(num_locales || 0) || 0);
-  const aparcamientos = Math.max(0, Number(num_aparcamientos || 0) || 0);
-  const base = (viviendas * 5) + (locales * 1) + (aparcamientos * 1);
-  const ajuste = base < 60 ? (60 - base) : 0;
+const buildFincasBudgetLineas = ({ num_vecinos = 0, num_locales = 0, num_trasteros = 0, num_aparcamientos = 0 } = {}, extras = null) => {
+  // El desglose sale de la tarifa del workspace. Antes estaba escrito a mano aquí
+  // (5/1/1 y mínimo 60) y no incluía trasteros, así que el PDF nunca los cobraba.
+  const unidades = {
+    num_vecinos: Math.max(0, Number(num_vecinos || 0) || 0),
+    num_locales: Math.max(0, Number(num_locales || 0) || 0),
+    num_trasteros: Math.max(0, Number(num_trasteros || 0) || 0),
+    num_aparcamientos: Math.max(0, Number(num_aparcamientos || 0) || 0),
+  };
   const lineas = [];
-  if (viviendas) {
-    lineas.push({
-      orden: 1,
-      categoria: "Edificio",
-      concepto: "Viviendas (5 €/unidad)",
-      cantidad: viviendas,
-      unidad: "vivienda",
-      precio_unitario: 5,
-      descuento_pct: 0,
-      total_linea: Math.round(viviendas * 5 * 100) / 100,
-    });
-  }
-  if (locales) {
-    lineas.push({
-      orden: lineas.length + 1,
-      categoria: "Edificio",
-      concepto: "Locales (1 €/unidad)",
-      cantidad: locales,
-      unidad: "local",
-      precio_unitario: 1,
-      descuento_pct: 0,
-      total_linea: Math.round(locales * 1 * 100) / 100,
-    });
-  }
-  if (aparcamientos) {
+  let base = 0;
+  let minimo = 0;
+  fincasTarifaActual.forEach((item) => {
+    if (!Number(item?.activo ?? 1)) return;
+    const precio = Number(item?.precio || 0) || 0;
+    if (item?.tipo === "minimo") {
+      minimo = Math.max(minimo, precio);
+      return;
+    }
+    const campo = FINCAS_TARIFA_UNIDADES[item?.clave];
+    if (!campo) return;
+    const cantidad = unidades[campo];
+    if (!cantidad || !precio) return;
+    const importe = Math.round(cantidad * precio * 100) / 100;
+    base += importe;
     lineas.push({
       orden: lineas.length + 1,
       categoria: "Edificio",
-      concepto: "Aparcamientos (1 €/unidad)",
-      cantidad: aparcamientos,
-      unidad: "plaza",
-      precio_unitario: 1,
+      concepto: `${item.etiqueta} (${euroFormatter.format(precio)}/unidad)`,
+      cantidad,
+      unidad: item.unidad || "unidad",
+      precio_unitario: precio,
       descuento_pct: 0,
-      total_linea: Math.round(aparcamientos * 1 * 100) / 100,
+      total_linea: importe,
     });
-  }
+  });
+  const ajuste = base < minimo ? Math.round((minimo - base) * 100) / 100 : 0;
   if (ajuste > 0) {
     lineas.push({
       orden: lineas.length + 1,
       categoria: "Cuota",
-      concepto: "Ajuste mínimo (cuota mínima 60 €)",
+      concepto: `Ajuste mínimo (cuota mínima ${euroFormatter.format(minimo)})`,
       cantidad: 1,
       unidad: "mes",
-      precio_unitario: Math.round(ajuste * 100) / 100,
+      precio_unitario: ajuste,
       descuento_pct: 0,
-      total_linea: Math.round(ajuste * 100) / 100,
+      total_linea: ajuste,
     });
   }
+  // Trabajos puntuales marcados: línea aparte, fuera de la cuota mensual.
+  const marcadas = new Set(Array.isArray(extras) ? extras : fincasExtrasSeleccionados());
+  fincasTarifasFijas()
+    .filter((item) => marcadas.has(item.clave))
+    .forEach((item) => {
+      const precio = Number(item.precio || 0) || 0;
+      lineas.push({
+        orden: lineas.length + 1,
+        categoria: "Servicios puntuales",
+        concepto: item.etiqueta,
+        cantidad: 1,
+        unidad: item.unidad || "servicio",
+        precio_unitario: precio,
+        descuento_pct: 0,
+        total_linea: precio,
+      });
+    });
   return lineas;
 };
 
@@ -86875,8 +87076,16 @@ if (workspaceFincasBudgetQuickForm) {
       : null;
 	    const numVecinos = Number(values.num_vecinos || 0) || 0;
 	    const numLocales = Number(values.num_locales || 0) || 0;
+	    const numTrasteros = Number(values.num_trasteros || 0) || 0;
 	    const numAparcamientos = Number(values.num_aparcamientos || 0) || 0;
-	    const suggestedSubtotal = Number(computeFincasCuotaSuggestedClient({ num_vecinos: numVecinos, num_locales: numLocales, num_aparcamientos: numAparcamientos }) || 0) || 0;
+	    const extras = fincasExtrasSeleccionados();
+	    const suggestedSubtotal =
+	      (Number(computeFincasCuotaSuggestedClient({
+	        num_vecinos: numVecinos,
+	        num_locales: numLocales,
+	        num_trasteros: numTrasteros,
+	        num_aparcamientos: numAparcamientos,
+	      }) || 0) || 0) + fincasImporteExtras();
 	    const manualSource = String(workspaceFincasBudgetQuickForm?.dataset?.manualSource || "").trim();
 	    const rawSubtotal = String(values.subtotal || "").trim();
 	    const rawTotal = String(values.total || "").trim();
@@ -86891,7 +87100,10 @@ if (workspaceFincasBudgetQuickForm) {
 	    const impuestos = Math.round(subtotal * FINCAS_IVA_PCT * 100) / 100;
 	    const total = Math.round((subtotal + impuestos) * 100) / 100;
 	    const totals = { subtotal, impuestos, total };
-    const lineas = buildFincasBudgetLineas({ num_vecinos: numVecinos, num_locales: numLocales, num_aparcamientos: numAparcamientos });
+    const lineas = buildFincasBudgetLineas(
+      { num_vecinos: numVecinos, num_locales: numLocales, num_trasteros: numTrasteros, num_aparcamientos: numAparcamientos },
+      extras,
+    );
     const serviciosIncluidos = readFincasServiciosIncluidos(workspaceFincasBudgetServiciosIncluidos);
     const comunidadName = String(values.comunidad_denominacion || community?.nombre || "").trim() || "Comunidad";
 	    const payload = {
@@ -86925,7 +87137,9 @@ if (workspaceFincasBudgetQuickForm) {
 	      servicios_incluidos: serviciosIncluidos,
 	      num_vecinos: numVecinos,
 	      num_locales: numLocales,
+	      num_trasteros: numTrasteros,
 	      num_aparcamientos: numAparcamientos,
+	      tarifas_fijas: extras,
       subtotal: totals.subtotal,
       impuestos: totals.impuestos,
       total: totals.total,

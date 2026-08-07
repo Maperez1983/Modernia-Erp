@@ -1,7 +1,25 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "crm-local", "runtimeExecutable": "bash", "runtimeArgs": ["/private/tmp/claude-501/-Volumes-Mac-Satecchi-Mac-Library-Mobile-Documents-com-apple-CloudDocs-CRM-MODERNIA/d5c490a9-528d-4798-8159-4cf28506cfcd/scratchpad/run_local.sh"], "port": 8011 },
-    { "name": "listados", "runtimeExecutable": "/opt/homebrew/bin/python3.12", "runtimeArgs": ["-m", "http.server", "8791", "--directory", "/private/tmp/claude-501/-Volumes-Mac-Satecchi-Mac-Library-Mobile-Documents-com-apple-CloudDocs-CRM-MODERNIA/5ccdf14a-d6c9-43fd-9f1f-856b57b35091/scratchpad"], "port": 8791 }
+    {
+      "name": "crm-local",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Volumes-Mac-Satecchi-Mac-Library-Mobile-Documents-com-apple-CloudDocs-CRM-MODERNIA/5ccdf14a-d6c9-43fd-9f1f-856b57b35091/scratchpad/run_local.sh"
+      ],
+      "port": 8012
+    },
+    {
+      "name": "listados",
+      "runtimeExecutable": "/opt/homebrew/bin/python3.12",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8791",
+        "--directory",
+        "/private/tmp/claude-501/-Volumes-Mac-Satecchi-Mac-Library-Mobile-Documents-com-apple-CloudDocs-CRM-MODERNIA/5ccdf14a-d6c9-43fd-9f1f-856b57b35091/scratchpad"
+      ],
+      "port": 8791
+    }
   ]
 }

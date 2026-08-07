@@ -40818,6 +40818,30 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_fincas_comunidades", "activo", "activo INTEGER")
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_tarifas (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          clave TEXT NOT NULL,
+          etiqueta TEXT NOT NULL,
+          tipo TEXT NOT NULL DEFAULT 'unitaria',
+          unidad TEXT,
+          precio NUMERIC NOT NULL DEFAULT 0,
+          activo INTEGER NOT NULL DEFAULT 1,
+          orden INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_tarifas_ws_clave "
+            "ON workspace_fincas_tarifas (workspace_id, clave)"
+        )
+    except Exception:
+        pass
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS workspace_fincas_incidencias (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
@@ -47625,14 +47649,101 @@ def parse_non_negative_int(value):
         return 0
 
 
-def compute_fincas_cuota_sugerida(num_vecinos=0, num_locales=0, num_trasteros=0, num_aparcamientos=0):
-    total = (
-        parse_non_negative_int(num_vecinos) * 5
-        + parse_non_negative_int(num_locales)
-        + parse_non_negative_int(num_trasteros)
-        + parse_non_negative_int(num_aparcamientos)
-    )
-    return round(max(60, total), 2)
+# Tarifa de administración de fincas. Hasta ahora los precios estaban escritos a
+# mano aquí y en app.js: 5 € por vivienda, 1 € por local, trastero o aparcamiento y
+# un mínimo de 60 €. Cambiar cualquiera de ellos exigía un despliegue, y no había
+# forma de cobrar un trabajo puntual como la constitución de la comunidad.
+#
+# Estos son los valores de partida: al abrir la pantalla por primera vez se siembran
+# tal cual, así que el día uno se sigue calculando exactamente lo mismo que antes.
+FINCAS_TARIFAS_DEFECTO = [
+    {"clave": "vivienda", "etiqueta": "Por vivienda", "tipo": "unitaria", "unidad": "vivienda", "precio": 5.0, "orden": 1},
+    {"clave": "local", "etiqueta": "Por local", "tipo": "unitaria", "unidad": "local", "precio": 1.0, "orden": 2},
+    {"clave": "trastero", "etiqueta": "Por trastero", "tipo": "unitaria", "unidad": "trastero", "precio": 1.0, "orden": 3},
+    {"clave": "aparcamiento", "etiqueta": "Por aparcamiento", "tipo": "unitaria", "unidad": "plaza", "precio": 1.0, "orden": 4},
+    {"clave": "minimo", "etiqueta": "Cuota mínima mensual", "tipo": "minimo", "unidad": "mes", "precio": 60.0, "orden": 5},
+    # Trabajo puntual, no mensual: se cobra una vez y hay que ponerle precio.
+    {"clave": "alta_comunidad", "etiqueta": "Constitución / alta de la comunidad", "tipo": "fija", "unidad": "servicio", "precio": 0.0, "orden": 6},
+]
+
+# La clave de cada concepto unitario y el campo del que sale su número de unidades.
+FINCAS_TARIFA_UNIDADES = {
+    "vivienda": "num_vecinos",
+    "local": "num_locales",
+    "trastero": "num_trasteros",
+    "aparcamiento": "num_aparcamientos",
+}
+
+
+def fetch_workspace_fincas_tarifas(conn, workspace_id, *, sembrar=True):
+    """Devuelve la tarifa del workspace, sembrando la de partida si no tiene ninguna."""
+    workspace_id = str(workspace_id or "").strip()
+    if not workspace_id:
+        return []
+    filas = conn.execute(
+        "SELECT clave, etiqueta, tipo, unidad, precio, activo, orden FROM workspace_fincas_tarifas "
+        "WHERE workspace_id = ? ORDER BY orden, etiqueta",
+        (workspace_id,),
+    ).fetchall()
+    if not filas and sembrar:
+        ahora = datetime.now().isoformat(timespec="seconds")
+        for item in FINCAS_TARIFAS_DEFECTO:
+            conn.execute(
+                "INSERT INTO workspace_fincas_tarifas "
+                "(id, workspace_id, clave, etiqueta, tipo, unidad, precio, activo, orden, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                (
+                    os.urandom(16).hex(), workspace_id, item["clave"], item["etiqueta"],
+                    item["tipo"], item["unidad"], item["precio"], item["orden"], ahora, ahora,
+                ),
+            )
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        filas = conn.execute(
+            "SELECT clave, etiqueta, tipo, unidad, precio, activo, orden FROM workspace_fincas_tarifas "
+            "WHERE workspace_id = ? ORDER BY orden, etiqueta",
+            (workspace_id,),
+        ).fetchall()
+    salida = []
+    for fila in filas:
+        salida.append(
+            {
+                "clave": row_value(fila, "clave", ""),
+                "etiqueta": row_value(fila, "etiqueta", ""),
+                "tipo": row_value(fila, "tipo", "unitaria") or "unitaria",
+                "unidad": row_value(fila, "unidad", "") or "",
+                "precio": round(parse_money_value(row_value(fila, "precio", 0)), 2),
+                "activo": int(row_value(fila, "activo", 1) or 0),
+                "orden": int(row_value(fila, "orden", 0) or 0),
+            }
+        )
+    return salida
+
+
+def compute_fincas_cuota_sugerida(num_vecinos=0, num_locales=0, num_trasteros=0, num_aparcamientos=0, tarifas=None):
+    """Base mensual sugerida. Sin tarifa se usan los precios históricos (5/1/1/1, mínimo 60)."""
+    unidades = {
+        "num_vecinos": parse_non_negative_int(num_vecinos),
+        "num_locales": parse_non_negative_int(num_locales),
+        "num_trasteros": parse_non_negative_int(num_trasteros),
+        "num_aparcamientos": parse_non_negative_int(num_aparcamientos),
+    }
+    if not tarifas:
+        tarifas = FINCAS_TARIFAS_DEFECTO
+    total = 0.0
+    minimo = 0.0
+    for item in tarifas:
+        if not int(item.get("activo", 1) or 0):
+            continue
+        clave = str(item.get("clave") or "")
+        precio = parse_money_value(item.get("precio"))
+        if item.get("tipo") == "minimo":
+            minimo = max(minimo, precio)
+        elif clave in FINCAS_TARIFA_UNIDADES:
+            total += unidades[FINCAS_TARIFA_UNIDADES[clave]] * precio
+    return round(max(minimo, total), 2)
 
 
 def normalize_workspace_budget_state(value):
@@ -58405,6 +58516,7 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/workspace_contratos",
                 "/api/workspace_contrato_copilot",
             "/api/workspace_fincas_comunidades",
+            "/api/workspace_fincas_tarifas",
             "/api/workspace_fincas_incidencias",
             "/api/workspace_fincas_proveedores",
             "/api/workspace_fincas_juntas",
@@ -69463,12 +69575,28 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         servicios = []
                 calculo["servicios_incluidos"] = servicios
+                tarifas = fetch_workspace_fincas_tarifas(conn, workspace_id) if workspace_id else []
                 calculo["cuota_sugerida"] = compute_fincas_cuota_sugerida(
                     calculo["num_vecinos"],
                     calculo["num_locales"],
                     calculo["num_trasteros"],
                     calculo["num_aparcamientos"],
+                    tarifas=tarifas,
                 )
+                # Trabajos puntuales elegidos en el formulario (constitución de la
+                # comunidad y demás): van como línea propia, no en la cuota mensual.
+                elegidas = payload.get("tarifas_fijas")
+                if isinstance(elegidas, str):
+                    try:
+                        elegidas = json.loads(elegidas)
+                    except Exception:
+                        elegidas = [c for c in elegidas.split(",") if c.strip()]
+                claves_fijas = {str(c or "").strip() for c in (elegidas or []) if str(c or "").strip()}
+                fijas = [
+                    t for t in tarifas
+                    if t.get("tipo") == "fija" and int(t.get("activo", 1) or 0) and t.get("clave") in claves_fijas
+                ]
+                calculo["tarifas_fijas"] = [t["clave"] for t in fijas]
                 if not lineas:
                     lineas = [
                         {
@@ -69482,6 +69610,19 @@ class Handler(BaseHTTPRequestHandler):
                             "total_linea": round(calculo["cuota_sugerida"], 2),
                         }
                     ]
+                    for extra in fijas:
+                        lineas.append(
+                            {
+                                "orden": len(lineas) + 1,
+                                "categoria": "Servicios puntuales",
+                                "concepto": extra["etiqueta"],
+                                "cantidad": 1.0,
+                                "unidad": extra.get("unidad") or "servicio",
+                                "precio_unitario": extra["precio"],
+                                "descuento_pct": 0.0,
+                                "total_linea": round(extra["precio"], 2),
+                            }
+                        )
             subtotal_calculado = round(sum(float(item.get("total_linea") or 0.0) for item in lineas), 2)
             subtotal_manual = round(parse_money_value(payload.get("subtotal")), 2) or 0.0
             subtotal = subtotal_manual if subtotal_manual > 0 else subtotal_calculado
@@ -69707,7 +69848,10 @@ class Handler(BaseHTTPRequestHandler):
             num_locales = parse_non_negative_int(payload.get("num_locales"))
             num_trasteros = parse_non_negative_int(payload.get("num_trasteros"))
             num_aparcamientos = parse_non_negative_int(payload.get("num_aparcamientos"))
-            cuota_sugerida = compute_fincas_cuota_sugerida(num_vecinos, num_locales, num_trasteros, num_aparcamientos)
+            cuota_sugerida = compute_fincas_cuota_sugerida(
+                num_vecinos, num_locales, num_trasteros, num_aparcamientos,
+                tarifas=fetch_workspace_fincas_tarifas(conn, workspace_id),
+            )
             values = (
                 workspace_id,
                 empresa_id,
@@ -69750,6 +69894,72 @@ class Handler(BaseHTTPRequestHandler):
                 )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
+            return
+
+        elif parsed.path == "/api/workspace_fincas_tarifas":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            items = payload.get("items")
+            if isinstance(items, str):
+                try:
+                    items = json.loads(items)
+                except Exception:
+                    items = None
+            if not isinstance(items, list):
+                json_response(self, {"error": "items requerido"}, status=400)
+                return
+            # Se guarda la tarifa entera de una vez: lo que no venga en `items` se
+            # borra. Así el editor puede quitar conceptos sin un endpoint aparte.
+            claves_vistas = set()
+            ahora = datetime.now().isoformat(timespec="seconds")
+            for orden, item in enumerate(items, start=1):
+                if not isinstance(item, dict):
+                    continue
+                etiqueta = str(item.get("etiqueta") or "").strip()
+                if not etiqueta:
+                    continue
+                clave = normalize_lookup_text(item.get("clave") or etiqueta).replace(" ", "_")[:60]
+                if not clave or clave in claves_vistas:
+                    continue
+                claves_vistas.add(clave)
+                tipo = str(item.get("tipo") or "unitaria").strip().lower()
+                if tipo not in {"unitaria", "minimo", "fija"}:
+                    tipo = "unitaria"
+                precio = round(parse_money_value(item.get("precio")), 2)
+                activo = 0 if str(item.get("activo", 1)) in {"0", "False", "false", ""} else 1
+                unidad = str(item.get("unidad") or "").strip()[:40]
+                existente = conn.execute(
+                    "SELECT id FROM workspace_fincas_tarifas WHERE workspace_id = ? AND clave = ? LIMIT 1",
+                    (workspace_id, clave),
+                ).fetchone()
+                if existente:
+                    conn.execute(
+                        "UPDATE workspace_fincas_tarifas SET etiqueta = ?, tipo = ?, unidad = ?, precio = ?, "
+                        "activo = ?, orden = ?, updated_at = ? WHERE id = ?",
+                        (etiqueta, tipo, unidad, precio, activo, orden, ahora, row_value(existente, "id", "")),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO workspace_fincas_tarifas "
+                        "(id, workspace_id, clave, etiqueta, tipo, unidad, precio, activo, orden, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                        (os.urandom(16).hex(), workspace_id, clave, etiqueta, tipo, unidad, precio, activo, orden, ahora, ahora),
+                    )
+            if claves_vistas:
+                huecos = ",".join("?" for _ in claves_vistas)
+                conn.execute(
+                    f"DELETE FROM workspace_fincas_tarifas WHERE workspace_id = ? AND clave NOT IN ({huecos})",
+                    (workspace_id, *claves_vistas),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "items": fetch_workspace_fincas_tarifas(conn, workspace_id, sembrar=False)})
             return
 
         elif parsed.path == "/api/workspace_fincas_comunidad_delete":
@@ -70612,7 +70822,10 @@ class Handler(BaseHTTPRequestHandler):
             num_locales = parse_non_negative_int(calc.get("num_locales"))
             num_trasteros = parse_non_negative_int(calc.get("num_trasteros"))
             num_aparcamientos = parse_non_negative_int(calc.get("num_aparcamientos"))
-            cuota_sugerida = compute_fincas_cuota_sugerida(num_vecinos, num_locales, num_trasteros, num_aparcamientos)
+            cuota_sugerida = compute_fincas_cuota_sugerida(
+                num_vecinos, num_locales, num_trasteros, num_aparcamientos,
+                tarifas=fetch_workspace_fincas_tarifas(conn, workspace_id),
+            )
             comunidad_nombre = str(calc.get("comunidad_denominacion") or budget["titulo"] or "Comunidad").strip()
             comunidad_cif = str(calc.get("comunidad_cif") or "").strip() or None
             comunidad_direccion = str(calc.get("comunidad_direccion") or "").strip() or None
@@ -84142,6 +84355,22 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             json_response(self, fetch_workspace_fincas_comunidades(conn, workspace_id, limit=limit))
+            return
+
+        if path == "/api/workspace_fincas_tarifas":
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, {"items": fetch_workspace_fincas_tarifas(conn, workspace_id)})
             return
 
         if path == "/api/workspace_fincas_incidencias":
