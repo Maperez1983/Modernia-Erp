@@ -40983,6 +40983,37 @@ def ensure_workspace_product_tables(conn):
         )
     except Exception:
         pass
+    # El artículo se guarda al lado del porcentaje para que se pueda comprobar sin
+    # salir de la pantalla, y para que se vea de dónde sale cuando la ley cambie.
+    ensure_column(conn, "workspace_fincas_mayorias", "articulo", "articulo TEXT")
+    ensure_column(conn, "workspace_fincas_mayorias", "nota", "nota TEXT")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_tipos_acuerdo (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          clave TEXT NOT NULL,
+          etiqueta TEXT NOT NULL,
+          mayoria_clave TEXT,
+          articulo TEXT,
+          nota TEXT,
+          activo INTEGER NOT NULL DEFAULT 1,
+          orden INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_tipos_acuerdo_unico "
+            "ON workspace_fincas_tipos_acuerdo (workspace_id, clave)"
+        )
+    except Exception:
+        pass
+    # En segunda convocatoria el denominador cambia: la mayoría se cuenta sobre los
+    # asistentes, no sobre el total de la comunidad (LPH art. 17.7).
+    ensure_column(conn, "workspace_fincas_juntas", "segunda_convocatoria", "segunda_convocatoria INTEGER NOT NULL DEFAULT 0")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_contabilidad (
@@ -50031,11 +50062,134 @@ def fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo="",
 #: de memoria qué artículo pide qué porcentaje sería inventar derecho, y una junta
 #: mal contada se impugna.
 FINCAS_MAYORIAS_DEFECTO = [
-    {"clave": "mayoria_simple", "etiqueta": "Mayoría simple (más de la mitad)", "porcentaje": 50.0, "estricta": 1, "orden": 1},
-    {"clave": "un_tercio", "etiqueta": "Un tercio", "porcentaje": 100.0 / 3, "estricta": 0, "orden": 2},
-    {"clave": "tres_quintos", "etiqueta": "Tres quintos", "porcentaje": 60.0, "estricta": 0, "orden": 3},
-    {"clave": "unanimidad", "etiqueta": "Unanimidad", "porcentaje": 100.0, "estricta": 0, "orden": 4},
+    {"clave": "mayoria_simple", "etiqueta": "Mayoría simple (más de la mitad)", "porcentaje": 50.0,
+     "estricta": 1, "orden": 1, "articulo": "LPH art. 17.7"},
+    {"clave": "un_tercio", "etiqueta": "Un tercio", "porcentaje": 100.0 / 3,
+     "estricta": 0, "orden": 2, "articulo": "LPH art. 17.1"},
+    {"clave": "tres_quintos", "etiqueta": "Tres quintos", "porcentaje": 60.0,
+     "estricta": 0, "orden": 3, "articulo": "LPH art. 17.3 y 17.4"},
+    {"clave": "unanimidad", "etiqueta": "Unanimidad", "porcentaje": 100.0,
+     "estricta": 0, "orden": 4, "articulo": "LPH art. 17.6"},
 ]
+
+
+#: Tipos de acuerdo con la mayoría que les asigna la Ley de Propiedad Horizontal
+#: (Ley 49/1960), con el artículo al lado para poder comprobarlo sin salir de la
+#: pantalla. Se siembran como **valores de partida editables**, no como dogma: si la
+#: ley cambia o el administrador discrepa de cómo se clasifica un punto concreto, se
+#: cambia en la propia pantalla y queda para las juntas siguientes.
+#:
+#: Ojo con tres cosas que la tabla no puede resolver sola:
+#:
+#: - **Clasificar el punto sigue siendo un juicio.** Que una obra sea «mejora no
+#:   necesaria» o «servicio común de interés general» lo decide quien redacta el
+#:   orden del día, no una lista.
+#: - **Cataluña, Navarra, Aragón y Baleares** tienen régimen civil propio con
+#:   mayorías distintas. Esto es LPH, que es lo que aplica en Málaga.
+#: - **El alquiler turístico se ha reformado más de una vez**; va marcado para
+#:   verificar antes de usarlo en una convocatoria.
+FINCAS_TIPOS_ACUERDO_DEFECTO = [
+    {
+        "clave": "ordinario", "etiqueta": "Acuerdo ordinario (cuentas, presupuesto, derramas)",
+        "mayoria_clave": "mayoria_simple", "articulo": "LPH art. 17.7",
+        "nota": "Doble mayoría en primera convocatoria. En segunda basta la mayoría de los asistentes.",
+        "orden": 1,
+    },
+    {
+        "clave": "titulo_estatutos", "etiqueta": "Modificar el título constitutivo o los estatutos",
+        "mayoria_clave": "unanimidad", "articulo": "LPH art. 17.6",
+        "nota": "También todo acuerdo no regulado expresamente que suponga modificarlos.",
+        "orden": 2,
+    },
+    {
+        "clave": "servicios_comunes", "etiqueta": "Crear o suprimir portería, conserjería o vigilancia",
+        "mayoria_clave": "tres_quintos", "articulo": "LPH art. 17.3",
+        "nota": "Mismo régimen para otros servicios comunes de interés general.",
+        "orden": 3,
+    },
+    {
+        "clave": "arrendar_comunes", "etiqueta": "Arrendar elementos comunes sin uso específico asignado",
+        "mayoria_clave": "tres_quintos", "articulo": "LPH art. 17.3", "orden": 4,
+    },
+    {
+        "clave": "mejoras_no_necesarias", "etiqueta": "Nuevas instalaciones o mejoras no necesarias",
+        "mayoria_clave": "tres_quintos", "articulo": "LPH art. 17.4",
+        "nota": "Quien vote en contra no queda obligado si su parte supera tres mensualidades ordinarias.",
+        "orden": 5,
+    },
+    {
+        "clave": "alquiler_turistico", "etiqueta": "Limitar o condicionar el alquiler turístico",
+        "mayoria_clave": "tres_quintos", "articulo": "LPH art. 17.12",
+        "nota": "VERIFICAR: este apartado se ha reformado más de una vez. Confirma la redacción vigente.",
+        "orden": 6,
+    },
+    {
+        "clave": "energias_telecom", "etiqueta": "Energías renovables o infraestructura de telecomunicaciones",
+        "mayoria_clave": "un_tercio", "articulo": "LPH art. 17.1",
+        "nota": "El coste lo asumen quienes lo solicitan, no la comunidad entera.",
+        "orden": 7,
+    },
+    {
+        "clave": "accesibilidad", "etiqueta": "Obras de accesibilidad no obligatorias",
+        "mayoria_clave": "mayoria_simple", "articulo": "LPH art. 17.2",
+        "nota": "Las obligatorias del art. 10.1.b no necesitan acuerdo; comprueba antes en cuál encaja.",
+        "orden": 8,
+    },
+    {
+        "clave": "recarga_electrica", "etiqueta": "Punto de recarga de vehículo eléctrico (plaza privativa)",
+        "mayoria_clave": "", "articulo": "LPH art. 17.5",
+        "nota": "No requiere acuerdo: basta comunicación previa a la comunidad. El coste es del interesado.",
+        "orden": 9,
+    },
+]
+
+#: Porcentaje mínimo del fondo de reserva sobre el último presupuesto ordinario
+#: (LPH art. 9.1.f). Es un mínimo legal: la junta puede acordar uno mayor.
+FINCAS_FONDO_RESERVA_MINIMO = 10.0
+
+
+def fetch_workspace_fincas_tipos_acuerdo(conn, workspace_id, *, sembrar=True):
+    """Catálogo de tipos de acuerdo del workspace, con su mayoría y su artículo."""
+    workspace_id = str(workspace_id or "").strip()
+    if not workspace_id:
+        return []
+
+    def leer():
+        return conn.execute(
+            "SELECT clave, etiqueta, mayoria_clave, articulo, nota, activo, orden "
+            "FROM workspace_fincas_tipos_acuerdo WHERE workspace_id = ? ORDER BY orden, etiqueta",
+            (workspace_id,),
+        ).fetchall()
+
+    filas = leer()
+    if not filas and sembrar:
+        ahora = datetime.now().isoformat(timespec="seconds")
+        for item in FINCAS_TIPOS_ACUERDO_DEFECTO:
+            conn.execute(
+                "INSERT INTO workspace_fincas_tipos_acuerdo "
+                "(id, workspace_id, clave, etiqueta, mayoria_clave, articulo, nota, activo, orden, "
+                " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                (os.urandom(16).hex(), workspace_id, item["clave"], item["etiqueta"],
+                 item.get("mayoria_clave") or None, item.get("articulo") or None,
+                 item.get("nota") or None, item.get("orden", 0), ahora, ahora),
+            )
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        filas = leer()
+    return [
+        {
+            "clave": row_value(f, "clave", ""),
+            "etiqueta": row_value(f, "etiqueta", ""),
+            "mayoria_clave": row_value(f, "mayoria_clave", "") or "",
+            "articulo": row_value(f, "articulo", "") or "",
+            "nota": row_value(f, "nota", "") or "",
+            "activo": int(row_value(f, "activo", 1) or 0),
+            "orden": int(row_value(f, "orden", 0) or 0),
+        }
+        for f in filas
+    ]
 
 
 def fetch_workspace_fincas_mayorias(conn, workspace_id, *, sembrar=True):
@@ -50046,8 +50200,8 @@ def fetch_workspace_fincas_mayorias(conn, workspace_id, *, sembrar=True):
 
     def leer():
         return conn.execute(
-            "SELECT clave, etiqueta, porcentaje, estricta, activo, orden FROM workspace_fincas_mayorias "
-            "WHERE workspace_id = ? ORDER BY orden, etiqueta",
+            "SELECT clave, etiqueta, porcentaje, estricta, activo, orden, articulo "
+            "FROM workspace_fincas_mayorias WHERE workspace_id = ? ORDER BY orden, etiqueta",
             (workspace_id,),
         ).fetchall()
 
@@ -50057,10 +50211,11 @@ def fetch_workspace_fincas_mayorias(conn, workspace_id, *, sembrar=True):
         for item in FINCAS_MAYORIAS_DEFECTO:
             conn.execute(
                 "INSERT INTO workspace_fincas_mayorias "
-                "(id, workspace_id, clave, etiqueta, porcentaje, estricta, activo, orden, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                "(id, workspace_id, clave, etiqueta, porcentaje, estricta, activo, orden, articulo, "
+                " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
                 (os.urandom(16).hex(), workspace_id, item["clave"], item["etiqueta"],
-                 round(item["porcentaje"], 4), item["estricta"], item["orden"], ahora, ahora),
+                 round(item["porcentaje"], 4), item["estricta"], item["orden"],
+                 item.get("articulo") or None, ahora, ahora),
             )
         try:
             conn.commit()
@@ -50075,6 +50230,7 @@ def fetch_workspace_fincas_mayorias(conn, workspace_id, *, sembrar=True):
             "estricta": int(row_value(f, "estricta", 0) or 0),
             "activo": int(row_value(f, "activo", 1) or 0),
             "orden": int(row_value(f, "orden", 0) or 0),
+            "articulo": row_value(f, "articulo", "") or "",
         }
         for f in filas
     ]
@@ -50132,10 +50288,19 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
         (representados if str(row_value(fila, "representado_por", "") or "").strip() else presentes).append(vecino_id)
     asistentes = presentes + representados
 
-    def porcentaje(ids, sobre_coef=True):
+    # En primera convocatoria la mayoría se mide sobre toda la comunidad. En segunda
+    # se mide sobre los asistentes (LPH art. 17.7), y ese cambio de denominador es lo
+    # que más se cuenta mal a mano: el mismo acuerdo sale aprobado o no según cuál se
+    # use, y aquí depende de una casilla, no de la memoria de quien preside.
+    segunda = bool(int(row_value(junta, "segunda_convocatoria", 0) or 0))
+
+    def porcentaje(ids, sobre_coef=True, sobre_asistentes=None):
+        usar_segunda = segunda if sobre_asistentes is None else sobre_asistentes
         if sobre_coef:
-            return round(sum(coef.get(i, 0.0) for i in ids) / total_coef * 100, 4) if total_coef else 0.0
-        return round(len(ids) / total_prop * 100, 4) if total_prop else 0.0
+            divisor = (round(sum(coef.get(i, 0.0) for i in asistentes), 4) if usar_segunda else total_coef)
+            return round(sum(coef.get(i, 0.0) for i in ids) / divisor * 100, 4) if divisor else 0.0
+        divisor = (len(asistentes) if usar_segunda else total_prop)
+        return round(len(ids) / divisor * 100, 4) if divisor else 0.0
 
     mayorias = {m["clave"]: m for m in fetch_workspace_fincas_mayorias(conn, workspace_id)}
     acuerdos = []
@@ -50172,6 +50337,8 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
             "favor_propietarios": pct_prop,
             # Aprobado solo si alcanza por las dos medidas. Sin mayoría elegida no
             # se dictamina: se deja en None y la pantalla pide que se elija.
+            "articulo": (mayoria or {}).get("articulo", ""),
+            "sobre": "los asistentes" if segunda else "toda la comunidad",
             "aprobado": None if not mayoria else bool(_alcanza(pct_coef, mayoria) and _alcanza(pct_prop, mayoria)),
         })
 
@@ -50183,11 +50350,13 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
             "presentes": len(presentes),
             "representados": len(representados),
             "asistentes": len(asistentes),
-            "asistentes_pct_propietarios": porcentaje(asistentes, False),
-            "asistentes_pct_coeficiente": porcentaje(asistentes, True),
+            "asistentes_pct_propietarios": porcentaje(asistentes, False, sobre_asistentes=False),
+            "asistentes_pct_coeficiente": porcentaje(asistentes, True, sobre_asistentes=False),
+            "segunda_convocatoria": segunda,
         },
         "acuerdos": acuerdos,
         "mayorias": list(mayorias.values()),
+        "tipos_acuerdo": fetch_workspace_fincas_tipos_acuerdo(conn, workspace_id),
         "propietarios": [
             {
                 "id": row_value(p, "id", ""),
@@ -50475,7 +50644,8 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
             {"label": "Sobre coeficiente", "value": f"{asistencia.get('asistentes_pct_coeficiente', 0):.2f} %"},
         ]}),
         ("", [f"De ellos, {asistencia.get('presentes', 0)} presentes y "
-              f"{asistencia.get('representados', 0)} representados."]),
+              f"{asistencia.get('representados', 0)} representados."
+              + (" Junta celebrada en segunda convocatoria." if asistencia.get("segunda_convocatoria") else "")]),
         ("Comunidad", [linea for linea in (
             f"Denominación: {limpio(row_value(comunidad, 'nombre', ''))}",
             f"Dirección: {limpio(row_value(comunidad, 'direccion', ''))}" if limpio(row_value(comunidad, "direccion", "")) else "",
@@ -50505,11 +50675,13 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
         sections.append((f"{acuerdo.get('orden', 1)}. {acuerdo.get('titulo', '')}", [
             linea for linea in (
                 limpio(acuerdo.get("descripcion")),
-                f"Mayoría exigida: {acuerdo.get('mayoria_etiqueta') or 'sin asignar'}.",
+                f"Mayoría exigida: {acuerdo.get('mayoria_etiqueta') or 'sin asignar'}"
+                + (f" ({acuerdo['articulo']})." if acuerdo.get("articulo") else "."),
                 f"A favor: {acuerdo.get('favor', 0)} · En contra: {acuerdo.get('contra', 0)} · "
                 f"Abstenciones: {acuerdo.get('abstencion', 0)}.",
                 f"El voto a favor representa el {acuerdo.get('favor_propietarios', 0):.2f} % de los propietarios "
-                f"y el {acuerdo.get('favor_coeficiente', 0):.2f} % de los coeficientes.",
+                f"y el {acuerdo.get('favor_coeficiente', 0):.2f} % de los coeficientes, sobre "
+                f"{acuerdo.get('sobre', 'toda la comunidad')}.",
                 veredicto,
             ) if linea
         ]))
@@ -50533,8 +50705,8 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
         "ACTA DE JUNTA",
         f"{limpio(row_value(comunidad, 'nombre', ''))} · {fecha}",
         sections,
-        [f"Documento generado desde el CRM. Los porcentajes se calculan sobre el total de la comunidad, "
-         f"no sobre los asistentes."],
+        ["Documento generado desde el CRM. En primera convocatoria los porcentajes se calculan sobre el "
+         "total de la comunidad; en segunda, sobre los asistentes (LPH art. 17.7)."],
         company=company,
         brand_logo_url=_load_asset_logo("logos/fincas-velazquez.png", max_width=420),
         brand_color=workspace.get("primary_color"),
@@ -60039,6 +60211,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_junta_acuerdo",
             "/api/workspace_fincas_junta_voto",
             "/api/workspace_fincas_mayorias",
+            "/api/workspace_fincas_junta_convocatoria",
             "/api/workspace_fincas_presupuesto_anual",
             "/api/workspace_fincas_portal_alta",
             "/api/workspace_fincas_portal_revocar",
@@ -72484,6 +72657,29 @@ class Handler(BaseHTTPRequestHandler):
                 "excluidos_sin_iban": len(candidatos) - len(incluidos),
             })
             return
+        elif parsed.path == "/api/workspace_fincas_junta_convocatoria":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            junta_id = str(payload.get("junta_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not junta_id:
+                json_response(self, {"error": "workspace_id y junta_id requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            segunda = 1 if str(payload.get("segunda") or "").strip().lower() in {"1", "true", "si", "sí"} else 0
+            conn.execute(
+                "UPDATE workspace_fincas_juntas SET segunda_convocatoria = ?, updated_at = datetime(?) "
+                "WHERE id = ? AND workspace_id = ?",
+                (segunda, now, junta_id, workspace_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "recuento": calcular_recuento_junta(conn, workspace_id, junta_id)})
+            return
         elif parsed.path in ("/api/workspace_fincas_junta_asistencia",
                              "/api/workspace_fincas_junta_acuerdo",
                              "/api/workspace_fincas_junta_voto",
@@ -72550,10 +72746,18 @@ class Handler(BaseHTTPRequestHandler):
                         "SELECT COALESCE(MAX(orden), 0) AS n FROM workspace_fincas_junta_acuerdos WHERE junta_id = ?",
                         (junta_id,)).fetchone(), "n", 0) or 0) + 1
                 )
+                # Si viene el tipo de acuerdo y no una mayoría concreta, la mayoría
+                # sale del catálogo de la LPH. Si vienen las dos, manda la elegida a
+                # mano: el administrador puede discrepar de cómo se clasifica el punto.
+                mayoria_clave = str(payload.get("mayoria_clave") or "").strip()
+                tipo_clave = str(payload.get("tipo_acuerdo") or "").strip()
+                if tipo_clave and not mayoria_clave:
+                    catalogo = {t["clave"]: t for t in fetch_workspace_fincas_tipos_acuerdo(conn, workspace_id)}
+                    mayoria_clave = (catalogo.get(tipo_clave) or {}).get("mayoria_clave", "")
                 valores = (
                     titulo,
                     str(payload.get("descripcion") or "").strip() or None,
-                    str(payload.get("mayoria_clave") or "").strip() or None,
+                    mayoria_clave or None,
                     orden,
                 )
                 if record_id:
@@ -72672,7 +72876,9 @@ class Handler(BaseHTTPRequestHandler):
                 (workspace_id, comunidad_id, ejercicio),
             ).fetchone()
             estado = str(payload.get("estado") or "").strip() or "Borrador"
-            fondo = round(parse_money_value(payload.get("fondo_reserva_pct")), 4)
+            # Sin valor, el mínimo legal (LPH art. 9.1.f). La junta puede acordar uno
+            # mayor, y por eso sigue siendo editable.
+            fondo = round(parse_money_value(payload.get("fondo_reserva_pct")), 4) or FINCAS_FONDO_RESERVA_MINIMO
             aprobacion = str(payload.get("fecha_aprobacion") or "").strip()[:10] or None
             if cabecera:
                 presupuesto_id = row_value(cabecera, "id", "")

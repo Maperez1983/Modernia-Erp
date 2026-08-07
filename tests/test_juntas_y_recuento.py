@@ -11,14 +11,16 @@ Por cabezas es el 60 % —parecería aprobado por tres quintos—, pero solo sum
 30 % del coeficiente. No está aprobado. Enseñar una sola de las dos medidas es la
 forma de dar por bueno un acuerdo impugnable.
 
-**Lo que este CRM no decide es qué acuerdo exige qué mayoría.** Los tipos que se
-siembran solo llevan la aritmética que define cada fracción —tres quintos son el
-60 %, unanimidad el 100 %—, que no es una afirmación jurídica. Cuál corresponde a
-cada punto lo elige el administrador, y los porcentajes se pueden editar. Codificar
-de memoria qué artículo pide qué porcentaje sería inventar derecho.
+**Las mayorías vienen precargadas de la LPH, con su artículo al lado.** La primera
+versión las dejaba en blanco por prudencia y era prudencia mal entendida: el artículo
+17 es un texto publicado, no una opinión. Van sembradas y **editables**, cada una con
+el artículo del que sale, para que se pueda comprobar de un vistazo y corregir cuando
+la ley cambie sin depender de la memoria de nadie. Lo que sigue siendo un juicio del
+administrador es **clasificar el punto**: que una obra sea «mejora no necesaria» o
+«servicio común de interés general» no lo decide una lista.
 
-El quórum tampoco se dictamina: se dan las cifras de asistencia y quien preside
-decide con ellas.
+El quórum no se dictamina: se dan las cifras de asistencia y quien preside decide.
+Ver también `test_mayorias_de_la_lph.py`.
 """
 
 import datetime
@@ -191,13 +193,11 @@ class LasMayoriasSonConfigurablesTests(unittest.TestCase):
         simple = next(m for m in server.FINCAS_MAYORIAS_DEFECTO if m["clave"] == "mayoria_simple")
         self.assertEqual(simple["estricta"], 1)
 
-    def test_no_se_afirma_que_acuerdo_exige_que_mayoria(self):
-        """Eso lo elige el administrador; el código no lo decide por él."""
-        i = SERVER.index("FINCAS_MAYORIAS_DEFECTO = [")
-        bloque = SERVER[i: SERVER.index("]", i)]
-        for palabra in ("ascensor", "obra", "derrama", "estatutos", "artículo", "LPH"):
-            with self.subTest(palabra=palabra):
-                self.assertNotIn(palabra, bloque)
+    def test_cada_mayoria_dice_de_que_articulo_sale(self):
+        """Sin el artículo al lado, el porcentaje hay que creérselo."""
+        for item in server.FINCAS_MAYORIAS_DEFECTO:
+            with self.subTest(clave=item["clave"]):
+                self.assertTrue(item.get("articulo", "").startswith("LPH art."))
 
     def test_se_pueden_editar(self):
         self.assertIn('elif parsed.path in ("/api/workspace_fincas_junta_asistencia"', SERVER)

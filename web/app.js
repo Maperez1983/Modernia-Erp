@@ -23908,6 +23908,10 @@ const renderWorkspaceFincasCommunityFicha = async () => {
           <div class="workspace-mini-kpi"><span>Sobre coeficiente</span><strong>${Number(a.asistentes_pct_coeficiente || 0).toFixed(2)} %</strong></div>
           <div class="workspace-mini-kpi"><span>Representados</span><strong>${a.representados}</strong></div>
         </div>
+        <label class="fincas-extra" style="max-width:520px;">
+          <input type="checkbox" data-segunda ${r.asistencia?.segunda_convocatoria ? "checked" : ""} />
+          <span>Segunda convocatoria — las mayorías se cuentan sobre los asistentes (LPH art. 17.7)</span>
+        </label>
         <p class="muted">El quórum lo decide quien preside: aquí solo están las cifras.</p>
         <h4>Asistencia</h4>
         <div class="workspace-billing-list">
@@ -23935,14 +23939,16 @@ const renderWorkspaceFincasCommunityFicha = async () => {
             </div>
             <div class="muted">
               A favor ${ac.favor} · en contra ${ac.contra} · abstenciones ${ac.abstencion} —
-              ${Number(ac.favor_propietarios).toFixed(2)} % de propietarios y ${Number(ac.favor_coeficiente).toFixed(2)} % de coeficiente.
+              ${Number(ac.favor_propietarios).toFixed(2)} % de propietarios y ${Number(ac.favor_coeficiente).toFixed(2)} % de coeficiente,
+              sobre ${escapeHtml(ac.sobre || "toda la comunidad")}.
             </div>
             <label>Mayoría exigida
               <select data-mayoria="${escapeHtml(String(ac.id))}">
                 <option value="">— elige —</option>
-                ${mayorias.map((m) => `<option value="${escapeHtml(m.clave)}" ${m.clave === ac.mayoria_clave ? "selected" : ""}>${escapeHtml(m.etiqueta)}</option>`).join("")}
+                ${mayorias.map((m) => `<option value="${escapeHtml(m.clave)}" ${m.clave === ac.mayoria_clave ? "selected" : ""}>${escapeHtml(m.etiqueta)}${m.articulo ? ` · ${escapeHtml(m.articulo)}` : ""}</option>`).join("")}
               </select>
             </label>
+            ${ac.articulo ? `<div class="muted">Según ${escapeHtml(ac.articulo)}.</div>` : ""}
             <div class="junta-votos">
               ${(r.propietarios || []).map((p) => `
                 <label class="fincas-extra">
@@ -23958,6 +23964,13 @@ const renderWorkspaceFincasCommunityFicha = async () => {
           </div>`).join("") || "<p class='muted'>Sin puntos en el orden del día.</p>"}
         <form class="form-grid" data-acuerdo-form>
           <label class="span-2">Nuevo punto <input name="titulo" placeholder="Ej. Aprobación de las cuentas" /></label>
+          <label class="span-2">Tipo de acuerdo
+            <select name="tipo_acuerdo">
+              <option value="">— elegir la mayoría a mano —</option>
+              ${(r.tipos_acuerdo || []).map((t) => `<option value="${escapeHtml(t.clave)}">${escapeHtml(t.etiqueta)}${t.articulo ? ` · ${escapeHtml(t.articulo)}` : ""}</option>`).join("")}
+            </select>
+          </label>
+          <div class="muted span-2" data-tipo-nota></div>
           <div class="form-actions span-2"><button type="submit">Añadir al orden del día</button></div>
         </form>
       `;
@@ -23986,12 +23999,24 @@ const renderWorkspaceFincasCommunityFicha = async () => {
         manda("/api/workspace_fincas_junta_voto", {
           acuerdo_id: el.dataset.voto, vecino_id: el.dataset.vecino, voto: el.value,
         })));
+      cuerpo.querySelector("[data-segunda]")?.addEventListener("change", (ev) =>
+        manda("/api/workspace_fincas_junta_convocatoria", { junta_id: juntaId, segunda: ev.target.checked ? "1" : "0" }));
       const alta = cuerpo.querySelector("[data-acuerdo-form]");
+      const nota = cuerpo.querySelector("[data-tipo-nota]");
+      // La nota del tipo es donde vive la letra pequeña: quién paga, si hace falta
+      // acuerdo o si el apartado se ha reformado.
+      alta?.querySelector('[name="tipo_acuerdo"]')?.addEventListener("change", (ev) => {
+        const t = (r.tipos_acuerdo || []).find((x) => x.clave === ev.target.value);
+        if (nota) nota.textContent = t?.nota || "";
+      });
       if (alta) alta.onsubmit = async (ev) => {
         ev.preventDefault();
         const titulo = alta.querySelector('[name="titulo"]')?.value?.trim();
         if (!titulo) return;
-        await manda("/api/workspace_fincas_junta_acuerdo", { junta_id: juntaId, titulo });
+        await manda("/api/workspace_fincas_junta_acuerdo", {
+          junta_id: juntaId, titulo,
+          tipo_acuerdo: alta.querySelector('[name="tipo_acuerdo"]')?.value || "",
+        });
       };
     };
 
