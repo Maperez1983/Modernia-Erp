@@ -23482,14 +23482,15 @@ const renderWorkspaceFincasCommunityFicha = async () => {
 
   if (tab === "vecinos") {
     workspaceFincasCommunityFichaPanel.innerHTML = `
+      <div data-censo-resumen></div>
       <div class="workspace-two-cols">
         <div>
-          <h4>Vecinos</h4>
+          <h4>Censo de propietarios</h4>
           <div class="muted" data-vecinos-status>Cargando...</div>
           <div data-vecinos-list></div>
         </div>
         <div>
-          <h4 data-vecino-form-title>Nuevo vecino</h4>
+          <h4 data-vecino-form-title>Nuevo propietario</h4>
           <form class="form-grid" data-vecino-form>
             <input type="hidden" name="id" value="" />
             <label class="span-all">Nombre <input name="nombre" /></label>
@@ -23497,26 +23498,78 @@ const renderWorkspaceFincasCommunityFicha = async () => {
             <label>Piso <input name="piso" /></label>
             <label>Teléfono <input name="telefono" /></label>
             <label>Email <input name="email" /></label>
-            <label>Coeficiente <input name="coeficiente" inputmode="decimal" /></label>
-            <label class="span-all">Notas <textarea name="notas" rows="3"></textarea></label>
+            <label>Coeficiente (%) <input name="coeficiente" inputmode="decimal" /></label>
+            <label class="span-all">Notas <textarea name="notas" rows="2"></textarea></label>
             <div class="muted span-all" data-vecino-status></div>
-            <div class="form-actions span-all"><button type="submit">Guardar</button></div>
+            <div class="form-actions span-all">
+              <button type="submit">Guardar</button>
+              <button type="button" class="secondary ghost" data-vecino-nuevo>Nuevo</button>
+            </div>
           </form>
+          <details class="fincas-tarifa-panel" data-censo-import>
+            <summary>Cargar el censo entero</summary>
+            <p class="muted">
+              Pega aquí la lista desde Excel: una fila por propietario. Se reconocen las
+              columnas por su título (Piso, Nombre, NIF, Coeficiente, Teléfono, Email) y,
+              si no hay título, se asume ese mismo orden. Los pisos que ya existan se
+              actualizan en vez de duplicarse.
+            </p>
+            <textarea data-censo-texto rows="8" placeholder="Piso	Nombre	NIF	Coeficiente
+1A	Juan Pérez	12345678Z	2,50
+1B	Ana Ruiz	87654321X	2,50"></textarea>
+            <label class="fincas-extra" style="margin-top:10px;">
+              <input type="checkbox" data-censo-reemplazar />
+              <span>Reemplazar el censo actual (borra lo que haya antes)</span>
+            </label>
+            <div class="form-actions">
+              <button type="button" data-censo-cargar>Cargar censo</button>
+              <span class="muted" data-censo-status></span>
+            </div>
+          </details>
         </div>
       </div>
     `;
     const listWrap = workspaceFincasCommunityFichaPanel.querySelector("[data-vecinos-list]");
     const listStatus = workspaceFincasCommunityFichaPanel.querySelector("[data-vecinos-status]");
+    const resumenWrap = workspaceFincasCommunityFichaPanel.querySelector("[data-censo-resumen]");
     const form = workspaceFincasCommunityFichaPanel.querySelector("[data-vecino-form]");
     const statusEl = workspaceFincasCommunityFichaPanel.querySelector("[data-vecino-status]");
     const titleEl = workspaceFincasCommunityFichaPanel.querySelector("[data-vecino-form-title]");
+
+    /** El dato que decide si el censo sirve: si los coeficientes no suman 100,
+     *  cualquier derrama y cualquier votación por cuota saldrán mal. */
+    const pintaResumen = (r) => {
+      if (!resumenWrap) return;
+      if (!r || !r.propietarios) {
+        resumenWrap.innerHTML = `<p class="muted">El censo está vacío. Sin él no se pueden emitir recibos, repartir derramas ni calcular quórums.</p>`;
+        return;
+      }
+      const suma = Number(r.suma_coeficientes || 0);
+      const cuadra = Boolean(r.cuadra);
+      const avisos = [];
+      if (!cuadra) avisos.push(`Los coeficientes suman ${suma.toFixed(4)} %, no 100 %.`);
+      if (r.sin_coeficiente) avisos.push(`${r.sin_coeficiente} sin coeficiente.`);
+      if (r.viviendas_declaradas && r.propietarios !== r.viviendas_declaradas) {
+        avisos.push(`La ficha declara ${r.viviendas_declaradas} viviendas y hay ${r.propietarios} propietarios.`);
+      }
+      resumenWrap.innerHTML = `
+        <div class="workspace-mini-kpis">
+          <div class="workspace-mini-kpi"><span>Propietarios</span><strong>${numberFormatter.format(r.propietarios)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Coeficientes</span><strong>${suma.toFixed(4)} %</strong></div>
+          <div class="workspace-mini-kpi"><span>Cuadra</span><strong>${cuadra ? "Sí" : "No"}</strong></div>
+        </div>
+        ${avisos.length ? `<p class="censo-aviso">${avisos.map(escapeHtml).join(" ")}</p>` : ""}
+      `;
+    };
+
     const loadVecinos = async () => {
       try {
         if (listStatus) listStatus.textContent = "Cargando...";
         const data = await api(`/api/workspace_fincas_vecinos?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}&limit=500`);
         const items = Array.isArray(data?.rows) ? data.rows : [];
+        pintaResumen(data?.resumen);
         if (!items.length) {
-          if (listWrap) listWrap.innerHTML = "<p class='muted'>Sin vecinos todavía.</p>";
+          if (listWrap) listWrap.innerHTML = "<p class='muted'>Sin propietarios todavía.</p>";
           if (listStatus) listStatus.textContent = "";
           return items;
         }
@@ -23526,11 +23579,15 @@ const renderWorkspaceFincasCommunityFicha = async () => {
               ${items.map((v) => `
                 <div class="workspace-billing-row">
                   <div>
-                    <strong>${escapeHtml(v.nombre || "-")}</strong>
-                    <div class="muted">${escapeHtml([v.piso, v.nif].filter(Boolean).join(" · ") || "-")}</div>
+                    <strong>${escapeHtml(v.piso || "—")} · ${escapeHtml(v.nombre || "-")}</strong>
+                    <div class="muted">${escapeHtml([v.nif, v.telefono, v.email].filter(Boolean).join(" · ") || "Sin datos de contacto")}</div>
                   </div>
                   <div class="workspace-billing-meta">
-                    <button type="button" class="secondary ghost" data-vecino-edit="${escapeHtml(String(v.id || ""))}">Editar</button>
+                    <span>${v.coeficiente === null || v.coeficiente === undefined || v.coeficiente === "" ? "sin coef." : `${Number(v.coeficiente).toFixed(4)} %`}</span>
+                    <span class="censo-acciones">
+                      <button type="button" class="secondary ghost" data-vecino-edit="${escapeHtml(String(v.id || ""))}">Editar</button>
+                      <button type="button" class="secondary ghost" data-vecino-borrar="${escapeHtml(String(v.id || ""))}">Borrar</button>
+                    </span>
                   </div>
                 </div>
               `).join("")}
@@ -23540,42 +23597,73 @@ const renderWorkspaceFincasCommunityFicha = async () => {
         if (listStatus) listStatus.textContent = "";
         (listWrap?.querySelectorAll("[data-vecino-edit]") || []).forEach((btn) => {
           btn.addEventListener("click", () => {
-            const id = String(btn.dataset.vecinoEdit || "");
-            const v = items.find((row) => String(row.id || "") === id);
+            const v = items.find((row) => String(row.id || "") === String(btn.dataset.vecinoEdit || ""));
             if (!v) return;
             form.querySelector('[name="id"]').value = v.id || "";
             ["nombre","nif","piso","telefono","email","coeficiente","notas"].forEach((k) => {
               const el = form.querySelector(`[name="${k}"]`);
               if (el) el.value = v[k] ?? "";
             });
-            if (titleEl) titleEl.textContent = "Editar vecino";
+            if (titleEl) titleEl.textContent = "Editar propietario";
+          });
+        });
+        (listWrap?.querySelectorAll("[data-vecino-borrar]") || []).forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const v = items.find((row) => String(row.id || "") === String(btn.dataset.vecinoBorrar || ""));
+            if (!v) return;
+            if (!window.confirm(`¿Borrar a ${v.nombre || v.piso} del censo?`)) return;
+            try {
+              await postJsonWithDbRetry("/api/workspace_fincas_vecino_delete", { workspace_id: workspaceId, id: v.id });
+              await loadVecinos();
+            } catch (e) {
+              if (listStatus) listStatus.textContent = e?.message || "No se pudo borrar.";
+            }
           });
         });
         return items;
       } catch (e) {
-        if (listStatus) listStatus.textContent = e?.message || "No se pudieron cargar vecinos.";
+        if (listStatus) listStatus.textContent = e?.message || "No se pudieron cargar los propietarios.";
         return [];
       }
     };
     const reset = () => {
       form.reset();
       form.querySelector('[name="id"]').value = "";
-      if (titleEl) titleEl.textContent = "Nuevo vecino";
+      if (titleEl) titleEl.textContent = "Nuevo propietario";
     };
+    workspaceFincasCommunityFichaPanel.querySelector("[data-vecino-nuevo]")?.addEventListener("click", reset);
+    workspaceFincasCommunityFichaPanel.querySelector("[data-censo-cargar]")?.addEventListener("click", async () => {
+      const texto = workspaceFincasCommunityFichaPanel.querySelector("[data-censo-texto]")?.value || "";
+      const reemplazar = workspaceFincasCommunityFichaPanel.querySelector("[data-censo-reemplazar]")?.checked;
+      const estado = workspaceFincasCommunityFichaPanel.querySelector("[data-censo-status]");
+      if (!texto.trim()) {
+        if (estado) estado.textContent = "Pega antes la lista.";
+        return;
+      }
+      if (reemplazar && !window.confirm("Se borrará el censo actual de esta comunidad antes de cargar el nuevo. ¿Seguimos?")) return;
+      try {
+        if (estado) estado.textContent = "Cargando…";
+        const res = await postJsonWithDbRetry("/api/workspace_fincas_vecinos_import", {
+          workspace_id: workspaceId,
+          comunidad_id: comunidadId,
+          texto,
+          reemplazar: reemplazar ? "1" : "",
+        });
+        if (estado) estado.textContent = `${res.creados} nuevos, ${res.actualizados} actualizados.`;
+        await loadVecinos();
+      } catch (e) {
+        if (estado) estado.textContent = e?.message || "No se pudo cargar el censo.";
+      }
+    });
     await loadVecinos();
     form.onsubmit = async (event) => {
       event.preventDefault();
       try {
         if (statusEl) statusEl.textContent = "Guardando...";
-        const fd = new FormData(form);
-        const payload = Object.fromEntries(fd.entries());
+        const payload = Object.fromEntries(new FormData(form).entries());
         payload.workspace_id = workspaceId;
         payload.comunidad_id = comunidadId;
-        const res = await fetch("/api/workspace_fincas_vecinos", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }).then((r) => r.json());
+        const res = await postJsonWithDbRetry("/api/workspace_fincas_vecinos", payload);
         if (res?.error) throw new Error(res.error);
         reset();
         await loadVecinos();

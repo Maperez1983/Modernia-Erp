@@ -15179,3 +15179,19 @@ samp {
 }
 .fincas-extras .fincas-extra > span { flex: 1 1 auto; }
 .fincas-extras .fincas-extra > strong { margin-left: auto; white-space: nowrap; }
+
+/* Censo de propietarios: el aviso de coeficientes que no cuadran. */
+.censo-aviso {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(180, 83, 9, 0.35);
+  background: rgba(251, 191, 36, 0.12);
+  color: #92400e;
+  font-size: 13px;
+}
+[data-censo-import] textarea { width: 100%; font-family: var(--font-mono); font-size: 12px; }
+
+/* Con dos botones, `workspace-billing-meta` los apilaba y cada fila del censo
+   medía el triple: con 177 propietarios la lista era interminable. */
+.censo-acciones { display: inline-flex; gap: 6px; align-items: center; }

@@ -49515,6 +49515,132 @@ def run_gestoria_conciliacion_convergente(conn, empresa_id, now=None, *, cliente
     }
 
 
+#: Columnas que se reconocen al pegar un censo, con las formas en que suele venir
+#: escrita la cabecera. Sin tildes y en mayúsculas, como devuelve `normalize_lookup_text`.
+CENSO_COLUMNAS = {
+    "nombre": ("NOMBRE", "PROPIETARIO", "TITULAR", "APELLIDOS Y NOMBRE", "NOMBRE Y APELLIDOS"),
+    "piso": ("PISO", "VIVIENDA", "PUERTA", "INMUEBLE", "FINCA", "UNIDAD", "DEPARTAMENTO"),
+    "nif": ("NIF", "DNI", "CIF", "DOCUMENTO"),
+    "telefono": ("TELEFONO", "TFNO", "MOVIL", "TELEFONOS", "CONTACTO"),
+    "email": ("EMAIL", "CORREO", "E MAIL", "MAIL"),
+    "coeficiente": ("COEFICIENTE", "COEF", "CUOTA", "PARTICIPACION", "PORCENTAJE"),
+}
+
+
+def parse_coeficiente(valor):
+    """Convierte «2,50», «1.234,56» o «4.75 %» en un número.
+
+    Con coma, la coma es el decimal y los puntos son miles (criterio español).
+    Sin coma, el punto es el decimal. Lo que no se entienda se deja vacío: un
+    coeficiente inventado descuadra la comunidad entera.
+    """
+    crudo = str(valor or "").replace("%", "").strip()
+    if not crudo:
+        return None
+    if "," in crudo:
+        crudo = crudo.replace(".", "").replace(",", ".")
+    try:
+        return round(float(crudo), 6)
+    except ValueError:
+        return None
+
+
+def parse_censo_vecinos(texto):
+    """Lee un censo pegado desde Excel: tabulaciones, punto y coma o comas.
+
+    Si la primera fila parece una cabecera, manda ella. Si no, se asume el orden
+    natural con el que la gente escribe una lista de propietarios: piso, nombre,
+    NIF, coeficiente, teléfono, email. Adivinar mal el orden no es grave —el
+    resultado se ve en pantalla antes de nada— pero adivinar el separador sí, así
+    que se elige el que más columnas produce.
+    """
+    lineas = [l for l in str(texto or "").replace("\r\n", "\n").replace("\r", "\n").split("\n") if l.strip()]
+    if not lineas:
+        return []
+
+    def trocea(linea):
+        for sep in ("\t", ";", "|"):
+            if sep in linea:
+                return [c.strip() for c in linea.split(sep)]
+        # La coma va la última: en los nombres españoles («Pérez, Juan») es
+        # separador de apellidos más que de columnas.
+        if linea.count(",") >= 2:
+            return [c.strip() for c in linea.split(",")]
+        return [c.strip() for c in re.split(r"\s{2,}", linea)]
+
+    ORDEN_POR_DEFECTO = ["piso", "nombre", "nif", "coeficiente", "telefono", "email"]
+    cabecera = trocea(lineas[0])
+    mapa = {}
+    for indice, celda in enumerate(cabecera):
+        clave = normalize_lookup_text(celda)
+        # `normalize_lookup_text` se come los símbolos, así que una columna
+        # titulada solo «%» llegaba vacía y el coeficiente se perdía.
+        if not clave and "%" in celda:
+            mapa.setdefault("coeficiente", indice)
+            continue
+        for campo, alias in CENSO_COLUMNAS.items():
+            if clave in alias:
+                mapa[campo] = indice
+                break
+    if mapa.get("nombre") is not None:
+        cuerpo = lineas[1:]
+    else:
+        mapa = {campo: i for i, campo in enumerate(ORDEN_POR_DEFECTO)}
+        cuerpo = lineas
+
+    filas = []
+    for linea in cuerpo:
+        celdas = trocea(linea)
+        def celda(campo):
+            indice = mapa.get(campo)
+            if indice is None or indice >= len(celdas):
+                return ""
+            return celdas[indice].strip()
+        nombre = celda("nombre")
+        piso = celda("piso")
+        if not nombre and not piso:
+            continue
+        coeficiente = parse_coeficiente(celda("coeficiente"))
+        filas.append({
+            "nombre": nombre or piso,
+            "piso": piso,
+            "nif": celda("nif"),
+            "telefono": celda("telefono"),
+            "email": celda("email"),
+            "coeficiente": coeficiente,
+        })
+    return filas
+
+
+def fetch_workspace_fincas_censo_resumen(conn, workspace_id, comunidad_id):
+    """Cuántos propietarios hay y cuánto suman sus coeficientes.
+
+    La suma es el dato que importa: si no da 100, cualquier derrama y cualquier
+    votación por cuota van a salir mal, y más vale verlo en la pantalla del censo
+    que descubrirlo repartiendo una obra.
+    """
+    fila = conn.execute(
+        "SELECT COUNT(*) AS total, "
+        "SUM(CASE WHEN coeficiente IS NULL THEN 1 ELSE 0 END) AS sin_coeficiente, "
+        "COALESCE(SUM(coeficiente), 0) AS suma "
+        "FROM workspace_fincas_vecinos WHERE workspace_id = ? AND comunidad_id = ?",
+        (workspace_id, comunidad_id),
+    ).fetchone()
+    total = int(row_value(fila, "total", 0) or 0)
+    suma = round(float(row_value(fila, "suma", 0) or 0), 4)
+    declarados = conn.execute(
+        "SELECT COALESCE(num_vecinos, 0) AS num_vecinos FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ?",
+        (comunidad_id, workspace_id),
+    ).fetchone()
+    return {
+        "propietarios": total,
+        "sin_coeficiente": int(row_value(fila, "sin_coeficiente", 0) or 0),
+        "suma_coeficientes": suma,
+        "cuadra": abs(suma - 100.0) < 0.01 if total else False,
+        "viviendas_declaradas": int(row_value(declarados, "num_vecinos", 0) or 0) if declarados else 0,
+    }
+
+
 def fetch_workspace_fincas_vecinos(conn, workspace_id, comunidad_id, limit=200):
     comunidad_id = str(comunidad_id or "").strip()
     rows = conn.execute(
@@ -58789,6 +58915,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_convert_presupuesto",
             "/api/workspace_fincas_documentos",
             "/api/workspace_fincas_vecinos",
+            "/api/workspace_fincas_vecinos_import",
+            "/api/workspace_fincas_vecino_delete",
             "/api/workspace_presupuesto_delete",
             "/api/workspace_rrhh_nominas_import",
             "/api/workspace_portal_presign",
@@ -70962,6 +71090,92 @@ class Handler(BaseHTTPRequestHandler):
                 )
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_fincas_vecinos_import":
+            # El censo se metía de uno en uno. Con 177 viviendas eso no se hace nunca,
+            # y por eso la tabla llevaba meses vacía: aquí se pega la lista entera.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            comunidad_id = str(payload.get("comunidad_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not comunidad_id:
+                json_response(self, {"error": "workspace_id y comunidad_id requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            filas = parse_censo_vecinos(payload.get("texto") or "")
+            if not filas:
+                json_response(self, {"error": "No se ha reconocido ninguna fila"}, status=400)
+                return
+            if str(payload.get("reemplazar") or "").strip().lower() in {"1", "true", "si", "sí"}:
+                conn.execute(
+                    "DELETE FROM workspace_fincas_vecinos WHERE workspace_id = ? AND comunidad_id = ?",
+                    (workspace_id, comunidad_id),
+                )
+            # Se identifica por piso, que es lo que no cambia: el propietario sí.
+            existentes = {}
+            for fila in conn.execute(
+                "SELECT id, piso FROM workspace_fincas_vecinos WHERE workspace_id = ? AND comunidad_id = ?",
+                (workspace_id, comunidad_id),
+            ).fetchall():
+                clave = normalize_lookup_text(row_value(fila, "piso", "") or "")
+                if clave:
+                    existentes[clave] = row_value(fila, "id", "")
+            creados = actualizados = 0
+            for fila in filas:
+                clave = normalize_lookup_text(fila.get("piso") or "")
+                valores = (
+                    fila.get("nombre") or "",
+                    fila.get("nif") or None,
+                    fila.get("piso") or None,
+                    fila.get("telefono") or None,
+                    fila.get("email") or None,
+                    fila.get("coeficiente"),
+                )
+                anterior = existentes.get(clave) if clave else None
+                if anterior:
+                    conn.execute(
+                        "UPDATE workspace_fincas_vecinos SET nombre = ?, nif = ?, piso = ?, telefono = ?, "
+                        "email = ?, coeficiente = ?, updated_at = datetime(?) WHERE id = ? AND workspace_id = ?",
+                        (*valores, now, anterior, workspace_id),
+                    )
+                    actualizados += 1
+                else:
+                    conn.execute(
+                        "INSERT INTO workspace_fincas_vecinos "
+                        "(id, workspace_id, comunidad_id, nombre, nif, piso, telefono, email, coeficiente, notas, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, datetime(?), datetime(?))",
+                        (os.urandom(16).hex(), workspace_id, comunidad_id, *valores, now, now),
+                    )
+                    creados += 1
+            conn.commit()
+            resumen = fetch_workspace_fincas_censo_resumen(conn, workspace_id, comunidad_id)
+            json_response(self, {"ok": True, "creados": creados, "actualizados": actualizados, "resumen": resumen})
+            return
+        elif parsed.path == "/api/workspace_fincas_vecino_delete":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not record_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            conn.execute(
+                "DELETE FROM workspace_fincas_vecinos WHERE id = ? AND workspace_id = ?",
+                (record_id, workspace_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True})
             return
         elif parsed.path == "/api/workspace_fincas_documentos":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -84692,7 +84906,9 @@ class Handler(BaseHTTPRequestHandler):
             if not ok:
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
-            json_response(self, fetch_workspace_fincas_vecinos(conn, workspace_id, comunidad_id, limit=limit))
+            datos = fetch_workspace_fincas_vecinos(conn, workspace_id, comunidad_id, limit=limit)
+            datos["resumen"] = fetch_workspace_fincas_censo_resumen(conn, workspace_id, comunidad_id)
+            json_response(self, datos)
             return
 
         if path == "/api/workspace_fincas_documentos":
