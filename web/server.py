@@ -52705,6 +52705,123 @@ def build_workspace_invoice_pdf(invoice, workspace, company, client, collections
     )
 
 
+#: Teselas de OpenStreetMap, que es el mismo proveedor que ya se usa para
+#: geocodificar. La política de uso de su servidor pide identificarse y no bajar en
+#: bloque: un presupuesto son doce teselas y se cachean, así que estamos lejos de
+#: eso. Si algún día hiciera falta volumen, hay que pasar a un proveedor con clave.
+MAPA_TESELA_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+MAPA_TESELA_PX = 256
+#: Caché en memoria del proceso: un mismo presupuesto se regenera varias veces
+#: mientras se ajusta, y no tiene sentido volver a pedir las mismas teselas.
+_MAPA_CACHE = {}
+_MAPA_CACHE_MAX = 200
+
+
+def _tesela_de(lat, lon, zoom):
+    """Coordenadas de tesela (fraccionarias) para una latitud y longitud."""
+    lat_rad = math.radians(max(-85.05112878, min(85.05112878, float(lat))))
+    n = 2.0 ** int(zoom)
+    x = (float(lon) + 180.0) / 360.0 * n
+    y = (1.0 - math.asinh(math.tan(lat_rad)) / math.pi) / 2.0 * n
+    # En los polos el redondeo se sale del rango por 2·10⁻¹⁰ y deja un índice de
+    # tesela negativo. Se acota aquí y no en quien llama.
+    return min(max(x, 0.0), n), min(max(y, 0.0), n)
+
+
+def _baja_tesela(z, x, y):
+    clave = (int(z), int(x), int(y))
+    if clave in _MAPA_CACHE:
+        return _MAPA_CACHE[clave]
+    url = MAPA_TESELA_URL.format(z=int(z), x=int(x), y=int(y))
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)",
+            "Accept": "image/png",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=6) as respuesta:
+        imagen = Image.open(BytesIO(respuesta.read())).convert("RGB")
+    if len(_MAPA_CACHE) >= _MAPA_CACHE_MAX:
+        _MAPA_CACHE.clear()
+    _MAPA_CACHE[clave] = imagen
+    return imagen
+
+
+def build_mapa_estatico(lat, lon, *, zoom=17, ancho=900, alto=380):
+    """Mapa del edificio, cosido a partir de teselas y con su chincheta.
+
+    El motor anterior dibujaba un rectángulo gris con una chincheta falsa y el texto
+    «Vista previa (sin conexión)», más un QR para que el cliente escaneara y lo viera
+    en el móvil. Eso no es un mapa: es pedirle al cliente que haga el trabajo. Aquí
+    se traen las teselas de verdad.
+
+    Devuelve `None` ante cualquier fallo —sin coordenadas, sin red, tesela caída— y
+    quien llama simplemente no pinta el bloque. Un presupuesto no se queda sin
+    entregar porque un servidor de mapas no conteste, y tampoco se rellena el hueco
+    con un dibujo que finge ser un mapa.
+    """
+    try:
+        lat = float(str(lat).replace(",", "."))
+        lon = float(str(lon).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+        return None
+
+    try:
+        centro_x, centro_y = _tesela_de(lat, lon, zoom)
+        # Cuántas teselas hacen falta a cada lado para cubrir el lienzo.
+        cuantas_x = int(math.ceil(ancho / MAPA_TESELA_PX)) + 1
+        cuantas_y = int(math.ceil(alto / MAPA_TESELA_PX)) + 1
+        inicio_x = int(math.floor(centro_x - cuantas_x / 2))
+        inicio_y = int(math.floor(centro_y - cuantas_y / 2))
+        limite = 2 ** int(zoom)
+
+        lienzo = Image.new("RGB", (cuantas_x * MAPA_TESELA_PX, cuantas_y * MAPA_TESELA_PX), (233, 233, 227))
+        for dx in range(cuantas_x):
+            for dy in range(cuantas_y):
+                tx, ty = inicio_x + dx, inicio_y + dy
+                if not (0 <= ty < limite):
+                    continue
+                try:
+                    lienzo.paste(_baja_tesela(zoom, tx % limite, ty), (dx * MAPA_TESELA_PX, dy * MAPA_TESELA_PX))
+                except Exception:
+                    # Una tesela que no llega deja su hueco en gris; el resto del
+                    # mapa sigue siendo útil.
+                    continue
+
+        # Se recorta centrado en el punto exacto, no en la tesela.
+        px = (centro_x - inicio_x) * MAPA_TESELA_PX
+        py = (centro_y - inicio_y) * MAPA_TESELA_PX
+        izq = int(round(px - ancho / 2))
+        arr = int(round(py - alto / 2))
+        izq = max(0, min(izq, lienzo.width - ancho))
+        arr = max(0, min(arr, lienzo.height - alto))
+        mapa = lienzo.crop((izq, arr, izq + ancho, arr + alto))
+
+        # La chincheta, en el centro del recorte.
+        dibujo = ImageDraw.Draw(mapa)
+        cx, cy = int(round(px - izq)), int(round(py - arr))
+        radio = 9
+        dibujo.ellipse((cx - radio, cy - radio - 14, cx + radio, cy + radio - 14),
+                       fill=(220, 38, 38), outline=(255, 255, 255), width=3)
+        dibujo.polygon([(cx - 6, cy - 8), (cx + 6, cy - 8), (cx, cy + 4)], fill=(220, 38, 38))
+        # Atribución obligatoria de OpenStreetMap.
+        texto = "© OpenStreetMap"
+        try:
+            fuente = ImageFont.load_default()
+            caja = dibujo.textbbox((0, 0), texto, font=fuente)
+            ancho_txt, alto_txt = caja[2] - caja[0], caja[3] - caja[1]
+            dibujo.rectangle((ancho - ancho_txt - 12, alto - alto_txt - 10, ancho, alto), fill=(255, 255, 255))
+            dibujo.text((ancho - ancho_txt - 6, alto - alto_txt - 7), texto, fill=(60, 60, 60), font=fuente)
+        except Exception:
+            pass
+        return mapa
+    except Exception:
+        return None
+
+
 def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     """Presupuesto en vectorial: texto de verdad, no una fotografía del documento.
 
@@ -52835,6 +52952,29 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         presentes = [f"{etiqueta}: {valor}" for etiqueta, valor in unidades if valor]
         if presentes:
             sections.append(("Unidades del edificio", [" · ".join(presentes)]))
+
+    # El mapa: primero las coordenadas que el formulario ya resolvió y guardó; si no
+    # las hay, se geocodifica la dirección. Si no sale nada, no se pinta el bloque —
+    # antes se rellenaba el hueco con un recuadro gris y un QR, que es peor que nada.
+    mapa = None
+    lat, lon = limpio(calc.get("map_lat")), limpio(calc.get("map_lon"))
+    if not (lat and lon):
+        direccion = limpio(calc.get("comunidad_direccion"))
+        if direccion:
+            try:
+                consulta = direccion if re.search(r"españa|spain", direccion, re.I) else f"{direccion}, España"
+                encontrado = fetch_geocode_coordinates(consulta)
+                if encontrado and encontrado.get("ok"):
+                    lat, lon = encontrado.get("lat"), encontrado.get("lon")
+            except Exception:
+                lat = lon = ""
+    if lat and lon:
+        mapa = build_mapa_estatico(lat, lon)
+    if mapa is not None:
+        sections.append(("Ubicación", {
+            "kind": "image", "image": mapa, "height": 190,
+            "caption": limpio(calc.get("comunidad_direccion")),
+        }))
 
     foto_key = limpio(calc.get("edificio_foto_key"))
     if foto_key:

@@ -21,6 +21,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 RAIZ = Path(__file__).resolve().parents[1]
 SERVER = (RAIZ / "web" / "server.py").read_text(encoding="utf-8")
@@ -72,9 +73,19 @@ LINEA_PUNTUAL = {"categoria": "Servicios puntuales", "concepto": "Constitución 
 
 
 def genera(lineas=None, **extra):
-    pdf = server.build_workspace_budget_pdf(
-        presupuesto(**extra), WORKSPACE, COMPANY, CLIENTE, lineas if lineas is not None else LINEAS_MENSUALES
-    )
+    """Genera el PDF sin salir a la red.
+
+    El presupuesto lleva dirección, así que al pedir el PDF se geocodifica y se bajan
+    las teselas del mapa. En un test eso es una llamada a dos servicios de terceros
+    por cada caso: lento, frágil y ajeno a lo que se está comprobando. El mapa tiene
+    sus propios tests con las teselas simuladas, en `test_mapa_del_presupuesto.py`.
+    """
+    with mock.patch.object(server, "fetch_geocode_coordinates", return_value=None), \
+         mock.patch.object(server, "build_mapa_estatico", return_value=None):
+        pdf = server.build_workspace_budget_pdf(
+            presupuesto(**extra), WORKSPACE, COMPANY, CLIENTE,
+            lineas if lineas is not None else LINEAS_MENSUALES,
+        )
     lector = PdfReader(__import__("io").BytesIO(pdf))
     texto = "\n".join((p.extract_text() or "") for p in lector.pages)
     return pdf, lector, texto
@@ -107,8 +118,10 @@ class YaNoEsUnaFotografiaTests(unittest.TestCase):
                     )
 
     def test_pesa_lo_que_pesa_un_documento_de_texto(self):
+        """Sin foto de equipo ni mapa. Con ellos sube a ~475 kB, y casi todo son las
+        dos imágenes: el documento en sí sigue siendo texto."""
         pdf, _l, _t = genera()
-        self.assertLess(len(pdf), 120_000, "sin fotos, un presupuesto no debería pasar de unos 100 kB")
+        self.assertLess(len(pdf), 120_000, "sin imágenes, un presupuesto no debería pasar de unos 100 kB")
 
     def test_el_motor_viejo_sigue_disponible(self):
         self.assertIn("def build_workspace_budget_pdf_imagen(", SERVER)
