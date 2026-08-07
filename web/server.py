@@ -37535,6 +37535,9 @@ def ensure_tables(db_path):
     # presupuesto ofrecía todas las del workspace, y por eso nueve de los diez
     # presupuestos salieron a nombre de una sociedad que no administra comunidades.
     ensure_column(conn, "empresas", "administra_fincas", "administra_fincas INTEGER NOT NULL DEFAULT 0")
+    # Y cuál de ellas se lleva las altas nuevas. Las comunidades que ya están siguen
+    # con la suya: esto solo decide qué sale preseleccionado al crear.
+    ensure_column(conn, "empresas", "fincas_por_defecto", "fincas_por_defecto INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "empresas", "razon_social", "razon_social TEXT")
     ensure_column(conn, "empresas", "nif", "nif TEXT")
     ensure_column(conn, "empresas", "direccion", "direccion TEXT")
@@ -51696,6 +51699,7 @@ def fetch_workspace_detail(conn, workspace_id):
           COALESCE(e.nif, '') AS nif,
           COALESCE(e.direccion, '') AS direccion,
           COALESCE(e.administra_fincas, 0) AS administra_fincas,
+          COALESCE(e.fincas_por_defecto, 0) AS fincas_por_defecto,
           COALESCE(e.direccion_fiscal, '') AS direccion_fiscal,
           COALESCE(e.telefono, '') AS telefono,
           COALESCE(e.email, '') AS email,
@@ -52859,6 +52863,7 @@ FINCAS_CARTAS_DEFECTO = [
             "el presidente y la junta puedan decidir con seguridad.\n"
             "Le remitimos la propuesta para {comunidad}, con una cuota calculada de forma objetiva a partir de "
             "las unidades del edificio: {unidades}.\n"
+            "Cada propietario recibe un enlace propio con el que entra desde el móvil, sin instalar nada y sin usuario ni contraseña: ve sus recibos, cuáles están cobrados y cuáles pendientes, lo que debe y los documentos que la comunidad publique, como las actas.\nSolo ve lo suyo. No aparecen los datos ni los pagos de ningún otro vecino, el enlace caduca y se puede anular en cualquier momento.\n"
             "Si lo desea, concertamos una visita y revisamos su documentación actual para afinar la cuota y "
             "proponer mejoras inmediatas, sin compromiso."
         ),
@@ -52875,8 +52880,9 @@ FINCAS_CARTAS_DEFECTO = [
             "resumen de cómo está la comunidad antes de tocar nada.\n"
             "La cuota que le proponemos sale de las unidades del edificio ({unidades}), no de una estimación: en "
             "el detalle de este presupuesto puede ver de dónde sale cada euro.\n"
-            "Desde el primer mes, cada propietario dispone de un acceso donde consulta sus recibos y su estado de "
-            "pago, y usted recibe la información de cuentas, morosidad e incidencias de forma periódica.\n"
+            "Cada propietario recibe un enlace propio con el que entra desde el móvil, sin instalar nada y sin usuario ni contraseña: ve sus recibos, cuáles están cobrados y cuáles pendientes, lo que debe y los documentos que la comunidad publique, como las actas.\nSolo ve lo suyo. No aparecen los datos ni los pagos de ningún otro vecino, el enlace caduca y se puede anular en cualquier momento.\n"
+            "Usted, como presidente, recibe además la información de cuentas, morosidad e incidencias de forma "
+            "periódica y sin tener que pedirla.\n"
             "Quedamos a su disposición para vernos en la finca y resolver cualquier duda antes de la junta."
         ),
     },
@@ -52893,6 +52899,7 @@ FINCAS_CARTAS_DEFECTO = [
             "Nos ocupamos de todo ese arranque y se lo dejamos documentado, para que la comunidad empiece con las "
             "cuentas claras y sin arrastrar decisiones sin tomar.\n"
             "La cuota que le proponemos sale de las unidades del edificio: {unidades}.\n"
+            "Cada propietario recibe un enlace propio con el que entra desde el móvil, sin instalar nada y sin usuario ni contraseña: ve sus recibos, cuáles están cobrados y cuáles pendientes, lo que debe y los documentos que la comunidad publique, como las actas.\nSolo ve lo suyo. No aparecen los datos ni los pagos de ningún otro vecino, el enlace caduca y se puede anular en cualquier momento.\n"
             "Estamos a su disposición para revisar juntos la documentación de la promoción y ajustar lo que haga "
             "falta antes de la constitución."
         ),

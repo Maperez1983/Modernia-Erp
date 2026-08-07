@@ -21698,7 +21698,14 @@ const hydrateWorkspaceCompanySelects = () => {
       select.innerHTML = soloFincas && administradoras.length
         ? administradoras.map((c) => `<option value="${escapeHtml(String(c.id))}">${escapeHtml(c.nombre || c.razon_social || c.id)}</option>`).join("")
         : html;
-      if (defaultCompanyId) {
+      // En fincas, el alta nueva sale por la sociedad marcada para ello. Las
+      // comunidades que ya existen conservan la suya: quien las precarga sobrescribe
+      // este valor después, y no queremos cambiarle el emisor a nadie por abrir la
+      // pantalla.
+      const paraAltasNuevas = soloFincas && administradoras.find((c) => Number(c.fincas_por_defecto || 0));
+      if (paraAltasNuevas) {
+        select.value = paraAltasNuevas.id;
+      } else if (defaultCompanyId) {
         select.value = defaultCompanyId;
       }
       if (!String(select.value || "").trim() && companies[0]?.id) {

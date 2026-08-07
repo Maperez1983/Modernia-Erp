@@ -122,10 +122,32 @@ class LasTresPlantillasTests(unittest.TestCase):
                     self.assertNotIn(reclamo, cuerpo)
 
     def test_solo_prometen_lo_que_el_crm_hace(self):
-        """El portal del propietario y el detalle de la cuota existen de verdad."""
+        """El detalle de la cuota existe de verdad."""
         cambio = server.FINCAS_CARTAS_DEFECTO[1]["cuerpo"]
-        self.assertIn("consulta sus recibos", cambio)
         self.assertIn("de dónde sale cada euro", cambio)
+
+    def test_las_tres_cuentan_el_portal_del_propietario(self):
+        """Es lo que os diferencia de un administrador clásico, así que va en todas."""
+        for plantilla in server.FINCAS_CARTAS_DEFECTO:
+            with self.subTest(clave=plantilla["clave"]):
+                cuerpo = plantilla["cuerpo"]
+                self.assertIn("enlace propio", cuerpo)
+                self.assertIn("sus recibos", cuerpo)
+
+    def test_lo_que_se_promete_del_portal_es_lo_que_hace(self):
+        """Cada afirmación de la carta se corresponde con algo construido y probado
+        en `test_portal_del_propietario.py`: sin contraseña, solo lo suyo, caduca y
+        se puede anular."""
+        cuerpo = server.FINCAS_CARTAS_DEFECTO[0]["cuerpo"]
+        self.assertIn("sin usuario ni contraseña", cuerpo)
+        self.assertIn("Solo ve lo suyo", cuerpo)
+        self.assertIn("caduca y", cuerpo)
+        self.assertIn("anular", cuerpo)
+        # Y las tres cosas existen en el código del portal.
+        self.assertIn("FINCAS_PORTAL_DIAS_VALIDEZ", SERVER)
+        self.assertIn("revocado", SERVER)
+        i = SERVER.index("def fetch_fincas_portal_public")
+        self.assertIn("Ningún otro propietario", SERVER[i: i + 1400])
 
     def test_todas_dicen_de_que_comunidad_hablan(self):
         for plantilla in server.FINCAS_CARTAS_DEFECTO:
