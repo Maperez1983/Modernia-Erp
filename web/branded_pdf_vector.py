@@ -147,9 +147,10 @@ def _es_destacado(item):
 class _Lienzo:
     """Envoltorio del canvas que lleva la cuenta del hueco que queda."""
 
-    def __init__(self, c, cabecera):
+    def __init__(self, c, cabecera, color=None):
         self.c = c
         self.cabecera = cabecera
+        self.color = color or VERDE
         self.y = 0.0
         self.pagina = 0
         self.nueva_pagina()
@@ -175,16 +176,29 @@ class _Lienzo:
             self.y -= interlineado
 
 
-def _dibuja_cabecera(titulo, subtitulo, meta_empresa, logo_marca=None):
+def _dibuja_cabecera(titulo, subtitulo, meta_empresa, logo_marca=None, color=None, sello=None):
+    color = color or VERDE
+
     def cabecera(c, pagina):
         y = A4_ALTO - MARGEN_SUP
         if pagina == 1:
-            if logo_marca:
-                # El logo va sobre blanco, encima de la banda: sobre el verde de
+            if logo_marca or sello:
+                # El logo va sobre blanco, encima de la banda: sobre el color de
                 # marca perdería contraste y se vería sucio.
-                _pinta_logo(c, logo_marca, MARGEN_X, y - 52, 50)
+                if logo_marca:
+                    _pinta_logo(c, logo_marca, MARGEN_X, y - 52, 50)
+                # El sello (colegio, certificación) va a la derecha, enfrentado al
+                # logo: es lo que da autoridad al documento y tiene que verse.
+                if sello:
+                    lector, ancho, alto = sello
+                    escala = min(1.0, 40.0 / float(alto or 1), 150.0 / float(ancho or 1))
+                    try:
+                        c.drawImage(lector, A4_ANCHO - MARGEN_X - ancho * escala, y - 52,
+                                    width=ancho * escala, height=alto * escala, mask="auto")
+                    except Exception:
+                        pass
                 y -= 64
-            c.setFillColorRGB(*VERDE)
+            c.setFillColorRGB(*color)
             c.rect(0, y - 40, A4_ANCHO, 40, stroke=0, fill=1)
             c.setFillColorRGB(1, 1, 1)
             c.setFont(PDF_FONT_BOLD, 15)
@@ -233,7 +247,7 @@ def _tarjetas_kpi(lienzo, bloque):
             # lo mismo para todos, que era perder la jerarquía del documento.
             destacado = _es_destacado(item)
             lienzo.c.setFillColorRGB(*(CREMA if destacado else FONDO_SUAVE))
-            lienzo.c.setStrokeColorRGB(*(VERDE if destacado else LINEA))
+            lienzo.c.setStrokeColorRGB(*(lienzo.color if destacado else LINEA))
             lienzo.c.setLineWidth(1.1 if destacado else 0.6)
             lienzo.c.roundRect(x, base, ancho, alto, 4, stroke=1, fill=1)
             lienzo.c.setFillColorRGB(*APAGADO)
@@ -269,20 +283,20 @@ def _ficha_destacada(lienzo, bloque, cache=None):
 
     y = base + alto - 13
     if bloque.get("eyebrow"):
-        lienzo.c.setFillColorRGB(*VERDE)
+        lienzo.c.setFillColorRGB(*lienzo.color)
         lienzo.c.setFont(PDF_FONT_BOLD, 6.6)
         lienzo.c.drawString(MARGEN_X + 10, y, _texto(bloque.get("eyebrow"))[:50].upper())
     if badge:
         ancho_badge = lienzo.c.stringWidth(badge.upper(), PDF_FONT_BOLD, 6.6) + 12
         _pildora(lienzo.c, badge.upper(), A4_ANCHO - MARGEN_X - 10 - ancho_badge, y - 3,
-                 fuente=PDF_FONT_BOLD, tamano=6.6, color_texto=VERDE, borde=VERDE)
+                 fuente=PDF_FONT_BOLD, tamano=6.6, color_texto=lienzo.color, borde=lienzo.color)
     y -= 12
 
     if alto_marca:
         if logo:
             _pinta_logo(lienzo.c, logo, MARGEN_X + 10, y - alto_marca + 6, alto_marca - 8)
         else:
-            lienzo.c.setFillColorRGB(*VERDE)
+            lienzo.c.setFillColorRGB(*lienzo.color)
             lienzo.c.roundRect(MARGEN_X + 10, y - alto_marca + 6, 34, alto_marca - 8, 3, stroke=0, fill=1)
             lienzo.c.setFillColorRGB(1, 1, 1)
             lienzo.c.setFont(PDF_FONT_BOLD, 10)
@@ -304,7 +318,7 @@ def _ficha_destacada(lienzo, bloque, cache=None):
             ancho_chip = lienzo.c.stringWidth(chip.upper(), PDF_FONT_REGULAR, 6.6) + 12
             if x + ancho_chip > A4_ANCHO - MARGEN_X - 10:
                 break
-            _pildora(lienzo.c, chip.upper(), x, y - 11, borde=VERDE, color_texto=OLIVA)
+            _pildora(lienzo.c, chip.upper(), x, y - 11, borde=lienzo.color, color_texto=OLIVA)
             x += ancho_chip + 4
         # 11 de alto de píldora + 11 de aire: sin esto la primera cifra se dibujaba
         # encima de los chips.
@@ -314,7 +328,7 @@ def _ficha_destacada(lienzo, bloque, cache=None):
         lienzo.c.setFillColorRGB(*APAGADO)
         lienzo.c.setFont(PDF_FONT_REGULAR, 8.5)
         lienzo.c.drawString(MARGEN_X + 10, y, _texto(item.get("label"))[:52])
-        lienzo.c.setFillColorRGB(*(VERDE if destacado else TINTA))
+        lienzo.c.setFillColorRGB(*(lienzo.color if destacado else TINTA))
         lienzo.c.setFont(PDF_FONT_BOLD, 8.5)
         lienzo.c.drawRightString(A4_ANCHO - MARGEN_X - 10, y, _texto(item.get("value"))[:34])
         y -= 13
@@ -349,7 +363,7 @@ def _barra_partida(lienzo, bloque):
     for idx, valor in enumerate(valores):
         ancho = ancho_util * (valor / total)
         tono = 0.55 + (idx % 3) * 0.14
-        lienzo.c.setFillColorRGB(VERDE[0] * tono, VERDE[1] * tono, VERDE[2] * tono)
+        lienzo.c.setFillColorRGB(lienzo.color[0] * tono, lienzo.color[1] * tono, lienzo.color[2] * tono)
         # 2 pt de aire entre tramos para que se distingan sin depender del color.
         lienzo.c.rect(x, base, max(0.0, ancho - 2), alto, stroke=0, fill=1)
         x += ancho
@@ -379,8 +393,165 @@ def _cascada(lienzo, bloque):
     lienzo.y -= 4
 
 
+def _tabla(lienzo, bloque):
+    """Tabla con cabecera, filas alternas y fila de totales opcional.
+
+    Las columnas se declaran como `{"label", "width", "align"}`; `width` es una
+    proporción, no puntos, para que la tabla se adapte al ancho útil. Cada fila es
+    una lista de celdas ya formateadas: aquí no se decide cómo se escribe un euro.
+    """
+    columnas = [c for c in (bloque.get("columns") or []) if isinstance(c, dict)]
+    filas = [f for f in (bloque.get("rows") or []) if isinstance(f, (list, tuple))]
+    if not columnas or not filas:
+        return
+    ancho_util = A4_ANCHO - MARGEN_X * 2
+    pesos = [float(c.get("width") or 1) for c in columnas]
+    total_peso = sum(pesos) or 1.0
+    anchos = [ancho_util * (p / total_peso) for p in pesos]
+    alto_fila = 17.0
+
+    def cabecera_tabla():
+        lienzo.sitio(alto_fila + 4)
+        base = lienzo.y - alto_fila
+        lienzo.c.setFillColorRGB(*lienzo.color)
+        lienzo.c.rect(MARGEN_X, base, ancho_util, alto_fila, stroke=0, fill=1)
+        lienzo.c.setFillColorRGB(1, 1, 1)
+        lienzo.c.setFont(PDF_FONT_BOLD, 7)
+        x = MARGEN_X
+        for col, ancho in zip(columnas, anchos):
+            etiqueta = _texto(col.get("label")).upper()
+            if str(col.get("align") or "left") == "right":
+                lienzo.c.drawRightString(x + ancho - 7, base + 5.5, etiqueta)
+            else:
+                lienzo.c.drawString(x + 7, base + 5.5, etiqueta)
+            x += ancho
+        lienzo.y = base
+
+    cabecera_tabla()
+    pagina_tabla = lienzo.pagina
+    for idx, fila in enumerate(filas):
+        lienzo.sitio(alto_fila)
+        # Si la tabla ha saltado de página, la cabecera se repite: una tabla
+        # descabezada obliga a volver atrás para saber qué columna es cuál.
+        if lienzo.pagina != pagina_tabla:
+            pagina_tabla = lienzo.pagina
+            cabecera_tabla()
+            lienzo.sitio(alto_fila)
+        base = lienzo.y - alto_fila
+        if idx % 2:
+            lienzo.c.setFillColorRGB(*FONDO_SUAVE)
+            lienzo.c.rect(MARGEN_X, base, ancho_util, alto_fila, stroke=0, fill=1)
+        x = MARGEN_X
+        for col, ancho, celda in zip(columnas, anchos, list(fila) + [""] * len(columnas)):
+            lienzo.c.setFillColorRGB(*TINTA)
+            lienzo.c.setFont(PDF_FONT_REGULAR, 8)
+            texto = _texto(celda)
+            if str(col.get("align") or "left") == "right":
+                lienzo.c.drawRightString(x + ancho - 7, base + 5.5, texto)
+            else:
+                # Se recorta a lo que cabe en vez de desbordar sobre la columna vecina.
+                while texto and lienzo.c.stringWidth(texto, PDF_FONT_REGULAR, 8) > ancho - 14:
+                    texto = texto[:-1]
+                lienzo.c.drawString(x + 7, base + 5.5, texto)
+            x += ancho
+        lienzo.y = base
+    total = bloque.get("total")
+    if isinstance(total, (list, tuple)):
+        lienzo.sitio(alto_fila + 2)
+        base = lienzo.y - alto_fila
+        lienzo.c.setStrokeColorRGB(*lienzo.color)
+        lienzo.c.setLineWidth(1.0)
+        lienzo.c.line(MARGEN_X, base + alto_fila, A4_ANCHO - MARGEN_X, base + alto_fila)
+        x = MARGEN_X
+        for col, ancho, celda in zip(columnas, anchos, list(total) + [""] * len(columnas)):
+            lienzo.c.setFillColorRGB(*TINTA)
+            lienzo.c.setFont(PDF_FONT_BOLD, 8.5)
+            if str(col.get("align") or "left") == "right":
+                lienzo.c.drawRightString(x + ancho - 7, base + 5.5, _texto(celda))
+            else:
+                lienzo.c.drawString(x + 7, base + 5.5, _texto(celda))
+            x += ancho
+        lienzo.y = base
+    lienzo.y -= 12
+
+
+def _imagen_pil(imagen):
+    """Convierte una imagen de PIL en (ImageReader, ancho, alto).
+
+    Los logos van en PNG porque suelen llevar transparencia; las fotografías, en
+    JPEG. Guardar una foto del equipo en PNG engordaba el presupuesto de 33 kB a
+    3,3 MB, que es peor que el problema que vinimos a arreglar.
+    """
+    try:
+        from reportlab.lib.utils import ImageReader
+
+        # Se mira el canal alfa, no el modo: los assets llegan todos en RGBA aunque
+        # sean fotografías opacas, y por el modo la del equipo se guardaba en PNG.
+        transparente = False
+        if "A" in imagen.getbands():
+            try:
+                transparente = imagen.getchannel("A").getextrema() != (255, 255)
+            except Exception:
+                transparente = True
+        elif "transparency" in getattr(imagen, "info", {}):
+            transparente = True
+        buf = BytesIO()
+        if transparente:
+            if imagen.mode != "RGBA":
+                imagen = imagen.convert("RGBA")
+            imagen.save(buf, format="PNG")
+        else:
+            if imagen.mode != "RGB":
+                imagen = imagen.convert("RGB")
+            imagen.save(buf, format="JPEG", quality=82, optimize=True)
+        buf.seek(0)
+        return (ImageReader(buf), imagen.width, imagen.height)
+    except Exception:
+        return None
+
+
+def _imagen(lienzo, bloque, cache=None):
+    """Una imagen a lo ancho, con alto máximo. Si no carga, no deja hueco."""
+    if bloque.get("image") is not None:
+        datos = _imagen_pil(bloque.get("image"))
+    else:
+        datos = _logo_png(bloque.get("url"), int(bloque.get("max_width") or 900), cache)
+    if not datos:
+        return
+    lector, ancho, alto = datos
+    ancho_util = A4_ANCHO - MARGEN_X * 2
+    alto_max = float(bloque.get("height") or 190)
+    escala = min(ancho_util / float(ancho or 1), alto_max / float(alto or 1))
+    w, h = ancho * escala, alto * escala
+    lienzo.sitio(h + 10)
+    base = lienzo.y - h
+    try:
+        lienzo.c.drawImage(lector, MARGEN_X + (ancho_util - w) / 2, base, width=w, height=h, mask="auto")
+    except Exception:
+        return
+    pie = _texto(bloque.get("caption")).strip()
+    lienzo.y = base - 8
+    if pie:
+        lienzo.linea_texto(pie, PDF_FONT_REGULAR, 7.5, APAGADO)
+    lienzo.y -= 4
+
+
+def _color_de(valor, defecto=VERDE):
+    """Convierte «#3C6E71» en la terna que quiere reportlab. Sin valor, el verde."""
+    crudo = _texto(valor).strip().lstrip("#")
+    if len(crudo) == 3:
+        crudo = "".join(ch * 2 for ch in crudo)
+    if len(crudo) != 6:
+        return defecto
+    try:
+        return tuple(int(crudo[i:i + 2], 16) / 255 for i in (0, 2, 4))
+    except ValueError:
+        return defecto
+
+
 def build_modernia_branded_document_pdf_vector(
-    title, subtitle, sections, footer_lines=None, company=None, brand_logo_url=None
+    title, subtitle, sections, footer_lines=None, company=None, brand_logo_url=None,
+    brand_color=None, seal_logo_url=None, seal_image=None,
 ):
     """Mismo documento que el motor de imagen, dibujado como texto."""
     from reportlab.pdfgen import canvas as rl_canvas
@@ -397,14 +568,27 @@ def build_modernia_branded_document_pdf_vector(
     )
 
     cache_logos = {}
-    logo_marca = _logo_png(
-        brand_logo_url or company.get("logo_url") or "/assets/grupo_modernia_logo.png", 150, cache_logos
-    )
+    if hasattr(brand_logo_url, "size"):
+        logo_marca = _imagen_pil(brand_logo_url)
+    else:
+        logo_marca = _logo_png(
+            brand_logo_url or company.get("logo_url") or "/assets/grupo_modernia_logo.png", 150, cache_logos
+        )
 
     buffer = BytesIO()
     c = rl_canvas.Canvas(buffer, pagesize=(A4_ANCHO, A4_ALTO))
     c.setTitle(_texto(title))
-    lienzo = _Lienzo(c, _dibuja_cabecera(title, subtitle, meta, logo_marca))
+    sello = None
+    if seal_image is not None:
+        sello = _imagen_pil(seal_image)
+    elif seal_logo_url:
+        sello = _logo_png(seal_logo_url, 300, cache_logos)
+    color_marca = _color_de(brand_color)
+    lienzo = _Lienzo(
+        c,
+        _dibuja_cabecera(title, subtitle, meta, logo_marca, color=color_marca, sello=sello),
+        color=color_marca,
+    )
 
     for seccion in sections or []:
         encabezado, cuerpo = (seccion if isinstance(seccion, (list, tuple)) and len(seccion) == 2 else ("", seccion))
@@ -428,6 +612,10 @@ def build_modernia_branded_document_pdf_vector(
             _barra_partida(lienzo, cuerpo)
         elif clase == "waterfall":
             _cascada(lienzo, cuerpo)
+        elif clase == "table":
+            _tabla(lienzo, cuerpo)
+        elif clase == "image":
+            _imagen(lienzo, cuerpo, cache_logos)
         elif isinstance(cuerpo, dict):
             for item in cuerpo.get("items") or []:
                 lienzo.linea_texto(_texto(item), sangria=8)

@@ -51289,6 +51289,247 @@ def build_workspace_invoice_pdf(invoice, workspace, company, client, collections
 
 
 def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
+    """Presupuesto en vectorial: texto de verdad, no una fotografía del documento.
+
+    El motor anterior (`build_workspace_budget_pdf_imagen`) componía cada página con
+    PIL y la guardaba como JPEG a 150 ppp. Se veía razonable en pantalla, pero el
+    documento que llegaba al presidente de la comunidad no se podía buscar ni copiar,
+    salía blando al imprimir y pesaba 391 kB por tres páginas. Aquí se dibuja lo
+    mismo con el motor vectorial de la casa.
+
+    Dos cambios que no son de forma:
+
+    - **Se dice la periodicidad.** Antes ponía «Total 1.523,39 €» y nada más. En una
+      comunidad de 177 viviendas, entender eso como pago único en vez de cuota
+      mensual son 18.000 € de diferencia.
+    - **Lo mensual y lo puntual van separados.** Desde que la tarifa admite trabajos
+      de una sola vez (la constitución de la comunidad), sumarlos en el mismo total
+      que la cuota sería mentir en la cifra grande.
+    """
+    MESES_ES = (
+        "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+    )
+    calc = {}
+    try:
+        calc = json.loads(budget.get("calculo_json") or "{}") if budget.get("calculo_json") else {}
+        if not isinstance(calc, dict):
+            calc = {}
+    except Exception:
+        calc = {}
+
+    # `normalize_lookup_text` devuelve mayúsculas sin tildes: comparar en minúsculas
+    # daba siempre falso y el presupuesto salía sin decir que la cuota es mensual.
+    servicio_key = normalize_lookup_text(budget.get("servicio") or "")
+    es_fincas = servicio_key in {"FINCAS", "ADMINISTRACION FINCAS"}
+    company_name = str(company.get("razon_social") or company.get("nombre") or workspace.get("nombre") or "").strip() or "Empresa"
+
+    def limpio(valor):
+        texto = str(valor or "").strip()
+        return "" if texto in {"-", "—", "None"} else texto
+
+    # Un campo sin dato se esconde. Antes se rellenaba con un guión, y una ficha
+    # llena de «NIF: -» / «Email: -» parece un documento a medio hacer.
+    def datos(pares):
+        return [f"{etiqueta}: {limpio(valor)}" for etiqueta, valor in pares if limpio(valor)]
+
+    mensuales, puntuales = [], []
+    for linea in (lineas or []):
+        destino = puntuales if normalize_lookup_text(linea.get("categoria") or "") == "SERVICIOS PUNTUALES" else mensuales
+        destino.append(linea)
+
+    def suma(items):
+        total = 0.0
+        for item in items:
+            try:
+                total += float(item.get("total_linea") or 0.0)
+            except (TypeError, ValueError):
+                pass
+        return round(total, 2)
+
+    base_mensual = suma(mensuales)
+    base_puntual = suma(puntuales)
+    subtotal = round(parse_money_value(budget.get("subtotal")), 2)
+    impuestos = round(parse_money_value(budget.get("impuestos")), 2)
+    total = round(parse_money_value(budget.get("total")), 2)
+    # El tipo se deduce de lo guardado en vez de darlo por hecho: hay presupuestos
+    # antiguos sin IVA y otros con un tipo distinto del 21 %.
+    tipo_iva = (impuestos / subtotal) if subtotal else 0.21
+    mensual_con_iva = round(base_mensual * (1 + tipo_iva), 2)
+    puntual_con_iva = round(base_puntual * (1 + tipo_iva), 2)
+
+    sections = []
+
+    carta = limpio(calc.get("carta_presentacion"))
+    if carta:
+        sections.append(("Carta de presentación", [p for p in carta.split("\n") if p.strip()]))
+        foto_equipo = _load_asset_logo("photos/equipo-modernia.jpg", max_width=1100)
+        if foto_equipo is not None:
+            sections.append(("", {"kind": "image", "image": foto_equipo, "height": 200}))
+        colegiado = limpio(calc.get("colegiado_numero"))
+        if es_fincas and colegiado:
+            sections.append(("", [f"Administrador de Fincas Colegiado nº {colegiado}."]))
+        sections.append(("", {"kind": "page_break"}))
+
+    kpis = []
+    if es_fincas and base_mensual:
+        kpis.append({"label": "Cuota mensual (IVA incl.)", "value": format_eur(mensual_con_iva), "accent": 1})
+        kpis.append({"label": "Base mensual (sin IVA)", "value": format_eur(base_mensual)})
+    else:
+        kpis.append({"label": "Total (IVA incl.)", "value": format_eur(total), "accent": 1})
+        kpis.append({"label": "Base (sin IVA)", "value": format_eur(subtotal)})
+    if base_puntual:
+        kpis.append({"label": "Pago único (IVA incl.)", "value": format_eur(puntual_con_iva)})
+    sections.append(("Resumen económico", {"kind": "kpi_cards", "items": kpis, "columns": len(kpis)}))
+    if es_fincas and base_mensual:
+        aviso = "Los importes de administración son mensuales."
+        if base_puntual:
+            aviso += " Los servicios puntuales se facturan una sola vez, al alta."
+        sections.append(("", [aviso]))
+
+    comunidad = datos([
+        ("Denominación", calc.get("comunidad_denominacion") or client.get("nombre")),
+        ("Dirección", calc.get("comunidad_direccion")),
+        ("CIF", calc.get("comunidad_cif") or client.get("nif")),
+        ("Referencia catastral", calc.get("referencia_catastral")),
+    ])
+    if comunidad:
+        sections.append(("Datos de la comunidad", comunidad))
+
+    solicitante = datos([
+        ("Nombre", calc.get("solicitante_nombre")),
+        ("DNI", calc.get("solicitante_dni")),
+        ("Teléfono", calc.get("solicitante_telefono") or client.get("telefono")),
+        ("Email", calc.get("solicitante_email") or client.get("email")),
+        ("Dirección", calc.get("solicitante_direccion")),
+    ])
+    if solicitante:
+        sections.append(("Datos del solicitante", solicitante))
+
+    if es_fincas:
+        # Sin emojis: eran cuatro PNG de emoji pegados como iconos, y en un documento
+        # que se lee en una junta de propietarios desentonaban.
+        unidades = [
+            ("Viviendas", parse_non_negative_int(calc.get("num_vecinos"))),
+            ("Locales", parse_non_negative_int(calc.get("num_locales"))),
+            ("Trasteros", parse_non_negative_int(calc.get("num_trasteros"))),
+            ("Aparcamientos", parse_non_negative_int(calc.get("num_aparcamientos"))),
+        ]
+        presentes = [f"{etiqueta}: {valor}" for etiqueta, valor in unidades if valor]
+        if presentes:
+            sections.append(("Unidades del edificio", [" · ".join(presentes)]))
+
+    foto_key = limpio(calc.get("edificio_foto_key"))
+    if foto_key:
+        try:
+            crudo, _err = s3_get_object_bytes(foto_key)
+            if crudo:
+                sections.append(("Edificio", {"kind": "image", "image": Image.open(BytesIO(crudo)), "height": 210}))
+        except Exception:
+            pass
+
+    servicios = [str(s).strip() for s in (calc.get("servicios_incluidos") or []) if str(s or "").strip()]
+    if servicios:
+        sections.append(("Servicios incluidos", [f"· {s}" for s in servicios]))
+
+    def tabla_de(items, titulo, sufijo=""):
+        if not items:
+            return
+        filas = []
+        for item in items:
+            try:
+                cantidad = float(item.get("cantidad") or 0)
+            except (TypeError, ValueError):
+                cantidad = 0.0
+            filas.append([
+                limpio(item.get("concepto")),
+                f"{cantidad:g} {limpio(item.get('unidad'))}".strip(),
+                format_eur(item.get("precio_unitario")),
+                format_eur(item.get("total_linea")),
+            ])
+        sections.append((titulo, {
+            "kind": "table",
+            "columns": [
+                {"label": "Partida", "width": 5},
+                {"label": "Cantidad", "width": 2, "align": "right"},
+                {"label": "Precio", "width": 2, "align": "right"},
+                {"label": "Importe" + sufijo, "width": 2, "align": "right"},
+            ],
+            "rows": filas,
+            "total": ["Total", "", "", format_eur(suma(items))],
+        }))
+
+    tabla_de(mensuales, "Administración mensual" if es_fincas else "Partidas presupuestadas", " / mes" if es_fincas else "")
+    tabla_de(puntuales, "Servicios puntuales (pago único)")
+
+    cierre = []
+    if es_fincas and base_mensual:
+        cierre.append({"label": "Base mensual", "value": format_eur(base_mensual)})
+        cierre.append({"label": f"IVA ({tipo_iva * 100:.0f} %)", "value": format_eur(round(base_mensual * tipo_iva, 2))})
+        cierre.append({"label": "Cuota mensual", "value": format_eur(mensual_con_iva), "accent": 1})
+    else:
+        cierre.append({"label": "Subtotal", "value": format_eur(subtotal)})
+        cierre.append({"label": "Impuestos", "value": format_eur(impuestos)})
+        cierre.append({"label": "Total", "value": format_eur(total), "accent": 1})
+    if base_puntual:
+        cierre.append({"label": "Servicios puntuales (una vez)", "value": format_eur(puntual_con_iva)})
+    sections.append(("Cierre económico", {"kind": "waterfall", "steps": cierre}))
+
+    condiciones = datos([
+        ("Responsable", budget.get("responsable")),
+        ("Forma de pago", budget.get("forma_pago")),
+        ("Válido hasta", budget.get("fecha_seguimiento")),
+    ])
+    if condiciones:
+        sections.append(("Condiciones", condiciones))
+    observaciones = limpio(budget.get("observaciones"))
+    if observaciones:
+        sections.append(("Observaciones", [observaciones]))
+
+    fecha_iso = limpio(budget.get("fecha")) or datetime.now().date().isoformat()
+    try:
+        d = datetime.strptime(fecha_iso[:10], "%Y-%m-%d").date()
+        fecha = f"{d.day} de {MESES_ES[d.month - 1]} de {d.year}"
+    except Exception:
+        fecha = fecha_iso
+    footer = [
+        f"Documento emitido por {company_name} el {fecha}.",
+        "Presupuesto sujeto a aceptación expresa del cliente.",
+    ]
+    # Fincas Velázquez tiene marca propia y sello del Colegio: el documento lo firma
+    # un administrador colegiado y eso es lo que le da peso. Con el logo genérico
+    # del grupo se perdía.
+    logo_marca = None
+    sello = None
+    if es_fincas:
+        logo_marca = _load_asset_logo("logos/fincas-velazquez.png", max_width=420)
+        sello = _load_asset_logo("logos/colegio-administradores-v2.png", max_width=300)
+    if logo_marca is None:
+        logo_marca = _load_brand_logo(company.get("logo_url"), max_width=360)
+
+    # El subtítulo de la banda se corta a 70 caracteres: metiendo ahí el nombre de la
+    # empresa más el título salía «... COMUNIDAD PR». Va solo la referencia.
+    referencia = limpio(budget.get("titulo")) or "Propuesta de servicios"
+    if len(referencia) > 58:
+        referencia = referencia[:57].rstrip(" ·,") + "…"
+
+    try:
+        from .branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    except ImportError:
+        from branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    return build_modernia_branded_document_pdf_vector(
+        "PRESUPUESTO",
+        referencia,
+        sections,
+        footer,
+        company=company,
+        brand_logo_url=logo_marca,
+        brand_color=workspace.get("primary_color"),
+        seal_image=sello,
+    )
+
+
+def build_workspace_budget_pdf_imagen(budget, workspace, company, client, lineas):
     def hex_to_rgb(value, fallback):
         raw = str(value or "").strip().lstrip("#")
         if len(raw) == 3:
