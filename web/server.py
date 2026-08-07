@@ -1157,6 +1157,8 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/inmueble_signature_public",
     "/api/inmueble_signature_document",
     "/api/workspace_portal_public",
+    "/api/workspace_fincas_portal_public",
+    "/portal-comunidad",
     "/api/workspace_portal_s3_url",
     "/api/workspace_factura_pdf_public",
     "/api/workspace_portal_facturas_excel",
@@ -41079,6 +41081,36 @@ def ensure_workspace_product_tables(conn):
     # Y del lado de la comunidad, su cuenta y su identificador de acreedor SEPA.
     ensure_column(conn, "workspace_fincas_comunidades", "iban", "iban TEXT")
     ensure_column(conn, "workspace_fincas_comunidades", "acreedor_sepa", "acreedor_sepa TEXT")
+    # Acceso del propietario a su portal. Se guarda **el hash** del token, nunca el
+    # token: si alguien lee la tabla no puede entrar en el portal de nadie.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_portal_accesos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          comunidad_id TEXT NOT NULL,
+          vecino_id TEXT NOT NULL,
+          token_hash TEXT NOT NULL,
+          expires_at TEXT,
+          revocado INTEGER NOT NULL DEFAULT 0,
+          accesos INTEGER NOT NULL DEFAULT 0,
+          last_access_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_portal_token "
+            "ON workspace_fincas_portal_accesos (token_hash)"
+        )
+    except Exception:
+        pass
+    # Un documento no se ve en el portal salvo que se marque a mano. Por defecto
+    # invisible: en esa carpeta hay contratos y facturas de proveedores, y que un
+    # vecino los vea por descuido es peor que tener que marcar los que sí.
+    ensure_column(conn, "workspace_fincas_documentos", "visible_portal", "visible_portal INTEGER NOT NULL DEFAULT 0")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_recibos (
@@ -50252,6 +50284,119 @@ def fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio
     }
 
 
+#: Caducidad por defecto del enlace del propietario. Un enlace sin fecha de fin es
+#: un enlace eterno circulando por WhatsApp; medio año cubre un ejercicio y obliga a
+#: renovarlo con la persona que de verdad vive ahí.
+FINCAS_PORTAL_DIAS_VALIDEZ = 180
+
+
+def hash_portal_token(raw):
+    return hashlib.sha256(str(raw or "").encode("utf-8")).hexdigest()
+
+
+def make_portal_token():
+    return secrets.token_urlsafe(32)
+
+
+def fetch_fincas_portal_public(conn, token, *, registrar=True):
+    """Datos que ve un propietario con su enlace. Solo los suyos.
+
+    Lo que **no** sale de aquí, y no es un olvido:
+
+    - Ningún otro propietario: ni su nombre, ni lo que debe, ni si asistió a la
+      junta. Un vecino no tiene por qué saber quién está al corriente.
+    - Ningún IBAN completo, tampoco el suyo: con los cuatro últimos dígitos
+      reconoce su cuenta y no hay nada que filtrar.
+    - Ningún identificador interno (workspace, comunidad, vecino). Con el enlace
+      basta; los ids solo servirían para probar suerte en otros endpoints.
+    - Ningún documento que no se haya marcado a mano como visible.
+    """
+    token = str(token or "").strip()
+    if not token:
+        return None
+    fila = conn.execute(
+        "SELECT a.*, v.nombre, v.piso, v.nif, v.iban, c.nombre AS comunidad_nombre, "
+        "       c.direccion AS comunidad_direccion "
+        "FROM workspace_fincas_portal_accesos a "
+        "JOIN workspace_fincas_vecinos v ON v.id = a.vecino_id "
+        "LEFT JOIN workspace_fincas_comunidades c ON c.id = a.comunidad_id "
+        "WHERE a.token_hash = ? LIMIT 1",
+        (hash_portal_token(token),),
+    ).fetchone()
+    if not fila:
+        return None
+    if int(row_value(fila, "revocado", 0) or 0):
+        return {"error": "revocado"}
+    caduca = str(row_value(fila, "expires_at", "") or "")[:10]
+    if caduca and caduca < datetime.now().date().isoformat():
+        return {"error": "caducado"}
+
+    workspace_id = row_value(fila, "workspace_id", "")
+    vecino_id = row_value(fila, "vecino_id", "")
+    comunidad_id = row_value(fila, "comunidad_id", "")
+
+    recibos = []
+    deuda = 0.0
+    for recibo in conn.execute(
+        "SELECT periodo, concepto, importe, estado, fecha_cobro FROM workspace_fincas_recibos "
+        "WHERE workspace_id = ? AND vecino_id = ? ORDER BY periodo DESC LIMIT 120",
+        (workspace_id, vecino_id),
+    ).fetchall():
+        importe = round(parse_money_value(row_value(recibo, "importe", 0)), 2)
+        estado = row_value(recibo, "estado", "")
+        if estado in {"Pendiente", "Devuelto"}:
+            deuda += importe
+        recibos.append({
+            "periodo": row_value(recibo, "periodo", ""),
+            "concepto": row_value(recibo, "concepto", ""),
+            "importe": importe,
+            "estado": estado,
+            "fecha_cobro": row_value(recibo, "fecha_cobro", "") or "",
+        })
+
+    documentos = [
+        {
+            "titulo": row_value(d, "titulo", ""),
+            "tipo": row_value(d, "tipo", "") or "",
+            "fecha": row_value(d, "fecha", "") or "",
+        }
+        for d in conn.execute(
+            "SELECT titulo, tipo, fecha FROM workspace_fincas_documentos "
+            "WHERE workspace_id = ? AND comunidad_id = ? AND COALESCE(visible_portal, 0) = 1 "
+            "ORDER BY COALESCE(fecha, '') DESC LIMIT 60",
+            (workspace_id, comunidad_id),
+        ).fetchall()
+    ]
+
+    if registrar:
+        try:
+            conn.execute(
+                "UPDATE workspace_fincas_portal_accesos SET accesos = COALESCE(accesos, 0) + 1, "
+                "last_access_at = ? WHERE id = ?",
+                (datetime.now().isoformat(timespec="seconds"), row_value(fila, "id", "")),
+            )
+            conn.commit()
+        except Exception:
+            pass
+
+    iban = normalizar_iban(row_value(fila, "iban", "") or "")
+    return {
+        "comunidad": {
+            "nombre": row_value(fila, "comunidad_nombre", "") or "",
+            "direccion": row_value(fila, "comunidad_direccion", "") or "",
+        },
+        "propietario": {
+            "nombre": row_value(fila, "nombre", ""),
+            "piso": row_value(fila, "piso", "") or "",
+            "cuenta": f"····{iban[-4:]}" if iban else "",
+        },
+        "recibos": recibos,
+        "deuda": round(deuda, 2),
+        "documentos": documentos,
+        "caduca": caduca,
+    }
+
+
 def fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id):
     """Quién debe, cuánto y desde cuándo.
 
@@ -59057,6 +59202,105 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "API error", "detail": Handler._safe_exc_detail(exc)}, status=500)
             return
 
+        if parsed.path == "/portal-comunidad":
+            # Página suelta, sin cargar el CRM entero: quien entra aquí es un vecino
+            # con su enlace, no un usuario de la aplicación. El token viaja en la
+            # query y el navegador lo quita de la barra en cuanto carga, para que no
+            # se quede en el historial ni en una captura.
+            page = """<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Mi comunidad</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: "IBM Plex Sans", "Segoe UI", sans-serif; max-width: 780px;
+           margin: 28px auto; padding: 0 18px; color: #1d1d1f; background: #fff; }
+    h1 { font-size: 22px; margin: 0 0 4px; }
+    .muted { color: #6b7280; }
+    .card { border: 1px solid #e7e7ea; border-radius: 14px; padding: 16px; margin: 14px 0; }
+    .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+    .kpi { border: 1px solid #e7e7ea; border-radius: 12px; padding: 12px; }
+    .kpi span { display: block; font-size: 12px; color: #6b7280; }
+    .kpi strong { font-size: 19px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #eee; font-size: 14px; }
+    td.num, th.num { text-align: right; }
+    .estado { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid #d1d5db; }
+    .estado[data-e="Cobrado"] { color: #15803d; border-color: #86efac; }
+    .estado[data-e="Devuelto"], .estado[data-e="Pendiente"] { color: #b45309; border-color: #fcd34d; }
+    .aviso { padding: 12px 14px; border-radius: 12px; background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #111; color: #f3f4f6; }
+      .card, .kpi { border-color: #333; }
+      th, td { border-color: #2a2a2a; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app"><p class="muted">Cargando…</p></div>
+  <script>
+    const eur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
+    const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    const app = document.getElementById("app");
+    const token = new URLSearchParams(location.search).get("token") || "";
+    // Se saca de la barra en cuanto lo tenemos: el enlace lleva la llave dentro y
+    // no hace falta que se quede en el historial ni salga en una captura.
+    if (token) history.replaceState(null, "", location.pathname);
+    if (!token) {
+      app.innerHTML = '<div class="aviso">Falta el enlace de acceso. Pide uno a tu administrador.</div>';
+    } else {
+      fetch("/api/workspace_fincas_portal_public?token=" + encodeURIComponent(token), { headers: { "Accept": "application/json" } })
+        .then(async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error || "No se pudo cargar"); return d; })
+        .then((d) => {
+          const pendientes = (d.recibos || []).filter((x) => x.estado !== "Cobrado").length;
+          app.innerHTML = `
+            <h1>${esc(d.comunidad.nombre || "Mi comunidad")}</h1>
+            <p class="muted">${esc(d.comunidad.direccion || "")}</p>
+            <div class="card">
+              <strong>${esc(d.propietario.nombre)}</strong>
+              <div class="muted">${esc(d.propietario.piso || "")}${d.propietario.cuenta ? " · cuenta " + esc(d.propietario.cuenta) : ""}</div>
+            </div>
+            <div class="kpis">
+              <div class="kpi"><span>Pendiente de pago</span><strong>${eur.format(d.deuda || 0)}</strong></div>
+              <div class="kpi"><span>Recibos sin cobrar</span><strong>${pendientes}</strong></div>
+              <div class="kpi"><span>Recibos en total</span><strong>${(d.recibos || []).length}</strong></div>
+            </div>
+            <div class="card">
+              <h2 style="font-size:16px;margin:0 0 8px;">Mis recibos</h2>
+              ${(d.recibos || []).length ? `<table>
+                <thead><tr><th>Periodo</th><th>Concepto</th><th>Estado</th><th class="num">Importe</th></tr></thead>
+                <tbody>${d.recibos.map((x) => `<tr>
+                  <td>${esc(x.periodo)}</td><td>${esc(x.concepto)}</td>
+                  <td><span class="estado" data-e="${esc(x.estado)}">${esc(x.estado)}</span></td>
+                  <td class="num">${eur.format(x.importe || 0)}</td></tr>`).join("")}</tbody>
+              </table>` : '<p class="muted">Todavía no hay recibos.</p>'}
+            </div>
+            ${(d.documentos || []).length ? `<div class="card">
+              <h2 style="font-size:16px;margin:0 0 8px;">Documentos de la comunidad</h2>
+              <table><tbody>${d.documentos.map((x) => `<tr><td>${esc(x.titulo)}</td><td class="muted">${esc(x.tipo)}</td><td class="num muted">${esc(x.fecha)}</td></tr>`).join("")}</tbody></table>
+            </div>` : ""}
+            <p class="muted">Enlace válido hasta ${esc(d.caduca || "-")}. Si tienes dudas sobre algún recibo, habla con tu administrador.</p>`;
+        })
+        .catch((e) => { app.innerHTML = '<div class="aviso">' + esc(e.message || "No se pudo cargar") + "</div>"; });
+    }
+  </script>
+</body>
+</html>"""
+            body = page.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Robots-Tag", "noindex, nofollow")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if parsed.path == "/kiosk":
             params = urllib.parse.parse_qs(parsed.query or "")
             token = (params.get("token", [""])[0] or "").strip()
@@ -59796,6 +60040,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_junta_voto",
             "/api/workspace_fincas_mayorias",
             "/api/workspace_fincas_presupuesto_anual",
+            "/api/workspace_fincas_portal_alta",
+            "/api/workspace_fincas_portal_revocar",
             "/api/workspace_fincas_vecino_delete",
             "/api/workspace_presupuesto_delete",
             "/api/workspace_rrhh_nominas_import",
@@ -72475,6 +72721,77 @@ class Handler(BaseHTTPRequestHandler):
                 "ejercicio": fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio),
             })
             return
+        elif parsed.path == "/api/workspace_fincas_portal_alta":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            vecino_id = str(payload.get("vecino_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not vecino_id:
+                json_response(self, {"error": "workspace_id y vecino_id requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            vecino = conn.execute(
+                "SELECT id, comunidad_id, nombre FROM workspace_fincas_vecinos "
+                "WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (vecino_id, workspace_id),
+            ).fetchone()
+            if not vecino:
+                json_response(self, {"error": "propietario no encontrado"}, status=404)
+                return
+            # Cada alta revoca la anterior: si el enlace viejo circulaba por ahí,
+            # renovarlo tiene que servir para cortarlo, no para tener dos válidos.
+            conn.execute(
+                "UPDATE workspace_fincas_portal_accesos SET revocado = 1, updated_at = datetime(?) "
+                "WHERE vecino_id = ? AND workspace_id = ?",
+                (now, vecino_id, workspace_id),
+            )
+            dias = parse_non_negative_int(payload.get("dias")) or FINCAS_PORTAL_DIAS_VALIDEZ
+            caduca = (datetime.now().date() + timedelta(days=int(dias))).isoformat()
+            crudo = make_portal_token()
+            conn.execute(
+                "INSERT INTO workspace_fincas_portal_accesos "
+                "(id, workspace_id, comunidad_id, vecino_id, token_hash, expires_at, revocado, accesos, "
+                " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, 0, datetime(?), datetime(?))",
+                (os.urandom(16).hex(), workspace_id, row_value(vecino, "comunidad_id", ""), vecino_id,
+                 hash_portal_token(crudo), caduca, now, now),
+            )
+            conn.commit()
+            # El token se enseña **una vez**: en la base solo queda el hash, así que
+            # no hay forma de volver a verlo. Si se pierde, se genera otro.
+            json_response(self, {
+                "ok": True,
+                "url": f"{self._external_base_url()}/portal-comunidad?token={urllib.parse.quote(crudo)}",
+                "caduca": caduca,
+                "aviso": "Este enlace solo se enseña ahora. Si se pierde, genera otro.",
+            })
+            return
+        elif parsed.path == "/api/workspace_fincas_portal_revocar":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            vecino_id = str(payload.get("vecino_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not vecino_id:
+                json_response(self, {"error": "workspace_id y vecino_id requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            conn.execute(
+                "UPDATE workspace_fincas_portal_accesos SET revocado = 1, updated_at = datetime(?) "
+                "WHERE vecino_id = ? AND workspace_id = ?",
+                (now, vecino_id, workspace_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
         elif parsed.path == "/api/workspace_fincas_vecino_delete":
             session = getattr(self, "auth_session", None) or self._current_session()
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -72521,6 +72838,10 @@ class Handler(BaseHTTPRequestHandler):
                 (payload.get("doc_key") or "").strip() or None,
                 (payload.get("doc_url") or "").strip() or None,
                 (payload.get("notas") or "").strip() or None,
+                # Invisible salvo que se marque: aquí hay contratos y facturas de
+                # proveedores, y que un vecino los vea por descuido es peor que
+                # tener que marcar los que sí.
+                1 if str(payload.get("visible_portal") or "").strip().lower() in {"1", "true", "si", "sí", "on"} else 0,
             )
             if record_id:
                 current = conn.execute(
@@ -72533,7 +72854,7 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     UPDATE workspace_fincas_documentos
-                    SET workspace_id = ?, comunidad_id = ?, titulo = ?, tipo = ?, fecha = ?, doc_key = ?, doc_url = ?, notas = ?,
+                    SET workspace_id = ?, comunidad_id = ?, titulo = ?, tipo = ?, fecha = ?, doc_key = ?, doc_url = ?, notas = ?, visible_portal = ?,
                         updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
@@ -72544,8 +72865,8 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     """
                     INSERT INTO workspace_fincas_documentos (
-                      id, workspace_id, comunidad_id, titulo, tipo, fecha, doc_key, doc_url, notas, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      id, workspace_id, comunidad_id, titulo, tipo, fecha, doc_key, doc_url, notas, visible_portal, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
@@ -86314,6 +86635,27 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             json_response(self, fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio))
+            return
+
+        if path == "/api/workspace_fincas_portal_public":
+            # Público a propósito: entra el propietario con su enlace, sin sesión.
+            # Todo el control está en el token, que es aleatorio de 256 bits y del
+            # que en la base solo hay el hash.
+            token = _request_token_param(self, params, "token")
+            if not token:
+                json_response(self, {"error": "token requerido"}, status=400)
+                return
+            datos = fetch_fincas_portal_public(conn, token)
+            if not datos:
+                json_response(self, {"error": "Enlace no válido"}, status=404)
+                return
+            if datos.get("error") == "revocado":
+                json_response(self, {"error": "Este enlace ha sido anulado. Pide uno nuevo a tu administrador."}, status=403)
+                return
+            if datos.get("error") == "caducado":
+                json_response(self, {"error": "Este enlace ha caducado. Pide uno nuevo a tu administrador."}, status=403)
+                return
+            json_response(self, datos)
             return
 
         if path == "/api/workspace_fincas_morosidad":

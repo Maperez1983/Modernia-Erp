@@ -23598,6 +23598,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
                   <div class="workspace-billing-meta">
                     <span>${v.coeficiente === null || v.coeficiente === undefined || v.coeficiente === "" ? "sin coef." : `${Number(v.coeficiente).toFixed(4)} %`}</span>
                     <span class="censo-acciones">
+                      <button type="button" class="secondary ghost" data-vecino-portal="${escapeHtml(String(v.id || ""))}">Enlace del portal</button>
                       <button type="button" class="secondary ghost" data-vecino-edit="${escapeHtml(String(v.id || ""))}">Editar</button>
                       <button type="button" class="secondary ghost" data-vecino-borrar="${escapeHtml(String(v.id || ""))}">Borrar</button>
                     </span>
@@ -23618,6 +23619,23 @@ const renderWorkspaceFincasCommunityFicha = async () => {
               if (el) el.value = v[k] ?? "";
             });
             if (titleEl) titleEl.textContent = "Editar propietario";
+          });
+        });
+        (listWrap?.querySelectorAll("[data-vecino-portal]") || []).forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const v = items.find((row) => String(row.id || "") === String(btn.dataset.vecinoPortal || ""));
+            if (!v) return;
+            if (!window.confirm(`Se generará un enlace nuevo para ${v.nombre || v.piso}. El anterior, si lo hubiera, dejará de funcionar. ¿Seguimos?`)) return;
+            try {
+              const res = await postJsonWithDbRetry("/api/workspace_fincas_portal_alta", { workspace_id: workspaceId, vecino_id: v.id });
+              // El enlace solo se puede enseñar ahora: en la base queda el hash.
+              window.prompt(
+                `Enlace para ${v.nombre || v.piso}, válido hasta ${res.caduca}.\nCópialo ahora: no se puede volver a ver.`,
+                res.url,
+              );
+            } catch (e) {
+              if (listStatus) listStatus.textContent = e?.message || "No se pudo generar el enlace.";
+            }
           });
         });
         (listWrap?.querySelectorAll("[data-vecino-borrar]") || []).forEach((btn) => {
@@ -24541,6 +24559,11 @@ const renderWorkspaceFincasCommunityFicha = async () => {
             <label>Fecha <input type="date" name="fecha" value="${new Date().toISOString().slice(0,10)}" /></label>
             <label class="span-all">Archivo <input type="file" name="file" /></label>
             <label class="span-all">Notas <textarea name="notas" rows="3"></textarea></label>
+            <label class="fincas-extra span-all">
+              <input type="checkbox" name="visible_portal" value="1" />
+              <span>Visible para los propietarios en su portal</span>
+            </label>
+            <div class="muted span-all">Por defecto no se ve: en esta carpeta hay contratos y facturas de proveedores.</div>
             <div class="muted span-all" data-doc-status></div>
             <div class="form-actions span-all"><button type="submit">Guardar</button></div>
           </form>
