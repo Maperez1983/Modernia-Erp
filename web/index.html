@@ -9,7 +9,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=307" />
+	    <link rel="stylesheet" href="styles.css?v=308" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2450,27 +2450,6 @@
 	              Ref. catastral
 	              <input name="referencia_catastral" placeholder="Opcional" />
 	            </label>
-	            <div class="form-grid-section">Datos del presidente / solicitante</div>
-            <label class="span-2">
-              Nombre
-              <input name="solicitante_nombre" />
-            </label>
-            <label>
-              DNI
-              <input name="solicitante_dni" />
-            </label>
-            <label>
-              Teléfono
-              <input name="solicitante_telefono" />
-            </label>
-            <label class="span-2">
-              Dirección
-              <input name="solicitante_direccion" />
-            </label>
-            <label class="span-2">
-              Email
-              <input name="solicitante_email" type="email" />
-            </label>
 	            <div class="form-grid-section">Datos del edificio</div>
             <label>
               Viviendas
@@ -2508,13 +2487,7 @@
 	              Total (con IVA)
 	              <input name="total" type="text" inputmode="decimal" readonly />
 	            </label>
-	            <label class="span-2">
-	              Foto del edificio (opcional)
-	              <input id="workspaceFincasBudgetBuildingPhoto" type="file" accept="image/*" />
-	              <div id="workspaceFincasBudgetBuildingPhotoStatus" class="muted"></div>
-	              <img id="workspaceFincasBudgetBuildingPhotoPreview" class="hidden" alt="Foto edificio" style="margin-top:10px;width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
-	            </label>
-            <div class="form-grid-section">El presupuesto</div>
+	            <div class="form-grid-section">El presupuesto</div>
             <label>
               Estado
               <select name="estado">
@@ -2528,11 +2501,48 @@
               Título (opcional)
               <input name="titulo" placeholder="Si lo dejas en blanco se autogenera" />
             </label>
+            <div class="span-2" id="workspaceFincasBudgetServiciosIncluidos"></div>
+                        <details class="presu-plegable span-2" id="workspaceFincasBudgetSolicitante">
+              <summary>Datos del presidente / solicitante <span class="muted">(opcional)</span></summary>
+              <div class="form-grid">
+
             <label class="span-2">
+              Nombre
+              <input name="solicitante_nombre" />
+            </label>
+            <label>
+              DNI
+              <input name="solicitante_dni" />
+            </label>
+            <label>
+              Teléfono
+              <input name="solicitante_telefono" />
+            </label>
+            <label class="span-2">
+              Dirección
+              <input name="solicitante_direccion" />
+            </label>
+            <label class="span-2">
+              Email
+              <input name="solicitante_email" type="email" />
+            </label>
+              </div>
+            </details>
+            <details class="presu-plegable span-2">
+              <summary>Foto del edificio y carta de presentación <span class="muted">(opcional)</span></summary>
+              <div class="form-grid">
+<label class="span-2">
+	              Foto del edificio (opcional)
+	              <input id="workspaceFincasBudgetBuildingPhoto" type="file" accept="image/*" />
+	              <div id="workspaceFincasBudgetBuildingPhotoStatus" class="muted"></div>
+	              <img id="workspaceFincasBudgetBuildingPhotoPreview" class="hidden" alt="Foto edificio" style="margin-top:10px;width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
+	            </label>
+<label class="span-2">
               Carta de presentación (opcional)
               <textarea name="carta_presentacion" rows="5" placeholder="Texto adicional que aparecerá en la carta de presentación del PDF."></textarea>
             </label>
-            <div class="span-2" id="workspaceFincasBudgetServiciosIncluidos"></div>
+              </div>
+            </details>
             <div class="span-2" id="workspaceFincasBudgetHero"></div>
 	            <div class="form-actions span-2">
 	              <button type="submit">Crear presupuesto + PDF</button>
@@ -11954,7 +11964,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=852",
+              "app.js?v=853",
             ];
 
             const getParams = () => {

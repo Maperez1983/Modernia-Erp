@@ -26512,6 +26512,15 @@ const hydrateWorkspaceFincasBudgetQuickSelect = ({ communities = [], budgets = [
   }
 };
 
+/** Abre el bloque de solicitante si alguno de sus campos trae algo escrito. */
+const abrirPlegableSiTieneDatos = () => {
+  const caja = document.getElementById("workspaceFincasBudgetSolicitante");
+  if (!caja) return;
+  const conDatos = Array.from(caja.querySelectorAll("input, textarea"))
+    .some((el) => String(el.value || "").trim());
+  if (conDatos) caja.open = true;
+};
+
 const syncWorkspaceFincasBudgetQuickComputed = (options = {}) => {
   if (!workspaceFincasBudgetQuickForm) return;
   const numVecinos = Number(workspaceFincasBudgetQuickForm.querySelector('[name="num_vecinos"]')?.value || 0) || 0;
@@ -26643,8 +26652,10 @@ const applyWorkspaceFincasBudgetQuickCommunity = (communityId) => {
     set("comunidad_cif", community.cif || "");
     set("referencia_catastral", community.referencia_catastral || "");
     set("solicitante_nombre", community.presidente || "");
+    abrirPlegableSiTieneDatos();
     set("num_vecinos", community.num_vecinos ?? 0);
     set("num_locales", community.num_locales ?? 0);
+    set("num_trasteros", community.num_trasteros ?? 0);
     set("num_aparcamientos", community.num_aparcamientos ?? 0);
     set("edificio_foto_key", community.foto_edificio_key || "");
     if (workspaceFincasBudgetBuildingPhotoPreview) {
@@ -26683,8 +26694,10 @@ const applyWorkspaceFincasBudgetQuickBudget = (budgetId) => {
   set("solicitante_telefono", String(calc.solicitante_telefono || budget.cliente_telefono || "").trim());
   set("solicitante_direccion", String(calc.solicitante_direccion || "").trim());
   set("solicitante_email", String(calc.solicitante_email || budget.cliente_email || "").trim());
+  abrirPlegableSiTieneDatos();
   set("num_vecinos", calc.num_vecinos ?? 0);
   set("num_locales", calc.num_locales ?? 0);
+  set("num_trasteros", calc.num_trasteros ?? 0);
   set("num_aparcamientos", calc.num_aparcamientos ?? 0);
   set("edificio_foto_key", String(calc.edificio_foto_key || "").trim());
   if (workspaceFincasBudgetBuildingPhotoPreview) {

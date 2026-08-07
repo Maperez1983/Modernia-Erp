@@ -10,11 +10,16 @@ a esta comunidad para poder trabajar. Un censo vacío o un IBAN sin poner no se 
 un KPI —se ven cuando intentas emitir y no puedes—, así que salen arriba, ordenados
 por lo que bloquea antes, y cada uno lleva a la pestaña que lo resuelve.
 
-**Presupuestos.** Medido sobre la pantalla real: 28 campos y 1.270 px, o sea 1,6
-pantallas de scroll, con los importes al final. Había que bajar entero para ver
-cuánto sale. Ahora hay un resumen pegado arriba con la cuota mensual y el pago único
-separados —que es como se lee un presupuesto—, y el «Estado» del presupuesto ha salido
-de «Datos de la comunidad», donde estaba entre el CIF y el nombre del presidente.
+**Presupuestos.** 28 campos con los importes al final: había que bajar el formulario
+entero para ver cuánto sale. Ahora hay un resumen pegado arriba con la cuota mensual y
+el pago único separados —que es como se lee un presupuesto—, el «Estado» ha salido de
+«Datos de la comunidad» (estaba entre el CIF y el nombre del presidente), y lo que no
+decide el precio —solicitante, foto, carta— va plegado al final.
+
+Sobre el tamaño, medido antes y después al mismo ancho y con el mismo contenido: 1.020
+px frente a 982, o sea **38 px menos**. Reordenar no acorta apenas, porque lo que se
+ahorra plegando se lo come el resumen pegado. Lo que cambia es el orden —primero lo
+que decide el precio— y que la cifra esté siempre a la vista sin scroll.
 """
 
 import datetime
@@ -214,15 +219,83 @@ class ElPresupuestoEnsenaElPrecioSinBajarTests(unittest.TestCase):
         self.assertIn('pon("mensual"', APP[i: i + 900])
 
     def test_el_estado_del_presupuesto_sale_de_los_datos_de_la_comunidad(self):
-        """Estaba entre el CIF y el nombre del presidente, y no es un dato de la comunidad."""
+        """Estaba entre el CIF y el nombre del presidente, y no es un dato de la comunidad.
+
+        Se comprueba que cae en su propia sección y no dentro del bloque de la
+        comunidad, en vez de compararlo con el bloque del solicitante: ese se ha
+        movido al final y la comparación decía otra cosa de la que se quería.
+        """
         formulario = self._formulario()
-        self.assertLess(formulario.index("Datos del presidente"), formulario.index('name="estado"'))
         self.assertIn("El presupuesto", formulario)
+        self.assertLess(formulario.index("El presupuesto"), formulario.index('name="estado"'))
+        bloque_comunidad = formulario[
+            formulario.index("Datos de la comunidad"): formulario.index("Datos del edificio")
+        ]
+        self.assertNotIn('name="estado"', bloque_comunidad)
 
     def test_el_texto_de_ayuda_dice_para_que_sirve_cada_importe(self):
         formulario = self._formulario()
         self.assertIn("La calcula la tarifa. No se edita.", formulario)
         self.assertIn("Solo si quieres cerrar otro precio.", formulario)
+
+
+class LoQueNoDecideElPrecioVaAlFinalPlegadoTests(unittest.TestCase):
+    """Reordenar no acorta apenas el formulario: mide 982 px frente a 1.020, o sea
+    38 menos. Lo que se ahorra plegando se lo come el resumen pegado. Lo que cambia
+    de verdad es el orden —primero lo que decide el precio— y que la cifra esté
+    siempre a la vista.
+    """
+
+    def _formulario(self):
+        i = HTML.index('id="workspaceFincasBudgetQuickForm"')
+        return HTML[i: HTML.index("</form>", i)]
+
+    def test_el_edificio_va_antes_que_el_solicitante(self):
+        """Las unidades deciden la cuota; el nombre del presidente no."""
+        formulario = self._formulario()
+        self.assertLess(formulario.index("Datos del edificio"), formulario.index("Datos del presidente"))
+
+    def test_el_solicitante_esta_plegado(self):
+        formulario = self._formulario()
+        i = formulario.index("Datos del presidente")
+        self.assertIn("presu-plegable", formulario[max(0, i - 400): i])
+
+    def test_la_foto_y_la_carta_estan_plegadas_y_juntas(self):
+        formulario = self._formulario()
+        i = formulario.index("Foto del edificio y carta de presentación")
+        self.assertIn("presu-plegable", formulario[max(0, i - 400): i])
+        self.assertLess(i, formulario.index("carta_presentacion"))
+
+    def test_los_plegables_van_despues_de_los_importes(self):
+        formulario = self._formulario()
+        self.assertLess(formulario.index("Importes"), formulario.index("presu-plegable"))
+
+    def test_se_abre_solo_si_ya_tiene_datos(self):
+        """Plegar sirve para acortar, no para esconder lo que ya está escrito."""
+        self.assertIn("const abrirPlegableSiTieneDatos", APP)
+        self.assertIn("caja.open = true", APP)
+        self.assertEqual(APP.count("abrirPlegableSiTieneDatos();"), 2)
+
+    def test_ningun_campo_obligatorio_queda_plegado(self):
+        """Un required escondido bloquea el envío sin decir dónde."""
+        formulario = self._formulario()
+        i = formulario.index("presu-plegable")
+        self.assertNotIn("required", formulario[i:])
+
+
+class LosTrasterosTampocoSePerdianAlPrecargarTests(unittest.TestCase):
+    """Resto del mismo fallo: se arregló el cálculo y el envío, pero las dos
+    precargas —cargar una comunidad y editar un presupuesto— seguían sin el campo,
+    así que los trasteros volvían a cero en cuanto tocabas cualquiera de las dos.
+    """
+
+    def test_al_precargar_una_comunidad(self):
+        i = APP.index('set("num_vecinos", community.num_vecinos ?? 0);')
+        self.assertIn('set("num_trasteros", community.num_trasteros ?? 0);', APP[i: i + 400])
+
+    def test_al_editar_un_presupuesto(self):
+        i = APP.index('set("num_vecinos", calc.num_vecinos ?? 0);')
+        self.assertIn('set("num_trasteros", calc.num_trasteros ?? 0);', APP[i: i + 400])
 
 
 if __name__ == "__main__":

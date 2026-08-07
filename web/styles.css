@@ -15240,3 +15240,14 @@ samp {
 .presu-resumen span { display: block; font-size: 12px; opacity: 0.7; }
 .presu-resumen strong { font-size: 19px; }
 .presu-resumen div[hidden] { display: none; }
+
+/* Bloques opcionales del presupuesto, plegados: el solicitante y los adornos del
+   PDF no deciden el precio y alargaban el formulario media pantalla. */
+.presu-plegable {
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 14px;
+  padding: 10px 14px;
+  margin: 6px 0;
+}
+.presu-plegable > summary { cursor: pointer; font-weight: 600; }
+.presu-plegable > .form-grid { margin-top: 12px; }
