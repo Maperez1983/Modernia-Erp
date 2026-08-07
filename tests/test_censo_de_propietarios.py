@@ -133,10 +133,16 @@ class LaCargaMasivaEstaBienGuardadaTests(unittest.TestCase):
         return SERVER[i: SERVER.index("\n        elif parsed.path ==", i + 10)]
 
     def test_las_dos_rutas_estan_dadas_de_alta(self):
-        i = SERVER.index('"/api/workspace_fincas_vecinos",')
-        vecindad = SERVER[i: i + 300]
-        self.assertIn('"/api/workspace_fincas_vecinos_import",', vecindad)
-        self.assertIn('"/api/workspace_fincas_vecino_delete",', vecindad)
+        """Se busca dentro de la lista blanca entera, no en una ventana de caracteres:
+        la primera versión miraba los 300 siguientes y se cayó sola al añadir rutas
+        de juntas en medio, sin que nada estuviera roto."""
+        i = SERVER.index("_POST_ALLOWED_PATHS") if "_POST_ALLOWED_PATHS" in SERVER else SERVER.index(
+            '"/api/workspace_fincas_comunidades",'
+        )
+        lista = SERVER[i: SERVER.index("}", i) if "}" in SERVER[i: i + 20000] else i + 20000]
+        for ruta in ("/api/workspace_fincas_vecinos_import", "/api/workspace_fincas_vecino_delete"):
+            with self.subTest(ruta=ruta):
+                self.assertIn(f'"{ruta}",', lista)
 
     def test_importar_exige_pertenencia_con_escritura(self):
         self.assertIn(

@@ -40899,6 +40899,85 @@ def ensure_workspace_product_tables(conn):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_junta_asistentes (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          junta_id TEXT NOT NULL,
+          vecino_id TEXT NOT NULL,
+          asiste INTEGER NOT NULL DEFAULT 0,
+          representado_por TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_junta_asistente_unico "
+            "ON workspace_fincas_junta_asistentes (junta_id, vecino_id)"
+        )
+    except Exception:
+        pass
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_junta_acuerdos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          junta_id TEXT NOT NULL,
+          orden INTEGER NOT NULL DEFAULT 1,
+          titulo TEXT NOT NULL,
+          descripcion TEXT,
+          mayoria_clave TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_junta_votos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          acuerdo_id TEXT NOT NULL,
+          vecino_id TEXT NOT NULL,
+          voto TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_junta_voto_unico "
+            "ON workspace_fincas_junta_votos (acuerdo_id, vecino_id)"
+        )
+    except Exception:
+        pass
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_mayorias (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          clave TEXT NOT NULL,
+          etiqueta TEXT NOT NULL,
+          porcentaje NUMERIC NOT NULL DEFAULT 0,
+          estricta INTEGER NOT NULL DEFAULT 0,
+          activo INTEGER NOT NULL DEFAULT 1,
+          orden INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_mayorias_unico "
+            "ON workspace_fincas_mayorias (workspace_id, clave)"
+        )
+    except Exception:
+        pass
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS workspace_fincas_contabilidad (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
@@ -49869,6 +49948,187 @@ def fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo="",
     }
 
 
+#: Tipos de mayoría que se siembran al abrir el módulo. Aquí **solo** está la
+#: aritmética que define cada fracción —tres quintos son el 60 %, unanimidad el
+#: 100 %—, que no es una afirmación jurídica sobre nada.
+#:
+#: Lo que este CRM no decide es **qué acuerdo exige qué mayoría**: eso lo elige el
+#: administrador acuerdo por acuerdo, y los porcentajes se pueden editar. Codificar
+#: de memoria qué artículo pide qué porcentaje sería inventar derecho, y una junta
+#: mal contada se impugna.
+FINCAS_MAYORIAS_DEFECTO = [
+    {"clave": "mayoria_simple", "etiqueta": "Mayoría simple (más de la mitad)", "porcentaje": 50.0, "estricta": 1, "orden": 1},
+    {"clave": "un_tercio", "etiqueta": "Un tercio", "porcentaje": 100.0 / 3, "estricta": 0, "orden": 2},
+    {"clave": "tres_quintos", "etiqueta": "Tres quintos", "porcentaje": 60.0, "estricta": 0, "orden": 3},
+    {"clave": "unanimidad", "etiqueta": "Unanimidad", "porcentaje": 100.0, "estricta": 0, "orden": 4},
+]
+
+
+def fetch_workspace_fincas_mayorias(conn, workspace_id, *, sembrar=True):
+    """Tipos de mayoría del workspace, sembrando los de partida la primera vez."""
+    workspace_id = str(workspace_id or "").strip()
+    if not workspace_id:
+        return []
+
+    def leer():
+        return conn.execute(
+            "SELECT clave, etiqueta, porcentaje, estricta, activo, orden FROM workspace_fincas_mayorias "
+            "WHERE workspace_id = ? ORDER BY orden, etiqueta",
+            (workspace_id,),
+        ).fetchall()
+
+    filas = leer()
+    if not filas and sembrar:
+        ahora = datetime.now().isoformat(timespec="seconds")
+        for item in FINCAS_MAYORIAS_DEFECTO:
+            conn.execute(
+                "INSERT INTO workspace_fincas_mayorias "
+                "(id, workspace_id, clave, etiqueta, porcentaje, estricta, activo, orden, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                (os.urandom(16).hex(), workspace_id, item["clave"], item["etiqueta"],
+                 round(item["porcentaje"], 4), item["estricta"], item["orden"], ahora, ahora),
+            )
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        filas = leer()
+    return [
+        {
+            "clave": row_value(f, "clave", ""),
+            "etiqueta": row_value(f, "etiqueta", ""),
+            "porcentaje": round(parse_money_value(row_value(f, "porcentaje", 0)), 4),
+            "estricta": int(row_value(f, "estricta", 0) or 0),
+            "activo": int(row_value(f, "activo", 1) or 0),
+            "orden": int(row_value(f, "orden", 0) or 0),
+        }
+        for f in filas
+    ]
+
+
+def _alcanza(valor, mayoria):
+    """¿Un porcentaje alcanza la mayoría pedida?"""
+    if not mayoria:
+        return None
+    umbral = float(mayoria.get("porcentaje") or 0)
+    if int(mayoria.get("estricta") or 0):
+        return valor > umbral + 1e-9
+    return valor >= umbral - 1e-9
+
+
+def calcular_recuento_junta(conn, workspace_id, junta_id):
+    """Asistencia y votación de una junta, contadas por cabezas y por coeficiente.
+
+    Las dos medidas van siempre juntas porque un acuerdo se mide por las dos, y
+    enseñar solo una es la forma de dar por aprobado algo que no lo está.
+
+    El **quórum no se decide aquí**: se dan las cifras de asistencia —presentes,
+    representados y qué coeficiente suman— y quien preside decide con ellas. Poner
+    un umbral inventado sería peor que no poner ninguno.
+    """
+    junta = conn.execute(
+        "SELECT * FROM workspace_fincas_juntas WHERE id = ? AND workspace_id = ? LIMIT 1",
+        (junta_id, workspace_id),
+    ).fetchone()
+    if not junta:
+        return None
+    comunidad_id = row_value(junta, "comunidad_id", "")
+    propietarios = conn.execute(
+        "SELECT id, nombre, piso, COALESCE(coeficiente, 0) AS coeficiente FROM workspace_fincas_vecinos "
+        "WHERE workspace_id = ? AND comunidad_id = ? ORDER BY piso, nombre",
+        (workspace_id, comunidad_id),
+    ).fetchall()
+    coef = {row_value(p, "id", ""): float(row_value(p, "coeficiente", 0) or 0) for p in propietarios}
+    total_coef = round(sum(coef.values()), 4)
+    total_prop = len(propietarios)
+
+    asistencia = {
+        row_value(a, "vecino_id", ""): a
+        for a in conn.execute(
+            "SELECT vecino_id, asiste, representado_por FROM workspace_fincas_junta_asistentes "
+            "WHERE junta_id = ? AND workspace_id = ?",
+            (junta_id, workspace_id),
+        ).fetchall()
+    }
+    presentes, representados = [], []
+    for vecino_id in coef:
+        fila = asistencia.get(vecino_id)
+        if not fila or not int(row_value(fila, "asiste", 0) or 0):
+            continue
+        (representados if str(row_value(fila, "representado_por", "") or "").strip() else presentes).append(vecino_id)
+    asistentes = presentes + representados
+
+    def porcentaje(ids, sobre_coef=True):
+        if sobre_coef:
+            return round(sum(coef.get(i, 0.0) for i in ids) / total_coef * 100, 4) if total_coef else 0.0
+        return round(len(ids) / total_prop * 100, 4) if total_prop else 0.0
+
+    mayorias = {m["clave"]: m for m in fetch_workspace_fincas_mayorias(conn, workspace_id)}
+    acuerdos = []
+    for acuerdo in conn.execute(
+        "SELECT id, orden, titulo, descripcion, mayoria_clave FROM workspace_fincas_junta_acuerdos "
+        "WHERE junta_id = ? AND workspace_id = ? ORDER BY orden",
+        (junta_id, workspace_id),
+    ).fetchall():
+        acuerdo_id = row_value(acuerdo, "id", "")
+        votos = {"Favor": [], "Contra": [], "Abstencion": []}
+        for voto in conn.execute(
+            "SELECT vecino_id, voto FROM workspace_fincas_junta_votos WHERE acuerdo_id = ? AND workspace_id = ?",
+            (acuerdo_id, workspace_id),
+        ).fetchall():
+            clave = str(row_value(voto, "voto", "") or "").strip().capitalize()
+            if clave in votos:
+                votos[clave].append(row_value(voto, "vecino_id", ""))
+        mayoria = mayorias.get(str(row_value(acuerdo, "mayoria_clave", "") or ""))
+        # El porcentaje se mide sobre el total de la comunidad, no sobre los que
+        # votaron: si no, una junta de cuatro gatos aprobaría por unanimidad.
+        pct_coef = porcentaje(votos["Favor"], True)
+        pct_prop = porcentaje(votos["Favor"], False)
+        acuerdos.append({
+            "id": acuerdo_id,
+            "orden": int(row_value(acuerdo, "orden", 0) or 0),
+            "titulo": row_value(acuerdo, "titulo", ""),
+            "descripcion": row_value(acuerdo, "descripcion", "") or "",
+            "mayoria_clave": row_value(acuerdo, "mayoria_clave", "") or "",
+            "mayoria_etiqueta": (mayoria or {}).get("etiqueta", ""),
+            "favor": len(votos["Favor"]),
+            "contra": len(votos["Contra"]),
+            "abstencion": len(votos["Abstencion"]),
+            "favor_coeficiente": pct_coef,
+            "favor_propietarios": pct_prop,
+            # Aprobado solo si alcanza por las dos medidas. Sin mayoría elegida no
+            # se dictamina: se deja en None y la pantalla pide que se elija.
+            "aprobado": None if not mayoria else bool(_alcanza(pct_coef, mayoria) and _alcanza(pct_prop, mayoria)),
+        })
+
+    return {
+        "junta": dict(junta),
+        "asistencia": {
+            "propietarios_total": total_prop,
+            "coeficiente_total": total_coef,
+            "presentes": len(presentes),
+            "representados": len(representados),
+            "asistentes": len(asistentes),
+            "asistentes_pct_propietarios": porcentaje(asistentes, False),
+            "asistentes_pct_coeficiente": porcentaje(asistentes, True),
+        },
+        "acuerdos": acuerdos,
+        "mayorias": list(mayorias.values()),
+        "propietarios": [
+            {
+                "id": row_value(p, "id", ""),
+                "nombre": row_value(p, "nombre", ""),
+                "piso": row_value(p, "piso", ""),
+                "coeficiente": float(row_value(p, "coeficiente", 0) or 0),
+                "asiste": row_value(p, "id", "") in asistentes,
+                "representado_por": str(row_value(asistencia.get(row_value(p, "id", "")), "representado_por", "") or "")
+                if asistencia.get(row_value(p, "id", "")) else "",
+            }
+            for p in propietarios
+        ],
+    }
+
+
 def fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id):
     """Quién debe, cuánto y desde cuándo.
 
@@ -49917,6 +50177,101 @@ def fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id):
             "recibos_impagados": sum(d["recibos"] for d in deudores),
         },
     }
+
+
+def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
+    """Acta de la junta: asistentes, votación y resultado de cada acuerdo.
+
+    Recoge lo que se ha registrado y nada más. El resultado de cada punto sale del
+    recuento por las dos medidas —cabezas y coeficiente— con la mayoría que el
+    administrador eligió para ese acuerdo; si no eligió ninguna, el acta lo dice
+    en vez de dictaminar por su cuenta.
+
+    Como el certificado de deuda, sale sin firmar: el acta la firman secretario y
+    presidente.
+    """
+    workspace = workspace or {}
+    company = company or {}
+    junta = recuento.get("junta") or {}
+    asistencia = recuento.get("asistencia") or {}
+    fecha = str(row_value(junta, "fecha", "") or "")[:10]
+
+    def limpio(valor):
+        texto = str(valor or "").strip()
+        return "" if texto in {"-", "—", "None"} else texto
+
+    sections = [
+        ("Asistencia", {"kind": "kpi_cards", "columns": 3, "items": [
+            {"label": "Asistentes", "value": f"{asistencia.get('asistentes', 0)} de {asistencia.get('propietarios_total', 0)}", "accent": 1},
+            {"label": "Sobre propietarios", "value": f"{asistencia.get('asistentes_pct_propietarios', 0):.2f} %"},
+            {"label": "Sobre coeficiente", "value": f"{asistencia.get('asistentes_pct_coeficiente', 0):.2f} %"},
+        ]}),
+        ("", [f"De ellos, {asistencia.get('presentes', 0)} presentes y "
+              f"{asistencia.get('representados', 0)} representados."]),
+        ("Comunidad", [linea for linea in (
+            f"Denominación: {limpio(row_value(comunidad, 'nombre', ''))}",
+            f"Dirección: {limpio(row_value(comunidad, 'direccion', ''))}" if limpio(row_value(comunidad, "direccion", "")) else "",
+            f"Junta {limpio(row_value(junta, 'tipo', '')) or 'ordinaria'} de {fecha}.",
+        ) if linea]),
+    ]
+
+    asistentes = [p for p in (recuento.get("propietarios") or []) if p.get("asiste")]
+    if asistentes:
+        sections.append(("Relación de asistentes", {
+            "kind": "table",
+            "columns": [
+                {"label": "Inmueble", "width": 2},
+                {"label": "Propietario", "width": 5},
+                {"label": "Representado por", "width": 3},
+                {"label": "Coeficiente", "width": 2, "align": "right"},
+            ],
+            "rows": [[p.get("piso", ""), p.get("nombre", ""), p.get("representado_por", "") or "—",
+                      f"{float(p.get('coeficiente') or 0):.4f} %"] for p in asistentes],
+        }))
+
+    for acuerdo in recuento.get("acuerdos") or []:
+        if acuerdo.get("aprobado") is None:
+            veredicto = "Sin mayoría asignada: el resultado no se dictamina."
+        else:
+            veredicto = "APROBADO" if acuerdo["aprobado"] else "NO APROBADO"
+        sections.append((f"{acuerdo.get('orden', 1)}. {acuerdo.get('titulo', '')}", [
+            linea for linea in (
+                limpio(acuerdo.get("descripcion")),
+                f"Mayoría exigida: {acuerdo.get('mayoria_etiqueta') or 'sin asignar'}.",
+                f"A favor: {acuerdo.get('favor', 0)} · En contra: {acuerdo.get('contra', 0)} · "
+                f"Abstenciones: {acuerdo.get('abstencion', 0)}.",
+                f"El voto a favor representa el {acuerdo.get('favor_propietarios', 0):.2f} % de los propietarios "
+                f"y el {acuerdo.get('favor_coeficiente', 0):.2f} % de los coeficientes.",
+                veredicto,
+            ) if linea
+        ]))
+
+    sections.append(("Firma", [
+        "Esta acta recoge lo registrado en la aplicación durante la junta. Debe ser firmada por",
+        "el secretario administrador con el visto bueno del presidente.",
+        "",
+        "",
+        "Fdo.: El secretario administrador",
+        "",
+        "",
+        "",
+        "V.º B.º El presidente",
+    ]))
+    try:
+        from .branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    except ImportError:
+        from branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    return build_modernia_branded_document_pdf_vector(
+        "ACTA DE JUNTA",
+        f"{limpio(row_value(comunidad, 'nombre', ''))} · {fecha}",
+        sections,
+        [f"Documento generado desde el CRM. Los porcentajes se calculan sobre el total de la comunidad, "
+         f"no sobre los asistentes."],
+        company=company,
+        brand_logo_url=_load_asset_logo("logos/fincas-velazquez.png", max_width=420),
+        brand_color=workspace.get("primary_color"),
+        seal_image=_load_asset_logo("logos/colegio-administradores-v2.png", max_width=300),
+    )
 
 
 def build_certificado_deuda_pdf(comunidad, vecino, recibos, workspace=None, company=None):
@@ -49980,7 +50335,11 @@ def build_certificado_deuda_pdf(comunidad, vecino, recibos, workspace=None, comp
         "el visto bueno del presidente para surtir efecto.",
         "",
         "",
-        "El secretario administrador                              V.º B.º El presidente",
+        "Fdo.: El secretario administrador",
+        "",
+        "",
+        "",
+        "V.º B.º El presidente",
     ]))
     fecha = datetime.now().date()
     MESES = ("enero", "febrero", "marzo", "abril", "mayo", "junio",
@@ -59309,6 +59668,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_recibos_emitir",
             "/api/workspace_fincas_recibo_estado",
             "/api/workspace_fincas_remesa_generar",
+            "/api/workspace_fincas_junta_asistencia",
+            "/api/workspace_fincas_junta_acuerdo",
+            "/api/workspace_fincas_junta_voto",
+            "/api/workspace_fincas_mayorias",
             "/api/workspace_fincas_vecino_delete",
             "/api/workspace_presupuesto_delete",
             "/api/workspace_rrhh_nominas_import",
@@ -71741,6 +72104,173 @@ class Handler(BaseHTTPRequestHandler):
                 "incluidos": len(incluidos),
                 "excluidos_sin_iban": len(candidatos) - len(incluidos),
             })
+            return
+        elif parsed.path in ("/api/workspace_fincas_junta_asistencia",
+                             "/api/workspace_fincas_junta_acuerdo",
+                             "/api/workspace_fincas_junta_voto",
+                             "/api/workspace_fincas_mayorias"):
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+
+            if parsed.path == "/api/workspace_fincas_junta_asistencia":
+                junta_id = str(payload.get("junta_id") or "").strip()
+                vecino_id = str(payload.get("vecino_id") or "").strip()
+                if not junta_id or not vecino_id:
+                    json_response(self, {"error": "junta_id y vecino_id requeridos"}, status=400)
+                    return
+                asiste = 1 if str(payload.get("asiste") or "").strip().lower() in {"1", "true", "si", "sí"} else 0
+                representado = str(payload.get("representado_por") or "").strip() or None
+                existente = conn.execute(
+                    "SELECT id FROM workspace_fincas_junta_asistentes WHERE junta_id = ? AND vecino_id = ? LIMIT 1",
+                    (junta_id, vecino_id),
+                ).fetchone()
+                if existente:
+                    conn.execute(
+                        "UPDATE workspace_fincas_junta_asistentes SET asiste = ?, representado_por = ?, "
+                        "updated_at = datetime(?) WHERE id = ?",
+                        (asiste, representado, now, row_value(existente, "id", "")),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO workspace_fincas_junta_asistentes "
+                        "(id, workspace_id, junta_id, vecino_id, asiste, representado_por, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
+                        (os.urandom(16).hex(), workspace_id, junta_id, vecino_id, asiste, representado, now, now),
+                    )
+                conn.commit()
+                json_response(self, {"ok": True, "recuento": calcular_recuento_junta(conn, workspace_id, junta_id)})
+                return
+
+            if parsed.path == "/api/workspace_fincas_junta_acuerdo":
+                junta_id = str(payload.get("junta_id") or "").strip()
+                record_id = str(payload.get("id") or "").strip()
+                titulo = str(payload.get("titulo") or "").strip()
+                if str(payload.get("borrar") or "").strip().lower() in {"1", "true", "si", "sí"} and record_id:
+                    conn.execute("DELETE FROM workspace_fincas_junta_votos WHERE acuerdo_id = ? AND workspace_id = ?",
+                                 (record_id, workspace_id))
+                    conn.execute("DELETE FROM workspace_fincas_junta_acuerdos WHERE id = ? AND workspace_id = ?",
+                                 (record_id, workspace_id))
+                    conn.commit()
+                    json_response(self, {"ok": True, "recuento": calcular_recuento_junta(conn, workspace_id, junta_id)})
+                    return
+                if not junta_id or not titulo:
+                    json_response(self, {"error": "junta_id y titulo requeridos"}, status=400)
+                    return
+                orden = parse_non_negative_int(payload.get("orden")) or (
+                    int(row_value(conn.execute(
+                        "SELECT COALESCE(MAX(orden), 0) AS n FROM workspace_fincas_junta_acuerdos WHERE junta_id = ?",
+                        (junta_id,)).fetchone(), "n", 0) or 0) + 1
+                )
+                valores = (
+                    titulo,
+                    str(payload.get("descripcion") or "").strip() or None,
+                    str(payload.get("mayoria_clave") or "").strip() or None,
+                    orden,
+                )
+                if record_id:
+                    conn.execute(
+                        "UPDATE workspace_fincas_junta_acuerdos SET titulo = ?, descripcion = ?, mayoria_clave = ?, "
+                        "orden = ?, updated_at = datetime(?) WHERE id = ? AND workspace_id = ?",
+                        (*valores, now, record_id, workspace_id),
+                    )
+                else:
+                    record_id = os.urandom(16).hex()
+                    conn.execute(
+                        "INSERT INTO workspace_fincas_junta_acuerdos "
+                        "(id, workspace_id, junta_id, titulo, descripcion, mayoria_clave, orden, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
+                        (record_id, workspace_id, junta_id, *valores, now, now),
+                    )
+                conn.commit()
+                json_response(self, {"ok": True, "id": record_id,
+                                     "recuento": calcular_recuento_junta(conn, workspace_id, junta_id)})
+                return
+
+            if parsed.path == "/api/workspace_fincas_junta_voto":
+                acuerdo_id = str(payload.get("acuerdo_id") or "").strip()
+                vecino_id = str(payload.get("vecino_id") or "").strip()
+                voto = str(payload.get("voto") or "").strip().capitalize()
+                if not acuerdo_id or not vecino_id or voto not in {"Favor", "Contra", "Abstencion", ""}:
+                    json_response(self, {"error": "acuerdo_id, vecino_id y voto válido requeridos"}, status=400)
+                    return
+                fila = conn.execute(
+                    "SELECT junta_id FROM workspace_fincas_junta_acuerdos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (acuerdo_id, workspace_id),
+                ).fetchone()
+                if not fila:
+                    json_response(self, {"error": "acuerdo no encontrado"}, status=404)
+                    return
+                conn.execute("DELETE FROM workspace_fincas_junta_votos WHERE acuerdo_id = ? AND vecino_id = ?",
+                             (acuerdo_id, vecino_id))
+                if voto:
+                    conn.execute(
+                        "INSERT INTO workspace_fincas_junta_votos "
+                        "(id, workspace_id, acuerdo_id, vecino_id, voto, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, datetime(?), datetime(?))",
+                        (os.urandom(16).hex(), workspace_id, acuerdo_id, vecino_id, voto, now, now),
+                    )
+                conn.commit()
+                json_response(self, {"ok": True,
+                                     "recuento": calcular_recuento_junta(conn, workspace_id, row_value(fila, "junta_id", ""))})
+                return
+
+            # /api/workspace_fincas_mayorias: se guarda la tabla entera de una vez.
+            items = payload.get("items")
+            if isinstance(items, str):
+                try:
+                    items = json.loads(items)
+                except Exception:
+                    items = None
+            if not isinstance(items, list):
+                json_response(self, {"error": "items requerido"}, status=400)
+                return
+            vistas = set()
+            for orden, item in enumerate(items, start=1):
+                if not isinstance(item, dict):
+                    continue
+                etiqueta = str(item.get("etiqueta") or "").strip()
+                if not etiqueta:
+                    continue
+                clave = normalize_lookup_text(item.get("clave") or etiqueta).replace(" ", "_").lower()[:60]
+                if not clave or clave in vistas:
+                    continue
+                vistas.add(clave)
+                valores = (
+                    etiqueta,
+                    round(parse_money_value(item.get("porcentaje")), 4),
+                    1 if str(item.get("estricta", 0)) in {"1", "True", "true", "si", "sí"} else 0,
+                    0 if str(item.get("activo", 1)) in {"0", "False", "false", ""} else 1,
+                    orden,
+                )
+                existente = conn.execute(
+                    "SELECT id FROM workspace_fincas_mayorias WHERE workspace_id = ? AND clave = ? LIMIT 1",
+                    (workspace_id, clave),
+                ).fetchone()
+                if existente:
+                    conn.execute(
+                        "UPDATE workspace_fincas_mayorias SET etiqueta = ?, porcentaje = ?, estricta = ?, "
+                        "activo = ?, orden = ?, updated_at = datetime(?) WHERE id = ?",
+                        (*valores, now, row_value(existente, "id", "")),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO workspace_fincas_mayorias "
+                        "(id, workspace_id, clave, etiqueta, porcentaje, estricta, activo, orden, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
+                        (os.urandom(16).hex(), workspace_id, clave, *valores, now, now),
+                    )
+            conn.commit()
+            json_response(self, {"ok": True, "items": fetch_workspace_fincas_mayorias(conn, workspace_id, sembrar=False)})
             return
         elif parsed.path == "/api/workspace_fincas_vecino_delete":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -85468,6 +85998,75 @@ class Handler(BaseHTTPRequestHandler):
                 self, xml, content_type="application/xml",
                 filename=f"remesa_{row_value(remesa, 'referencia', remesa_id)}.xml",
             )
+            return
+
+        if path == "/api/workspace_fincas_junta":
+            workspace_id = params.get("workspace_id", [""])[0]
+            junta_id = (params.get("id", [""])[0] or "").strip()
+            if not workspace_id or not junta_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            recuento = calcular_recuento_junta(conn, workspace_id, junta_id)
+            if not recuento:
+                json_response(self, {"error": "junta no encontrada"}, status=404)
+                return
+            json_response(self, recuento)
+            return
+
+        if path == "/api/workspace_fincas_mayorias":
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, {"items": fetch_workspace_fincas_mayorias(conn, workspace_id)})
+            return
+
+        if path == "/api/workspace_fincas_acta":
+            workspace_id = params.get("workspace_id", [""])[0]
+            junta_id = (params.get("id", [""])[0] or "").strip()
+            if not workspace_id or not junta_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            recuento = calcular_recuento_junta(conn, workspace_id, junta_id)
+            if not recuento:
+                json_response(self, {"error": "junta no encontrada"}, status=404)
+                return
+            comunidad = conn.execute(
+                "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (row_value(recuento["junta"], "comunidad_id", ""), workspace_id),
+            ).fetchone()
+            detalle = fetch_workspace_detail(conn, workspace_id)
+            pdf = build_acta_junta_pdf(
+                recuento, comunidad or {},
+                workspace=detalle.get("workspace") or {},
+                company=(detalle.get("companies") or [{}])[0] if detalle.get("companies") else {},
+            )
+            binary_response(self, pdf, content_type="application/pdf",
+                            filename=f"acta_{str(row_value(recuento['junta'], 'fecha', ''))[:10]}.pdf")
             return
 
         if path == "/api/workspace_fincas_morosidad":

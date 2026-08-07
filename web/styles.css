@@ -15200,3 +15200,9 @@ samp {
 .recibo-estado { font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line, rgba(0,0,0,0.12)); }
 .recibo-estado[data-estado="Cobrado"] { border-color: rgba(22, 163, 74, 0.5); color: #15803d; }
 .recibo-estado[data-estado="Devuelto"] { border-color: rgba(220, 38, 38, 0.5); color: #b91c1c; }
+
+/* Junta: cada punto del orden del día y su votación. */
+.junta-acuerdo { margin: 12px 0; padding: 12px 14px; border: 1px solid rgba(0,0,0,0.08); border-radius: 14px; }
+.junta-acuerdo-cabeza { display: flex; align-items: center; gap: 10px; justify-content: space-between; }
+.junta-votos { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 6px; margin-top: 10px; }
+.junta-votos .fincas-extra { padding: 6px 10px; }

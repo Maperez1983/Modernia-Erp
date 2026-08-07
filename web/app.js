@@ -23855,6 +23855,146 @@ const renderWorkspaceFincasCommunityFicha = async () => {
     return;
   }
 
+  if (tab === "juntas") {
+    workspaceFincasCommunityFichaPanel.innerHTML = `
+      <div class="form-grid" style="align-items:end;">
+        <label class="span-2">Junta <select data-junta-sel></select></label>
+        <div class="form-actions span-2">
+          <button type="button" class="secondary ghost" data-junta-acta>Descargar acta</button>
+          <span class="muted" data-junta-status></span>
+        </div>
+      </div>
+      <div data-junta-cuerpo><p class="muted">Cargando…</p></div>
+    `;
+    const panel = workspaceFincasCommunityFichaPanel;
+    const sel = panel.querySelector("[data-junta-sel]");
+    const cuerpo = panel.querySelector("[data-junta-cuerpo]");
+    const estado = panel.querySelector("[data-junta-status]");
+
+    const todasLasJuntas = Array.isArray((state.currentWorkspaceData || {}).fincasMeetings)
+      ? (state.currentWorkspaceData || {}).fincasMeetings : [];
+    const juntasDeLaComunidad = todasLasJuntas
+      .filter((j) => String(j.comunidad_id || "") === String(comunidadId));
+    sel.innerHTML = juntasDeLaComunidad.length
+      ? juntasDeLaComunidad.map((j) => `<option value="${escapeHtml(String(j.id))}">${escapeHtml(String(j.fecha || "").slice(0, 10))} · ${escapeHtml(j.tipo || "Junta")}</option>`).join("")
+      : `<option value="">No hay juntas creadas</option>`;
+
+    const pinta = (r) => {
+      if (!r) { cuerpo.innerHTML = "<p class='muted'>Crea una junta primero desde la pestaña de Juntas del CRM.</p>"; return; }
+      const a = r.asistencia || {};
+      const mayorias = r.mayorias || [];
+      cuerpo.innerHTML = `
+        <div class="workspace-mini-kpis">
+          <div class="workspace-mini-kpi"><span>Asistentes</span><strong>${a.asistentes} / ${a.propietarios_total}</strong></div>
+          <div class="workspace-mini-kpi"><span>Sobre propietarios</span><strong>${Number(a.asistentes_pct_propietarios || 0).toFixed(2)} %</strong></div>
+          <div class="workspace-mini-kpi"><span>Sobre coeficiente</span><strong>${Number(a.asistentes_pct_coeficiente || 0).toFixed(2)} %</strong></div>
+          <div class="workspace-mini-kpi"><span>Representados</span><strong>${a.representados}</strong></div>
+        </div>
+        <p class="muted">El quórum lo decide quien preside: aquí solo están las cifras.</p>
+        <h4>Asistencia</h4>
+        <div class="workspace-billing-list">
+          ${(r.propietarios || []).map((p) => `
+            <div class="workspace-billing-row">
+              <div><strong>${escapeHtml(p.piso || "—")} · ${escapeHtml(p.nombre || "")}</strong>
+                <div class="muted">${Number(p.coeficiente || 0).toFixed(4)} %${p.representado_por ? ` · representado por ${escapeHtml(p.representado_por)}` : ""}</div></div>
+              <div class="workspace-billing-meta">
+                <label class="fincas-extra" style="border:0;padding:0;">
+                  <input type="checkbox" data-asiste="${escapeHtml(String(p.id))}" ${p.asiste ? "checked" : ""} />
+                  <span>Asiste</span>
+                </label>
+                <input placeholder="Representado por" value="${escapeHtml(p.representado_por || "")}" data-repre="${escapeHtml(String(p.id))}" style="max-width:180px;" />
+              </div>
+            </div>`).join("")}
+        </div>
+        <h4>Orden del día y votación</h4>
+        ${(r.acuerdos || []).map((ac) => `
+          <div class="junta-acuerdo">
+            <div class="junta-acuerdo-cabeza">
+              <strong>${ac.orden}. ${escapeHtml(ac.titulo)}</strong>
+              <span class="recibo-estado" data-estado="${ac.aprobado === true ? "Cobrado" : ac.aprobado === false ? "Devuelto" : ""}">
+                ${ac.aprobado === true ? "Aprobado" : ac.aprobado === false ? "No aprobado" : "Sin mayoría asignada"}
+              </span>
+            </div>
+            <div class="muted">
+              A favor ${ac.favor} · en contra ${ac.contra} · abstenciones ${ac.abstencion} —
+              ${Number(ac.favor_propietarios).toFixed(2)} % de propietarios y ${Number(ac.favor_coeficiente).toFixed(2)} % de coeficiente.
+            </div>
+            <label>Mayoría exigida
+              <select data-mayoria="${escapeHtml(String(ac.id))}">
+                <option value="">— elige —</option>
+                ${mayorias.map((m) => `<option value="${escapeHtml(m.clave)}" ${m.clave === ac.mayoria_clave ? "selected" : ""}>${escapeHtml(m.etiqueta)}</option>`).join("")}
+              </select>
+            </label>
+            <div class="junta-votos">
+              ${(r.propietarios || []).map((p) => `
+                <label class="fincas-extra">
+                  <span>${escapeHtml(p.piso || p.nombre)}</span>
+                  <select data-voto="${escapeHtml(String(ac.id))}" data-vecino="${escapeHtml(String(p.id))}">
+                    <option value="">—</option>
+                    <option value="Favor">A favor</option>
+                    <option value="Contra">En contra</option>
+                    <option value="Abstencion">Abstención</option>
+                  </select>
+                </label>`).join("")}
+            </div>
+          </div>`).join("") || "<p class='muted'>Sin puntos en el orden del día.</p>"}
+        <form class="form-grid" data-acuerdo-form>
+          <label class="span-2">Nuevo punto <input name="titulo" placeholder="Ej. Aprobación de las cuentas" /></label>
+          <div class="form-actions span-2"><button type="submit">Añadir al orden del día</button></div>
+        </form>
+      `;
+      const juntaId = String(sel.value || "");
+      const manda = async (ruta, datos) => {
+        const res = await postJsonWithDbRetry(ruta, { workspace_id: workspaceId, ...datos });
+        if (res?.recuento) pinta(res.recuento);
+      };
+      cuerpo.querySelectorAll("[data-asiste]").forEach((el) => el.addEventListener("change", () =>
+        manda("/api/workspace_fincas_junta_asistencia", {
+          junta_id: juntaId, vecino_id: el.dataset.asiste, asiste: el.checked ? "1" : "0",
+          representado_por: cuerpo.querySelector(`[data-repre="${el.dataset.asiste}"]`)?.value || "",
+        })));
+      cuerpo.querySelectorAll("[data-repre]").forEach((el) => el.addEventListener("change", () =>
+        manda("/api/workspace_fincas_junta_asistencia", {
+          junta_id: juntaId, vecino_id: el.dataset.repre,
+          asiste: cuerpo.querySelector(`[data-asiste="${el.dataset.repre}"]`)?.checked ? "1" : "0",
+          representado_por: el.value,
+        })));
+      cuerpo.querySelectorAll("[data-mayoria]").forEach((el) => el.addEventListener("change", () =>
+        manda("/api/workspace_fincas_junta_acuerdo", {
+          junta_id: juntaId, id: el.dataset.mayoria, mayoria_clave: el.value,
+          titulo: (r.acuerdos.find((x) => String(x.id) === el.dataset.mayoria) || {}).titulo || "Punto",
+        })));
+      cuerpo.querySelectorAll("[data-voto]").forEach((el) => el.addEventListener("change", () =>
+        manda("/api/workspace_fincas_junta_voto", {
+          acuerdo_id: el.dataset.voto, vecino_id: el.dataset.vecino, voto: el.value,
+        })));
+      const alta = cuerpo.querySelector("[data-acuerdo-form]");
+      if (alta) alta.onsubmit = async (ev) => {
+        ev.preventDefault();
+        const titulo = alta.querySelector('[name="titulo"]')?.value?.trim();
+        if (!titulo) return;
+        await manda("/api/workspace_fincas_junta_acuerdo", { junta_id: juntaId, titulo });
+      };
+    };
+
+    const cargar = async () => {
+      const juntaId = String(sel.value || "");
+      if (!juntaId) { pinta(null); return; }
+      try {
+        pinta(await api(`/api/workspace_fincas_junta?workspace_id=${encodeURIComponent(workspaceId)}&id=${encodeURIComponent(juntaId)}`));
+      } catch (e) {
+        cuerpo.innerHTML = `<p class="muted">${escapeHtml(e?.message || "No se pudo cargar la junta.")}</p>`;
+      }
+    };
+    sel.addEventListener("change", cargar);
+    panel.querySelector("[data-junta-acta]")?.addEventListener("click", () => {
+      if (!sel.value) { if (estado) estado.textContent = "Elige una junta."; return; }
+      window.open(`/api/workspace_fincas_acta?workspace_id=${encodeURIComponent(workspaceId)}&id=${encodeURIComponent(sel.value)}`, "_blank");
+    });
+    await cargar();
+    return;
+  }
+
   if (tab === "proveedores") {
     workspaceFincasCommunityFichaPanel.innerHTML = `
       <div class="workspace-two-cols">
