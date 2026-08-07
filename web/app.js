@@ -23995,6 +23995,97 @@ const renderWorkspaceFincasCommunityFicha = async () => {
     return;
   }
 
+  if (tab === "ejercicio") {
+    const anyoActual = String(new Date().getFullYear());
+    workspaceFincasCommunityFichaPanel.innerHTML = `
+      <div class="form-grid" style="align-items:end;">
+        <label>Ejercicio <input data-ej-anyo inputmode="numeric" value="${anyoActual}" maxlength="4" /></label>
+        <label>Fondo de reserva (% del presupuesto) <input data-ej-fondo inputmode="decimal" /></label>
+        <div class="form-actions span-2">
+          <button type="button" data-ej-guardar>Guardar presupuesto</button>
+          <span class="muted" data-ej-status></span>
+        </div>
+      </div>
+      <div data-ej-resumen></div>
+      <h4>Partidas del presupuesto</h4>
+      <table class="table"><thead><tr><th>Concepto</th><th>Importe (€)</th><th></th></tr></thead>
+        <tbody data-ej-partidas></tbody></table>
+      <div class="form-actions">
+        <button type="button" class="secondary ghost" data-ej-anadir>Añadir partida</button>
+      </div>
+    `;
+    const panel = workspaceFincasCommunityFichaPanel;
+    const estado = panel.querySelector("[data-ej-status]");
+    let partidas = [];
+
+    const pintaPartidas = () => {
+      panel.querySelector("[data-ej-partidas]").innerHTML = partidas.map((p, i) => `
+        <tr data-fila="${i}">
+          <td><input data-campo="concepto" value="${escapeHtml(p.concepto || "")}" /></td>
+          <td><input data-campo="importe" type="number" step="0.01" value="${Number(p.importe || 0)}" /></td>
+          <td><button type="button" class="secondary ghost" data-quitar="${i}">Quitar</button></td>
+        </tr>`).join("") || `<tr><td colspan="3" class="muted">Sin partidas todavía.</td></tr>`;
+      panel.querySelectorAll("[data-quitar]").forEach((b) => b.addEventListener("click", () => {
+        partidas = leePartidas();
+        partidas.splice(Number(b.dataset.quitar), 1);
+        pintaPartidas();
+      }));
+    };
+    const leePartidas = () => Array.from(panel.querySelectorAll("[data-fila]")).map((tr) => ({
+      concepto: tr.querySelector('[data-campo="concepto"]')?.value?.trim() || "",
+      importe: Number(tr.querySelector('[data-campo="importe"]')?.value || 0) || 0,
+    })).filter((p) => p.concepto);
+
+    const pinta = (datos) => {
+      const r = datos?.resumen || {};
+      partidas = datos?.partidas || [];
+      panel.querySelector("[data-ej-fondo]").value = r.fondo_reserva_pct || "";
+      panel.querySelector("[data-ej-resumen]").innerHTML = `
+        <div class="workspace-mini-kpis">
+          <div class="workspace-mini-kpi"><span>Presupuestado</span><strong>${euroFormatter.format(r.presupuestado || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Gastado</span><strong>${euroFormatter.format(r.gastado || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Desviación</span><strong>${euroFormatter.format(r.desviacion || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Recibos cobrados</span><strong>${euroFormatter.format(r.recibos_cobrados || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Recibos pendientes</span><strong>${euroFormatter.format(r.recibos_pendientes || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Fondo de reserva</span><strong>${r.fondo_reserva_sin_configurar ? "sin configurar" : euroFormatter.format(r.fondo_reserva || 0)}</strong></div>
+        </div>
+        ${r.fondo_reserva_sin_configurar ? `<p class="censo-aviso">El fondo de reserva no está configurado. El porcentaje mínimo lo fija la ley: confírmalo con el Colegio y ponlo arriba. No lo relleno yo por si acaso.</p>` : ""}
+      `;
+      pintaPartidas();
+    };
+
+    const cargar = async () => {
+      const anyo = String(panel.querySelector("[data-ej-anyo]")?.value || anyoActual).slice(0, 4);
+      try {
+        pinta(await api(`/api/workspace_fincas_ejercicio?workspace_id=${encodeURIComponent(workspaceId)}&comunidad_id=${encodeURIComponent(comunidadId)}&ejercicio=${encodeURIComponent(anyo)}`));
+      } catch (e) {
+        if (estado) estado.textContent = e?.message || "No se pudo cargar el ejercicio.";
+      }
+    };
+    panel.querySelector("[data-ej-anyo]")?.addEventListener("change", cargar);
+    panel.querySelector("[data-ej-anadir]")?.addEventListener("click", () => {
+      partidas = [...leePartidas(), { concepto: "Nueva partida", importe: 0 }];
+      pintaPartidas();
+    });
+    panel.querySelector("[data-ej-guardar]")?.addEventListener("click", async () => {
+      try {
+        if (estado) estado.textContent = "Guardando…";
+        const res = await postJsonWithDbRetry("/api/workspace_fincas_presupuesto_anual", {
+          workspace_id: workspaceId, comunidad_id: comunidadId,
+          ejercicio: String(panel.querySelector("[data-ej-anyo]")?.value || anyoActual).slice(0, 4),
+          fondo_reserva_pct: panel.querySelector("[data-ej-fondo]")?.value || "",
+          partidas: leePartidas(),
+        });
+        if (res?.ejercicio) pinta(res.ejercicio);
+        if (estado) estado.textContent = "Guardado.";
+      } catch (e) {
+        if (estado) estado.textContent = e?.message || "No se pudo guardar.";
+      }
+    });
+    await cargar();
+    return;
+  }
+
   if (tab === "proveedores") {
     workspaceFincasCommunityFichaPanel.innerHTML = `
       <div class="workspace-two-cols">
@@ -24131,6 +24222,13 @@ const renderWorkspaceFincasCommunityFicha = async () => {
                 ${providers.map((p) => `<option value="${escapeHtml(String(p.id || ""))}">${escapeHtml(p.nombre || "-")}</option>`).join("")}
               </select>
             </label>
+            <label class="span-all">Póliza de la comunidad
+              <select name="seguro_id">
+                <option value="">(Sin póliza)</option>
+                ${((state.currentWorkspaceData || {}).fincasPolizas || []).map((s) => `<option value="${escapeHtml(String(s.id || ""))}">${escapeHtml([s.tomador, s.compania, s.ramo, s.poliza_numero].filter(Boolean).join(" · ") || String(s.id))}</option>`).join("")}
+              </select>
+            </label>
+            <label>Ref. siniestro <input name="siniestro_ref" placeholder="La que dé la compañía" /></label>
             <label>Fecha apertura <input type="date" name="fecha_apertura" value="${new Date().toISOString().slice(0,10)}" /></label>
             <label>Coste estimado <input name="coste_estimado" inputmode="decimal" /></label>
             <label class="span-all">Responsable <input name="responsable" /></label>
@@ -24140,6 +24238,18 @@ const renderWorkspaceFincasCommunityFicha = async () => {
         </div>
       </div>
     `;
+    if (!Array.isArray((state.currentWorkspaceData || {}).fincasPolizas)) {
+      // Se cargan una vez y se guardan: el desplegable de póliza las necesita, y
+      // sin ellas la incidencia se puede guardar igual, solo que sin enlazar.
+      try {
+        const datos = await api(`/api/workspace_fincas_polizas?workspace_id=${encodeURIComponent(workspaceId)}`);
+        state.currentWorkspaceData = { ...(state.currentWorkspaceData || {}), fincasPolizas: datos?.rows || [] };
+        renderWorkspaceFincasCommunityFicha();
+        return;
+      } catch (e) {
+        state.currentWorkspaceData = { ...(state.currentWorkspaceData || {}), fincasPolizas: [] };
+      }
+    }
     const form = workspaceFincasCommunityFichaPanel.querySelector("[data-incident-form]");
     const statusEl = workspaceFincasCommunityFichaPanel.querySelector("[data-incident-status]");
     const titleEl = workspaceFincasCommunityFichaPanel.querySelector("[data-incident-form-title]");

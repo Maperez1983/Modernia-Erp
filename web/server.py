@@ -40860,6 +40860,11 @@ def ensure_workspace_product_tables(conn):
         """
     )
     ensure_column(conn, "workspace_fincas_incidencias", "proveedor_id", "proveedor_id TEXT")
+    # Un siniestro de agua se gestiona con la póliza de la comunidad delante. Tener
+    # el CRM de seguros al lado es la ventaja que una aplicación suelta de fincas no
+    # puede dar, y para aprovecharla basta con guardar a qué póliza corresponde.
+    ensure_column(conn, "workspace_fincas_incidencias", "seguro_id", "seguro_id TEXT")
+    ensure_column(conn, "workspace_fincas_incidencias", "siniestro_ref", "siniestro_ref TEXT")
     ensure_column(conn, "workspace_fincas_incidencias", "coste_estimado", "coste_estimado REAL")
     conn.execute(
         """
@@ -40994,6 +40999,43 @@ def ensure_workspace_product_tables(conn):
         """
     )
     ensure_column(conn, "workspace_fincas_contabilidad", "estado", "estado TEXT NOT NULL DEFAULT 'Manual'")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_presupuesto_anual (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          comunidad_id TEXT NOT NULL,
+          ejercicio TEXT NOT NULL,
+          estado TEXT NOT NULL DEFAULT 'Borrador',
+          fondo_reserva_pct NUMERIC NOT NULL DEFAULT 0,
+          fecha_aprobacion TEXT,
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_presupuesto_anual_unico "
+            "ON workspace_fincas_presupuesto_anual (comunidad_id, ejercicio)"
+        )
+    except Exception:
+        pass
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_presupuesto_partidas (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          presupuesto_id TEXT NOT NULL,
+          orden INTEGER NOT NULL DEFAULT 1,
+          concepto TEXT NOT NULL,
+          importe NUMERIC NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_vecinos (
@@ -50126,6 +50168,87 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
             }
             for p in propietarios
         ],
+    }
+
+
+def fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio):
+    """Presupuesto del ejercicio frente a lo realmente ingresado y gastado.
+
+    El **fondo de reserva** se calcula como porcentaje del presupuesto ordinario,
+    pero el porcentaje se guarda por comunidad y no viene puesto: la ley fija un
+    mínimo que conviene confirmar con el Colegio antes de darlo por bueno, y un
+    número inventado aquí acabaría en una liquidación firmada. Mientras esté a
+    cero, la pantalla lo dice en vez de calcular con un valor falso.
+    """
+    ejercicio = str(ejercicio or "").strip()[:4]
+    cabecera = conn.execute(
+        "SELECT * FROM workspace_fincas_presupuesto_anual "
+        "WHERE workspace_id = ? AND comunidad_id = ? AND ejercicio = ? LIMIT 1",
+        (workspace_id, comunidad_id, ejercicio),
+    ).fetchone()
+    partidas = []
+    presupuestado = 0.0
+    if cabecera:
+        for fila in conn.execute(
+            "SELECT id, orden, concepto, importe FROM workspace_fincas_presupuesto_partidas "
+            "WHERE presupuesto_id = ? AND workspace_id = ? ORDER BY orden",
+            (row_value(cabecera, "id", ""), workspace_id),
+        ).fetchall():
+            importe = round(parse_money_value(row_value(fila, "importe", 0)), 2)
+            presupuestado += importe
+            partidas.append({
+                "id": row_value(fila, "id", ""),
+                "orden": int(row_value(fila, "orden", 0) or 0),
+                "concepto": row_value(fila, "concepto", ""),
+                "importe": importe,
+            })
+    presupuestado = round(presupuestado, 2)
+
+    # Lo realmente movido en el ejercicio, de la contabilidad de la comunidad.
+    real = conn.execute(
+        "SELECT tipo, COALESCE(SUM(importe), 0) AS total FROM workspace_fincas_contabilidad "
+        "WHERE workspace_id = ? AND comunidad_id = ? AND substr(COALESCE(fecha, ''), 1, 4) = ? "
+        "GROUP BY tipo",
+        (workspace_id, comunidad_id, ejercicio),
+    ).fetchall()
+    gastos = ingresos = 0.0
+    for fila in real:
+        importe = round(parse_money_value(row_value(fila, "total", 0)), 2)
+        if normalize_lookup_text(row_value(fila, "tipo", "")) == "INGRESO":
+            ingresos += importe
+        else:
+            gastos += importe
+
+    # Y lo cobrado por recibos, que es de dónde sale el dinero de verdad.
+    cobrado = round(parse_money_value(row_value(conn.execute(
+        "SELECT COALESCE(SUM(importe), 0) AS total FROM workspace_fincas_recibos "
+        "WHERE workspace_id = ? AND comunidad_id = ? AND estado = 'Cobrado' "
+        "AND substr(periodo, 1, 4) = ?",
+        (workspace_id, comunidad_id, ejercicio),
+    ).fetchone(), "total", 0)), 2)
+    pendiente = round(parse_money_value(row_value(conn.execute(
+        "SELECT COALESCE(SUM(importe), 0) AS total FROM workspace_fincas_recibos "
+        "WHERE workspace_id = ? AND comunidad_id = ? AND estado IN ('Pendiente', 'Devuelto') "
+        "AND substr(periodo, 1, 4) = ?",
+        (workspace_id, comunidad_id, ejercicio),
+    ).fetchone(), "total", 0)), 2)
+
+    fondo_pct = round(parse_money_value(row_value(cabecera, "fondo_reserva_pct", 0)) if cabecera else 0, 4)
+    return {
+        "ejercicio": ejercicio,
+        "presupuesto": dict(cabecera) if cabecera else None,
+        "partidas": partidas,
+        "resumen": {
+            "presupuestado": presupuestado,
+            "gastado": round(gastos, 2),
+            "ingresado": round(ingresos, 2),
+            "desviacion": round(presupuestado - gastos, 2),
+            "recibos_cobrados": cobrado,
+            "recibos_pendientes": pendiente,
+            "fondo_reserva_pct": fondo_pct,
+            "fondo_reserva": round(presupuestado * fondo_pct / 100, 2) if fondo_pct else 0.0,
+            "fondo_reserva_sin_configurar": not fondo_pct,
+        },
     }
 
 
@@ -59672,6 +59795,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_junta_acuerdo",
             "/api/workspace_fincas_junta_voto",
             "/api/workspace_fincas_mayorias",
+            "/api/workspace_fincas_presupuesto_anual",
             "/api/workspace_fincas_vecino_delete",
             "/api/workspace_presupuesto_delete",
             "/api/workspace_rrhh_nominas_import",
@@ -71199,6 +71323,11 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             proveedor_id = str(payload.get("proveedor_id") or "").strip() or None
+            # Enlace con el CRM de seguros: un siniestro de agua se gestiona con la
+            # póliza de la comunidad delante, y aquí las dos cosas están en la misma
+            # base. Es lo que una aplicación suelta de fincas no puede ofrecer.
+            seguro_id_valor = str(payload.get("seguro_id") or "").strip() or None
+            siniestro_ref_valor = str(payload.get("siniestro_ref") or "").strip() or None
             proveedor_nombre = str(payload.get("proveedor") or "").strip() or None
             if proveedor_id and not proveedor_nombre:
                 proveedor_row = conn.execute(
@@ -71219,13 +71348,16 @@ class Handler(BaseHTTPRequestHandler):
                 (payload.get("fecha_apertura") or "").strip() or None,
                 (payload.get("fecha_cierre") or "").strip() or None,
                 round(parse_money_value(payload.get("coste_estimado")), 2) if parse_money_value(payload.get("coste_estimado")) is not None else None,
+                seguro_id_valor,
+                siniestro_ref_valor,
             )
             if record_id:
                 conn.execute(
                     """
                     UPDATE workspace_fincas_incidencias
                     SET workspace_id = ?, comunidad_id = ?, titulo = ?, descripcion = ?, prioridad = ?, estado = ?,
-                        proveedor = ?, proveedor_id = ?, responsable = ?, fecha_apertura = ?, fecha_cierre = ?, coste_estimado = ?, updated_at = datetime(?)
+                        proveedor = ?, proveedor_id = ?, responsable = ?, fecha_apertura = ?, fecha_cierre = ?, coste_estimado = ?,
+                        seguro_id = ?, siniestro_ref = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
                     (*values, now, record_id, workspace_id),
@@ -71236,8 +71368,9 @@ class Handler(BaseHTTPRequestHandler):
                     """
                     INSERT INTO workspace_fincas_incidencias (
                       id, workspace_id, comunidad_id, titulo, descripcion, prioridad, estado, proveedor,
-                      proveedor_id, responsable, fecha_apertura, fecha_cierre, coste_estimado, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      proveedor_id, responsable, fecha_apertura, fecha_cierre, coste_estimado,
+                      seguro_id, siniestro_ref, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
@@ -72271,6 +72404,76 @@ class Handler(BaseHTTPRequestHandler):
                     )
             conn.commit()
             json_response(self, {"ok": True, "items": fetch_workspace_fincas_mayorias(conn, workspace_id, sembrar=False)})
+            return
+        elif parsed.path == "/api/workspace_fincas_presupuesto_anual":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            comunidad_id = str(payload.get("comunidad_id") or "").strip()
+            ejercicio = str(payload.get("ejercicio") or "").strip()[:4]
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not comunidad_id or not re.fullmatch(r"\d{4}", ejercicio):
+                json_response(self, {"error": "workspace_id, comunidad_id y ejercicio (AAAA) requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            cabecera = conn.execute(
+                "SELECT id FROM workspace_fincas_presupuesto_anual "
+                "WHERE workspace_id = ? AND comunidad_id = ? AND ejercicio = ? LIMIT 1",
+                (workspace_id, comunidad_id, ejercicio),
+            ).fetchone()
+            estado = str(payload.get("estado") or "").strip() or "Borrador"
+            fondo = round(parse_money_value(payload.get("fondo_reserva_pct")), 4)
+            aprobacion = str(payload.get("fecha_aprobacion") or "").strip()[:10] or None
+            if cabecera:
+                presupuesto_id = row_value(cabecera, "id", "")
+                conn.execute(
+                    "UPDATE workspace_fincas_presupuesto_anual SET estado = ?, fondo_reserva_pct = ?, "
+                    "fecha_aprobacion = ?, notas = ?, updated_at = datetime(?) WHERE id = ?",
+                    (estado, fondo, aprobacion, str(payload.get("notas") or "").strip() or None, now, presupuesto_id),
+                )
+            else:
+                presupuesto_id = os.urandom(16).hex()
+                conn.execute(
+                    "INSERT INTO workspace_fincas_presupuesto_anual "
+                    "(id, workspace_id, comunidad_id, ejercicio, estado, fondo_reserva_pct, fecha_aprobacion, "
+                    " notas, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
+                    (presupuesto_id, workspace_id, comunidad_id, ejercicio, estado, fondo, aprobacion,
+                     str(payload.get("notas") or "").strip() or None, now, now),
+                )
+            partidas = payload.get("partidas")
+            if isinstance(partidas, str):
+                try:
+                    partidas = json.loads(partidas)
+                except Exception:
+                    partidas = None
+            if isinstance(partidas, list):
+                # Se guardan todas de una vez: lo que no venga, se va.
+                conn.execute(
+                    "DELETE FROM workspace_fincas_presupuesto_partidas WHERE presupuesto_id = ? AND workspace_id = ?",
+                    (presupuesto_id, workspace_id),
+                )
+                for orden, item in enumerate(partidas, start=1):
+                    if not isinstance(item, dict):
+                        continue
+                    concepto = str(item.get("concepto") or "").strip()
+                    if not concepto:
+                        continue
+                    conn.execute(
+                        "INSERT INTO workspace_fincas_presupuesto_partidas "
+                        "(id, workspace_id, presupuesto_id, orden, concepto, importe, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
+                        (os.urandom(16).hex(), workspace_id, presupuesto_id, orden, concepto,
+                         round(parse_money_value(item.get("importe")), 2), now, now),
+                    )
+            conn.commit()
+            json_response(self, {
+                "ok": True, "id": presupuesto_id,
+                "ejercicio": fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio),
+            })
             return
         elif parsed.path == "/api/workspace_fincas_vecino_delete":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -86067,6 +86270,50 @@ class Handler(BaseHTTPRequestHandler):
             )
             binary_response(self, pdf, content_type="application/pdf",
                             filename=f"acta_{str(row_value(recuento['junta'], 'fecha', ''))[:10]}.pdf")
+            return
+
+        if path == "/api/workspace_fincas_polizas":
+            # Pólizas del workspace para enlazarlas con una incidencia. Se devuelve
+            # lo justo para elegir en un desplegable: ni importes ni datos del
+            # tomador, que aquí no pintan nada.
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            filas = conn.execute(
+                "SELECT id, COALESCE(ramo, '') AS ramo, COALESCE(compania, '') AS compania, "
+                "COALESCE(poliza_numero, '') AS poliza_numero, COALESCE(tomador, '') AS tomador, "
+                "COALESCE(estado, '') AS estado "
+                "FROM seguros WHERE workspace_id = ? ORDER BY tomador, compania LIMIT 500",
+                (workspace_id,),
+            ).fetchall()
+            json_response(self, {"rows": [dict(f) for f in filas]})
+            return
+
+        if path == "/api/workspace_fincas_ejercicio":
+            workspace_id = params.get("workspace_id", [""])[0]
+            comunidad_id = (params.get("comunidad_id", [""])[0] or "").strip()
+            ejercicio = (params.get("ejercicio", [""])[0] or "").strip() or str(datetime.now().year)
+            if not workspace_id or not comunidad_id:
+                json_response(self, {"error": "workspace_id y comunidad_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio))
             return
 
         if path == "/api/workspace_fincas_morosidad":
