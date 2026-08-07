@@ -52,6 +52,10 @@ ESPACIO_TRAS_ENCABEZADO = 8.0
 ALTO_ENCABEZADO_CON_ARRANQUE = 78.0
 #: Separación por defecto entre los elementos de una lista (datos, servicios).
 ESPACIO_ENTRE_ITEMS = 2.0
+#: Cuánto baja la raya del encabezado por debajo de la base del texto. En IBM Plex
+#: el trazo descendente de una «p» a cuerpo 11,5 llega a unos 2,6 puntos, así que
+#: con menos de eso la raya cruza la letra y el título parece cortado.
+REGLA_BAJO_ENCABEZADO = 4.5
 
 
 def _texto(valor):
@@ -723,10 +727,16 @@ def build_modernia_branded_document_pdf_vector(
             if not lienzo.recien_abierta():
                 lienzo.y -= ESPACIO_ANTES_SECCION
             lienzo.linea_texto(_texto(encabezado), PDF_FONT_BOLD, 11.5, TINTA)
+            # `linea_texto` deja la base del texto en `y + 4`. Dibujar ahí la raya la
+            # hacía pasar por encima de los trazos que bajan —la «p» de «Carta de
+            # presentación», la «g» de «Gestión»— y el encabezado salía cortado por
+            # la mitad. Va por debajo del descendente.
+            base_texto = lienzo.y + 4
             lienzo.c.setStrokeColorRGB(*LINEA)
             lienzo.c.setLineWidth(0.5)
-            lienzo.c.line(MARGEN_X, lienzo.y + 4, A4_ANCHO - MARGEN_X, lienzo.y + 4)
-            lienzo.y -= ESPACIO_TRAS_ENCABEZADO
+            regla = base_texto - REGLA_BAJO_ENCABEZADO
+            lienzo.c.line(MARGEN_X, regla, A4_ANCHO - MARGEN_X, regla)
+            lienzo.y = regla - ESPACIO_TRAS_ENCABEZADO
         clase = str(cuerpo.get("kind") or "").lower() if isinstance(cuerpo, dict) else ""
         if clase == "kpi_cards":
             _tarjetas_kpi(lienzo, cuerpo)

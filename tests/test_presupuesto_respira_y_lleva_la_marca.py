@@ -230,6 +230,30 @@ class ElDocumentoRespiraTests(unittest.TestCase):
         self.assertIn("destacado = _es_destacado(paso)", cuerpo)
         self.assertIn("11.0 if destacado else 8.5", cuerpo)
 
+    def test_la_raya_del_encabezado_no_corta_las_letras(self):
+        """Iba justo a la altura de la base del texto, así que partía por la mitad
+        el trazo que baja: «Carta de presentación» salía con la «p» cortada."""
+        from reportlab.pdfbase import pdfmetrics
+
+        cara = pdfmetrics.getFont(motor.PDF_FONT_BOLD).face
+        # `descent` viene en milésimas de em y es negativo.
+        descendente = abs(cara.descent) / 1000.0 * 11.5
+        self.assertGreater(
+            motor.REGLA_BAJO_ENCABEZADO, descendente,
+            "la raya vuelve a pasar por encima de la «p»",
+        )
+
+    def test_la_raya_se_dibuja_bajo_la_base_del_texto(self):
+        i = MOTOR.index("if encabezado:")
+        cuerpo = MOTOR[i: i + 1600]
+        self.assertIn("base_texto = lienzo.y + 4", cuerpo)
+        self.assertIn("regla = base_texto - REGLA_BAJO_ENCABEZADO", cuerpo)
+
+    def test_el_hueco_bajo_la_raya_se_mide_desde_la_raya(self):
+        """Si se restara desde la base del texto, el contenido se le pegaría."""
+        i = MOTOR.index("if encabezado:")
+        self.assertIn("lienzo.y = regla - ESPACIO_TRAS_ENCABEZADO", MOTOR[i: i + 1600])
+
     def test_la_cifra_final_lleva_una_linea_encima(self):
         i = MOTOR.index("def _cascada(")
         cuerpo = MOTOR[i: MOTOR.index("\ndef ", i + 10)]
