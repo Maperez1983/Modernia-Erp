@@ -2659,6 +2659,31 @@ const workspaceFincasBudgetQuickForm = document.getElementById("workspaceFincasB
 const workspaceFincasBudgetOpenEngine = document.getElementById("workspaceFincasBudgetOpenEngine");
 const workspaceFincasBudgetResetBtn = document.getElementById("workspaceFincasBudgetResetBtn");
 const workspaceFincasBudgetQuickStatus = document.getElementById("workspaceFincasBudgetQuickStatus");
+const workspaceFincasBudgetSubmit = document.getElementById("workspaceFincasBudgetSubmit");
+const workspaceFincasBudgetEditando = document.getElementById("workspaceFincasBudgetEditando");
+const workspaceFincasBudgetEditandoTitulo = document.getElementById("workspaceFincasBudgetEditandoTitulo");
+const workspaceFincasBudgetCrearCopia = document.getElementById("workspaceFincasBudgetCrearCopia");
+
+/** Enciende o apaga el modo edición del formulario de presupuestos.
+ *
+ * Sin esto el formulario mandaba siempre `id: ""` y el servidor, que decide
+ * UPDATE o INSERT por ese campo, insertaba cada vez: corregir un presupuesto
+ * dejaba dos. En producción no había ni uno solo con `updated_at` distinto de
+ * `created_at`, y C.P ASTREA tenía tres copias idénticas.
+ */
+const setWorkspaceFincasBudgetEditando = (budget) => {
+  if (!workspaceFincasBudgetQuickForm) return;
+  const campo = workspaceFincasBudgetQuickForm.querySelector('[name="presupuesto_id"]');
+  const id = String(budget?.id || "").trim();
+  if (campo) campo.value = id;
+  if (workspaceFincasBudgetEditando) workspaceFincasBudgetEditando.hidden = !id;
+  if (workspaceFincasBudgetEditandoTitulo) {
+    workspaceFincasBudgetEditandoTitulo.textContent = id ? String(budget?.titulo || "").trim() : "";
+  }
+  if (workspaceFincasBudgetSubmit) {
+    workspaceFincasBudgetSubmit.textContent = id ? "Guardar cambios + PDF" : "Crear presupuesto + PDF";
+  }
+};
 const workspaceFincasBudgetsEstadoFilter = document.getElementById("workspaceFincasBudgetsEstadoFilter");
 const workspaceFincasBudgetsRefreshBtn = document.getElementById("workspaceFincasBudgetsRefreshBtn");
 const workspaceFincasBudgetsTable = document.getElementById("workspaceFincasBudgetsTable");
@@ -27028,6 +27053,7 @@ const applyWorkspaceFincasBudgetQuickCommunity = (communityId) => {
   const community = ((state.currentWorkspaceData || {}).fincasCommunities || []).find((row) => String(row.id || "") === id) || null;
   const hidden = workspaceFincasBudgetQuickForm.querySelector('[name="comunidad_id"]');
   if (hidden) hidden.value = community?.id || "";
+  setWorkspaceFincasBudgetEditando(null);
   if (community) {
     const set = (name, value) => {
       const input = workspaceFincasBudgetQuickForm.querySelector(`[name="${name}"]`);
@@ -27065,6 +27091,7 @@ const applyWorkspaceFincasBudgetQuickBudget = (budgetId) => {
   const budget = ((state.currentWorkspaceData || {}).budgetRows || []).find((row) => String(row.id || "") === id) || null;
   const hidden = workspaceFincasBudgetQuickForm.querySelector('[name="comunidad_id"]');
   if (hidden) hidden.value = "";
+  setWorkspaceFincasBudgetEditando(budget);
   if (!budget) return;
   const calc = parseWorkspaceBudgetCalc(budget);
   const set = (name, value) => {
@@ -27108,6 +27135,7 @@ const applyWorkspaceFincasBudgetQuickPrefill = (rawValue) => {
   if (!value) {
     const hidden = workspaceFincasBudgetQuickForm?.querySelector('[name="comunidad_id"]');
     if (hidden) hidden.value = "";
+    setWorkspaceFincasBudgetEditando(null);
     syncWorkspaceFincasBudgetQuickComputed();
     syncWorkspaceFincasBudgetMap();
     return;
@@ -27133,6 +27161,7 @@ const resetWorkspaceFincasBudgetQuickForm = () => {
   if (hidden) hidden.value = "";
   const lookup = workspaceFincasBudgetQuickForm.querySelector('[name="comunidad_id_lookup"]');
   if (lookup) lookup.value = "";
+  setWorkspaceFincasBudgetEditando(null);
   set("titulo", "");
   set("estado", "Borrador");
   set("comunidad_denominacion", "");
@@ -88151,7 +88180,8 @@ if (workspaceFincasBudgetQuickForm) {
     const serviciosIncluidos = readFincasServiciosIncluidos(workspaceFincasBudgetServiciosIncluidos);
     const comunidadName = String(values.comunidad_denominacion || community?.nombre || "").trim() || "Comunidad";
 	    const payload = {
-	      id: "",
+	      // Vacío crea uno nuevo; con id el servidor actualiza ese mismo.
+	      id: String(values.presupuesto_id || "").trim(),
 	      workspace_id: state.currentWorkspaceId,
 	      empresa_id: String(values.empresa_id || community?.empresa_id || state.currentWorkspaceCompanyId || "").trim(),
 	      servicio: "fincas",
@@ -88194,14 +88224,18 @@ if (workspaceFincasBudgetQuickForm) {
       if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = "La comunidad no tiene empresa asignada.";
       return;
     }
-	    if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = "Generando presupuesto...";
+	    const editando = Boolean(String(payload.id || "").trim());
+	    if (workspaceFincasBudgetQuickStatus) {
+	      workspaceFincasBudgetQuickStatus.textContent = editando ? "Guardando cambios..." : "Generando presupuesto...";
+	    }
 	    try {
 	      const data = await apiPost("/api/workspace_presupuestos", payload);
 		      const budgetId = String(data.id || "").trim();
-		      if (!budgetId) throw new Error("No se pudo crear el presupuesto.");
+		      if (!budgetId) throw new Error(editando ? "No se pudo guardar el presupuesto." : "No se pudo crear el presupuesto.");
 		      const pdfUrl = `/api/workspace_presupuesto_pdf?id=${encodeURIComponent(budgetId)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`;
 		      if (workspaceFincasBudgetQuickStatus) {
-		        workspaceFincasBudgetQuickStatus.innerHTML = `Presupuesto creado. <a href="${pdfUrl}" target="_blank" rel="noopener noreferrer">Abrir PDF</a>`;
+		        const hecho = editando ? "Presupuesto actualizado" : "Presupuesto creado";
+		        workspaceFincasBudgetQuickStatus.innerHTML = `${hecho}. <a href="${pdfUrl}" target="_blank" rel="noopener noreferrer">Abrir PDF</a>`;
 	      }
 	      if (pdfWindow && !pdfWindow.closed) {
 	        try {
@@ -88214,14 +88248,32 @@ if (workspaceFincasBudgetQuickForm) {
 	        window.open(pdfUrl, "_blank");
 	      }
 	      await loadWorkspaceDetail(state.currentWorkspaceId);
+	      // Después de recargar, porque el recargado repuebla el desplegable: si se
+	      // marcara antes, volver a darle a guardar crearía el duplicado otra vez.
+	      setWorkspaceFincasBudgetEditando({ id: budgetId, titulo: payload.titulo });
 	    } catch (error) {
-	      if (workspaceFincasBudgetQuickStatus) workspaceFincasBudgetQuickStatus.textContent = error?.message || "No se pudo crear el presupuesto.";
+	      if (workspaceFincasBudgetQuickStatus) {
+	        workspaceFincasBudgetQuickStatus.textContent =
+	          error?.message || (editando ? "No se pudo guardar el presupuesto." : "No se pudo crear el presupuesto.");
+	      }
 	      try {
 	        if (pdfWindow && !pdfWindow.closed) pdfWindow.close();
 	      } catch (e) {}
 	    }
 	  });
 	}
+
+if (workspaceFincasBudgetCrearCopia) {
+  // Partir de uno existente para crear otro sigue siendo útil (dos escaleras de la
+  // misma finca, una revisión que se quiere guardar aparte). Lo que no vale es que
+  // sea lo único que se pueda hacer.
+  workspaceFincasBudgetCrearCopia.addEventListener("click", () => {
+    setWorkspaceFincasBudgetEditando(null);
+    if (workspaceFincasBudgetQuickStatus) {
+      workspaceFincasBudgetQuickStatus.textContent = "Al guardar se creará un presupuesto nuevo, sin tocar el anterior.";
+    }
+  });
+}
 
 if (workspaceFincasBudgetResetBtn) {
   workspaceFincasBudgetResetBtn.addEventListener("click", () => {

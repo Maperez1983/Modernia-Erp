@@ -9,7 +9,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=309" />
+	    <link rel="stylesheet" href="styles.css?v=310" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2411,6 +2411,15 @@
 		              <div><span>Base mensual (sin IVA)</span><strong data-resumen="base">—</strong></div>
 		              <div data-resumen-puntual hidden><span>Pago único (IVA incl.)</span><strong data-resumen="puntual">—</strong></div>
 		            </div>
+		            <div class="presu-editando span-all" id="workspaceFincasBudgetEditando" hidden aria-live="polite">
+		              <div>
+		                <strong>Estás modificando un presupuesto ya creado.</strong>
+		                <span id="workspaceFincasBudgetEditandoTitulo" class="muted"></span>
+		                <div class="muted">Al guardar se actualiza ese mismo presupuesto y se rehace su PDF. No se crea otro.</div>
+		              </div>
+		              <button type="button" class="secondary ghost" id="workspaceFincasBudgetCrearCopia">Crear uno nuevo en su lugar</button>
+		            </div>
+		            <input type="hidden" name="presupuesto_id" />
 		            <input type="hidden" name="comunidad_id" />
 		            <input type="hidden" name="edificio_foto_key" />
 		            <input type="hidden" name="map_lat" />
@@ -2562,7 +2571,7 @@
             </details>
             <div class="span-2" id="workspaceFincasBudgetHero"></div>
 	            <div class="form-actions span-2">
-	              <button type="submit">Crear presupuesto + PDF</button>
+	              <button type="submit" id="workspaceFincasBudgetSubmit">Crear presupuesto + PDF</button>
 	              <button type="button" id="workspaceFincasBudgetOpenEngine" class="secondary ghost">Abrir motor de presupuestos</button>
 	              <button type="button" id="workspaceFincasBudgetResetBtn" class="secondary ghost">Nuevo</button>
 	              <span id="workspaceFincasBudgetQuickStatus" class="muted"></span>
@@ -11982,7 +11991,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=860",
+              "app.js?v=861",
             ];
 
             const getParams = () => {
