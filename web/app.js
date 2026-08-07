@@ -21688,7 +21688,16 @@ const hydrateWorkspaceCompanySelects = () => {
   ].forEach((form) => {
     const select = form?.querySelector('[name="empresa_id"]');
     if (select) {
-      select.innerHTML = html;
+      // El presupuesto de fincas solo puede emitirlo una administradora. Este
+      // selector ofrecía las nueve empresas del workspace, y por eso nueve de los
+      // diez presupuestos salieron a nombre de una sociedad que no administra
+      // comunidades. Si ninguna está marcada, se ofrecen todas: mejor un selector
+      // amplio que uno vacío que no deja crear el presupuesto.
+      const soloFincas = form === workspaceFincasBudgetQuickForm || form === workspaceFincasCommunityForm;
+      const administradoras = companies.filter((c) => Number(c.administra_fincas || 0));
+      select.innerHTML = soloFincas && administradoras.length
+        ? administradoras.map((c) => `<option value="${escapeHtml(String(c.id))}">${escapeHtml(c.nombre || c.razon_social || c.id)}</option>`).join("")
+        : html;
       if (defaultCompanyId) {
         select.value = defaultCompanyId;
       }

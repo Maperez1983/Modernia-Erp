@@ -37531,6 +37531,10 @@ def ensure_tables(db_path):
     # RGPD: permite excluir a una empresa del envío de documentos a proveedores de IA
     # (OpenAI / Google DocAI) en el OCR de seguros. NULL = se aplica el flag global.
     ensure_column(conn, "empresas", "seguros_ocr_externo", "seguros_ocr_externo INTEGER")
+    # Qué sociedades administran fincas. El selector de empresa emisora del
+    # presupuesto ofrecía todas las del workspace, y por eso nueve de los diez
+    # presupuestos salieron a nombre de una sociedad que no administra comunidades.
+    ensure_column(conn, "empresas", "administra_fincas", "administra_fincas INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "empresas", "razon_social", "razon_social TEXT")
     ensure_column(conn, "empresas", "nif", "nif TEXT")
     ensure_column(conn, "empresas", "direccion", "direccion TEXT")
@@ -49880,6 +49884,45 @@ def parse_censo_vecinos(texto):
     return filas
 
 
+def nif_valido(valor):
+    """Dígito de control de un NIF/CIF/NIE español.
+
+    Se comprueba por lo mismo que el IBAN: un dígito mal tecleado en el NIF del
+    emisor sale impreso en el presupuesto, en el certificado de deuda y en la
+    factura, y no lo detecta nadie hasta que lo devuelve Hacienda o el cliente.
+    """
+    crudo = re.sub(r"[^0-9A-Za-z]", "", str(valor or "")).upper()
+    if len(crudo) != 9:
+        return False
+    LETRAS_DNI = "TRWAGMYFPDXBNJZSQVHLCKE"
+
+    # NIF de persona física: 8 dígitos + letra.
+    if crudo[:8].isdigit() and crudo[8].isalpha():
+        return crudo[8] == LETRAS_DNI[int(crudo[:8]) % 23]
+
+    # NIE: X/Y/Z + 7 dígitos + letra.
+    if crudo[0] in "XYZ" and crudo[1:8].isdigit() and crudo[8].isalpha():
+        numero = str("XYZ".index(crudo[0])) + crudo[1:8]
+        return crudo[8] == LETRAS_DNI[int(numero) % 23]
+
+    # CIF de persona jurídica: letra + 7 dígitos + control (número o letra).
+    if crudo[0].isalpha() and crudo[1:8].isdigit():
+        letra, cuerpo, control = crudo[0], crudo[1:8], crudo[8]
+        pares = sum(int(cuerpo[i]) for i in (1, 3, 5))
+        impares = 0
+        for i in (0, 2, 4, 6):
+            doble = int(cuerpo[i]) * 2
+            impares += doble // 10 + doble % 10
+        digito = (10 - (pares + impares) % 10) % 10
+        letra_control = "JABCDEFGHI"[digito]
+        if letra in "ABEH":          # el control es siempre numérico
+            return control == str(digito)
+        if letra in "KPQRSNW":       # el control es siempre una letra
+            return control == letra_control
+        return control in (str(digito), letra_control)
+    return False
+
+
 def normalizar_iban(valor):
     """Quita espacios y guiones y pasa a mayúsculas. No valida."""
     return re.sub(r"[^A-Za-z0-9]", "", str(valor or "")).upper()
@@ -50798,6 +50841,21 @@ def fetch_workspace_fincas_comunidad_dashboard(conn, workspace_id, comunidad_id,
             avisos.append({"nivel": "medio", "texto": f"{censo['sin_coeficiente']} propietario(s) sin coeficiente.", "ir": "vecinos"})
         if censo["viviendas_declaradas"] and censo["propietarios"] != censo["viviendas_declaradas"]:
             avisos.append({"nivel": "medio", "texto": f"La ficha declara {censo['viviendas_declaradas']} viviendas y el censo tiene {censo['propietarios']}.", "ir": "datos"})
+    # La comunidad tiene que colgar de una sociedad que administre fincas: si no,
+    # sus recibos y su presupuesto salen a nombre de quien no la administra. Pasaba
+    # con tres de las trece, y no se veía por ninguna parte.
+    empresa_admin = conn.execute(
+        "SELECT nombre, COALESCE(administra_fincas, 0) AS administra FROM empresas WHERE id = ? LIMIT 1",
+        (row_value(comunidad, "empresa_id", ""),),
+    ).fetchone()
+    if not empresa_admin:
+        avisos.append({"nivel": "alto", "texto": "La comunidad no está asignada a ninguna sociedad.", "ir": "datos"})
+    elif not int(row_value(empresa_admin, "administra", 0) or 0):
+        avisos.append({
+            "nivel": "alto",
+            "texto": f"Está asignada a {row_value(empresa_admin, 'nombre', '')}, que no consta como administradora de fincas.",
+            "ir": "datos",
+        })
     if not iban_valido(row_value(comunidad, "iban", "")):
         avisos.append({"nivel": "alto", "texto": "La comunidad no tiene IBAN válido: no se puede generar la remesa.", "ir": "datos"})
     if not str(row_value(comunidad, "acreedor_sepa", "") or "").strip():
@@ -51637,6 +51695,7 @@ def fetch_workspace_detail(conn, workspace_id):
           COALESCE(e.razon_social, '') AS razon_social,
           COALESCE(e.nif, '') AS nif,
           COALESCE(e.direccion, '') AS direccion,
+          COALESCE(e.administra_fincas, 0) AS administra_fincas,
           COALESCE(e.direccion_fiscal, '') AS direccion_fiscal,
           COALESCE(e.telefono, '') AS telefono,
           COALESCE(e.email, '') AS email,

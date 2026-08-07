@@ -45,6 +45,12 @@ class ComunidadDePrueba(unittest.TestCase):
     def setUp(self):
         self.conn = server.get_db(":memory:")
         server.ensure_workspace_product_tables(self.conn)
+        # `empresas` la crea otro tramo del arranque; aquí basta con lo que mira el
+        # resumen para saber si quien administra la comunidad puede administrarla.
+        self.conn.execute(
+            "CREATE TABLE IF NOT EXISTS empresas (id TEXT PRIMARY KEY, nombre TEXT NOT NULL, "
+            "activo INTEGER NOT NULL DEFAULT 1, administra_fincas INTEGER NOT NULL DEFAULT 0, "
+            "created_at TEXT, updated_at TEXT)")
         self.ahora = datetime.datetime.now().isoformat(timespec="seconds")
         self.ws, self.com = "ws1", "com1"
         self.conn.execute(
@@ -114,6 +120,25 @@ class LosAvisosSonLaListaDeTareasTests(ComunidadDePrueba):
     def test_avisa_de_que_nadie_tiene_portal(self):
         self.poblar()
         self.assertIn("acceso al portal", " ".join(self._textos()))
+
+    def test_avisa_si_la_administra_una_sociedad_que_no_administra_fincas(self):
+        """Tres de las trece comunidades colgaban de una sociedad que no es
+        administradora, así que sus recibos y su presupuesto salían a nombre de
+        quien no las administra. No se veía por ninguna parte."""
+        self.conn.execute(
+            "INSERT INTO empresas (id, nombre, activo, administra_fincas, created_at, updated_at) "
+            "VALUES ('e1','Estudio Velazquez 2012 SL',1,0,datetime(?),datetime(?))", (self.ahora, self.ahora))
+        self.conn.execute("UPDATE workspace_fincas_comunidades SET empresa_id = 'e1' WHERE id = ?", (self.com,))
+        self.conn.commit()
+        self.assertIn("no consta como administradora de fincas", " ".join(self._textos()))
+
+    def test_si_la_administra_una_administradora_no_avisa(self):
+        self.conn.execute(
+            "INSERT INTO empresas (id, nombre, activo, administra_fincas, created_at, updated_at) "
+            "VALUES ('e2','Fincas Velazquez',1,1,datetime(?),datetime(?))", (self.ahora, self.ahora))
+        self.conn.execute("UPDATE workspace_fincas_comunidades SET empresa_id = 'e2' WHERE id = ?", (self.com,))
+        self.conn.commit()
+        self.assertNotIn("no consta como administradora", " ".join(self._textos()))
 
     def test_un_censo_descuadrado_se_ve(self):
         self.poblar()
