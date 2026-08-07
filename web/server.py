@@ -41144,6 +41144,28 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_fincas_documentos", "visible_portal", "visible_portal INTEGER NOT NULL DEFAULT 0")
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_cartas (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          clave TEXT NOT NULL,
+          etiqueta TEXT NOT NULL,
+          cuerpo TEXT NOT NULL,
+          activo INTEGER NOT NULL DEFAULT 1,
+          orden INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_cartas_unico "
+            "ON workspace_fincas_cartas (workspace_id, clave)"
+        )
+    except Exception:
+        pass
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS workspace_fincas_recibos (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
@@ -52748,6 +52770,157 @@ def _baja_tesela(z, x, y):
     return imagen
 
 
+#: Huecos que se rellenan con los datos del presupuesto. Los que no se puedan
+#: resolver dejan la frase entera fuera, para que no salga «su comunidad de {}
+#: viviendas» en un documento que se manda a un cliente.
+CARTA_HUECOS = ("comunidad", "direccion", "viviendas", "unidades", "cuota", "empresa", "colegiado")
+
+#: Plantillas de partida. La primera es **el texto que ya usaba la casa**: estaba
+#: escrito a fuego dentro del motor de imagen del PDF, no en la base, así que el
+#: campo `carta_presentacion` llevaba desde siempre vacío y nadie podía tocarlo sin
+#: un despliegue. Las otras dos cubren los casos que de verdad se dan.
+#:
+#: Cuidado con una cosa: la primera afirma cosas sobre el despacho —los años, los
+#: servicios— que son de la casa, no mías. Las otras dos no añaden ninguna
+#: afirmación nueva de ese tipo a propósito: describen lo que el presupuesto trae
+#: detrás y poco más. Si queréis vender algo, escribidlo vosotros.
+FINCAS_CARTAS_DEFECTO = [
+    {
+        "clave": "general",
+        "etiqueta": "General (la de siempre)",
+        "orden": 1,
+        "cuerpo": (
+            "Gracias por solicitar nuestra propuesta. En {empresa} llevamos más de 40 años administrando "
+            "comunidades con un enfoque cercano y muy práctico.\n"
+            "Trabajamos con un despacho multidisciplinar: laboral, fiscal y contable, mediación de seguros, "
+            "administrador de fincas colegiado y apoyo jurídico.\n"
+            "Nuestro objetivo es sencillo: tranquilidad para la comunidad. Respuesta ágil ante incidencias, "
+            "control de costes y proveedores, y transparencia en cada decisión.\n"
+            "Entregamos información clara y periódica —cuentas, situación de morosidad e incidencias— para que "
+            "el presidente y la junta puedan decidir con seguridad.\n"
+            "Le remitimos la propuesta para {comunidad}, con una cuota calculada de forma objetiva a partir de "
+            "las unidades del edificio: {unidades}.\n"
+            "Si lo desea, concertamos una visita y revisamos su documentación actual para afinar la cuota y "
+            "proponer mejoras inmediatas, sin compromiso."
+        ),
+    },
+    {
+        "clave": "cambio_administrador",
+        "etiqueta": "Cambio de administrador",
+        "orden": 2,
+        "cuerpo": (
+            "Gracias por su interés en nuestros servicios para {comunidad}.\n"
+            "Sabemos que cambiar de administrador preocupa por lo que pueda perderse por el camino, así que lo "
+            "primero que hacemos es recibir la documentación del administrador saliente y revisarla: cuentas del "
+            "ejercicio, actas, contratos con proveedores, pólizas y situación de morosidad. Le entregamos un "
+            "resumen de cómo está la comunidad antes de tocar nada.\n"
+            "La cuota que le proponemos sale de las unidades del edificio ({unidades}), no de una estimación: en "
+            "el detalle de este presupuesto puede ver de dónde sale cada euro.\n"
+            "Desde el primer mes, cada propietario dispone de un acceso donde consulta sus recibos y su estado de "
+            "pago, y usted recibe la información de cuentas, morosidad e incidencias de forma periódica.\n"
+            "Quedamos a su disposición para vernos en la finca y resolver cualquier duda antes de la junta."
+        ),
+    },
+    {
+        "clave": "obra_nueva",
+        "etiqueta": "Comunidad de nueva constitución",
+        "orden": 3,
+        "cuerpo": (
+            "Gracias por contar con nosotros para la puesta en marcha de {comunidad}.\n"
+            "En una comunidad que se constituye, el primer año es el que marca el resto: hay que fijar los "
+            "coeficientes, redactar y aprobar los estatutos si procede, convocar la junta constituyente, abrir la "
+            "cuenta de la comunidad, dar de alta los suministros y dejar cerrado el presupuesto del ejercicio con "
+            "su fondo de reserva.\n"
+            "Nos ocupamos de todo ese arranque y se lo dejamos documentado, para que la comunidad empiece con las "
+            "cuentas claras y sin arrastrar decisiones sin tomar.\n"
+            "La cuota que le proponemos sale de las unidades del edificio: {unidades}.\n"
+            "Estamos a su disposición para revisar juntos la documentación de la promoción y ajustar lo que haga "
+            "falta antes de la constitución."
+        ),
+    },
+]
+
+
+def render_carta_presentacion(cuerpo, datos):
+    """Rellena los huecos de una plantilla con los datos del presupuesto.
+
+    Una frase cuyo hueco no se puede resolver **se cae entera**. Es preferible una
+    carta más corta que una que diga «su comunidad de {viviendas} viviendas»: esto se
+    le manda a un presidente de comunidad, no es un borrador interno.
+    """
+    valores = {clave: str(datos.get(clave) or "").strip() for clave in CARTA_HUECOS}
+    salida = []
+    for linea in str(cuerpo or "").replace("\r\n", "\n").split("\n"):
+        huecos = re.findall(r"\{(\w+)\}", linea)
+        if any(not valores.get(h) for h in huecos):
+            continue
+        for hueco in huecos:
+            linea = linea.replace("{" + hueco + "}", valores[hueco])
+        if linea.strip():
+            salida.append(linea.strip())
+    return "\n".join(salida)
+
+
+def describe_unidades_edificio(calc):
+    """«24 viviendas, 30 trasteros y 12 plazas de garaje», o vacío si no hay nada."""
+    partes = []
+    for campo, singular, plural in (
+        ("num_vecinos", "vivienda", "viviendas"),
+        ("num_locales", "local", "locales"),
+        ("num_trasteros", "trastero", "trasteros"),
+        ("num_aparcamientos", "plaza de garaje", "plazas de garaje"),
+    ):
+        cantidad = parse_non_negative_int((calc or {}).get(campo))
+        if cantidad:
+            partes.append(f"{cantidad} {singular if cantidad == 1 else plural}")
+    if not partes:
+        return ""
+    if len(partes) == 1:
+        return partes[0]
+    return ", ".join(partes[:-1]) + " y " + partes[-1]
+
+
+def fetch_workspace_fincas_cartas(conn, workspace_id, *, sembrar=True):
+    """Plantillas de carta del workspace, sembrando las de partida la primera vez."""
+    workspace_id = str(workspace_id or "").strip()
+    if not workspace_id:
+        return []
+
+    def leer():
+        return conn.execute(
+            "SELECT clave, etiqueta, cuerpo, activo, orden FROM workspace_fincas_cartas "
+            "WHERE workspace_id = ? ORDER BY orden, etiqueta",
+            (workspace_id,),
+        ).fetchall()
+
+    filas = leer()
+    if not filas and sembrar:
+        ahora = datetime.now().isoformat(timespec="seconds")
+        for item in FINCAS_CARTAS_DEFECTO:
+            conn.execute(
+                "INSERT INTO workspace_fincas_cartas "
+                "(id, workspace_id, clave, etiqueta, cuerpo, activo, orden, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                (os.urandom(16).hex(), workspace_id, item["clave"], item["etiqueta"],
+                 item["cuerpo"], item["orden"], ahora, ahora),
+            )
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        filas = leer()
+    return [
+        {
+            "clave": row_value(f, "clave", ""),
+            "etiqueta": row_value(f, "etiqueta", ""),
+            "cuerpo": row_value(f, "cuerpo", "") or "",
+            "activo": int(row_value(f, "activo", 1) or 0),
+            "orden": int(row_value(f, "orden", 0) or 0),
+        }
+        for f in filas
+    ]
+
+
 def build_mapa_estatico(lat, lon, *, zoom=17, ancho=900, alto=380):
     """Mapa del edificio, cosido a partir de teselas y con su chincheta.
 
@@ -60455,6 +60628,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_mayorias",
             "/api/workspace_fincas_junta_convocatoria",
             "/api/workspace_fincas_presupuesto_anual",
+            "/api/workspace_fincas_carta",
             "/api/workspace_fincas_portal_alta",
             "/api/workspace_fincas_portal_revocar",
             "/api/workspace_fincas_vecino_delete",
@@ -73239,6 +73413,98 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/workspace_fincas_carta":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+
+            # Guardar las plantillas editadas.
+            items = payload.get("items")
+            if isinstance(items, str):
+                try:
+                    items = json.loads(items)
+                except Exception:
+                    items = None
+            if isinstance(items, list):
+                vistas = set()
+                for orden, item in enumerate(items, start=1):
+                    if not isinstance(item, dict):
+                        continue
+                    etiqueta = str(item.get("etiqueta") or "").strip()
+                    cuerpo = str(item.get("cuerpo") or "").strip()
+                    if not etiqueta or not cuerpo:
+                        continue
+                    clave = normalize_lookup_text(item.get("clave") or etiqueta).replace(" ", "_").lower()[:60]
+                    if not clave or clave in vistas:
+                        continue
+                    vistas.add(clave)
+                    existente = conn.execute(
+                        "SELECT id FROM workspace_fincas_cartas WHERE workspace_id = ? AND clave = ? LIMIT 1",
+                        (workspace_id, clave),
+                    ).fetchone()
+                    if existente:
+                        conn.execute(
+                            "UPDATE workspace_fincas_cartas SET etiqueta = ?, cuerpo = ?, orden = ?, "
+                            "updated_at = datetime(?) WHERE id = ?",
+                            (etiqueta, cuerpo, orden, now, row_value(existente, "id", "")),
+                        )
+                    else:
+                        conn.execute(
+                            "INSERT INTO workspace_fincas_cartas "
+                            "(id, workspace_id, clave, etiqueta, cuerpo, activo, orden, created_at, updated_at) "
+                            "VALUES (?, ?, ?, ?, ?, 1, ?, datetime(?), datetime(?))",
+                            (os.urandom(16).hex(), workspace_id, clave, etiqueta, cuerpo, orden, now, now),
+                        )
+                conn.commit()
+                json_response(self, {"ok": True, "items": fetch_workspace_fincas_cartas(conn, workspace_id, sembrar=False)})
+                return
+
+            # Componer una carta a partir de una plantilla y los datos que se están
+            # tecleando: se genera con lo que hay en pantalla, no con lo guardado,
+            # porque se pide antes de crear el presupuesto.
+            clave = str(payload.get("plantilla") or "").strip()
+            plantillas = {c["clave"]: c for c in fetch_workspace_fincas_cartas(conn, workspace_id)}
+            plantilla = plantillas.get(clave) or (list(plantillas.values())[0] if plantillas else None)
+            if not plantilla:
+                json_response(self, {"error": "No hay plantillas de carta"}, status=404)
+                return
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            empresa = ""
+            if empresa_id:
+                fila = conn.execute("SELECT nombre, razon_social FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+                if fila:
+                    empresa = str(row_value(fila, "nombre", "") or row_value(fila, "razon_social", "") or "").strip()
+            calc = {
+                "num_vecinos": payload.get("num_vecinos"),
+                "num_locales": payload.get("num_locales"),
+                "num_trasteros": payload.get("num_trasteros"),
+                "num_aparcamientos": payload.get("num_aparcamientos"),
+            }
+            cuota = round(parse_money_value(payload.get("cuota")), 2)
+            datos = {
+                "comunidad": str(payload.get("comunidad") or "").strip() or "su comunidad",
+                "direccion": str(payload.get("direccion") or "").strip(),
+                "viviendas": str(parse_non_negative_int(payload.get("num_vecinos")) or ""),
+                "unidades": describe_unidades_edificio(calc),
+                "cuota": format_eur(cuota) if cuota else "",
+                "empresa": empresa or "nuestro despacho",
+                "colegiado": str(payload.get("colegiado") or "").strip(),
+            }
+            json_response(self, {
+                "ok": True,
+                "plantilla": plantilla["clave"],
+                "carta": render_carta_presentacion(plantilla["cuerpo"], datos),
+            })
             return
         elif parsed.path == "/api/workspace_fincas_vecino_delete":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -87126,6 +87392,22 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "comunidad no encontrada"}, status=404)
                 return
             json_response(self, datos)
+            return
+
+        if path == "/api/workspace_fincas_cartas":
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, {"items": fetch_workspace_fincas_cartas(conn, workspace_id)})
             return
 
         if path == "/api/workspace_fincas_morosidad":

@@ -2528,8 +2528,28 @@
             </label>
               </div>
             </details>
+            <details class="presu-plegable span-2" id="workspaceFincasBudgetCartaPanel">
+              <summary>Carta de presentación <span class="muted">(va en la primera página del PDF)</span></summary>
+              <div class="form-grid">
+                <label class="span-2">
+                  Plantilla
+                  <select id="workspaceFincasBudgetCartaPlantilla"></select>
+                </label>
+                <div class="form-actions span-2">
+                  <button type="button" id="workspaceFincasBudgetCartaGenerar" class="secondary ghost">Generar carta</button>
+                  <span class="muted" id="workspaceFincasBudgetCartaStatus"></span>
+                </div>
+<label class="span-2">
+              Carta de presentación (opcional)
+              <textarea name="carta_presentacion" rows="5" placeholder="Texto adicional que aparecerá en la carta de presentación del PDF."></textarea>
+            </label>
+                <div class="muted span-2">
+                  Se compone con los datos que hay en pantalla. Puedes reescribirla; se guarda con el presupuesto.
+                </div>
+              </div>
+            </details>
             <details class="presu-plegable span-2">
-              <summary>Foto del edificio y carta de presentación <span class="muted">(opcional)</span></summary>
+              <summary>Foto del edificio <span class="muted">(opcional)</span></summary>
               <div class="form-grid">
 <label class="span-2">
 	              Foto del edificio (opcional)
@@ -2537,10 +2557,7 @@
 	              <div id="workspaceFincasBudgetBuildingPhotoStatus" class="muted"></div>
 	              <img id="workspaceFincasBudgetBuildingPhotoPreview" class="hidden" alt="Foto edificio" style="margin-top:10px;width:100%;max-width:720px;max-height:220px;object-fit:cover;border-radius:14px;border:1px solid rgba(0,0,0,0.06);" />
 	            </label>
-<label class="span-2">
-              Carta de presentación (opcional)
-              <textarea name="carta_presentacion" rows="5" placeholder="Texto adicional que aparecerá en la carta de presentación del PDF."></textarea>
-            </label>
+
               </div>
             </details>
             <div class="span-2" id="workspaceFincasBudgetHero"></div>
@@ -11964,7 +11981,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=853",
+              "app.js?v=854",
             ];
 
             const getParams = () => {

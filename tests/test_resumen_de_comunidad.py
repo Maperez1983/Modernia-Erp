@@ -260,11 +260,16 @@ class LoQueNoDecideElPrecioVaAlFinalPlegadoTests(unittest.TestCase):
         i = formulario.index("Datos del presidente")
         self.assertIn("presu-plegable", formulario[max(0, i - 400): i])
 
-    def test_la_foto_y_la_carta_estan_plegadas_y_juntas(self):
+    def test_la_foto_y_la_carta_estan_plegadas_pero_separadas(self):
+        """Empezaron en el mismo bloque; la carta se sacó al suyo cuando pasó a
+        generarse con plantillas, porque es lo primero que lee el cliente y la foto
+        es un adorno. Ver `test_carta_de_presentacion.py`."""
         formulario = self._formulario()
-        i = formulario.index("Foto del edificio y carta de presentación")
-        self.assertIn("presu-plegable", formulario[max(0, i - 400): i])
-        self.assertLess(i, formulario.index("carta_presentacion"))
+        for titulo in ("Carta de presentación", "Foto del edificio"):
+            with self.subTest(titulo=titulo):
+                i = formulario.index(titulo)
+                self.assertIn("presu-plegable", formulario[max(0, i - 500): i])
+        self.assertNotIn("Foto del edificio y carta de presentación", formulario)
 
     def test_los_plegables_van_despues_de_los_importes(self):
         formulario = self._formulario()

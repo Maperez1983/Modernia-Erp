@@ -26512,6 +26512,58 @@ const hydrateWorkspaceFincasBudgetQuickSelect = ({ communities = [], budgets = [
   }
 };
 
+/** Plantillas de carta: se cargan al abrir el bloque y se componen con lo que hay
+ *  tecleado en pantalla, porque la carta se genera antes de crear el presupuesto. */
+const cargarPlantillasDeCarta = async () => {
+  const sel = document.getElementById("workspaceFincasBudgetCartaPlantilla");
+  if (!sel || sel.dataset.cargado === "1") return;
+  const workspaceId = String(state.currentWorkspaceId || "").trim();
+  if (!workspaceId) return;
+  try {
+    const datos = await api(`/api/workspace_fincas_cartas?workspace_id=${encodeURIComponent(workspaceId)}`);
+    const items = Array.isArray(datos?.items) ? datos.items : [];
+    sel.innerHTML = items.map((c) => `<option value="${escapeHtml(c.clave)}">${escapeHtml(c.etiqueta)}</option>`).join("");
+    sel.dataset.cargado = "1";
+  } catch (e) {
+    sel.innerHTML = `<option value="">No se pudieron cargar las plantillas</option>`;
+  }
+};
+
+const generarCartaDePresentacion = async () => {
+  const form = workspaceFincasBudgetQuickForm;
+  const estado = document.getElementById("workspaceFincasBudgetCartaStatus");
+  const destino = form?.querySelector('[name="carta_presentacion"]');
+  if (!form || !destino) return;
+  const valor = (n) => String(form.querySelector(`[name="${n}"]`)?.value || "").trim();
+  // Reescribir encima de una carta ya redactada sería tirar el trabajo hecho.
+  if (destino.value.trim() && !window.confirm("Ya hay una carta escrita. ¿La reemplazo por la de la plantilla?")) return;
+  try {
+    if (estado) estado.textContent = "Generando…";
+    const res = await postJsonWithDbRetry("/api/workspace_fincas_carta", {
+      workspace_id: state.currentWorkspaceId,
+      plantilla: document.getElementById("workspaceFincasBudgetCartaPlantilla")?.value || "",
+      empresa_id: valor("empresa_id"),
+      comunidad: valor("comunidad_denominacion"),
+      direccion: valor("comunidad_direccion"),
+      num_vecinos: valor("num_vecinos"),
+      num_locales: valor("num_locales"),
+      num_trasteros: valor("num_trasteros"),
+      num_aparcamientos: valor("num_aparcamientos"),
+      cuota: valor("total"),
+      colegiado: "3079",
+    });
+    destino.value = res.carta || "";
+    if (estado) estado.textContent = res.carta ? "Lista. Revísala antes de enviar." : "La plantilla quedó vacía con estos datos.";
+  } catch (e) {
+    if (estado) estado.textContent = e?.message || "No se pudo generar la carta.";
+  }
+};
+
+document.getElementById("workspaceFincasBudgetCartaPanel")?.addEventListener("toggle", (ev) => {
+  if (ev.target.open) void cargarPlantillasDeCarta();
+});
+document.getElementById("workspaceFincasBudgetCartaGenerar")?.addEventListener("click", generarCartaDePresentacion);
+
 /** Abre el bloque de solicitante si alguno de sus campos trae algo escrito. */
 const abrirPlegableSiTieneDatos = () => {
   const caja = document.getElementById("workspaceFincasBudgetSolicitante");
