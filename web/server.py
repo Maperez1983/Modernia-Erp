@@ -41305,6 +41305,31 @@ def ensure_workspace_product_tables(conn):
         )
     except Exception:
         pass
+    # El equipo que va en la carta de presentación. En su propia tabla y no escrito
+    # en el código para que se pueda cambiar cuando entre o salga alguien sin tener
+    # que desplegar: los nombres de personas cambian más que las plantillas.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_equipo (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          nombre TEXT NOT NULL,
+          cargo TEXT NOT NULL DEFAULT '',
+          colegiado TEXT NOT NULL DEFAULT '',
+          activo INTEGER NOT NULL DEFAULT 1,
+          orden INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_equipo_unico "
+            "ON workspace_fincas_equipo (workspace_id, nombre)"
+        )
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_recibos (
@@ -54399,6 +54424,76 @@ def fetch_workspace_fincas_cartas(conn, workspace_id, *, sembrar=True):
     ]
 
 
+#: El equipo que firma la propuesta, tal y como lo dio la casa. Son personas
+#: reales: los nombres y los cargos van literalmente como me los pasaron, sin
+#: retocar ni completar. El número de colegiado se deja en blanco a propósito —el
+#: presupuesto ya lleva el 3079 por su lado— hasta que se confirme de quién es.
+FINCAS_EQUIPO_DEFECTO = [
+    {"nombre": "Miguel Ángel Pérez Rodríguez", "cargo": "Administrador de Fincas", "orden": 1},
+    {"nombre": "Daniel Gallardo Romero", "cargo": "Oficial Habilitado administración de fincas", "orden": 2},
+    {"nombre": "Barbara Salazar Oular", "cargo": "Seguros", "orden": 3},
+    {"nombre": "Teresa Ramos Rueda", "cargo": "Asesora Fiscal persona física", "orden": 4},
+    {"nombre": "Ana Portero Palma", "cargo": "Abogada", "orden": 5},
+]
+
+
+def fetch_workspace_fincas_equipo(conn, workspace_id, *, sembrar=True):
+    """Equipo del workspace, sembrando el de partida la primera vez."""
+    workspace_id = str(workspace_id or "").strip()
+    if not workspace_id:
+        return []
+
+    def leer():
+        return conn.execute(
+            "SELECT id, nombre, cargo, colegiado, activo, orden FROM workspace_fincas_equipo "
+            "WHERE workspace_id = ? ORDER BY orden, nombre",
+            (workspace_id,),
+        ).fetchall()
+
+    filas = leer()
+    if not filas and sembrar:
+        ahora = datetime.now().isoformat(timespec="seconds")
+        for item in FINCAS_EQUIPO_DEFECTO:
+            conn.execute(
+                "INSERT INTO workspace_fincas_equipo "
+                "(id, workspace_id, nombre, cargo, colegiado, activo, orden, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, '', 1, ?, ?, ?)",
+                (os.urandom(16).hex(), workspace_id, item["nombre"], item["cargo"], item["orden"], ahora, ahora),
+            )
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        filas = leer()
+    return [
+        {
+            "id": row_value(f, "id", ""),
+            "nombre": row_value(f, "nombre", "") or "",
+            "cargo": row_value(f, "cargo", "") or "",
+            "colegiado": row_value(f, "colegiado", "") or "",
+            "activo": int(row_value(f, "activo", 1) or 0),
+            "orden": int(row_value(f, "orden", 0) or 0),
+        }
+        for f in filas
+    ]
+
+
+def describe_miembro_equipo(miembro):
+    """«Miguel Ángel Pérez Rodríguez — Administrador de Fincas, colegiado nº 3079».
+
+    Lo que falte se cae: un guion suelto o un «colegiado nº» sin número quedan peor
+    que la línea corta.
+    """
+    nombre = str((miembro or {}).get("nombre") or "").strip()
+    if not nombre:
+        return ""
+    cargo = str((miembro or {}).get("cargo") or "").strip()
+    colegiado = str((miembro or {}).get("colegiado") or "").strip()
+    if colegiado:
+        cargo = f"{cargo}, colegiado nº {colegiado}" if cargo else f"Colegiado nº {colegiado}"
+    return f"{nombre} — {cargo}" if cargo else nombre
+
+
 def build_mapa_estatico(lat, lon, *, zoom=17, ancho=900, alto=380):
     """Mapa del edificio, cosido a partir de teselas y con su chincheta.
 
@@ -54665,11 +54760,26 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
         sections.append(("Carta de presentación", {
             "items": [p for p in carta.split("\n") if p.strip()], "espaciado": 7,
         }))
+        # Quién va a llevar la comunidad, con nombre y cargo. Va antes de la foto de
+        # grupo: así la foto deja de estar suelta y se sabe a quién se está viendo.
+        equipo = [m for m in (calc.get("equipo") or []) if isinstance(m, dict) and str(m.get("nombre") or "").strip()]
+        lineas_equipo = [describe_miembro_equipo(m) for m in equipo]
+        lineas_equipo = [l for l in lineas_equipo if l]
+        if lineas_equipo:
+            sections.append(("Quién va a llevar su comunidad", {
+                "items": [f"· {l}" for l in lineas_equipo],
+            }))
         foto_equipo = _load_asset_logo("photos/equipo-modernia.jpg", max_width=1100)
         if foto_equipo is not None:
-            sections.append(("", {"kind": "image", "image": foto_equipo, "height": 200}))
+            # 150 y no 200: con la lista del equipo delante, a 200 la foto ya no
+            # entraba en la primera página y se quedaba sola en la segunda, debajo
+            # de una cabecera vacía. Es una foto de acompañamiento, no una portada.
+            sections.append(("", {"kind": "image", "image": foto_equipo, "height": 150}))
         colegiado = limpio(calc.get("colegiado_numero"))
-        if es_fincas and colegiado:
+        # Si alguien del equipo ya sale con su número de colegiado, esta línea
+        # sobra: repetiría el mismo dato sin decir de quién es.
+        ya_hay_colegiado = any(str(m.get("colegiado") or "").strip() for m in equipo)
+        if es_fincas and colegiado and not ya_hay_colegiado:
             sections.append(("", [f"Administrador de Fincas Colegiado nº {colegiado}."]))
         sections.append(("", {"kind": "page_break"}))
 
@@ -62259,6 +62369,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_factura",
             "/api/workspace_fincas_contabilizar_recibos",
             "/api/workspace_fincas_carta",
+            "/api/workspace_fincas_equipo",
             "/api/workspace_fincas_portal_alta",
             "/api/workspace_fincas_portal_revocar",
             "/api/workspace_fincas_vecino_delete",
@@ -73295,6 +73406,15 @@ class Handler(BaseHTTPRequestHandler):
                 # herencias, seguros...), se ofrecen con presupuesto aparte y no
                 # entran en la cuota mensual de administración.
                 calculo["servicios_grupo"] = lista_de_servicios(payload.get("servicios_grupo"))
+                # El equipo se congela dentro del presupuesto: si mañana alguien deja
+                # el despacho, el PDF que ya se mandó tiene que seguir diciendo lo
+                # que decía el día que se envió.
+                if workspace_id:
+                    calculo["equipo"] = [
+                        {"nombre": m["nombre"], "cargo": m["cargo"], "colegiado": m["colegiado"]}
+                        for m in fetch_workspace_fincas_equipo(conn, workspace_id)
+                        if m.get("activo")
+                    ]
                 tarifas = fetch_workspace_fincas_tarifas(conn, workspace_id) if workspace_id else []
                 calculo["cuota_sugerida"] = compute_fincas_cuota_sugerida(
                     calculo["num_vecinos"],
@@ -75049,6 +75169,54 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/workspace_fincas_equipo":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            items = payload.get("items")
+            if isinstance(items, str):
+                try:
+                    items = json.loads(items)
+                except Exception:
+                    items = None
+            if not isinstance(items, list):
+                json_response(self, {"error": "items requerido"}, status=400)
+                return
+            ahora = datetime.now().isoformat(timespec="seconds")
+            # Se reemplaza la lista entera: es la forma de que quitar a alguien del
+            # formulario lo quite de verdad. Con altas y bajas sueltas, quien se va
+            # se queda en la carta hasta que alguien se acuerde de borrarlo.
+            conn.execute("DELETE FROM workspace_fincas_equipo WHERE workspace_id = ?", (workspace_id,))
+            vistos = set()
+            for orden, item in enumerate(items, start=1):
+                if not isinstance(item, dict):
+                    continue
+                nombre = str(item.get("nombre") or "").strip()
+                if not nombre or normalize_lookup_text(nombre) in vistos:
+                    continue
+                vistos.add(normalize_lookup_text(nombre))
+                conn.execute(
+                    "INSERT INTO workspace_fincas_equipo "
+                    "(id, workspace_id, nombre, cargo, colegiado, activo, orden, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (os.urandom(16).hex(), workspace_id, nombre,
+                     str(item.get("cargo") or "").strip(),
+                     str(item.get("colegiado") or "").strip(),
+                     0 if str(item.get("activo") or "1") in {"0", "False", "false"} else 1,
+                     orden, ahora, ahora),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "items": fetch_workspace_fincas_equipo(conn, workspace_id, sembrar=False)})
             return
         elif parsed.path == "/api/workspace_fincas_carta":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -89439,6 +89607,22 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             json_response(self, {"items": fetch_workspace_fincas_cartas(conn, workspace_id)})
+            return
+
+        if path == "/api/workspace_fincas_equipo":
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, {"items": fetch_workspace_fincas_equipo(conn, workspace_id)})
             return
 
         if path == "/api/workspace_fincas_morosidad":

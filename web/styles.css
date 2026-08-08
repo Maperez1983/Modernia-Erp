@@ -15273,3 +15273,12 @@ samp {
   white-space: pre;
   overflow-x: auto;
 }
+
+/* Filas del equipo que sale en la carta de presentación. */
+.equipo-fila {
+  display: grid; grid-template-columns: 2fr 2fr 1fr auto; gap: 8px;
+  align-items: center; margin-bottom: 8px;
+}
+@media (max-width: 720px) {
+  .equipo-fila { grid-template-columns: 1fr; }
+}

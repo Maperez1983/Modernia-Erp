@@ -26958,6 +26958,79 @@ document.getElementById("workspaceFincasBudgetCartaPanel")?.addEventListener("to
 });
 document.getElementById("workspaceFincasBudgetCartaGenerar")?.addEventListener("click", generarCartaDePresentacion);
 
+// --- Equipo que sale en la carta -------------------------------------------
+// Va en su propia tabla y no escrito en el código: los nombres de las personas
+// cambian más a menudo que las plantillas, y no vale que haga falta un despliegue
+// para quitar de la carta a quien ya no está.
+
+const equipoFincasLista = document.getElementById("workspaceFincasBudgetEquipoLista");
+const equipoFincasStatus = document.getElementById("workspaceFincasBudgetEquipoStatus");
+
+const filaEquipoFincas = (miembro = {}) => `
+  <div class="equipo-fila" data-equipo-fila>
+    <input data-equipo="nombre" placeholder="Nombre y apellidos" value="${escapeHtml(String(miembro.nombre || ""))}" />
+    <input data-equipo="cargo" placeholder="Cargo" value="${escapeHtml(String(miembro.cargo || ""))}" />
+    <input data-equipo="colegiado" placeholder="Nº colegiado (opcional)" value="${escapeHtml(String(miembro.colegiado || ""))}" />
+    <button type="button" class="secondary ghost" data-equipo-quitar title="Quitar">Quitar</button>
+  </div>
+`;
+
+const pintaEquipoFincas = (items) => {
+  if (!equipoFincasLista) return;
+  const filas = (Array.isArray(items) ? items : []).map(filaEquipoFincas).join("");
+  equipoFincasLista.innerHTML = filas || `<p class="muted">Todavía no hay nadie. Añade a quien vaya a salir en la carta.</p>`;
+};
+
+const leeEquipoFincas = () =>
+  Array.from(equipoFincasLista?.querySelectorAll("[data-equipo-fila]") || [])
+    .map((fila) => {
+      const val = (campo) => String(fila.querySelector(`[data-equipo="${campo}"]`)?.value || "").trim();
+      return { nombre: val("nombre"), cargo: val("cargo"), colegiado: val("colegiado") };
+    })
+    .filter((m) => m.nombre);
+
+const cargarEquipoDeFincas = async () => {
+  if (!state.currentWorkspaceId || !equipoFincasLista) return;
+  try {
+    const data = await apiGet(`/api/workspace_fincas_equipo?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`);
+    pintaEquipoFincas(data?.items || []);
+  } catch (error) {
+    if (equipoFincasStatus) equipoFincasStatus.textContent = error?.message || "No se pudo cargar el equipo.";
+  }
+};
+
+const guardarEquipoDeFincas = async () => {
+  if (!state.currentWorkspaceId) return;
+  const items = leeEquipoFincas();
+  if (equipoFincasStatus) equipoFincasStatus.textContent = "Guardando...";
+  try {
+    const data = await apiPost("/api/workspace_fincas_equipo", { workspace_id: state.currentWorkspaceId, items });
+    pintaEquipoFincas(data?.items || []);
+    if (equipoFincasStatus) {
+      equipoFincasStatus.textContent = "Equipo guardado. Saldrá en los presupuestos que generes a partir de ahora.";
+    }
+  } catch (error) {
+    if (equipoFincasStatus) equipoFincasStatus.textContent = error?.message || "No se pudo guardar el equipo.";
+  }
+};
+
+document.getElementById("workspaceFincasBudgetEquipoPanel")?.addEventListener("toggle", (ev) => {
+  // Solo al abrir el plegable: casi nunca se toca, y son datos de todo el workspace.
+  if (ev.target.open) void cargarEquipoDeFincas();
+});
+document.getElementById("workspaceFincasBudgetEquipoAnadir")?.addEventListener("click", () => {
+  if (!equipoFincasLista) return;
+  if (!equipoFincasLista.querySelector("[data-equipo-fila]")) equipoFincasLista.innerHTML = "";
+  equipoFincasLista.insertAdjacentHTML("beforeend", filaEquipoFincas());
+});
+document.getElementById("workspaceFincasBudgetEquipoGuardar")?.addEventListener("click", guardarEquipoDeFincas);
+equipoFincasLista?.addEventListener("click", (ev) => {
+  const boton = ev.target.closest("[data-equipo-quitar]");
+  if (!boton) return;
+  boton.closest("[data-equipo-fila]")?.remove();
+  if (equipoFincasStatus) equipoFincasStatus.textContent = "Recuerda darle a «Guardar equipo».";
+});
+
 /** Abre el bloque de solicitante si alguno de sus campos trae algo escrito. */
 const abrirPlegableSiTieneDatos = () => {
   const caja = document.getElementById("workspaceFincasBudgetSolicitante");
