@@ -58883,35 +58883,238 @@ def get_workspace_contract_templates():
                 "Firma cliente ____________________ · Firma prestador ____________________",
             ],
         },
+        # Contrato base de administración de fincas. Redactado con la Ley 49/1960 de
+        # Propiedad Horizontal y el Código Civil delante (texto consolidado del BOE),
+        # citando el artículo del que sale cada cláusula para que se pueda comprobar
+        # sin salir del documento y para que se vea qué hay que revisar cuando la ley
+        # cambie. Lo mismo que ya se hizo con las mayorías de junta.
+        #
+        # **Es un borrador.** Lo dice el pie del propio PDF y lo repito aquí: esto lo
+        # firma una comunidad real y quien lo valida es un abogado, no el sistema.
         "fincas_contrato_comunidad": {
-            "label": "Fincas · Contrato gestión de comunidad",
+            "label": "Fincas · Contrato de administración de comunidad",
             "servicio": "fincas",
             "title": "Contrato de administración de fincas · Comunidad de propietarios",
             "sections": [
                 (
-                    "Objeto",
+                    "Primera. Objeto",
                     [
-                        "Prestación del servicio de administración de la comunidad: contabilidad, gestión de cobros y pagos, incidencias y coordinación de proveedores.",
-                        "Convocatoria y asistencia a juntas según acuerdo y condiciones pactadas.",
+                        "La Comunidad encomienda a la Administración la gestión y administración de la finca, "
+                        "que se prestará conforme a las funciones que la Ley de Propiedad Horizontal atribuye al "
+                        "administrador y a los acuerdos que adopte la Junta de propietarios.",
+                        "El presente contrato tiene naturaleza de mandato retribuido conforme al artículo 1709 del "
+                        "Código Civil, por el que una persona se obliga a prestar algún servicio o hacer alguna cosa "
+                        "por cuenta o encargo de otra.",
                     ],
                 ),
                 (
-                    "Alcance operativo",
+                    "Segunda. Nombramiento, duración y remoción",
                     [
-                        "Uso del portal para requerimientos, documentos y control de incidencias.",
-                        "Archivado de documentación y trazabilidad de actuaciones.",
+                        "El cargo de administrador se ejerce por persona física con cualificación profesional "
+                        "suficiente, conforme al artículo 13.6 de la Ley de Propiedad Horizontal.",
+                        "El nombramiento se hace por el plazo de un año, salvo que los estatutos de la Comunidad "
+                        "dispongan otra cosa (artículo 13.7 LPH), y se entenderá prorrogado por periodos iguales "
+                        "salvo denuncia de cualquiera de las partes con un mes de antelación.",
+                        "La Junta de propietarios podrá remover a la Administración de su cargo antes de la "
+                        "expiración del mandato, sin necesidad de causa (artículo 13.7 LPH). Igualmente, la "
+                        "Administración podrá renunciar conforme al artículo 1732.2.º del Código Civil.",
                     ],
                 ),
                 (
-                    "Honorarios y duración",
+                    "Tercera. Funciones (artículo 20 LPH)",
                     [
-                        "Honorarios: según presupuesto aceptado (cuota mensual/vecino u otro criterio).",
-                        "Duración: anual renovable salvo preaviso.",
+                        "a) Velar por el buen régimen de la casa, sus instalaciones y servicios, y hacer a los "
+                        "titulares las advertencias y apercibimientos oportunos.",
+                        "b) Preparar con la debida antelación y someter a la Junta el plan de gastos previsibles, "
+                        "proponiendo los medios necesarios para hacerle frente.",
+                        "c) Atender a la conservación y entretenimiento de la casa, disponiendo las reparaciones y "
+                        "medidas que resulten urgentes, dando cuenta inmediata a la Presidencia o a los propietarios.",
+                        "d) Ejecutar los acuerdos adoptados en materia de obras y efectuar los pagos y realizar los cobros.",
+                        "e) Actuar como Secretaría de la Junta y custodiar la documentación de la Comunidad.",
+                        "f) Las demás atribuciones que le confiera la Junta.",
+                    ],
+                ),
+                (
+                    "Cuarta. Secretaría y custodia documental",
+                    [
+                        "La Administración llevará el libro de actas y conservará durante el plazo de cinco años las "
+                        "convocatorias, comunicaciones, apoderamientos y demás documentos relevantes de las "
+                        "reuniones (artículo 19.4 LPH).",
+                        "La documentación es propiedad de la Comunidad. Al terminar el contrato se entregará "
+                        "íntegramente a quien la Junta designe, en el plazo máximo de un mes desde el cese, junto con "
+                        "los saldos y el estado de cuentas a esa fecha.",
+                    ],
+                ),
+                (
+                    "Quinta. Gestión económica",
+                    [
+                        "La Administración preparará el presupuesto ordinario anual y lo someterá a la Junta, y "
+                        "girará las cuotas conforme a la cuota de participación de cada propietario o a lo "
+                        "especialmente establecido (artículo 9.1.e LPH).",
+                        "El presupuesto contemplará la dotación del fondo de reserva, que en ningún caso podrá ser "
+                        "inferior al 10 por ciento del último presupuesto ordinario (artículo 9.1.f LPH).",
+                        "Los fondos de la Comunidad se mantendrán en cuenta abierta a nombre de la Comunidad. La "
+                        "Administración no dispondrá de fondos propios para atender gastos de la Comunidad ni "
+                        "confundirá unos con otros.",
+                        "En caso de impago, la Administración preparará el certificado del acuerdo de liquidación de "
+                        "la deuda, que suscribirá como Secretaría con el visto bueno de la Presidencia (artículo 21.3 "
+                        "LPH), quedando la decisión de reclamar judicialmente reservada a la Junta.",
+                    ],
+                ),
+                (
+                    "Sexta. Rendición de cuentas",
+                    [
+                        "La Administración está obligada a dar cuenta de sus operaciones y a abonar a la Comunidad "
+                        "cuanto haya recibido en virtud del mandato, aun cuando lo recibido no se le debiera "
+                        "(artículo 1720 del Código Civil).",
+                        "Se rendirán cuentas ante la Junta ordinaria anual y siempre que la Comunidad lo solicite. La "
+                        "Comunidad tendrá acceso permanente al estado de cuentas, la situación de morosidad y las "
+                        "incidencias abiertas.",
+                        "En la ejecución del encargo, la Administración se ajustará a las instrucciones de la "
+                        "Comunidad y, a falta de ellas, hará lo que según la naturaleza del negocio haría un buen "
+                        "padre de familia (artículo 1719 del Código Civil).",
+                    ],
+                ),
+                (
+                    "Séptima. Obligaciones de la Comunidad",
+                    [
+                        "Facilitar la documentación, los datos y las autorizaciones necesarios para la gestión, y "
+                        "comunicar los cambios de titularidad y de domicilio a efectos de notificaciones.",
+                        "Adoptar en Junta los acuerdos que correspondan a su competencia, sin que la Administración "
+                        "pueda sustituirla en decisiones que la Ley reserva a la Junta.",
+                        "Atender el pago de los honorarios pactados en la cláusula octava.",
+                    ],
+                ),
+                (
+                    "Octava. Honorarios",
+                    [
+                        "Los honorarios son los que figuran en el presupuesto aceptado que se acompaña como parte "
+                        "integrante de este contrato, y se devengan por mensualidades.",
+                        "No están incluidos, y se presupuestarán aparte, los trabajos extraordinarios: entre otros, "
+                        "la constitución de la comunidad, las juntas extraordinarias que excedan de las pactadas, la "
+                        "tramitación de siniestros complejos, los expedientes de obras y las actuaciones judiciales.",
+                        "Los honorarios podrán actualizarse anualmente conforme a la variación del Índice de Precios "
+                        "de Consumo, previa comunicación a la Comunidad con un mes de antelación.",
+                    ],
+                ),
+                (
+                    "Novena. Responsabilidad, colegiación y seguro",
+                    [
+                        "La Administración responde no solamente del dolo, sino también de la culpa, que se estimará "
+                        "con más rigor por tratarse de un mandato retribuido (artículo 1726 del Código Civil).",
+                        "La Administración declara estar colegiada y mantener en vigor un seguro de responsabilidad "
+                        "civil profesional, cuyos datos facilitará a la Comunidad a requerimiento de esta.",
+                    ],
+                ),
+                (
+                    "Décima. Protección de datos",
+                    [
+                        "La Comunidad es responsable del tratamiento de los datos personales de los propietarios y "
+                        "residentes. La Administración los trata por cuenta de aquella en condición de encargada del "
+                        "tratamiento, en los términos del artículo 28 del Reglamento (UE) 2016/679.",
+                        "La Administración tratará los datos únicamente siguiendo instrucciones documentadas de la "
+                        "Comunidad; garantizará que las personas autorizadas se comprometen a la confidencialidad; "
+                        "aplicará las medidas de seguridad del artículo 32 del Reglamento; no subcontratará sin "
+                        "autorización; asistirá a la Comunidad en la atención de los derechos de los interesados y en "
+                        "la notificación de violaciones de seguridad; y, al finalizar la prestación, devolverá o "
+                        "suprimirá los datos, salvo los que deba conservar por obligación legal.",
+                        "El detalle del tratamiento —objeto, duración, naturaleza, finalidad, tipo de datos y "
+                        "categorías de interesados— consta en el anexo de encargo de tratamiento.",
+                    ],
+                ),
+                (
+                    "Undécima. Terminación",
+                    [
+                        "El contrato se extingue por revocación de la Comunidad, por renuncia de la Administración y "
+                        "por las demás causas del artículo 1732 del Código Civil. La Comunidad puede revocar el "
+                        "mandato a su voluntad (artículo 1733 del Código Civil).",
+                        "Extinguido el contrato, la Administración cesará en sus funciones y procederá a la entrega "
+                        "de la documentación y de los saldos conforme a la cláusula cuarta, sin perjuicio de la "
+                        "liquidación de los honorarios devengados hasta la fecha del cese.",
+                    ],
+                ),
+                (
+                    "Duodécima. Legislación aplicable",
+                    [
+                        "En lo no previsto se estará a la Ley 49/1960, de 21 de julio, sobre propiedad horizontal, y "
+                        "subsidiariamente a las normas del mandato del Código Civil (artículos 1709 y siguientes).",
                     ],
                 ),
             ],
             "footer": [
-                "Documento operativo generado por el sistema. Requiere validación jurídica definitiva antes de su uso masivo en producción.",
+                "BORRADOR. Documento base generado por el sistema a partir de la Ley 49/1960 de Propiedad Horizontal "
+                "y del Código Civil. Debe ser revisado y validado por la asesoría jurídica antes de su firma.",
+                "Firma comunidad ____________________ · Firma administración ____________________",
+            ],
+        },
+        # El anexo va aparte y no dentro del contrato porque tiene vida propia: el
+        # artículo 28.3 del RGPD exige que el encargo conste por escrito con un
+        # contenido mínimo, y ese contenido se revisa y se actualiza por su cuenta.
+        "fincas_anexo_rgpd": {
+            "label": "Fincas · Anexo de encargo de tratamiento (RGPD)",
+            "servicio": "fincas",
+            "title": "Anexo de encargo de tratamiento · Artículo 28 RGPD",
+            "sections": [
+                (
+                    "Partes y condición",
+                    [
+                        "Responsable del tratamiento: la Comunidad de propietarios.",
+                        "Encargada del tratamiento: la Administración de fincas, que trata los datos por cuenta de "
+                        "la Comunidad para prestar el servicio de administración.",
+                    ],
+                ),
+                (
+                    "Objeto, duración y naturaleza",
+                    [
+                        "Objeto: los tratamientos necesarios para administrar la comunidad.",
+                        "Duración: la del contrato de administración, incluidas sus prórrogas.",
+                        "Naturaleza y finalidad: recogida, registro, conservación, consulta, comunicación y supresión "
+                        "de datos para la gestión de cuotas y recibos, la contabilidad, las juntas y actas, las "
+                        "incidencias y la relación con proveedores y aseguradoras.",
+                    ],
+                ),
+                (
+                    "Datos y personas afectadas",
+                    [
+                        "Categorías de interesados: propietarios, y en su caso ocupantes, cargos de la comunidad y "
+                        "personas de contacto de proveedores.",
+                        "Categorías de datos: identificativos (nombre, NIF, domicilio, teléfono, correo), datos "
+                        "económicos y bancarios (IBAN, mandato de domiciliación, importes y estado de los recibos, "
+                        "situación de deuda) y datos de la propiedad (piso, coeficiente).",
+                        "No está previsto tratar categorías especiales de datos del artículo 9 del Reglamento.",
+                    ],
+                ),
+                (
+                    "Obligaciones de la Encargada (artículo 28.3 RGPD)",
+                    [
+                        "a) Tratar los datos únicamente siguiendo instrucciones documentadas de la Comunidad.",
+                        "b) Garantizar que las personas autorizadas se han comprometido a respetar la "
+                        "confidencialidad o están sujetas a una obligación de confidencialidad de naturaleza legal.",
+                        "c) Aplicar las medidas técnicas y organizativas del artículo 32 del Reglamento.",
+                        "d) No recurrir a otro encargado sin autorización previa por escrito de la Comunidad.",
+                        "e) Asistir a la Comunidad para que pueda atender las solicitudes de ejercicio de derechos "
+                        "de los interesados.",
+                        "f) Ayudar a la Comunidad en el cumplimiento de los artículos 32 a 36 del Reglamento, "
+                        "notificando sin dilación indebida cualquier violación de la seguridad de la que tenga "
+                        "conocimiento.",
+                        "g) A elección de la Comunidad, suprimir o devolver todos los datos una vez finalice la "
+                        "prestación, y suprimir las copias existentes, salvo que deba conservarlos por obligación legal.",
+                        "h) Poner a disposición de la Comunidad la información necesaria para demostrar el "
+                        "cumplimiento de estas obligaciones y permitir auditorías.",
+                    ],
+                ),
+                (
+                    "Acceso de los propietarios",
+                    [
+                        "El acceso de cada propietario a su información se realiza mediante enlace personal, sin que "
+                        "pueda ver los datos ni los pagos de ningún otro propietario. El enlace caduca y puede ser "
+                        "anulado en cualquier momento por la Administración o a instancia de la Comunidad.",
+                    ],
+                ),
+            ],
+            "footer": [
+                "BORRADOR. Anexo generado por el sistema conforme al artículo 28 del Reglamento (UE) 2016/679. "
+                "Debe ser revisado y validado por la asesoría jurídica antes de su firma.",
                 "Firma comunidad ____________________ · Firma administración ____________________",
             ],
         },

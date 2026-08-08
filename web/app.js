@@ -27584,6 +27584,8 @@ const renderWorkspaceFincasBudgetsList = () => {
               ${!isAccepted ? `<button type="button" class="secondary ghost button-inline" data-fincas-budget-accept="${escapeHtml(String(row.id || ""))}">Aceptar</button>` : ""}
               ${normalizeSimple(estado) !== "rechazado" ? `<button type="button" class="secondary ghost button-inline" data-fincas-budget-reject="${escapeHtml(String(row.id || ""))}">Rechazar</button>` : ""}
               ${isAccepted ? `<button type="button" class="secondary ghost button-inline" data-fincas-budget-contract="${escapeHtml(String(row.id || ""))}">Contrato</button>` : ""}
+              ${isAccepted ? `<button type="button" class="secondary ghost button-inline" data-fincas-budget-rgpd="${escapeHtml(String(row.id || ""))}">Anexo RGPD</button>` : ""}
+              ${isAccepted ? `<a class="secondary ghost button-inline" href="/api/workspace_presupuesto_encargo_pdf?id=${encodeURIComponent(row.id || "")}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}" target="_blank" rel="noreferrer">Encargo</a>` : ""}
               ${isAccepted && !hasCommunityRef ? `<button type="button" class="secondary ghost button-inline" data-fincas-budget-convert="${escapeHtml(String(row.id || ""))}">Convertir</button>` : ""}
               ${hasCommunityRef ? `<button type="button" class="secondary ghost button-inline" data-fincas-budget-open-community="${escapeHtml(String(row.referencia_id || ""))}">Comunidad</button>` : ""}
               <button type="button" class="secondary ghost button-inline" data-fincas-budget-edit="${escapeHtml(String(row.id || ""))}">Editar</button>
@@ -27673,6 +27675,36 @@ const renderWorkspaceFincasBudgetsList = () => {
         if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "Contrato creado.";
       } catch (error) {
         if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = error?.message || "No se pudo generar el contrato.";
+      }
+    });
+  });
+
+  workspaceFincasBudgetsTable.querySelectorAll("[data-fincas-budget-rgpd]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const row = findRow(btn.dataset.fincasBudgetRgpd || "");
+      if (!row || !state.currentWorkspaceId) return;
+      try {
+        if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "Generando anexo RGPD...";
+        // Mismo camino que el contrato, cambiando la plantilla: el anexo del
+        // artículo 28 tiene que quedar guardado como documento propio, no ser un
+        // PDF suelto que nadie sabe si se firmó.
+        const payload = buildFincasContractPayloadFromBudgetRow(row);
+        payload.template_key = "fincas_anexo_rgpd";
+        payload.titulo = payload.titulo.replace("Contrato · Administración de fincas", "Anexo RGPD · Administración de fincas");
+        payload.clausulas_extra = "";
+        const res = await fetch("/api/workspace_contratos", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((r) => r.json());
+        if (res?.error) throw new Error(res.error);
+        const anexoId = String(res.id || "").trim();
+        if (anexoId) {
+          window.open(`/api/workspace_contrato_pdf?id=${encodeURIComponent(anexoId)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`, "_blank", "noopener,noreferrer");
+        }
+        if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "Anexo RGPD creado.";
+      } catch (error) {
+        if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = error?.message || "No se pudo generar el anexo.";
       }
     });
   });
