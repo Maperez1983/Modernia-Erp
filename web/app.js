@@ -56689,7 +56689,7 @@ const buildVerifika2Badge = (isVerified, { compact = false } = {}) => {
   if (!isVerified) return "";
   return `
     <span class="inmueble-badge verifika2${compact ? " compact" : ""}" title="Verificado por Verifika² (documentación revisada)">
-      <img src="/assets/verifika2/verifika2_mark.svg" alt="" aria-hidden="true" loading="lazy" />
+      <img src="/assets/verifika2/verifika2_app_icon.svg" alt="" aria-hidden="true" loading="lazy" />
       <span>Verifika²</span>
     </span>
   `;
