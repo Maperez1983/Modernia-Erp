@@ -104454,6 +104454,44 @@ def _warn_missing_fiscal_catalogs():
         print(msg)
 
 
+def aviso_de_produccion(args):
+    """Grita si un arranque a mano está apuntando a la base de producción.
+
+    `load_env_file()` solo respeta una variable si **ya existe** en el entorno
+    (`if key not in os.environ`), así que un `unset DATABASE_URL` no sirve de nada:
+    el `.env` la repone. Levantando el servidor en local para mirar una pantalla se
+    acaba escribiendo en los datos de los clientes sin enterarse. Me pasó a mí
+    revisando la interfaz, y solo lo vi porque `build_info` decía «postgres».
+
+    No bloquea nada: en Render este arranque es el bueno. Solo lo dice bien claro.
+    """
+    dsn = (os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or "").strip()
+    if not dsn:
+        return
+    # En la plataforma siempre hay PORT; en un portátil, casi nunca.
+    if str(os.environ.get("PORT") or "").strip():
+        return
+    host = ""
+    try:
+        host = urllib.parse.urlsplit(dsn).hostname or ""
+    except Exception:
+        host = ""
+    linea = "=" * 72
+    mensaje = (
+        f"\n{linea}\n"
+        f"  ATENCIÓN: este servidor está conectado a POSTGRES ({host or 'host desconocido'}).\n"
+        f"  Si esto es tu portátil, estás escribiendo en la base de PRODUCCIÓN.\n"
+        f"  Para trabajar en local:  export DATABASE_URL=\"\"  (vacía, NO 'unset':\n"
+        f"  al quitarla, el .env la vuelve a poner).\n"
+        f"{linea}\n"
+    )
+    try:
+        LOGGER.warning(mensaje)
+    except Exception:
+        pass
+    print(mensaje, flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Verifika² · CRM local server.")
     parser.add_argument("--db", default=str(DB_CONFIGURED), help="SQLite path.")
@@ -104509,6 +104547,7 @@ def main():
             daemon=True,
         )
         legal_thread.start()
+    aviso_de_produccion(args)
     # Creamos el servidor ANTES de bootstraps pesados para evitar 502 en plataformas (Render) con timeouts de arranque.
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     # Bootstrap DB en background (no bloquea bind del puerto).

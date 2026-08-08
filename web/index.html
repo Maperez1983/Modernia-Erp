@@ -9,7 +9,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=312" />
+	    <link rel="stylesheet" href="styles.css?v=315" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -26,7 +26,8 @@
       <div class="brand" id="brandHome">
         <img src="/assets/verifika2/verifika2_wordmark_dark.svg" alt="Verifika²" />
         <div class="brand-copy">
-          <span class="brand-kicker">Verifika²</span>
+          <!-- El wordmark de al lado ya dice «Verifika²»: repetirlo en la píldora y
+               otra vez en el título era decir la marca tres veces en la cabecera. -->
           <h1>CRM 360</h1>
         </div>
       </div>
@@ -48,7 +49,6 @@
         <span id="uiContextDrafts" class="pill hidden"></span>
         <button id="uiContextBackBtn" type="button" class="secondary ghost hidden" data-ui-action="holding-back">Volver al panel</button>
         <button type="button" class="secondary ghost" data-ui-action="focus-search">Buscar</button>
-        <button type="button" class="secondary ghost" data-ui-action="focus-primary">Acción principal</button>
       </div>
     </div>
     <div id="renewalAlert" class="alert hidden"></div>
@@ -12036,11 +12036,11 @@
             const LEAFLET_CSS_HREF = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
             const DEEP_LINK_KEYS = ["activar_token", "portal_token", "firma_inmo", "portal_inmo", "holding", "workspace", "crm", "cliente", "poliza", "agenda", "admin", "token"];
             const APP_SHELL_SCRIPTS = [
-              "ui-foundation.js?v=9",
+              "ui-foundation.js?v=10",
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=869",
+              "app.js?v=870",
             ];
 
             const getParams = () => {

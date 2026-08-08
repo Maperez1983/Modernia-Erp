@@ -15295,3 +15295,34 @@ samp {
 .presu-kpis span { display: block; font-size: 11px; opacity: 0.7; text-transform: uppercase; letter-spacing: .03em; }
 .presu-kpis strong { display: block; font-size: 22px; line-height: 1.2; margin-top: 2px; }
 .presu-kpis em { font-style: normal; font-size: 11px; opacity: 0.6; }
+
+/* La cabecera ocupaba 272 px de los 812 de un móvil, y el primer contenido útil
+   empezaba en el píxel 486: había que pasar el 60 % de la pantalla para ver algo.
+   En un teléfono la marca puede ocupar mucho menos; en escritorio se deja como
+   estaba, que ahí sobra sitio. */
+@media (max-width: 720px) {
+  header {
+    padding:
+      calc(12px + var(--safe-top))
+      calc(16px + var(--safe-right))
+      12px
+      calc(16px + var(--safe-left));
+    gap: 8px;
+  }
+  /* El logo lo pinta `body.theme-operativa .brand img` como una insignia cuadrada
+     de 92x92 con relleno. Hay que igualar esa especificidad o la regla no gana; y
+     hay que encogerla entera, no solo el alto, o el wordmark queda perdido dentro
+     de una caja que sigue midiendo lo mismo. */
+  body.theme-operativa header .brand img,
+  header .brand img { width: 52px; height: 52px; padding: 8px; border-radius: 16px; }
+  header .brand { gap: 12px; }
+  header .brand-copy h1 { font-size: 22px; line-height: 1.15; margin: 0; }
+  /* El bloque de usuario en línea, no apilado ocupando media pantalla. */
+  header .meta {
+    display: flex; flex-direction: row; align-items: center;
+    gap: 8px; flex-wrap: wrap; padding: 0; background: none; border: 0;
+  }
+  header .meta-user { flex-direction: row; align-items: center; gap: 6px; }
+  header .meta-user > span:first-child { display: none; }  /* el rótulo «Usuario» sobra al lado del nombre */
+  .ui-context-bar { padding: 10px 16px; }
+}

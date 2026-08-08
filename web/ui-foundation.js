@@ -574,7 +574,6 @@
           <span id="uiContextDrafts" class="pill hidden"></span>
           <button id="uiContextBackBtn" type="button" class="secondary ghost hidden" data-ui-action="holding-back">Volver al panel</button>
           <button type="button" class="secondary ghost" data-ui-action="focus-search">Buscar</button>
-          <button type="button" class="secondary ghost" data-ui-action="focus-primary">Acción principal</button>
         </div>
       `;
       header.insertAdjacentElement("afterend", contextBar);
@@ -595,6 +594,9 @@
           ).find(isVisible);
           target?.focus();
         }
+        // Se mantiene el manejador aunque ya no haya botón: la barra se genera en
+        // varios sitios y alguno podría seguir pidiéndolo. Lo que se quitó es el
+        // botón visible, que solo movía el foco y parecía un comando.
         if (action === "focus-primary") {
           const target = Array.from(document.querySelectorAll("button, .btn")).find(
             (el) => isVisible(el) && !el.classList.contains("secondary") && !el.classList.contains("ghost")
