@@ -9245,6 +9245,10 @@ const setWorkspaceView = (view = "overview", options = {}) => {
   if (normalized === "motores") {
     ensureWorkspaceEngineGroupBoot();
     setWorkspaceEngineView(state.currentWorkspaceEngineView || "documental");
+    // El hub de copiloto vive dentro de «motores» y solo se pintaba al cargar el
+    // workspace. Al dejar de pintarlo desde ahí (ver `loadWorkspaceDetail`), hay
+    // que pintarlo aquí o entraría vacío.
+    renderWorkspaceCopilotHub();
   }
   if (normalized === "rrhh") {
     // RRHH es un espacio propio, no un "motor" de configuración.
@@ -28688,8 +28692,17 @@ const loadWorkspaceDetail = async (workspaceId) => {
   renderWorkspaceFinOverview(finOverview || {});
   renderWorkspaceInmoOverview(inmoOverview || {});
   renderWorkspaceServiceDesks(serviceDesks || {});
-  renderWorkspaceCopilotHub();
-  renderWorkspaceRrhhHub();
+  // Estos dos hubs disparan entre los dos ocho peticiones de RRHH, contratos y
+  // fichaje. Se pintaban SIEMPRE, en cualquier vista: abrir el CRM inmobiliario
+  // pedía más datos de RRHH (8) que de inmuebles (7). Solo se pintan si su panel
+  // está a la vista; al entrar en «motores» y en «rrhh» se repintan desde
+  // `setWorkspaceView`, así que no se quedan vacíos.
+  if (workspaceCopilotHub?.offsetParent) {
+    renderWorkspaceCopilotHub();
+  }
+  if (workspaceRrhhHub?.offsetParent) {
+    renderWorkspaceRrhhHub();
+  }
   if (state.currentWorkspaceView === "motores") {
     const engine = state.currentWorkspaceEngineView || "documental";
     if (engine === "registro_horario") {

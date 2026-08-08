@@ -127,3 +127,41 @@ class LosCamposDeLaFichaTienenNombreTests(unittest.TestCase):
         """La otra maqueta usa <h3> y no necesita el apaño del clic."""
         i = APP.index("const nombreAccesible")
         self.assertIn("if (useTecnoLayout) {", APP[i: i + 900])
+
+
+class AbrirInmobiliariaNoCargaElHubDeRrhhTests(unittest.TestCase):
+    """Abrir el CRM inmobiliario pedía más datos de RRHH que de inmuebles.
+
+    Medido en el navegador al entrar en el módulo: 34 peticiones, de las cuales 8
+    eran de RRHH, fichaje y contratos, y solo 7 de inmobiliaria. La causa:
+    `loadWorkspaceDetail` —que corre en cualquier vista— pintaba siempre
+    `renderWorkspaceCopilotHub()` y `renderWorkspaceRrhhHub()`, y esos dos hubs
+    disparan sus propias cargas aunque su panel esté oculto.
+
+    Ahora solo se pintan si su panel está a la vista. El de RRHH ya se recargaba al
+    entrar en su vista (`refreshWorkspaceRrhh` en `setWorkspaceView`); el del
+    copiloto no se repintaba en ningún sitio, así que hubo que añadirlo al entrar en
+    «motores» o habría quedado vacío.
+
+    Comprobado después en el navegador: RRHH entra con sus pestañas y el copiloto se
+    pinta. Quedan 6 peticiones de fichaje que vienen por otro camino —el widget de
+    registro horario— y esas no se tocan aquí.
+    """
+
+    def test_los_hubs_solo_se_pintan_si_se_ven(self):
+        i = APP.index("if (workspaceCopilotHub?.offsetParent) {")
+        cuerpo = APP[i: i + 260]
+        self.assertIn("renderWorkspaceCopilotHub();", cuerpo)
+        self.assertIn("if (workspaceRrhhHub?.offsetParent) {", cuerpo)
+
+    def test_ya_no_se_pintan_siempre(self):
+        self.assertNotIn("  renderWorkspaceCopilotHub();\n  renderWorkspaceRrhhHub();", APP)
+
+    def test_el_copiloto_se_repinta_al_entrar_en_motores(self):
+        """No se repintaba en ningún sitio: sin esto quedaría vacío."""
+        i = APP.index('if (normalized === "motores") {')
+        self.assertIn("renderWorkspaceCopilotHub();", APP[i: i + 500])
+
+    def test_rrhh_ya_se_recargaba_al_entrar(self):
+        i = APP.index('if (normalized === "rrhh") {')
+        self.assertIn("refreshWorkspaceRrhh()", APP[i: i + 260])
