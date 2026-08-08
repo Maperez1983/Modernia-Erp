@@ -56775,10 +56775,12 @@ const renderInmuebleTecnocloudPanels = ({
     const hasValoracion = Boolean(Number(inmueble.precio_valoracion || 0));
 
     const kpis = [
-      { label: "Planificado", value: isPlanned ? "✓" : "✗" },
+      // «Sí / No» en vez de «✓ / ✗»: un aspa no distingue «no está planificado» de
+      // «ha fallado algo», y un lector de pantalla lee el símbolo, no lo que significa.
+      { label: "Planificado", value: isPlanned ? "Sí" : "No" },
       { label: "Citas venta (30 días)", value: String(citasVenta30) },
       { label: "Actividades (15 días)", value: String(gestiones15) },
-      { label: "Valoración", value: hasValoracion ? "✓" : "✗" },
+      { label: "Valoración", value: hasValoracion ? "Sí" : "Pendiente" },
     ];
     inmuebleTecnoKpis.innerHTML = kpis
       .map(
@@ -57471,7 +57473,9 @@ const refreshCurrentInmuebleProfile = () => {
       captacion.etapa ? buildInmuebleBadge(captacion.etapa, "soft") : "",
     ].filter(Boolean).join("");
     const secondary = [
-      formatDisplayCell("m2", inmueble.m2, ""),
+      // Con unidad, como en el resto de la aplicación: suelto, «92» al lado de
+      // «3 hab.» y «2 baños» no dice si son metros, habitaciones o qué.
+      inmueble.m2 ? `${formatDisplayCell("m2", inmueble.m2, "")} m²` : "",
       inmueble.habitaciones ? `${inmueble.habitaciones} hab.` : "",
       inmueble.banos ? `${inmueble.banos} baños` : "",
     ].filter(Boolean).join(" · ");
@@ -57908,14 +57912,17 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
   table.className = "crm-dense-table crm-inmuebles-table";
   const thead = document.createElement("thead");
   const trHead = document.createElement("tr");
+			  // Orden por lo que se mira primero en un listado de inmuebles: dónde está,
+			  // por cuánto y en qué operación. Antes el precio iba el último y, al llenarse
+			  // las tres columnas que estaban vacías, se salía de la pantalla a 1280 px.
 			  [
 			    "",
 			    "Inmueble",
+			    "Precio encargo",
+		    "Necesidad de vta.",
 			    "Propietario",
 			    "Inmueble: Tel. pr.",
 			    "Subtipología inm.",
-		    "Necesidad de vta.",
-		    "Precio encargo",
 		  ].forEach((label) => {
     const th = document.createElement("th");
     th.textContent = label;
@@ -57968,25 +57975,28 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
     propTd.textContent = String(row.propietario_principal || row.propietarios || row.propietario || "")
       .trim()
       .replace(/\s+\|\s+/g, " · ");
-    tr.appendChild(propTd);
 
     const telTd = document.createElement("td");
     telTd.textContent = String(row.propietario_telefono || "").trim();
-    tr.appendChild(telTd);
 
 	    const subtipoTd = document.createElement("td");
 	    subtipoTd.textContent = String(row.subtipologia || "").trim();
-	    tr.appendChild(subtipoTd);
 
 	    const necTd = document.createElement("td");
 	    necTd.textContent = String(row.necesidad_venta_alquiler || "").trim();
-    tr.appendChild(necTd);
 
     const precioTd = document.createElement("td");
     const precio = row.precio_encargo ?? "";
     const formatted = formatCell("precio_encargo", precio);
     precioTd.textContent = formatted === null ? "" : formatted;
+
+
+    // El orden de las celdas tiene que seguir al de las cabeceras.
     tr.appendChild(precioTd);
+    tr.appendChild(necTd);
+    tr.appendChild(propTd);
+    tr.appendChild(telTd);
+    tr.appendChild(subtipoTd);
 
     tbody.appendChild(tr);
   });
