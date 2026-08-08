@@ -15326,3 +15326,27 @@ samp {
   header .meta-user > span:first-child { display: none; }  /* el rótulo «Usuario» sobra al lado del nombre */
   .ui-context-bar { padding: 10px 16px; }
 }
+
+/* Los pastillones de navegación del CRM (Inicio · Dashboard · Clientes · Inmuebles)
+   se reparten el ancho con `grid-auto-columns: minmax(44px, 1fr)`, así que cuando la
+   barra va llena se quedan en 44 px. La etiqueta está a 8 px y recortada a dos
+   líneas, pero «Dashboard» e «Inmuebles» son palabras sin punto de corte: no
+   partían, se desbordaban a 51 y 47 px, y el botón siguiente los tapaba. En pantalla
+   se leía «DASHBOAR» y «NMUEBL».
+   La barra de RRHH ya resolvía esto mismo; se usa la misma regla. */
+#crmSection .crm-workspace-tabs.crm-lightning-tabs .tc-mod-label {
+  max-width: 100%;
+  text-align: center;
+  /* Partir por cualquier sitio es el último recurso —puede dejar «DASHBO/ARD»—,
+     pero es preferible a que la palabra se salga del botón y la tape la de al lado,
+     que es lo que pasaba. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Probé a subir el mínimo del pastillón de 44 a 68 px para que las palabras
+   cupieran en una línea. Salió peor: al no caber todos, el contenedor no desplaza
+   —tiene `overflow: visible`— y «Inmuebles» desaparecía entero. Un botón feo se
+   usa; uno que no está, no. Se queda el mínimo original y las palabras parten.
+   El arreglo bueno sería acortar las etiquetas («Panel» en vez de «Dashboard»),
+   pero eso es decidir nombres, no maquetar. */

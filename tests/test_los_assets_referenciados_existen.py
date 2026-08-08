@@ -74,3 +74,38 @@ class TodoLoQueSePintaExisteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LasEtiquetasDeLaBarraDelCrmNoSeCortanTests(unittest.TestCase):
+    """«DASHBOAR» y «NMUEBL» en la barra del CRM inmobiliario.
+
+    Los pastillones de navegación se reparten el ancho con
+    `grid-auto-columns: minmax(44px, 1fr)`. Con la barra llena se quedan en 44 px, y
+    la etiqueta va a 8 px con recorte a dos líneas. Pero «Dashboard» e «Inmuebles»
+    son palabras sin punto de corte: no partían, se desbordaban a 51 y 47 px, y el
+    botón de al lado las tapaba.
+
+    Probé a subir el mínimo del pastillón a 68 px para que cupieran en una línea y
+    **salió peor**: al no caber los ocho, el contenedor no desplaza —tiene
+    `overflow: visible`— y «Inmuebles» desaparecía del todo. Un botón feo se usa;
+    uno que no está, no. Se revirtió.
+
+    El arreglo de fondo sería acortar las etiquetas («Panel» en vez de «Dashboard»),
+    pero eso es decidir nombres de producto, no maquetar.
+    """
+
+    CSS = (RAIZ / "web" / "styles.css").read_text(encoding="utf-8")
+
+    def test_la_etiqueta_no_se_sale_del_boton(self):
+        # Hay cuatro reglas con este selector; la que manda es la última.
+        i = self.CSS.rindex("#crmSection .crm-workspace-tabs.crm-lightning-tabs .tc-mod-label {")
+        bloque = self.CSS[i: self.CSS.index("}", i)]
+        self.assertIn("max-width: 100%", bloque)
+        self.assertIn("overflow-wrap: anywhere", bloque)
+
+    def test_no_se_subio_el_minimo_del_pastillon(self):
+        """Dejaba «Inmuebles» fuera de la pantalla."""
+        self.assertNotIn("grid-auto-columns: minmax(68px, 1fr)", self.CSS)
+
+    def test_queda_escrito_por_que_no(self):
+        self.assertIn("«Inmuebles» desaparecía entero", self.CSS)
