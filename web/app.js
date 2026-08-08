@@ -63430,6 +63430,41 @@ const renderInmuebleDocs = (rows = []) => {
     }
   };
 
+  /** Anula una solicitud de firma pendiente de este documento.
+   *
+   * Antes no se podía: una solicitud enviada solo dejaba de valer al caducar o si
+   * el firmante la rechazaba. Mandada al correo equivocado, o cambiado el precio
+   * después de enviarla, seguía siendo firmable.
+   */
+  const cancelDocSignature = async (docRow) => {
+    const docId = String(docRow?.id || "").trim();
+    const inmuebleId = String(state.currentInmuebleId || state.currentInmuebleContext?.inmueble?.id || docRow?.inmueble_id || "").trim();
+    if (!docId || !inmuebleId) return;
+    try {
+      const data = await api(`/api/inmueble_signature_requests?inmueble_id=${encodeURIComponent(inmuebleId)}`);
+      const abiertas = (Array.isArray(data?.rows) ? data.rows : [])
+        .filter((r) => String(r.doc_id || "") === docId)
+        .filter((r) => !["signed", "cancelled", "rejected", "expired"].includes(String(r.status || "").toLowerCase()));
+      if (!abiertas.length) {
+        alert("Este documento no tiene ninguna solicitud de firma pendiente.");
+        return;
+      }
+      const r = abiertas[0];
+      const quien = [r.signer_nombre, r.signer_email].filter(Boolean).join(" · ") || "sin destinatario";
+      if (!window.confirm(`Se anulará la solicitud enviada a ${quien}.\nEl enlace dejará de funcionar al momento. ¿Seguir?`)) return;
+      const motivo = window.prompt("Motivo (opcional, queda en el histórico)", "") || "";
+      const res = await fetch("/api/inmueble_signature_cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: r.id, motivo }),
+      }).then((x) => x.json().then((body) => ({ ok: x.ok, body })));
+      if (!res.ok || res.body?.error) throw new Error(res.body?.error || "No se pudo anular.");
+      alert("Solicitud anulada. El enlace ya no funciona.");
+    } catch (err) {
+      alert(err?.message || "No se pudo anular la solicitud.");
+    }
+  };
+
   const requestDocSignature = async (docRow) => {
     const docId = String(docRow?.id || "").trim();
     const inmuebleId = String(state.currentInmuebleId || state.currentInmuebleContext?.inmueble?.id || docRow?.inmueble_id || "").trim();
@@ -63606,6 +63641,9 @@ const renderInmuebleDocs = (rows = []) => {
         const signBtn = createIconButton("edit", "Solicitar firma");
         signBtn.addEventListener("click", () => requestDocSignature(row));
         actions.appendChild(signBtn);
+        const cancelSignBtn = createIconButton("close", "Anular firma pendiente");
+        cancelSignBtn.addEventListener("click", () => cancelDocSignature(row));
+        actions.appendChild(cancelSignBtn);
 
         item.appendChild(left);
         item.appendChild(badges);

@@ -16,6 +16,11 @@ que la borra. Y no hay ninguna puerta genérica antes de los manejadores: las
 llamadas a `enforce_workspace_membership` están todas dentro de un manejador
 concreto, así que cada uno es responsable de la suya.
 
+Auditando inmobiliaria el 2026-08-08 apareció el mismo patrón con una variante
+peor: la comprobación existía, pero **envuelta en un `if workspace_id:`**, así que
+omitir ese campo en la petición la saltaba entera. Se cerró con
+`enforce_inmueble_access`, que deduce el ámbito del propio inmueble.
+
 El repaso completo salió a 16 manejadores con este patrón —no a los 44 que dio un
 primer barrido, que contaba como desnudos los que se guardan con otra función—, y
 de esos 16 hicieron falta 10 arreglos. Los tres que quedan sin comprobar están en
@@ -44,6 +49,12 @@ GUARDIANES = (
     "resolve_cliente_scope_access",
     "ensure_partner_membership",
     "_auth_allowed_services",
+    # Añadidos al auditar inmobiliaria el 2026-08-08. No son una excepción: deducen
+    # el ámbito del propio registro y acaban llamando a `enforce_workspace_membership`
+    # o a `enforce_empresa_membership`. Son más estrictos que lo que había, porque no
+    # dependen de que el cliente mande `workspace_id`.
+    "enforce_inmueble_access",
+    "enforce_registro_de_inmueble",
 )
 
 SE_GUARDAN_DE_OTRA_FORMA = {

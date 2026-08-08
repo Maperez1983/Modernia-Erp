@@ -46224,11 +46224,122 @@ def ensure_partner_membership(conn, source_workspace_id, target_workspace_id, *,
     return added
 
 
+def enforce_registro_de_inmueble(conn, session, tabla, registro_id, *, write=False, campo="inmueble_id"):
+    """Como `enforce_inmueble_access`, para lo que cuelga de un inmueble.
+
+    Una captación o una tarea de checklist no llevan empresa ni workspace propios:
+    los heredan del inmueble. Se resuelve el padre y se decide sobre él, en vez de
+    dejar que quien llama diga a qué empresa pertenece.
+    """
+    registro_id = str(registro_id or "").strip()
+    if not registro_id:
+        return False, "id requerido", None
+    try:
+        fila = conn.execute(
+            f"SELECT * FROM {tabla} WHERE id = ? LIMIT 1", (registro_id,)
+        ).fetchone()
+    except Exception:
+        _rollback_best_effort(conn)
+        return False, "No autorizado", None
+    if not fila:
+        return False, "Registro no encontrado", None
+    padre = str(row_value(fila, campo, "") or "").strip()
+    if padre:
+        ok, err, _inm = enforce_inmueble_access(conn, session, padre, write=write)
+        return (True, "", fila) if ok else (False, err, None)
+    # Sin inmueble todavía. **No es un error**: una captación en fase de prospecto no
+    # tiene inmueble hasta que se convierte, y en producción hay una así. Denegarlas
+    # habría dejado esos registros inaccesibles, que es justo lo contrario de lo que
+    # se venía a arreglar. Se cae al ámbito por empresa del propio registro.
+    empresa_id = str(row_value(fila, "empresa_id", "") or "").strip()
+    if not empresa_id:
+        return False, "No autorizado", None
+    ok, err = enforce_empresa_membership(conn, session, empresa_id, write=write)
+    return (True, "", fila) if ok else (False, err or "No autorizado", None)
+
+
+def enforce_inmueble_access(conn, session, inmueble_id, *, write=False, tabla="inmuebles"):
+    """Comprueba que quien llama puede tocar ESE inmueble. Sin escapatoria.
+
+    Antes la comprobación era **opcional para el cliente**: se ejecutaba solo si el
+    cuerpo de la petición traía `workspace_id`, así que omitirlo bastaba para
+    saltársela y operar sobre cualquier ficha. El mismo patrón que ya se cerró en los
+    endpoints de workspace, que en inmobiliaria se había quedado sin hacer.
+
+    El ámbito se deduce del propio registro, no de lo que mande el navegador:
+
+    1. Si el inmueble tiene `workspace_id`, se exige pertenencia a ese workspace.
+    2. Si no lo tiene —81 de los 86 de producción son anteriores a ese campo—, se
+       buscan los workspaces que contienen a su empresa y basta con pertenecer a uno.
+
+    Devuelve `(ok, error, fila)`.
+    """
+    inmueble_id = str(inmueble_id or "").strip()
+    if not inmueble_id:
+        return False, "inmueble_id requerido", None
+    columnas = table_columns(conn, tabla) or set()
+    campos = ["id", "empresa_id"] + (["workspace_id"] if "workspace_id" in columnas else [])
+    try:
+        fila = conn.execute(
+            f"SELECT {', '.join(campos)} FROM {tabla} WHERE id = ? LIMIT 1", (inmueble_id,)
+        ).fetchone()
+    except Exception:
+        _rollback_best_effort(conn)
+        return False, "No autorizado", None
+    if not fila:
+        return False, "Inmueble no encontrado", None
+
+    ws_id = str(row_value(fila, "workspace_id", "") or "").strip()
+    if ws_id:
+        ok, err = enforce_workspace_membership(conn, session, ws_id, write=write)
+        return (True, "", fila) if ok else (False, err or "No autorizado", None)
+
+    empresa_id = str(row_value(fila, "empresa_id", "") or "").strip()
+    if not empresa_id:
+        # Sin empresa ni workspace no hay forma de decidir a quién pertenece. Se
+        # deniega: es preferible un registro inaccesible a uno que toca cualquiera.
+        return False, "No autorizado", None
+    # `enforce_empresa_membership` ya resuelve esto —incluido el caso legacy de un
+    # único workspace—, así que no se reimplementa aquí.
+    ok, err = enforce_empresa_membership(conn, session, empresa_id, write=write)
+    return (True, "", fila) if ok else (False, err or "No autorizado", None)
+
+
+def cuenta_es_de_solo_lectura(conn, session):
+    """¿La cuenta está marcada como de solo lectura?
+
+    El rol de la cuenta («Lectura») y el rol dentro del workspace («Miembro») eran
+    dos cosas distintas y solo se miraba el segundo. Como el alta sembraba a todo el
+    mundo como «Miembro», los ocho usuarios de solo lectura de producción podían
+    crear, modificar y borrar igual que un administrador: el rol era decorativo.
+
+    Se lee de la base y no de la sesión: una sesión abierta antes de bajarle los
+    permisos a alguien seguiría escribiendo hasta que caducara.
+    """
+    if not session:
+        return False
+    uid = str(session.get("user_id") or "").strip()
+    if not uid or conn is None:
+        return normalize_lookup_text(session.get("rol") or "") == "LECTURA"
+    try:
+        fila = conn.execute("SELECT rol FROM usuarios WHERE id = ? LIMIT 1", (uid,)).fetchone()
+    except Exception:
+        _rollback_best_effort(conn)
+        fila = None
+    if fila is None:
+        return normalize_lookup_text(session.get("rol") or "") == "LECTURA"
+    return normalize_lookup_text(row_value(fila, "rol", "")) == "LECTURA"
+
+
 def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
     """
     En modo comercial multi-tenant, exige que el usuario pertenezca al workspace.
     Para no romper setups legacy, se puede desactivar con APP_WORKSPACE_MEMBERSHIP_ENFORCE=0.
     """
+    if write and cuenta_es_de_solo_lectura(conn, session):
+        # Va **antes** que todo lo demás, incluida la vía de actor privilegiado: una
+        # cuenta marcada de solo lectura no escribe por ningún camino.
+        return False, "Tu usuario es de solo lectura"
     if not WORKSPACE_MEMBERSHIP_ENFORCE:
         return True, ""
     if workspace_actor_is_privileged(conn, session):
@@ -62805,6 +62916,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_anuncio_generate",
             "/api/inmueble_signature_request",
             "/api/inmueble_signature_remind",
+            "/api/inmueble_signature_cancel",
             "/api/inmueble_signature_sign",
             "/api/inmueble_signature_reject",
             "/api/inmueble_catastro_lookup",
@@ -63637,6 +63749,8 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/inmueble_anuncio_generate",
                 "/api/inmueble_signature_request",
                 "/api/inmueble_signature_remind",
+                "/api/inmueble_signature_cancel",
+            "/api/inmueble_signature_cancel",
                 "/api/inmueble_signature_sign",
                 "/api/inmueble_signature_reject",
                 "/api/admin_seed_modernia_users",
@@ -63675,6 +63789,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_anuncio_generate",
             "/api/inmueble_signature_request",
             "/api/inmueble_signature_remind",
+            "/api/inmueble_signature_cancel",
             "/api/inmueble_signature_sign",
             "/api/inmueble_signature_reject",
             "/api/usuarios",
@@ -69422,22 +69537,25 @@ class Handler(BaseHTTPRequestHandler):
 
             seed_rows = [
                 # (usuario, email, nombre, apellido, servicio_csv, rol_usuario, workspace_id, rol_miembro)
-                ("SLallana", "", "Sebastian", "Lallana", "Inmobiliaria", "Lectura", ws_modernia, "Miembro"),
-                ("DGarcia", "", "David", "Garcia", "Inmobiliaria", "Lectura", ws_modernia, "Miembro"),
+                ("SLallana", "", "Sebastian", "Lallana", "Inmobiliaria", "Lectura", ws_modernia, "Lectura"),
+                ("DGarcia", "", "David", "Garcia", "Inmobiliaria", "Lectura", ws_modernia, "Lectura"),
                 ("Icanamero", "", "I", "Canamero", "Administración", "Administrador", ws_modernia, "Owner"),
-                ("DGallardo", "", "D", "Gallardo", "Fincas, Gestoría", "Lectura", ws_modernia, "Miembro"),
-                ("Rmiera", "", "R", "Miera", "Seguros, Gestoría", "Lectura", ws_modernia, "Miembro"),
-                ("Tramos", "", "T", "Ramos", "Gestoría", "Lectura", ws_modernia, "Miembro"),
-                ("AMostazo", "", "A", "Mostazo", "Gestoría", "Lectura", ws_modernia, "Miembro"),
-                ("Gbartha", "", "G", "Bartha", "Registro horario", "Lectura", ws_modernia, "Miembro"),
-                ("LDianez", "", "L", "Dianez", "Inmobiliaria", "Lectura", ws_modernia, "Miembro"),
-                ("Bsalazar", "", "B", "Salazar", "Seguros, Inmobiliaria", "Lectura", ws_modernia, "Miembro"),
-                ("AMelgar", "", "A", "Melgar", "Gestoría", "Lectura", ws_modernia, "Miembro"),
-                ("JBernal", "", "J", "Bernal", "Financiaciones", "Lectura", ws_modernia, "Miembro"),
+                ("DGallardo", "", "D", "Gallardo", "Fincas, Gestoría", "Lectura", ws_modernia, "Lectura"),
+                ("Rmiera", "", "R", "Miera", "Seguros, Gestoría", "Lectura", ws_modernia, "Lectura"),
+                ("Tramos", "", "T", "Ramos", "Gestoría", "Lectura", ws_modernia, "Lectura"),
+                ("AMostazo", "", "A", "Mostazo", "Gestoría", "Lectura", ws_modernia, "Lectura"),
+                ("Gbartha", "", "G", "Bartha", "Registro horario", "Lectura", ws_modernia, "Lectura"),
+                ("LDianez", "", "L", "Dianez", "Inmobiliaria", "Lectura", ws_modernia, "Lectura"),
+                ("Bsalazar", "", "B", "Salazar", "Seguros, Inmobiliaria", "Lectura", ws_modernia, "Lectura"),
+                ("AMelgar", "", "A", "Melgar", "Gestoría", "Lectura", ws_modernia, "Lectura"),
+                ("JBernal", "", "J", "Bernal", "Financiaciones", "Lectura", ws_modernia, "Lectura"),
                 ("S.sanchez", "sergirex@gmail.com", "S", "Sanchez", "Administración", "Administrador", ws_centro, "Owner"),
                 ("C.anca", "modernia.centro@grupomodernia.es", "C", "Anca", "Administración", "Administrador", ws_centro, "Owner"),
             ]
 
+            # El rol dentro del workspace acompaña al de la cuenta: sembrando a todo
+            # el mundo como «Miembro» se anulaba el rol de solo lectura sin que se
+            # notara, porque la pantalla seguía diciendo «Lectura».
             base_url = configured_app_base_url()
             created = []
             updated = []
@@ -82134,6 +82252,55 @@ class Handler(BaseHTTPRequestHandler):
                 response.pop("token", None)
             json_response(self, {"ok": True, **response})
             return
+        elif parsed.path == "/api/inmueble_signature_cancel":
+            # No había forma de retirar una solicitud enviada: solo dejaba de valer
+            # al caducar o si el firmante la rechazaba. Mandada al correo
+            # equivocado, o cambiado el precio después, el destinatario podía seguir
+            # firmando un documento que ya no valía.
+            ensure_inmueble_signature_schema(conn)
+            request_id = str(payload.get("id") or payload.get("request_id") or "").strip()
+            if not request_id:
+                json_response(self, {"error": "request_id requerido"}, status=400)
+                return
+            row = conn.execute("SELECT * FROM inmueble_signature_requests WHERE id = ? LIMIT 1", (request_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "Solicitud no encontrada"}, status=404)
+                return
+            data = dict(row)
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_empresa_membership(conn, session, data.get("empresa_id"), write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            estado = str(data.get("status") or "").strip().lower()
+            if estado == "signed":
+                # Un documento ya firmado no se anula por aquí: eso es revocar algo
+                # con valor probatorio y no puede ser un botón.
+                json_response(self, {"error": "La solicitud ya está firmada"}, status=409)
+                return
+            if estado in {"cancelled", "rejected", "expired"}:
+                json_response(self, {"error": "La solicitud ya está cerrada"}, status=409)
+                return
+            ahora = datetime.now(timezone.utc).isoformat()
+            motivo = str(payload.get("motivo") or "").strip()
+            conn.execute(
+                "UPDATE inmueble_signature_requests "
+                "SET status = 'cancelled', token_hash = ?, otp_hash = NULL, updated_at = ? "
+                "WHERE id = ?",
+                # Se quema el token: sin esto el enlace ya enviado seguiría abriendo
+                # la solicitud aunque figure como anulada.
+                ("cancelada:" + os.urandom(16).hex(), ahora, request_id),
+            )
+            try:
+                record_signature_event(
+                    conn, request_id, "cancelled", handler=self,
+                    details={"motivo": motivo, "por": str((session or {}).get("user_id") or "")},
+                    now=ahora)
+            except Exception:
+                pass
+            conn.commit()
+            json_response(self, {"ok": True, "id": request_id, "status": "cancelled"})
+            return
         elif parsed.path == "/api/inmueble_signature_remind":
             ensure_inmueble_signature_schema(conn)
             request_id = str(payload.get("id") or payload.get("request_id") or "").strip()
@@ -82252,6 +82419,11 @@ class Handler(BaseHTTPRequestHandler):
                     {"error": "El inmueble ya está activo. Abre la ficha existente para continuar."},
                     status=400,
                 )
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if err_acc == "Inmueble no encontrado" else 403)
                 return
 
             # En la renovación NO se duplica el inmueble: se reabre y se crea una nueva captación vinculada
@@ -82744,6 +82916,11 @@ class Handler(BaseHTTPRequestHandler):
                 if not inmueble_id:
                     json_response(self, {"error": "inmueble_id requerido"}, status=400)
                     return
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+                if not ok_acc:
+                    json_response(self, {"error": err_acc}, status=404 if err_acc == "Inmueble no encontrado" else 403)
+                    return
                 referencia = clean_catastro_reference(payload.get("referencia_catastral") or "")
                 if referencia:
                     conn.execute(
@@ -82782,6 +82959,11 @@ class Handler(BaseHTTPRequestHandler):
             etapa = payload.get("etapa")
             if not record_id or not etapa:
                 json_response(self, {"error": "id y etapa requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_registro_de_inmueble(conn, session, "captaciones", record_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if "no encontrado" in err_acc else 403)
                 return
             try:
                 session = getattr(self, "auth_session", None) or self._current_session()
@@ -82859,6 +83041,11 @@ class Handler(BaseHTTPRequestHandler):
             inmueble_id = payload.get("inmueble_id")
             if not inmueble_id:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if err_acc == "Inmueble no encontrado" else 403)
                 return
             try:
                 prev = conn.execute(
@@ -83100,14 +83287,19 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_registro_de_inmueble(conn, session, "captaciones", record_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if "no encontrado" in err_acc else 403)
+                return
             captacion = conn.execute(
                 """
                 SELECT id, empresa_id, inmueble_id, direccion
                 FROM captaciones
-                WHERE id = ? AND empresa_id = ?
+                WHERE id = ?
                 LIMIT 1
                 """,
-                (record_id, empresa["id"]),
+                (record_id,),
             ).fetchone()
             if not captacion:
                 json_response(self, {"error": "Captación no encontrada"}, status=404)
@@ -83145,6 +83337,14 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 captacion_id = str(payload.get("captacion_id") or "").strip()
                 inmueble_id = str(payload.get("inmueble_id") or "").strip()
+                session = getattr(self, "auth_session", None) or self._current_session()
+                if inmueble_id:
+                    ok_acc, err_acc, _f = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+                else:
+                    ok_acc, err_acc, _f = enforce_registro_de_inmueble(conn, session, "captaciones", captacion_id, write=True)
+                if not ok_acc:
+                    json_response(self, {"error": err_acc}, status=404 if "no encontrado" in err_acc else 403)
+                    return
                 destino = normalize_lookup_text(payload.get("destino") or "")
                 destino_map = {
                     "noticia": "Noticia",
@@ -83749,12 +83949,13 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
             workspace_id = str(payload.get("workspace_id") or "").strip()
-            if workspace_id:
-                session = getattr(self, "auth_session", None) or self._current_session()
-                ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
-                if not ok:
-                    json_response(self, {"error": err or "No autorizado"}, status=403)
-                    return
+            # El ámbito sale del propio inmueble, no de lo que mande el navegador:
+            # antes bastaba con omitir `workspace_id` para saltarse la comprobación.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=403 if err_acc != "Inmueble no encontrado" else 404)
+                return
             try:
                 prev_inmueble = conn.execute(
                     "SELECT * FROM inmuebles WHERE id = ? LIMIT 1",
@@ -84048,12 +84249,11 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
             workspace_id = str(payload.get("workspace_id") or "").strip()
-            if workspace_id:
-                session = getattr(self, "auth_session", None) or self._current_session()
-                ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
-                if not ok:
-                    json_response(self, {"error": err or "No autorizado"}, status=403)
-                    return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=403 if err_acc != "Inmueble no encontrado" else 404)
+                return
             target_empresa_id = empresa["id"] if empresa else None
             if not target_empresa_id:
                 row = conn.execute(
@@ -84230,6 +84430,11 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if err_acc == "Inmueble no encontrado" else 403)
+                return
             etapa_value = str(inmueble["estado"] or "").strip() or "Inmueble"
             empresa_id_value = str(inmueble["empresa_id"] or "").strip()
             responsable_value = str(
@@ -84277,6 +84482,11 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id or not etapa or not isinstance(tareas, list):
                 json_response(self, {"error": "inmueble_id, etapa y tareas requeridos"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if err_acc == "Inmueble no encontrado" else 403)
+                return
             conn.execute(
                 "DELETE FROM inmueble_checklist WHERE inmueble_id = ? AND etapa = ?",
                 (inmueble_id, etapa),
@@ -84308,6 +84518,11 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_registro_de_inmueble(conn, session, "inmueble_checklist", record_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if "no encontrado" in err_acc else 403)
+                return
             allowed = ("tarea", "estado", "responsable", "fecha_limite")
             updates = {key: payload.get(key) for key in allowed if key in payload}
             if not updates:
@@ -84329,21 +84544,20 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(cliente_ids, list):
                 json_response(self, {"error": "cliente_ids invalido"}, status=400)
                 return
-            scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
-            inmueble = None
-            if scope_empresa_id:
-                inmueble = fetch_inmueble_for_empresa(conn, inmueble_id, scope_empresa_id)
-                if not inmueble:
-                    json_response(self, {"error": "Inmueble no encontrado"}, status=404)
-                    return
-            else:
-                inmueble = conn.execute(
-                    "SELECT id, empresa_id FROM inmuebles WHERE id = ? LIMIT 1",
-                    (inmueble_id,),
-                ).fetchone()
-                if not inmueble:
-                    json_response(self, {"error": "Inmueble no encontrado"}, status=404)
-                    return
+            # El `empresa_id` venía del cuerpo y, si no llegaba, se caía a una rama que
+            # leía el inmueble sin filtrar por nada. Ahora manda el propio registro.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=403 if err_acc != "Inmueble no encontrado" else 404)
+                return
+            inmueble = conn.execute(
+                "SELECT id, empresa_id FROM inmuebles WHERE id = ? LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+            if not inmueble:
+                json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
             conn.execute(
                 "DELETE FROM inmueble_propietarios WHERE inmueble_id = ?",
                 (inmueble_id,),
@@ -84371,19 +84585,18 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
-            workspace_id = str(payload.get("workspace_id") or "").strip()
-            if workspace_id:
-                session = getattr(self, "auth_session", None) or self._current_session()
-                ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
-                if not ok:
-                    json_response(self, {"error": err or "No autorizado"}, status=403)
-                    return
+            # El ámbito lo decide el propio inmueble, no lo que mande el cliente.
             inmueble = conn.execute(
                 "SELECT id, empresa_id FROM inmuebles WHERE id = ? LIMIT 1",
                 (inmueble_id,),
             ).fetchone()
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if err_acc == "Inmueble no encontrado" else 403)
                 return
             archived = archive_pending_inmueble_actions(
                 conn,
@@ -84414,6 +84627,11 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if err_acc == "Inmueble no encontrado" else 403)
                 return
             tipo = str(payload.get("tipo") or "").strip() or None
             fecha_cierre = str(payload.get("fecha_cierre") or "").strip() or None
@@ -84460,6 +84678,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if not isinstance(servicios_raw, list):
                 json_response(self, {"error": "servicios inválido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if err_acc == "Inmueble no encontrado" else 403)
                 return
             ensure_inmueble_servicios_schema(conn)
             servicios = []
@@ -84508,6 +84731,11 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if err_acc == "Inmueble no encontrado" else 403)
+                return
             cliente_id = ensure_cliente_for_inmobiliaria(
                 conn,
                 inmueble["empresa_id"],
@@ -84548,6 +84776,11 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             if not demanda:
                 json_response(self, {"error": "Demanda no encontrada"}, status=404)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if err_acc == "Inmueble no encontrado" else 403)
                 return
             if remove:
                 conn.execute(
@@ -84631,6 +84864,11 @@ class Handler(BaseHTTPRequestHandler):
             inmueble = fetch_inmueble_for_empresa(conn, inmueble_id, empresa["id"])
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if err_acc == "Inmueble no encontrado" else 403)
                 return
             inmueble_folder = re.sub(r"[^A-Za-z0-9_-]+", "_", str(inmueble_id)).strip("_") or "inmueble"
             doc_id = os.urandom(16).hex()
@@ -97847,6 +98085,28 @@ class Handler(BaseHTTPRequestHandler):
             binary_response(self, xml_bytes, content_type="application/xml; charset=utf-8", filename="verifika2_inmuebles.xml")
             return
 
+        if path == "/api/inmueble_signature_requests":
+            # Sin listado no se podía anular nada desde la pantalla: había que saberse
+            # el id de la solicitud. Nunca devuelve el token, solo su estado.
+            inmueble_id = (params.get("inmueble_id", [""])[0] or "").strip()
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _f = enforce_inmueble_access(conn, session, inmueble_id)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if err_acc == "Inmueble no encontrado" else 403)
+                return
+            ensure_inmueble_signature_schema(conn)
+            filas = conn.execute(
+                "SELECT id, doc_id, doc_nombre, signer_nombre, signer_email, purpose, status, "
+                "expires_at, sent_at, opened_at, signed_at, rejected_at, created_at "
+                "FROM inmueble_signature_requests WHERE inmueble_id = ? ORDER BY created_at DESC LIMIT 100",
+                (inmueble_id,),
+            ).fetchall()
+            json_response(self, {"rows": [dict(f) for f in filas]})
+            return
+
         if path == "/api/inmueble_signature_config":
             config = {
                 "smtp": bool((os.environ.get("SMTP_HOST") or "").strip()),
@@ -97949,6 +98209,14 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 if not empresa_id:
                     json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                    return
+                # Antes bastaba con pasar el id de cualquier empresa para listar sus
+                # inmuebles: no se comprobaba nada. Se exige pertenecer a algún
+                # workspace que la contenga.
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok_emp, err_emp = enforce_empresa_membership(conn, session, empresa_id)
+                if not ok_emp:
+                    json_response(self, {"error": err_emp or "No autorizado"}, status=403)
                     return
                 where.append("i.empresa_id = ?")
                 values.append(empresa_id)
