@@ -121,6 +121,70 @@ class LosDiezDocumentosTests(unittest.TestCase):
         self.assertLess(len(self.docs["nota de encargo"]), 100_000)
 
 
+class LosDosDocumentosQueEranUnEsbozoTests(unittest.TestCase):
+    """`web/templates/inmo/` nunca se subió a git y Render despliega desde git, así
+    que producción jamás tuvo las cinco plantillas PDF: todo el código de relleno por
+    coordenadas está muerto y siempre se emite el documento generado.
+
+    Para las notas de encargo daba igual, porque el generado es un contrato completo.
+    Pero la promesa de compraventa —lo que firma un comprador para comprometerse y
+    entregar dinero a cuenta— eran tres líneas, y la nota explicativa del precio, dos.
+    Las dos llevaban «(fallback)» impreso en la cabecera.
+    """
+
+    def texto(self, pdf):
+        return "\n".join(pg.extract_text() or "" for pg in PdfReader(BytesIO(pdf)).pages)
+
+    def test_ninguno_anuncia_ser_un_apaño(self):
+        for nombre, pdf in documentos().items():
+            with self.subTest(documento=nombre):
+                self.assertNotIn("fallback", self.texto(pdf).lower())
+
+    def test_la_promesa_de_compraventa_es_un_contrato(self):
+        pdf = server.build_inmueble_negotiation_offer_pdf(EMPRESA, INMUEBLE, COMPRADOR, ACCION)
+        t = self.texto(pdf)
+        for pieza in ("Intervinientes", "Objeto", "Precio y forma de pago",
+                      "Arras penitenciales", "Plazos", "Gastos e impuestos", "Firmas"):
+            with self.subTest(pieza=pieza):
+                self.assertIn(pieza, t)
+
+    def test_la_promesa_cita_los_articulos_en_que_se_apoya(self):
+        """1451 (promesa de vender o comprar) y 1454 (arras penitenciales)."""
+        t = self.texto(server.build_inmueble_negotiation_offer_pdf(EMPRESA, INMUEBLE, COMPRADOR, ACCION))
+        for articulo in ("1451", "1454", "1124", "1504"):
+            with self.subTest(articulo=articulo):
+                self.assertIn(articulo, t)
+
+    def test_la_promesa_desglosa_senal_arras_y_resto(self):
+        pdf = server.build_inmueble_negotiation_offer_pdf(
+            EMPRESA, INMUEBLE, COMPRADOR,
+            {"importe_propuesta": 200000, "garantia": 3000, "entrega_2": 17000})
+        t = self.texto(pdf).replace("\n", " ")
+        self.assertIn("3.000,00", t)    # señal
+        self.assertIn("17.000,00", t)   # arras
+        self.assertIn("180.000,00", t)  # resto: 200.000 - 3.000 - 17.000
+
+    def test_la_nota_de_precio_recorre_las_cinco_letras_del_articulo_8(self):
+        """Decreto 218/2005 art. 8, «Nota explicativa en la venta de viviendas sobre
+        el precio y las formas de pago»: precio con tributos y gastos, aplazamientos,
+        subrogación hipotecaria, validez, y lugar/fecha/firma."""
+        t = self.texto(server.build_inmueble_consumo_sale_price_note_pdf(EMPRESA, INMUEBLE, {}))
+        for letra in ("a) Precio de venta", "b) Aplazamientos de pago",
+                      "c) Subrogación en préstamo hipotecario", "d) Validez de esta nota",
+                      "e) Lugar, fecha y firma"):
+            with self.subTest(letra=letra):
+                self.assertIn(letra, t)
+        self.assertIn("218/2005", t)
+
+    def test_lo_que_falta_queda_como_hueco_para_rellenar(self):
+        """Un documento que se imprime y se firma no puede decir «PARTE VENDEDORA:
+        Pendiente»: ni se entiende ni se puede completar a mano."""
+        pdf = server.build_inmueble_negotiation_offer_pdf(EMPRESA, INMUEBLE, COMPRADOR, {})
+        t = self.texto(pdf)
+        self.assertIn("PARTE VENDEDORA", t)
+        self.assertNotIn("PARTE VENDEDORA: Pendiente", t.replace("\n", " "))
+
+
 class ElReconocimientoDeHonorariosTests(unittest.TestCase):
     """Se anuncia como editable (AcroForm) y salía con cero campos.
 

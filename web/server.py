@@ -60039,10 +60039,120 @@ def build_inmueble_consumo_sale_price_note_pdf(company, inmueble, captacion):
                 if merged:
                     return merged
 
-    # Fallback si faltan dependencias/plantillas.
-    price = format_eur((inmueble or {}).get("precio_objetivo") or (captacion or {}).get("precio_objetivo") or 0)
-    sections = [("Datos económicos", [("Vivienda", (inmueble or {}).get("direccion") or "Pendiente"), ("Precio de venta", price)])]
-    return build_company_branded_document_pdf(company, "NOTA EXPLICATIVA DEL PRECIO", "Modelo Modernia (fallback)", sections, [])
+    # Sin plantilla, esto eran dos líneas —vivienda y precio— con «(fallback)» en la
+    # cabecera. Pero este documento no es un resumen: es la nota que exige el
+    # artículo 8 del Decreto 218/2005 de Andalucía («Nota explicativa en la venta de
+    # viviendas sobre el precio y las formas de pago»), y tiene que recorrer sus
+    # cinco letras: precio con tributos y gastos, aplazamientos, subrogación
+    # hipotecaria, periodo de validez, y lugar, fecha y firma.
+    inmueble = inmueble or {}
+    captacion = captacion or {}
+    company = company or {}
+
+    def _texto_o(valor, defecto="Pendiente"):
+        crudo = str(valor or "").strip()
+        return crudo or defecto
+
+    cp = str(inmueble.get("codigo_postal") or "").strip()
+    poblacion = str(inmueble.get("poblacion") or "").strip()
+    provincia = str(inmueble.get("provincia") or "").strip()
+    localidad = " ".join(p for p in (cp, poblacion) if p).strip()
+    direccion_full = ", ".join(
+        p for p in (str(inmueble.get("direccion") or "").strip(), localidad, provincia) if p
+    ).strip() or "Pendiente"
+
+    precio_valor = parse_money_value(
+        inmueble.get("precio_objetivo") or captacion.get("precio_objetivo") or 0) or 0.0
+    empresa_nombre = _texto_o(company.get("nombre"), "la agencia")
+    hoy = datetime.now(timezone.utc).date().isoformat()
+    try:
+        fecha_larga = format_spanish_long_date_capitalized(hoy)
+    except Exception:
+        fecha_larga = hoy
+    lugar = _texto_o(poblacion or provincia, "………………………")
+    validez = _texto_o(captacion.get("validez_precio"), "30 días naturales desde la fecha de esta nota")
+
+    sections = [
+        (
+            "Vivienda a la que se refiere",
+            [
+                ("Dirección", direccion_full),
+                ("Referencia catastral", _texto_o(inmueble.get("referencia_catastral"))),
+                ("Superficie construida", f"{_texto_o(inmueble.get('m2'), '—')} m²"),
+                ("Anejos y servicios accesorios", _texto_o(captacion.get("anejos"), "Sin anejos declarados")),
+            ],
+        ),
+        (
+            "a) Precio de venta",
+            [
+                ("Precio de venta de la vivienda", format_eur(precio_valor)),
+                ("Anejos y servicios accesorios", _texto_o(captacion.get("precio_anejos"),
+                                                           "Incluidos en el precio anterior")),
+                "El precio indicado no incluye los tributos ni los gastos que se detallan a continuación.",
+                "Impuestos: en segunda y ulteriores transmisiones, el Impuesto sobre Transmisiones "
+                "Patrimoniales (ITP) según el tipo vigente en la Comunidad Autónoma; en primera transmisión, "
+                "el IVA más el Impuesto de Actos Jurídicos Documentados (AJD).",
+                "Gastos: notaría, inscripción en el Registro de la Propiedad y gestoría, de cargo de la parte "
+                "compradora, salvo pacto en contrario. La plusvalía municipal (IIVTNU) es de cargo de la parte "
+                "vendedora.",
+                "Forma de pago: señal a la reserva, arras a la firma del contrato privado y resto en el "
+                "otorgamiento de la escritura pública, mediante cheque bancario conformado o transferencia.",
+            ],
+        ),
+        (
+            "b) Aplazamientos de pago",
+            [
+                _texto_o(
+                    captacion.get("aplazamiento_detalle"),
+                    "No se ofrece aplazamiento de pago por parte de la vendedora. Si llegara a pactarse, se "
+                    "entregará una adenda a esta nota con el tipo de interés, la tasa anual equivalente con un "
+                    "ejemplo representativo, el importe de principal e intereses de cada cuota, las fechas de "
+                    "vencimiento, el plazo, los medios de pago admitidos y las garantías exigidas.",
+                ),
+            ],
+        ),
+        (
+            "c) Subrogación en préstamo hipotecario",
+            [
+                _texto_o(
+                    captacion.get("subrogacion_detalle"),
+                    "La vivienda no está sujeta a un préstamo hipotecario en el que la parte compradora pueda "
+                    "subrogarse. Si lo estuviera, se facilitará antes de la firma el notario autorizante y la "
+                    "fecha, los datos registrales, la responsabilidad hipotecaria, el tipo de interés —fijo o "
+                    "variable, con su índice de referencia y su margen—, el importe y las fechas de las cuotas, "
+                    "el plazo de amortización pendiente y las comisiones aplicables.",
+                ),
+            ],
+        ),
+        (
+            "d) Validez de esta nota",
+            [
+                f"Las condiciones económicas recogidas aquí se mantienen durante {validez}.",
+                "Transcurrido ese plazo, la vendedora podrá revisarlas y se emitirá una nota nueva.",
+                "Esta nota tiene carácter informativo y no constituye por sí sola oferta vinculante de venta.",
+            ],
+        ),
+        (
+            "e) Lugar, fecha y firma",
+            [
+                f"En {lugar}, a {fecha_larga}.",
+                "",
+                f"Por {empresa_nombre}",
+                "Firma: ______________________________________",
+                "",
+                "Recibí la presente nota explicativa",
+                "Nombre, NIF y firma: ______________________________________",
+            ],
+        ),
+    ]
+    pie = [
+        "Nota explicativa emitida conforme al artículo 8 del Decreto 218/2005, de 11 de octubre, por el que se "
+        "aprueba el Reglamento de información al consumidor en la compraventa y arrendamiento de viviendas en "
+        "Andalucía.",
+        "Se entrega gratuitamente y queda copia en el expediente del inmueble.",
+    ]
+    return build_company_branded_document_pdf(
+        company, "NOTA EXPLICATIVA DEL PRECIO", f"{empresa_nombre} · {direccion_full}", sections, pie)
 
 
 def build_inmueble_consumo_rental_dia_pdf(company, inmueble, captacion, docs):
@@ -60212,10 +60322,180 @@ def build_inmueble_negotiation_offer_pdf(company, inmueble, buyer, action):
                 if merged:
                     return merged
 
-    amount = format_eur((action or {}).get("importe_propuesta") or (inmueble or {}).get("precio_objetivo") or 0)
-    doc_kind = str((action or {}).get("documento_tipo") or "Promesa de compraventa").strip() or "Promesa de compraventa"
-    sections = [("Propuesta", [("Documento", doc_kind), ("Importe", amount), ("Inmueble", (inmueble or {}).get("direccion") or "Pendiente")])]
-    return build_company_branded_document_pdf(company, doc_kind.upper(), "Modelo Modernia (fallback)", sections, [])
+    # Sin plantilla, esto eran tres líneas —documento, importe y dirección— con
+    # «(fallback)» impreso en la cabecera. Es el papel que firma un comprador para
+    # comprometerse a comprar y entregar dinero a cuenta: se redacta entero, con las
+    # mismas partidas que preveía la plantilla (señal, arras y resto).
+    inmueble = inmueble or {}
+    buyer = buyer or {}
+    action = action or {}
+    company = company or {}
+
+    def _texto_o(valor, defecto="Pendiente"):
+        crudo = str(valor or "").strip()
+        return crudo or defecto
+
+    def _fecha_larga(valor):
+        try:
+            return format_spanish_long_date_capitalized(valor)
+        except Exception:
+            return str(valor or "").strip()
+
+    cp = str(inmueble.get("codigo_postal") or "").strip()
+    poblacion = str(inmueble.get("poblacion") or "").strip()
+    provincia = str(inmueble.get("provincia") or "").strip()
+    localidad = " ".join(p for p in (cp, poblacion) if p).strip()
+    direccion_full = ", ".join(
+        p for p in (str(inmueble.get("direccion") or "").strip(), localidad, provincia) if p
+    ).strip() or "Pendiente"
+
+    precio_valor = parse_money_value(
+        action.get("importe_propuesta") or inmueble.get("precio_objetivo") or 0) or 0.0
+    senal_valor = parse_money_value(action.get("garantia") or action.get("senal") or 0) or 0.0
+    arras_valor = parse_money_value(action.get("entrega_2") or action.get("arras") or 0) or 0.0
+    resto_valor = max(0.0, precio_valor - senal_valor - arras_valor)
+
+    # Lo que falte va como hueco a rellenar, no como la palabra «Pendiente»: es un
+    # documento que se imprime y se firma, y «PARTE VENDEDORA: Pendiente» no se puede
+    # completar a mano ni se entiende.
+    HUECO = "…" * 34
+    comprador = _texto_o(buyer.get("nombre"), HUECO)
+    comprador_nif = _texto_o(buyer.get("nif"), "…………………")
+    vendedor = _texto_o(action.get("propietario_nombre") or inmueble.get("propietario_nombre"), HUECO)
+    vendedor_nif = _texto_o(action.get("propietario_nif") or inmueble.get("propietario_nif"), "…………………")
+
+    hoy = datetime.now(timezone.utc).date().isoformat()
+    fecha_firma = _fecha_larga(action.get("fecha") or hoy)
+    lugar_firma = _texto_o(action.get("lugar_firma") or poblacion or provincia, "………………………")
+    fecha_privado = _texto_o(action.get("fecha_contrato_privado"), "…… / …… / ………")
+    fecha_publico = _texto_o(action.get("fecha_escritura"), "…… / …… / ………")
+    empresa_nombre = _texto_o(company.get("nombre"), "la agencia")
+
+    sections = [
+        (
+            "Intervinientes",
+            [
+                f"De una parte, como PARTE VENDEDORA: {vendedor}, con NIF {vendedor_nif}, actuando en su "
+                "propio nombre y derecho, o debidamente representada según acredite documentalmente.",
+                f"De otra parte, como PARTE COMPRADORA: {comprador}, con NIF {comprador_nif}, actuando en su "
+                "propio nombre y derecho.",
+                f"Interviene {empresa_nombre} en su condición de intermediaria, sin ser parte del contrato de "
+                "compraventa, a los solos efectos de recibir y custodiar las cantidades entregadas a cuenta y "
+                "de coordinar la firma.",
+                "Ambas partes se reconocen capacidad legal suficiente para obligarse y, a tal efecto, exponen y "
+                "convienen lo siguiente.",
+            ],
+        ),
+        (
+            "Primera. Objeto",
+            [
+                f"La parte vendedora se compromete a vender, y la compradora a comprar, el inmueble sito en "
+                f"{direccion_full}, con referencia catastral {_texto_o(inmueble.get('referencia_catastral'))}.",
+                "La finca se transmite como cuerpo cierto, con cuantos derechos, usos y servidumbres le sean "
+                "inherentes, libre de arrendatarios y ocupantes, y al corriente de gastos de comunidad, "
+                "suministros e Impuesto sobre Bienes Inmuebles.",
+                "Esta promesa se otorga al amparo del artículo 1451 del Código Civil: habiendo conformidad en la "
+                "cosa y en el precio, da derecho a las partes a reclamarse recíprocamente el cumplimiento del "
+                "contrato.",
+            ],
+        ),
+        (
+            "Segunda. Precio y forma de pago",
+            [
+                f"El precio total convenido de la compraventa asciende a {format_eur(precio_valor)}, que la parte "
+                "compradora abonará del siguiente modo:",
+                f"a) En este acto, en concepto de señal y a cuenta del precio: {format_eur(senal_valor)}.",
+                f"b) A la firma del contrato privado de compraventa, en concepto de arras: "
+                f"{format_eur(arras_valor)}.",
+                f"c) El resto, {format_eur(resto_valor)}, en el momento del otorgamiento de la escritura pública, "
+                "mediante cheque bancario conformado o transferencia.",
+                "Todas las cantidades entregadas a cuenta se imputarán al precio final y quedarán reflejadas en "
+                "el correspondiente recibo.",
+            ],
+        ),
+        (
+            "Tercera. Arras penitenciales",
+            [
+                "Las cantidades entregadas tienen la condición de arras penitenciales del artículo 1454 del "
+                "Código Civil: si desiste la parte compradora, las perderá; si desiste la vendedora, deberá "
+                "devolverlas duplicadas.",
+                "Este pacto no impide a la parte cumplidora optar por exigir el cumplimiento del contrato al "
+                "amparo de los artículos 1124 y 1504 del Código Civil, en lugar de acudir al desistimiento.",
+            ],
+        ),
+        (
+            "Cuarta. Plazos",
+            [
+                f"El contrato privado de compraventa se firmará, a más tardar, el {fecha_privado}.",
+                f"La escritura pública se otorgará, a más tardar, el {fecha_publico}, ante el notario que designe "
+                "la parte compradora, conforme al artículo 1280.1.º del Código Civil.",
+                "La entrega de la posesión se producirá en el momento del otorgamiento de la escritura, salvo "
+                "pacto expreso en contrario.",
+            ],
+        ),
+        (
+            "Quinta. Gastos e impuestos",
+            [
+                "Los gastos e impuestos se repartirán conforme a la ley y a los usos: la plusvalía municipal "
+                "(IIVTNU) será de cargo de la parte vendedora; el ITP o el IVA/AJD que corresponda, los gastos "
+                "de notaría, registro y gestoría serán de cargo de la parte compradora.",
+                "La cancelación registral de cargas anteriores, si las hubiera, será de cargo de la parte "
+                "vendedora.",
+            ],
+        ),
+        (
+            "Sexta. Condición de financiación",
+            [
+                "Si la parte compradora precisa financiación hipotecaria y le fuera denegada por escrito por dos "
+                "entidades antes de la fecha prevista para el contrato privado, podrá resolver esta promesa y le "
+                "serán devueltas íntegramente las cantidades entregadas, sin penalización para ninguna de las "
+                "partes.",
+                "La denegación deberá acreditarse documentalmente dentro del plazo indicado; en otro caso, se "
+                "entenderá cumplida la condición.",
+            ],
+        ),
+        (
+            "Séptima. Protección de datos",
+            [
+                "Los datos personales se tratarán para gestionar esta operación y cumplir las obligaciones "
+                "legales derivadas de ella. La base jurídica es la ejecución del contrato y el cumplimiento de "
+                "obligaciones legales.",
+                "Puede ejercer los derechos de acceso, rectificación, supresión, limitación, portabilidad y "
+                f"oposición dirigiéndose a {empresa_nombre}.",
+            ],
+        ),
+        (
+            "Octava. Legislación y fuero",
+            [
+                "En lo no previsto se estará a los artículos 1445 y siguientes del Código Civil.",
+                "Las partes se someten a los juzgados y tribunales del lugar donde radica el inmueble, salvo que "
+                "la parte compradora tenga la condición de persona consumidora, en cuyo caso será competente el "
+                "fuero que legalmente le corresponda.",
+            ],
+        ),
+        (
+            "Firmas",
+            [
+                f"En {lugar_firma}, a {fecha_firma}.",
+                "",
+                # Sin alinear con espacios: este camino no pasa por el detector de
+                # columnas, y al partir por palabras los dos rótulos se pegarían.
+                f"Por la parte vendedora — {vendedor}, NIF {vendedor_nif}",
+                "Firma: ______________________________________",
+                "",
+                f"Por la parte compradora — {comprador}, NIF {comprador_nif}",
+                "Firma: ______________________________________",
+            ],
+        ),
+    ]
+    doc_kind = _texto_o(action.get("documento_tipo"), "Promesa de compraventa")
+    pie = [
+        "Documento generado por el CRM Verifika² a partir del expediente del inmueble. "
+        "Revisar jurídicamente antes de la firma.",
+        "Redactado conforme a los artículos 1445, 1451, 1454, 1124, 1504 y 1280.1.º del Código Civil.",
+    ]
+    return build_company_branded_document_pdf(
+        company, doc_kind.upper(), f"{empresa_nombre} · {direccion_full}", sections, pie)
 
 
 def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action, extra=None):
