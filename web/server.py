@@ -54649,7 +54649,17 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
 
     servicios = [str(s).strip() for s in (calc.get("servicios_incluidos") or []) if str(s or "").strip()]
     if servicios:
-        sections.append(("Servicios incluidos", [f"· {s}" for s in servicios]))
+        # «Incluidos en la cuota», no «incluidos» a secas: debajo va la lista de los
+        # complementarios, y de un vistazo tiene que quedar claro qué compra la cuota.
+        titulo_servicios = "Servicios incluidos en la cuota" if es_fincas else "Servicios incluidos"
+        sections.append((titulo_servicios, [f"· {s}" for s in servicios]))
+
+    complementarios = [str(s).strip() for s in (calc.get("servicios_grupo") or []) if str(s or "").strip()]
+    if complementarios:
+        sections.append(("Servicios complementarios", {
+            "items": ["El grupo cubre además, con presupuesto aparte y a disposición tanto de la "
+                      "comunidad como de cada propietario:"] + [f"· {s}" for s in complementarios],
+        }))
 
     def tabla_de(items, titulo, sufijo=""):
         if not items:
@@ -73148,18 +73158,24 @@ class Handler(BaseHTTPRequestHandler):
                 calculo["carta_presentacion"] = str(payload.get("carta_presentacion") or "").strip()
                 colegiado_raw = str(payload.get("colegiado_numero") or "").strip()
                 calculo["colegiado_numero"] = colegiado_raw if colegiado_raw else "3079"
-                servicios_raw = payload.get("servicios_incluidos")
-                servicios = []
-                if isinstance(servicios_raw, list):
-                    servicios = [str(item or "").strip() for item in servicios_raw if str(item or "").strip()]
-                elif isinstance(servicios_raw, str) and servicios_raw.strip():
-                    try:
-                        parsed = json.loads(servicios_raw)
+                def lista_de_servicios(bruto):
+                    """Acepta lista o JSON en texto, que es como llega según el camino."""
+                    if isinstance(bruto, list):
+                        return [str(i or "").strip() for i in bruto if str(i or "").strip()]
+                    if isinstance(bruto, str) and bruto.strip():
+                        try:
+                            parsed = json.loads(bruto)
+                        except Exception:
+                            return []
                         if isinstance(parsed, list):
-                            servicios = [str(item or "").strip() for item in parsed if str(item or "").strip()]
-                    except Exception:
-                        servicios = []
-                calculo["servicios_incluidos"] = servicios
+                            return [str(i or "").strip() for i in parsed if str(i or "").strip()]
+                    return []
+
+                calculo["servicios_incluidos"] = lista_de_servicios(payload.get("servicios_incluidos"))
+                # Los complementarios van por separado: son los del grupo (fiscal,
+                # herencias, seguros...), se ofrecen con presupuesto aparte y no
+                # entran en la cuota mensual de administración.
+                calculo["servicios_grupo"] = lista_de_servicios(payload.get("servicios_grupo"))
                 tarifas = fetch_workspace_fincas_tarifas(conn, workspace_id) if workspace_id else []
                 calculo["cuota_sugerida"] = compute_fincas_cuota_sugerida(
                     calculo["num_vecinos"],

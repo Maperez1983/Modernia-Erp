@@ -26555,6 +26555,22 @@ const FINCAS_SERVICIOS_DEFAULT = [
   "Cumplimiento LPH: comunicaciones y soporte administrativo",
 ];
 
+// Lo que hace el grupo además de administrar la finca. Va en su propia lista y no
+// en la de arriba a propósito: «Servicios incluidos» define lo que compra la cuota
+// mensual, y meter ahí la renta de cada propietario sería comprometerse a hacer 92
+// declaraciones por el mismo precio. Estos se ofrecen, no se incluyen.
+const FINCAS_SERVICIOS_GRUPO = [
+  "Asesoría fiscal, contable y laboral",
+  "Elaboración de declaraciones de la renta",
+  "Tramitación de cualquier asunto con la Administración y cumplimentación de modelos",
+  "Gestión de herencias",
+  "Transferencias de vehículos",
+  "Asesoría jurídica",
+  "Análisis de inversiones",
+  "Seguros: mediación y revisión de pólizas",
+  "Intermediación inmobiliaria y financiera",
+];
+
 const renderFincasServiciosIncluidos = (container) => {
   if (!container) return;
   const items = FINCAS_SERVICIOS_DEFAULT.slice();
@@ -26574,17 +26590,35 @@ const renderFincasServiciosIncluidos = (container) => {
           </label>
         `).join("")}
       </div>
+      <div class="section-head" style="margin-top:14px;">
+        <div>
+          <h4>Otros servicios del grupo</h4>
+          <p class="muted">A disposición de la comunidad y de cada propietario, con presupuesto aparte. No entran en la cuota mensual.</p>
+        </div>
+      </div>
+      <div class="budget-services-grid">
+        ${FINCAS_SERVICIOS_GRUPO.map((text) => `
+          <label class="inline-check">
+            <input type="checkbox" data-servicio-grupo="1" value="${escapeHtml(text)}" checked />
+            ${escapeHtml(text)}
+          </label>
+        `).join("")}
+      </div>
     </div>
   `;
 };
 
-const readFincasServiciosIncluidos = (container) => {
-  if (!container) return [];
-  return Array.from(container.querySelectorAll('input[type="checkbox"]'))
+const leeServiciosMarcados = (container, selector) =>
+  Array.from(container ? container.querySelectorAll(selector) : [])
     .filter((input) => input && input.checked)
     .map((input) => String(input.value || "").trim())
     .filter(Boolean);
-};
+
+const readFincasServiciosIncluidos = (container) =>
+  leeServiciosMarcados(container, 'input[type="checkbox"]:not([data-servicio-grupo])');
+
+const readFincasServiciosGrupo = (container) =>
+  leeServiciosMarcados(container, 'input[type="checkbox"][data-servicio-grupo]');
 
 const normalizeBudgetServiceKey = (value = "") => {
   const raw = normalizeSimple(value || "");
@@ -27294,6 +27328,7 @@ const refreshWorkspaceBudgets = async ({ silent = false } = {}) => {
 const buildWorkspacePresupuestoUpdatePayloadFromRow = (row = {}, overrides = {}) => {
   const calc = parseWorkspaceBudgetCalc(row);
   const serviciosIncluidos = Array.isArray(calc.servicios_incluidos) ? calc.servicios_incluidos : [];
+  const serviciosGrupo = Array.isArray(calc.servicios_grupo) ? calc.servicios_grupo : [];
   const payload = {
     id: String(row.id || "").trim(),
     workspace_id: state.currentWorkspaceId || String(row.workspace_id || "").trim(),
@@ -27336,6 +27371,7 @@ const buildWorkspacePresupuestoUpdatePayloadFromRow = (row = {}, overrides = {})
     map_lat: String(calc.map_lat ?? row.map_lat ?? "").trim(),
     map_lon: String(calc.map_lon ?? row.map_lon ?? "").trim(),
     servicios_incluidos: serviciosIncluidos,
+    servicios_grupo: serviciosGrupo,
     lineas: Array.isArray(row.lineas) ? row.lineas : [],
   };
   return { ...payload, ...(overrides || {}) };
@@ -88178,6 +88214,7 @@ if (workspaceFincasBudgetQuickForm) {
       extras,
     );
     const serviciosIncluidos = readFincasServiciosIncluidos(workspaceFincasBudgetServiciosIncluidos);
+    const serviciosGrupo = readFincasServiciosGrupo(workspaceFincasBudgetServiciosIncluidos);
     const comunidadName = String(values.comunidad_denominacion || community?.nombre || "").trim() || "Comunidad";
 	    const payload = {
 	      // Vacío crea uno nuevo; con id el servidor actualiza ese mismo.
@@ -88209,6 +88246,7 @@ if (workspaceFincasBudgetQuickForm) {
 	      map_lat: String(values.map_lat || "").trim(),
 	      map_lon: String(values.map_lon || "").trim(),
 	      servicios_incluidos: serviciosIncluidos,
+	      servicios_grupo: serviciosGrupo,
 	      num_vecinos: numVecinos,
 	      num_locales: numLocales,
 	      num_trasteros: numTrasteros,

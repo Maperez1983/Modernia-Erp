@@ -285,3 +285,65 @@ class LoQueNoSeDebeHaberRotoTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LosServiciosComplementariosVanAparteTests(unittest.TestCase):
+    """Lo que hace el grupo además de administrar la finca.
+
+    El usuario pidió que salieran en el presupuesto la asesoría fiscal, las rentas,
+    las herencias, los seguros… Van en **su propia lista**, no en «Servicios
+    incluidos»: esa lista define lo que compra la cuota mensual, y meter ahí la
+    declaración de la renta sería comprometerse a hacer las 92 de la comunidad por
+    los mismos 810,70 € al mes.
+    """
+
+    APP = (RAIZ / "web" / "app.js").read_text(encoding="utf-8")
+
+    def test_estan_los_que_pidio(self):
+        for servicio in ("Asesoría fiscal, contable y laboral",
+                         "Elaboración de declaraciones de la renta",
+                         "Gestión de herencias",
+                         "Transferencias de vehículos",
+                         "Asesoría jurídica",
+                         "Análisis de inversiones",
+                         "Intermediación inmobiliaria y financiera"):
+            with self.subTest(servicio=servicio):
+                self.assertIn(servicio, self.APP)
+
+    def test_no_se_mezclan_con_los_incluidos(self):
+        i = self.APP.index("const FINCAS_SERVICIOS_DEFAULT")
+        incluidos = self.APP[i: self.APP.index("];", i)]
+        self.assertNotIn("herencias", incluidos)
+        self.assertNotIn("renta", incluidos)
+
+    def test_se_leen_por_separado(self):
+        self.assertIn("data-servicio-grupo", self.APP)
+        self.assertIn("const readFincasServiciosGrupo", self.APP)
+        i = self.APP.index("const readFincasServiciosIncluidos")
+        self.assertIn(':not([data-servicio-grupo])', self.APP[i: i + 260])
+
+    def test_viajan_en_el_presupuesto(self):
+        self.assertIn("servicios_grupo: serviciosGrupo", self.APP)
+        self.assertIn('calculo["servicios_grupo"]', SERVER)
+
+    @unittest.skipUnless(LISTO, "hace falta web.server y pypdf")
+    def test_el_pdf_los_pinta_en_su_bloque(self):
+        _pdf, _l, texto = genera(calc={"servicios_incluidos": ["Gestión de incidencias"],
+                                       "servicios_grupo": ["Gestión de herencias"]})
+        self.assertIn("Servicios complementarios", texto)
+        self.assertIn("Gestión de herencias", texto)
+
+    @unittest.skipUnless(LISTO, "hace falta web.server y pypdf")
+    def test_la_cuota_deja_claro_que_compra(self):
+        _pdf, _l, texto = genera(calc={"servicios_incluidos": ["Gestión de incidencias"]})
+        self.assertIn("Servicios incluidos en la cuota", texto)
+
+    @unittest.skipUnless(LISTO, "hace falta web.server y pypdf")
+    def test_se_advierte_de_que_van_con_presupuesto_aparte(self):
+        _pdf, _l, texto = genera(calc={"servicios_grupo": ["Gestión de herencias"]})
+        self.assertIn("presupuesto aparte", texto)
+
+    @unittest.skipUnless(LISTO, "hace falta web.server y pypdf")
+    def test_sin_complementarios_no_sale_el_bloque(self):
+        _pdf, _l, texto = genera(calc={"servicios_grupo": []})
+        self.assertNotIn("Servicios complementarios", texto)
