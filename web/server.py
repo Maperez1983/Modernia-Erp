@@ -98238,6 +98238,8 @@ class Handler(BaseHTTPRequestHandler):
                   i.provincia,
                   i.zona,
                   i.tipo_inmueble,
+                  i.subtipologia,
+                  i.propietario_telefono,
                   i.m2,
                   i.habitaciones,
                   i.banos,
@@ -98251,6 +98253,10 @@ class Handler(BaseHTTPRequestHandler):
                   i.certificado,
                   i.estado,
                   COALESCE(MAX(cap.noticia_verificada), 0) AS noticia_verificada,
+                  -- La columna «Necesidad de vta.» del listado leía este campo y salía
+                  -- siempre vacía: no está en `inmuebles`, está en `captaciones`, que ya
+                  -- se une aquí para `noticia_verificada`. Nunca se llegó a pedir.
+                  MAX(cap.necesidad_venta_alquiler) AS necesidad_venta_alquiler,
                   GROUP_CONCAT(c.nombre, ' | ') AS propietarios
                 FROM inmuebles i
                 LEFT JOIN inmueble_propietarios ip ON ip.inmueble_id = i.id
