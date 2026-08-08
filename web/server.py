@@ -54424,16 +54424,18 @@ def fetch_workspace_fincas_cartas(conn, workspace_id, *, sembrar=True):
     ]
 
 
-#: El equipo que firma la propuesta, tal y como lo dio la casa. Son personas
-#: reales: los nombres y los cargos van literalmente como me los pasaron, sin
-#: retocar ni completar. El número de colegiado se deja en blanco a propósito —el
-#: presupuesto ya lleva el 3079 por su lado— hasta que se confirme de quién es.
+#: El equipo que firma la propuesta. Son personas reales, así que esta lista se
+#: revisó con la casa antes de darla por buena: la tilde de «Bárbara», el «de» del
+#: cargo de Daniel y a quién pertenece el número de colegiado, que es lo único que
+#: aquí constituye una afirmación profesional y no un dato de contacto.
 FINCAS_EQUIPO_DEFECTO = [
-    {"nombre": "Miguel Ángel Pérez Rodríguez", "cargo": "Administrador de Fincas", "orden": 1},
-    {"nombre": "Daniel Gallardo Romero", "cargo": "Oficial Habilitado administración de fincas", "orden": 2},
-    {"nombre": "Barbara Salazar Oular", "cargo": "Seguros", "orden": 3},
-    {"nombre": "Teresa Ramos Rueda", "cargo": "Asesora Fiscal persona física", "orden": 4},
-    {"nombre": "Ana Portero Palma", "cargo": "Abogada", "orden": 5},
+    {"nombre": "Miguel Ángel Pérez Rodríguez", "cargo": "Administrador de Fincas",
+     "colegiado": "3079", "orden": 1},
+    {"nombre": "Daniel Gallardo Romero", "cargo": "Oficial Habilitado de administración de fincas",
+     "colegiado": "", "orden": 2},
+    {"nombre": "Bárbara Salazar Oular", "cargo": "Seguros", "colegiado": "", "orden": 3},
+    {"nombre": "Teresa Ramos Rueda", "cargo": "Asesora Fiscal persona física", "colegiado": "", "orden": 4},
+    {"nombre": "Ana Portero Palma", "cargo": "Abogada", "colegiado": "", "orden": 5},
 ]
 
 
@@ -54457,8 +54459,9 @@ def fetch_workspace_fincas_equipo(conn, workspace_id, *, sembrar=True):
             conn.execute(
                 "INSERT INTO workspace_fincas_equipo "
                 "(id, workspace_id, nombre, cargo, colegiado, activo, orden, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, '', 1, ?, ?, ?)",
-                (os.urandom(16).hex(), workspace_id, item["nombre"], item["cargo"], item["orden"], ahora, ahora),
+                "VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                (os.urandom(16).hex(), workspace_id, item["nombre"], item["cargo"],
+                 item.get("colegiado") or "", item["orden"], ahora, ahora),
             )
         try:
             conn.commit()

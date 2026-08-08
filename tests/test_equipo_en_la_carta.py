@@ -18,8 +18,11 @@ Dos decisiones que estos tests fijan:
 - **Guardar reemplaza la lista entera.** Con altas y bajas sueltas, quien se va se
   queda en la carta hasta que alguien se acuerda de borrarlo.
 
-Sobre los datos: los nombres y los cargos son los que dio la casa, literales. No los
-he retocado ni completado —ni las tildes ni los cargos— porque son personas reales.
+Sobre los datos: son personas reales, así que la lista se revisó con la casa antes
+de darla por buena. De esa revisión salieron tres correcciones —la tilde de
+«Bárbara», el «de» del cargo de Daniel y el número de colegiado, que es de Miguel
+Ángel— y estos tests las fijan. El colegiado importa más que las otras dos: es lo
+único de aquí que constituye una afirmación profesional, no un dato de contacto.
 """
 
 import json
@@ -51,7 +54,7 @@ class LaListaDePartidaTests(unittest.TestCase):
         self.assertEqual(nombres, [
             "Miguel Ángel Pérez Rodríguez",
             "Daniel Gallardo Romero",
-            "Barbara Salazar Oular",
+            "Bárbara Salazar Oular",
             "Teresa Ramos Rueda",
             "Ana Portero Palma",
         ])
@@ -59,17 +62,20 @@ class LaListaDePartidaTests(unittest.TestCase):
     def test_cada_uno_con_su_cargo(self):
         cargos = {m["nombre"]: m["cargo"] for m in server.FINCAS_EQUIPO_DEFECTO}
         self.assertEqual(cargos["Miguel Ángel Pérez Rodríguez"], "Administrador de Fincas")
-        self.assertEqual(cargos["Daniel Gallardo Romero"], "Oficial Habilitado administración de fincas")
-        self.assertEqual(cargos["Barbara Salazar Oular"], "Seguros")
+        self.assertEqual(cargos["Daniel Gallardo Romero"], "Oficial Habilitado de administración de fincas")
+        self.assertEqual(cargos["Bárbara Salazar Oular"], "Seguros")
         self.assertEqual(cargos["Teresa Ramos Rueda"], "Asesora Fiscal persona física")
         self.assertEqual(cargos["Ana Portero Palma"], "Abogada")
 
-    def test_nadie_lleva_colegiado_inventado(self):
-        """El 3079 que ya salía en el presupuesto no se le cuelga a nadie sin que
-        alguien lo confirme: atribuir un número de colegiado es afirmar algo."""
-        for miembro in server.FINCAS_EQUIPO_DEFECTO:
-            with self.subTest(nombre=miembro["nombre"]):
-                self.assertEqual(str(miembro.get("colegiado") or ""), "")
+    def test_el_colegiado_es_del_administrador_y_de_nadie_mas(self):
+        """Atribuir un número de colegiado es afirmar algo, así que se dejó en
+        blanco hasta que la casa confirmó de quién era. El 3079 es de Miguel
+        Ángel; el resto no tiene, y ponérselo sería inventarlo."""
+        con_numero = {m["nombre"]: m.get("colegiado") or "" for m in server.FINCAS_EQUIPO_DEFECTO}
+        self.assertEqual(con_numero.pop("Miguel Ángel Pérez Rodríguez"), "3079")
+        for nombre, colegiado in con_numero.items():
+            with self.subTest(nombre=nombre):
+                self.assertEqual(colegiado, "")
 
 
 class ComoSeEscribeCadaUnoTests(unittest.TestCase):
@@ -110,6 +116,12 @@ class SeGuardaYSeEditaTests(unittest.TestCase):
         items = server.fetch_workspace_fincas_equipo(self.conn(), "ws1")
         self.assertEqual(len(items), 5)
         self.assertEqual(items[0]["nombre"], "Miguel Ángel Pérez Rodríguez")
+
+    def test_la_siembra_guarda_el_colegiado(self):
+        """Se insertaba una cadena vacía a fuego, así que el 3079 se perdía."""
+        items = server.fetch_workspace_fincas_equipo(self.conn(), "ws1")
+        self.assertEqual(items[0]["colegiado"], "3079")
+        self.assertEqual(items[1]["colegiado"], "")
 
     def test_no_se_siembra_dos_veces(self):
         conn = self.conn()
@@ -203,7 +215,7 @@ class EnElPdfTests(unittest.TestCase):
         return "\n".join((p.extract_text() or "") for p in PdfReader(BytesIO(pdf)).pages)
 
     def equipo(self):
-        return [{"nombre": m["nombre"], "cargo": m["cargo"], "colegiado": ""}
+        return [{"nombre": m["nombre"], "cargo": m["cargo"], "colegiado": m.get("colegiado") or ""}
                 for m in server.FINCAS_EQUIPO_DEFECTO]
 
     def test_sale_el_bloque_con_todos(self):
@@ -239,8 +251,15 @@ class EnElPdfTests(unittest.TestCase):
         self.assertIn("colegiado nº 3079", texto)
 
     def test_sin_colegiado_en_el_equipo_la_linea_suelta_se_queda(self):
-        texto = self.genera({"equipo": self.equipo()})
+        sin_numero = [{"nombre": "Ana Portero Palma", "cargo": "Abogada", "colegiado": ""}]
+        texto = self.genera({"equipo": sin_numero})
         self.assertIn("Administrador de Fincas Colegiado nº 3079.", texto)
+
+    def test_con_el_equipo_de_verdad_el_numero_sale_una_sola_vez(self):
+        """Miguel Ángel ya lo lleva, así que la línea suelta sobra."""
+        texto = self.genera({"equipo": self.equipo()})
+        self.assertEqual(texto.count("3079"), 1)
+        self.assertIn("Miguel Ángel Pérez Rodríguez — Administrador de Fincas, colegiado nº 3079", texto)
 
 
 class ElEquipoSeCongelaEnElPresupuestoTests(unittest.TestCase):
