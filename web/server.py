@@ -56688,6 +56688,7 @@ def build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=
             body,
             footer,
             brand_logo_url=company.get("logo_url"),
+            company=company,
         )
 
     precio_venta_raw = (
@@ -56761,7 +56762,43 @@ def build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=
         body,
         footer,
         brand_logo_url=company.get("logo_url"),
+        company=company,
     )
+
+
+def _fuente_para_formulario(nombre=None):
+    """Fuente admisible dentro de un campo de formulario PDF.
+
+    Los campos AcroForm de reportlab sólo aceptan las 14 fuentes estándar del
+    formato. Aquí se le venía pasando la del producto, IBMPlexSans, así que
+    `form.textfield()` lanzaba `ValueError` en **todos** los campos y el
+    `except: pass` de al lado se lo tragaba: el reconocimiento de honorarios salía
+    con sus cuatro recuadros vacíos y sin un solo campo donde escribir, y nadie veía
+    el error. Se sustituye por la estándar más parecida; el documento lleva
+    NeedAppearances, así que el lector rehace el aspecto con ella.
+    """
+    crudo = str(nombre or "").strip()
+    estandar = {
+        "helvetica", "helvetica-bold", "helvetica-oblique", "helvetica-boldoblique",
+        "courier", "courier-bold", "courier-oblique", "courier-boldoblique",
+        "times-roman", "times-bold", "times-italic", "times-bolditalic",
+        "symbol", "zapfdingbats",
+    }
+    if crudo.lower() in estandar:
+        return crudo
+    return "Helvetica-Bold" if "bold" in crudo.lower() else "Helvetica"
+
+
+def _valor_para_campo(valor):
+    """Valor apto para un campo de formulario PDF.
+
+    Las 14 fuentes estándar no traen el símbolo del euro en la tabla que reportlab
+    usa para los formularios: un importe con «€» reventaba con `KeyError: 8364` y el
+    campo se caía entero, así que la casilla del importe salía en blanco. Los
+    acentos y la eñe sí van bien. Se escribe «EUR», que además es lo que dice el
+    rótulo de la casilla («Importe (EUR)»).
+    """
+    return str(valor or "").replace("€", "EUR")
 
 
 def _pdf_form_value(value, fallback=""):
@@ -56807,17 +56844,18 @@ def _build_acroform_overlay_pdf(pagesize_list, fields_by_page):
                     y=y,
                     width=max(10.0, w),
                     height=max(10.0, h),
-                    value=value,
+                    value=_valor_para_campo(value),
                     forceBorder=False,
                     borderWidth=0,
                     borderColor=None,
                     fillColor=None,
                     textColor=text_color,
-                    fontName=font_name,
+                    fontName=_fuente_para_formulario(font_name),
                     fontSize=font_size,
                     fieldFlags=flags,
                 )
-            except Exception:
+            except Exception as exc:
+                print(f"[pdf] campo de formulario descartado ({name}): {exc}", file=sys.stderr)
                 continue
         # Finaliza la página antes de guardar: necesario para que ReportLab resuelva referencias de AcroForm.
         # (Si no se llama, algunas versiones lanzan "forward reference to Page1 not resolved".)
@@ -59655,6 +59693,7 @@ def build_workspace_contract_pdf(template_key, company, client, payload=None, tm
             body_lines,
             footer_lines=footer,
             brand_logo_url=company.get("logo_url"),
+            company=company,
         )
     sections = [
         (
@@ -60380,19 +60419,18 @@ def build_inmueble_honorarios_ack_pdf_editable(company, inmueble, buyer, action,
                 y=y,
                 width=width,
                 height=height,
-                value=_pdf_form_value(value),
+                value=_valor_para_campo(_pdf_form_value(value)),
                 forceBorder=True,
                 borderWidth=1,
                 borderColor=line,
                 fillColor=bg,
                 textColor=ink,
-                fontName=PDF_FONT_REGULAR,
+                fontName=_fuente_para_formulario(PDF_FONT_REGULAR),
                 fontSize=font_size,
                 fieldFlags=flags,
             )
-        except Exception:
-            # Best-effort
-            pass
+        except Exception as exc:
+            print(f"[pdf] campo de formulario descartado ({name}): {exc}", file=sys.stderr)
 
     # Content
     y = h - 170

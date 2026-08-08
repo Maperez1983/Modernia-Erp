@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+import os
+import re
+import sys
 import textwrap
 from io import BytesIO
 from pathlib import Path
@@ -228,28 +231,107 @@ def build_branded_document_pdf(title, subtitle, sections, footer_lines=None, bra
 
 
 def build_company_branded_document_pdf(company, title, subtitle, sections, footer_lines=None, brand_logo_url=None):
+    """Documento con la marca de la empresa que lo emite.
+
+    Antes esto miraba si la empresa era Modernia y, sólo en ese caso, usaba el motor
+    que sabe dibujar texto; las demás caían al de imagen. Pero de las nueve empresas
+    reales sólo dos llevan «modernia» en el nombre, y las inmobiliarias no: sus 86
+    inmuebles emitían notas de encargo, hojas de precio y ofertas como un mapa de
+    bits de 1240x1754, sin una sola fuente incrustada. El propietario firmaba un
+    documento en el que no se puede buscar una cifra, ni copiar una cláusula, ni
+    leerlo un lector de pantalla.
+
+    La estética no era de Modernia, era la del producto: logo de la empresa, banda
+    de color y título. Cada empresa entra con su propio logo, así que la puerta
+    sobraba. `PDF_MOTOR=imagen` sigue devolviendo el aspecto anterior sin desplegar.
+    """
     company = company or {}
-    if _company_uses_modernia_pdf_brand(company):
-        return _dep("build_modernia_branded_document_pdf")(
-            title,
-            subtitle,
-            sections,
-            footer_lines,
-            company=company,
-            brand_logo_url=brand_logo_url,
-        )
-    return _dep("build_branded_document_pdf")(
+    logo = brand_logo_url or company.get("logo_url")
+    if not logo:
+        # Empresas sin logo (Inmovere Fincas, Verifika2): se resuelve aquí el mismo
+        # respaldo que aplicaba el motor de imagen, para que no cambie la marca.
+        logo = _dep("load_brand_logo")(None, max_width=560)
+    return _dep("build_modernia_branded_document_pdf")(
         title,
         subtitle,
         sections,
         footer_lines,
-        brand_logo_url=brand_logo_url or company.get("logo_url"),
+        company=company,
+        brand_logo_url=logo,
     )
 
 
-def build_branded_text_document_pdf(title, subtitle, body_lines, footer_lines=None, brand_logo_url=None):
+def _texto_corrido_a_secciones(body_lines):
+    """Convierte la lista plana de párrafos en las secciones que espera el vectorial.
+
+    El texto corrido no tiene encabezados: es un contrato, párrafo tras párrafo. Se
+    parte por los saltos de página explícitos y cada trozo va como una sección sin
+    título, para que el motor respete los cortes que pedía el documento.
+    """
+    secciones = []
+    bloque = []
+    columnas = []
+
+    def cierra_columnas():
+        nonlocal columnas
+        if columnas:
+            secciones.append(("", {"kind": "columns", "items": columnas}))
+            columnas = []
+
+    def cierra_bloque():
+        nonlocal bloque
+        if bloque:
+            secciones.append(("", bloque))
+            bloque = []
+
+    for line in body_lines:
+        raw = str(line or "")
+        if raw.strip().upper() in {"__PAGE_BREAK__", "__PAGEBREAK__"}:
+            cierra_bloque()
+            cierra_columnas()
+            secciones.append(("", {"kind": "page_break"}))
+            continue
+        # Las líneas que reparten dos rótulos con una tirada de espacios (el pie de
+        # firmas, sobre todo) son una tabla escrita a mano: aquí se recupera como tal,
+        # porque al partir por palabras esos espacios se pierden y los dos rótulos
+        # acaban pegados.
+        celdas = [c.strip() for c in re.split(r" {3,}", raw.strip())]
+        if len(celdas) > 1 and all(celdas):
+            cierra_bloque()
+            columnas.append(celdas)
+            continue
+        cierra_columnas()
+        bloque.append(raw)
+    cierra_bloque()
+    cierra_columnas()
+    return secciones or [("", [])]
+
+
+def build_branded_text_document_pdf(title, subtitle, body_lines, footer_lines=None, brand_logo_url=None, company=None):
+    """Documento de texto corrido (contratos, notas de encargo, cartas).
+
+    La nota de encargo llamaba aquí directamente, saltándose el enrutado por empresa,
+    así que se dibujaba como imagen aunque hubiera un motor de texto disponible: tres
+    páginas, 617 kB y ni una fuente dentro. Ahora pasa por el mismo motor que el
+    resto y sigue habiendo respaldo si algo falla.
+    """
     footer_lines = footer_lines or []
     body_lines = body_lines or []
+
+    motor = (os.environ.get("PDF_MOTOR") or "").strip().lower()
+    if motor not in ("imagen", "pil", "raster"):
+        try:
+            return _dep("build_modernia_branded_document_pdf")(
+                title,
+                subtitle,
+                _texto_corrido_a_secciones(body_lines),
+                footer_lines,
+                company=company or {},
+                brand_logo_url=brand_logo_url,
+            )
+        except Exception as exc:  # pragma: no cover - un documento feo es mejor que ninguno
+            print(f"[pdf] texto corrido: motor vectorial falló, se usa el de imagen: {exc}", file=sys.stderr)
+
     page_width, page_height = 1240, 1754
     margin_x, top_margin, bottom_margin = 90, 70, 90
     logo = _dep("load_brand_logo")(brand_logo_url, max_width=560)

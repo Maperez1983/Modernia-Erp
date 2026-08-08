@@ -231,6 +231,23 @@ def _alto_estimado(cuerpo):
     return None
 
 
+def _item_a_texto(item):
+    """Un elemento de lista puede venir como texto o como par (etiqueta, valor).
+
+    El par es la forma que usan las fichas —«Referencia catastral», «Superficie»— y
+    el motor de imagen lo unía con dos puntos. Aquí se hacía `str()` a secas, así que
+    la ficha catastral salía con la tupla de Python en crudo:
+    `('Dirección CRM', '100 - SOR TERESA PRAT 59 2º G')`.
+    """
+    if isinstance(item, (list, tuple)) and len(item) == 2:
+        etiqueta, valor = item
+        etiqueta, valor = _texto(etiqueta).strip(), _texto(valor).strip()
+        if etiqueta and valor:
+            return f"{etiqueta}: {valor}"
+        return etiqueta or valor
+    return _texto(item)
+
+
 def _lista(lienzo, items, espaciado=None):
     """Pinta una lista de párrafos dejando aire entre ellos.
 
@@ -239,9 +256,44 @@ def _lista(lienzo, items, espaciado=None):
     """
     hueco = ESPACIO_ENTRE_ITEMS if espaciado is None else float(espaciado or 0)
     for item in items:
-        lienzo.linea_texto(_texto(item), sangria=8)
+        lienzo.linea_texto(_item_a_texto(item), sangria=8)
         if hueco:
             lienzo.y -= hueco
+
+
+def _columnas(lienzo, bloque):
+    """Filas repartidas en columnas de igual ancho, sin rayas.
+
+    Es lo que necesita el pie de firmas de un contrato: «Por el Intermediario» a la
+    izquierda y «Por el cliente» a la derecha, cada uno sobre su hueco. Venía escrito
+    alineando con tiradas de espacios, que el motor de imagen respetaba pero este
+    colapsa al partir por palabras, así que las dos firmas acababan pegadas en una
+    misma línea y no se distinguía dónde firmaba cada parte.
+    """
+    filas = [f for f in (bloque.get("items") or []) if f]
+    if not filas:
+        return
+    columnas = max(len(f) for f in filas)
+    if columnas < 2:
+        _lista(lienzo, [" ".join(f) for f in filas])
+        return
+    util = A4_ANCHO - MARGEN_X * 2
+    ancho = util / columnas
+    tamano = float(bloque.get("tamano") or 9.5)
+    for fila in filas:
+        lienzo.sitio(tamano + 6)
+        lienzo.c.setFillColorRGB(*TINTA)
+        lienzo.c.setFont(PDF_FONT_REGULAR, tamano)
+        for i, celda in enumerate(fila):
+            texto = _texto(celda).strip()
+            if not texto:
+                continue
+            cabido, cuerpo = _encoge_para_caber(
+                lienzo.c, texto, PDF_FONT_REGULAR, tamano, ancho - 10, minimo=7.0)
+            lienzo.c.setFont(PDF_FONT_REGULAR, cuerpo)
+            lienzo.c.drawString(MARGEN_X + ancho * i, lienzo.y - tamano, cabido)
+        lienzo.c.setFont(PDF_FONT_REGULAR, tamano)
+        lienzo.y -= tamano + 6
 
 
 def _cabe_en(c, texto, fuente, tamano, ancho):
@@ -294,15 +346,28 @@ def _dibuja_cabecera(titulo, subtitulo, meta_empresa, logo_marca=None, color=Non
             texto_titulo = _texto(titulo)[:80]
             c.setFont(PDF_FONT_BOLD, 15)
             c.drawString(MARGEN_X, y - 26, texto_titulo)
+            bajado = ""
             if subtitulo:
                 # Lo que queda libre a la derecha del título, con un respiro en medio:
                 # así el subtítulo se encoge o se recorta, pero nunca se solapa.
                 libre = (A4_ANCHO - MARGEN_X * 2) - c.stringWidth(texto_titulo, PDF_FONT_BOLD, 15) - 18
-                cabido, cuerpo_sub = _encoge_para_caber(c, _texto(subtitulo), PDF_FONT_REGULAR, 9, libre)
-                if cabido:
+                entero = _texto(subtitulo)
+                cabido, cuerpo_sub = _encoge_para_caber(c, entero, PDF_FONT_REGULAR, 9, libre)
+                if cabido and cabido == entero:
                     c.setFont(PDF_FONT_REGULAR, cuerpo_sub)
                     c.drawRightString(A4_ANCHO - MARGEN_X, y - 26, cabido)
+                else:
+                    # Con un título largo no queda hueco y el recorte dejaba cosas como
+                    # «Modelo adaptad…», que no dice nada. Mejor entero, debajo.
+                    bajado = entero
             y -= 56
+            if bajado:
+                c.setFillColorRGB(*TINTA)
+                cabido, cuerpo_sub = _encoge_para_caber(
+                    c, bajado, PDF_FONT_REGULAR, 9, A4_ANCHO - MARGEN_X * 2, minimo=7.0)
+                c.setFont(PDF_FONT_REGULAR, cuerpo_sub)
+                c.drawString(MARGEN_X, y, cabido)
+                y -= 14
             if meta_empresa:
                 c.setFillColorRGB(*APAGADO)
                 cabido, cuerpo_meta = _encoge_para_caber(
@@ -750,6 +815,8 @@ def build_modernia_branded_document_pdf_vector(
             _tabla(lienzo, cuerpo)
         elif clase == "image":
             _imagen(lienzo, cuerpo, cache_logos)
+        elif clase == "columns":
+            _columnas(lienzo, cuerpo)
         elif isinstance(cuerpo, dict):
             _lista(lienzo, cuerpo.get("items") or [], cuerpo.get("espaciado"))
         else:

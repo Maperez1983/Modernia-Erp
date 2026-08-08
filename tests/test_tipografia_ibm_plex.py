@@ -90,10 +90,41 @@ class LasVistasDeImpresionYLosCorreosTests(unittest.TestCase):
 
 class LosDocumentosGeneradosTests(unittest.TestCase):
     def test_no_queda_helvetica_escrita_a_mano(self):
+        """Salvo en los campos de formulario, donde el formato no admite otra cosa.
+
+        Los campos AcroForm sólo aceptan las 14 fuentes estándar del PDF. Se le
+        estaba pasando IBMPlexSans, así que reportlab lanzaba en cada campo y el
+        `except` de al lado lo escondía: el reconocimiento de honorarios salía sin
+        un solo campo. La excepción vive aislada en `_fuente_para_formulario`; fuera
+        de ahí, Helvetica sigue prohibida.
+        """
         for fichero in ("server.py", "document_pdf.py"):
             texto = (RAIZ / "web" / fichero).read_text(encoding="utf-8")
+            if "def _fuente_para_formulario" in texto:
+                i = texto.index("def _fuente_para_formulario")
+                texto = texto[:i] + texto[texto.index("\ndef ", i + 10):]
             with self.subTest(fichero=fichero):
                 self.assertNotIn("Helvetica", texto)
+
+    def test_los_campos_de_formulario_llevan_una_fuente_que_el_formato_admite(self):
+        import os
+        os.environ.setdefault("DATABASE_URL", "")
+        from web.server import _fuente_para_formulario
+        from web.pdf_fonts import PDF_FONT_REGULAR, PDF_FONT_BOLD
+
+        estandar = {
+            "Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique",
+            "Courier", "Courier-Bold", "Courier-Oblique", "Courier-BoldOblique",
+            "Times-Roman", "Times-Bold", "Times-Italic", "Times-BoldItalic",
+            "Symbol", "ZapfDingbats",
+        }
+        for entrada in (PDF_FONT_REGULAR, PDF_FONT_BOLD, "", None, "Courier"):
+            with self.subTest(entrada=entrada):
+                self.assertIn(_fuente_para_formulario(entrada), estandar)
+        # La negrita no se pierde por el camino.
+        self.assertEqual(_fuente_para_formulario(PDF_FONT_BOLD), "Helvetica-Bold")
+        # Y una estándar que ya venía bien se respeta tal cual.
+        self.assertEqual(_fuente_para_formulario("Courier"), "Courier")
 
     def test_las_fuentes_viajan_con_el_repositorio(self):
         # Render no tiene IBM Plex instalada; si no van en el repo, no hay fuente.
