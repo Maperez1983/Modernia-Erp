@@ -26959,6 +26959,78 @@ document.getElementById("workspaceFincasBudgetCartaPanel")?.addEventListener("to
 });
 document.getElementById("workspaceFincasBudgetCartaGenerar")?.addEventListener("click", generarCartaDePresentacion);
 
+// --- Plantillas de contrato, editables sin desplegar ------------------------
+// Quien tiene que revisar estas cláusulas es la asesoría jurídica, no quien toca
+// el código. Obligarle a pedir un despliegue para cambiar una coma garantiza que
+// no se cambie nunca.
+
+const plantillaContratoSelect = document.getElementById("workspaceContratoPlantillaSelect");
+const plantillaContratoTitulo = document.getElementById("workspaceContratoPlantillaTitulo");
+const plantillaContratoCuerpo = document.getElementById("workspaceContratoPlantillaCuerpo");
+const plantillaContratoPie = document.getElementById("workspaceContratoPlantillaPie");
+const plantillaContratoStatus = document.getElementById("workspaceContratoPlantillaStatus");
+let plantillasContrato = [];
+
+const pintaPlantillaContrato = (clave) => {
+  const item = plantillasContrato.find((p) => p.clave === clave) || plantillasContrato[0];
+  if (!item) return;
+  if (plantillaContratoSelect) plantillaContratoSelect.value = item.clave;
+  if (plantillaContratoTitulo) plantillaContratoTitulo.value = item.titulo || "";
+  if (plantillaContratoCuerpo) plantillaContratoCuerpo.value = item.cuerpo || "";
+  if (plantillaContratoPie) plantillaContratoPie.value = item.pie || "";
+};
+
+const cargarPlantillasDeContrato = async () => {
+  if (!state.currentWorkspaceId || !plantillaContratoSelect) return;
+  try {
+    const data = await apiGet(`/api/workspace_contrato_plantillas?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`);
+    plantillasContrato = Array.isArray(data?.items) ? data.items : [];
+    const previa = String(plantillaContratoSelect.value || "");
+    plantillaContratoSelect.innerHTML = plantillasContrato
+      .map((p) => `<option value="${escapeHtml(p.clave)}">${escapeHtml(p.etiqueta || p.clave)}</option>`)
+      .join("");
+    // Las de fincas primero, que son las que se van a tocar.
+    const preferida = previa || (plantillasContrato.find((p) => p.clave.startsWith("fincas_")) || plantillasContrato[0] || {}).clave;
+    pintaPlantillaContrato(preferida);
+  } catch (error) {
+    if (plantillaContratoStatus) plantillaContratoStatus.textContent = error?.message || "No se pudieron cargar las plantillas.";
+  }
+};
+
+const guardarPlantillaDeContrato = async (restaurar = false) => {
+  if (!state.currentWorkspaceId || !plantillaContratoSelect) return;
+  const clave = String(plantillaContratoSelect.value || "").trim();
+  if (!clave) return;
+  if (restaurar && !window.confirm("Se perderán los cambios de esta plantilla y volverá al texto de origen. ¿Seguir?")) return;
+  if (plantillaContratoStatus) plantillaContratoStatus.textContent = "Guardando...";
+  try {
+    const data = await apiPost("/api/workspace_contrato_plantillas", {
+      workspace_id: state.currentWorkspaceId,
+      clave,
+      restaurar: restaurar ? "1" : "",
+      titulo: plantillaContratoTitulo?.value || "",
+      cuerpo: plantillaContratoCuerpo?.value || "",
+      pie: plantillaContratoPie?.value || "",
+    });
+    plantillasContrato = Array.isArray(data?.items) ? data.items : plantillasContrato;
+    pintaPlantillaContrato(clave);
+    if (plantillaContratoStatus) {
+      plantillaContratoStatus.textContent = restaurar
+        ? "Restaurada la plantilla de origen."
+        : "Plantilla guardada. Los contratos que generes a partir de ahora la usarán.";
+    }
+  } catch (error) {
+    if (plantillaContratoStatus) plantillaContratoStatus.textContent = error?.message || "No se pudo guardar.";
+  }
+};
+
+document.getElementById("workspaceContratoPlantillasPanel")?.addEventListener("toggle", (ev) => {
+  if (ev.target.open) void cargarPlantillasDeContrato();
+});
+plantillaContratoSelect?.addEventListener("change", () => pintaPlantillaContrato(plantillaContratoSelect.value));
+document.getElementById("workspaceContratoPlantillaGuardar")?.addEventListener("click", () => void guardarPlantillaDeContrato(false));
+document.getElementById("workspaceContratoPlantillaRestaurar")?.addEventListener("click", () => void guardarPlantillaDeContrato(true));
+
 // --- Equipo que sale en la carta -------------------------------------------
 // Va en su propia tabla y no escrito en el código: los nombres de las personas
 // cambian más a menudo que las plantillas, y no vale que haga falta un despliegue

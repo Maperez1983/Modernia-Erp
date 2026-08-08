@@ -204,3 +204,114 @@ class SeGeneraDesdeLaPantallaTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LasPlantillasSeEditanSinDesplegarTests(unittest.TestCase):
+    """Quien revisa estas cláusulas es la asesoría jurídica, no quien toca el
+    código. Obligarle a pedir un despliegue para cambiar una coma garantiza que no
+    se cambie nunca."""
+
+    def conn(self):
+        c = server.get_db(":memory:")
+        server.ensure_workspace_product_tables(c)
+        return c
+
+    def test_ida_y_vuelta_sin_perder_nada(self):
+        base = server.get_workspace_contract_templates()["fincas_contrato_comunidad"]
+        texto = server.plantilla_contrato_a_texto(base)
+        vuelta = server.parse_plantilla_contrato(texto)
+        self.assertEqual([t for t, _ in vuelta], [t for t, _ in base["sections"]])
+        self.assertEqual(sum(len(l) for _, l in vuelta), sum(len(l) for _, l in base["sections"]))
+
+    def test_los_apartados_se_marcan_con_almohadillas(self):
+        """JSON habría sido más cómodo de programar y peor de editar."""
+        texto = server.plantilla_contrato_a_texto(
+            server.get_workspace_contract_templates()["fincas_anexo_rgpd"])
+        self.assertTrue(texto.startswith("## "))
+
+    def test_lo_escrito_antes_del_primer_apartado_no_se_tira(self):
+        """Tirarlo sería la forma más silenciosa de que alguien escriba una
+        cláusula y no salga en el documento."""
+        vuelta = server.parse_plantilla_contrato("Un párrafo suelto.\n## Primera\nOtro.")
+        self.assertEqual(vuelta[0], ("", ["Un párrafo suelto."]))
+        self.assertEqual(vuelta[1], ("Primera", ["Otro."]))
+
+    def test_un_cuerpo_vacio_no_da_apartados(self):
+        self.assertEqual(server.parse_plantilla_contrato(""), [])
+        self.assertEqual(server.parse_plantilla_contrato("## Solo un título"), [])
+
+    def test_se_siembran_desde_el_codigo(self):
+        items = server.fetch_workspace_contrato_plantillas(self.conn(), "ws1")
+        claves = [i["clave"] for i in items]
+        self.assertIn("fincas_contrato_comunidad", claves)
+        self.assertIn("fincas_anexo_rgpd", claves)
+
+    def test_cada_workspace_tiene_las_suyas(self):
+        c = self.conn()
+        server.fetch_workspace_contrato_plantillas(c, "ws1")
+        c.execute("UPDATE workspace_contrato_plantillas SET cuerpo = '## Mío\nTexto' WHERE workspace_id='ws1'")
+        c.commit()
+        otras = server.fetch_workspace_contrato_plantillas(c, "ws2")
+        self.assertNotIn("Mío", otras[0]["cuerpo"])
+
+    def test_la_editada_manda_sobre_la_del_codigo(self):
+        c = self.conn()
+        server.fetch_workspace_contrato_plantillas(c, "ws1")
+        c.execute("UPDATE workspace_contrato_plantillas SET cuerpo = ? WHERE workspace_id='ws1' AND clave=?",
+                  ("## Primera\nCláusula reescrita por el abogado.", "fincas_contrato_comunidad"))
+        c.commit()
+        tmpl = server.resolve_contract_template(c, "ws1", "fincas_contrato_comunidad")
+        self.assertEqual(tmpl["sections"], [("Primera", ["Cláusula reescrita por el abogado."])])
+
+    def test_si_la_vacian_se_cae_a_la_del_codigo(self):
+        """Un contrato en blanco es peor que uno desactualizado."""
+        c = self.conn()
+        server.fetch_workspace_contrato_plantillas(c, "ws1")
+        c.execute("UPDATE workspace_contrato_plantillas SET cuerpo = '' WHERE workspace_id='ws1' AND clave=?",
+                  ("fincas_contrato_comunidad",))
+        c.commit()
+        tmpl = server.resolve_contract_template(c, "ws1", "fincas_contrato_comunidad")
+        self.assertEqual(len(tmpl["sections"]), 12)
+
+    def test_sin_tabla_migrada_tampoco_se_rompe(self):
+        c = server.get_db(":memory:")
+        tmpl = server.resolve_contract_template(c, "ws1", "fincas_contrato_comunidad")
+        self.assertIsNotNone(tmpl)
+        self.assertEqual(len(tmpl["sections"]), 12)
+
+    def test_una_clave_desconocida_devuelve_nada(self):
+        self.assertIsNone(server.resolve_contract_template(self.conn(), "ws1", "no_existe"))
+
+    def test_el_pdf_usa_la_plantilla_resuelta(self):
+        for llamada in ("tmpl=resolve_contract_template(",):
+            self.assertEqual(SERVER.count(llamada), 2, "los dos caminos del PDF deben resolverla")
+
+    def test_los_endpoints_comprueban_pertenencia(self):
+        i = SERVER.index('if path == "/api/workspace_contrato_plantillas"')
+        self.assertIn("enforce_workspace_membership(conn, session, workspace_id)", SERVER[i: i + 1200])
+        j = SERVER.index('elif parsed.path == "/api/workspace_contrato_plantillas"')
+        cuerpo = SERVER[j: SERVER.index("\n        elif parsed.path ==", j + 10)]
+        self.assertIn("enforce_workspace_membership(conn, session, workspace_id, write=True)", cuerpo)
+
+    def test_esta_en_la_lista_de_rutas_permitidas(self):
+        self.assertIn('"/api/workspace_contrato_plantillas",', SERVER)
+
+    def test_no_deja_guardar_un_cuerpo_sin_apartados(self):
+        j = SERVER.index('elif parsed.path == "/api/workspace_contrato_plantillas"')
+        cuerpo = SERVER[j: SERVER.index("\n        elif parsed.path ==", j + 10)]
+        self.assertIn("El cuerpo está vacío o no tiene ningún apartado", cuerpo)
+
+    def test_se_puede_volver_al_texto_de_origen(self):
+        j = SERVER.index('elif parsed.path == "/api/workspace_contrato_plantillas"')
+        cuerpo = SERVER[j: SERVER.index("\n        elif parsed.path ==", j + 10)]
+        self.assertIn('payload.get("restaurar")', cuerpo)
+        self.assertIn("plantilla_contrato_a_texto(base)", cuerpo)
+
+    def test_la_pantalla_existe_y_explica_el_formato(self):
+        html = (RAIZ / "web" / "index.html").read_text(encoding="utf-8")
+        self.assertIn('id="workspaceContratoPlantillasPanel"', html)
+        self.assertIn("Los apartados se marcan con", html)
+        self.assertIn("cada uno guarda el texto con el que se creó", html)
+
+    def test_restaurar_pide_confirmacion(self):
+        self.assertIn("Se perderán los cambios de esta plantilla", APP)

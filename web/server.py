@@ -41334,6 +41334,33 @@ def ensure_workspace_product_tables(conn):
         )
     except Exception:
         pass
+    # Las plantillas de contrato, editables sin desplegar. Quien las tiene que
+    # revisar es un abogado, no quien toca el código: obligarle a pedir un
+    # despliegue para cambiar una coma de una cláusula garantiza que no se cambie.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_contrato_plantillas (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          clave TEXT NOT NULL,
+          etiqueta TEXT NOT NULL,
+          titulo TEXT NOT NULL DEFAULT '',
+          cuerpo TEXT NOT NULL DEFAULT '',
+          pie TEXT NOT NULL DEFAULT '',
+          activo INTEGER NOT NULL DEFAULT 1,
+          orden INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_contrato_plantillas_unico "
+            "ON workspace_contrato_plantillas (workspace_id, clave)"
+        )
+    except Exception:
+        pass
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_recibos (
@@ -59356,10 +59383,132 @@ def build_workspace_contract_copilot_prompt(template_key, template_meta, company
     )
 
 
-def build_workspace_contract_pdf(template_key, company, client, payload=None):
+#: Marca de apartado en el texto editable. Se eligió `##` y no JSON porque quien
+#: edita estas plantillas es la asesoría jurídica: pedirle que respete comillas y
+#: corchetes para cambiar una cláusula es pedirle que no la cambie.
+MARCA_APARTADO = "## "
+
+
+def plantilla_contrato_a_texto(tmpl):
+    """Pasa una plantilla del código al texto editable que se guarda en la base."""
+    lineas = []
+    for titulo, contenido in (tmpl or {}).get("sections") or []:
+        lineas.append(MARCA_APARTADO + str(titulo or "").strip())
+        for item in contenido or []:
+            if isinstance(item, (list, tuple)):
+                etiqueta, valor = (list(item) + ["", ""])[:2]
+                lineas.append(f"{etiqueta}: {valor}")
+            else:
+                lineas.append(str(item or "").strip())
+        lineas.append("")
+    return "\n".join(lineas).strip()
+
+
+def parse_plantilla_contrato(texto):
+    """Del texto editable a los apartados que entiende el generador de PDF.
+
+    Lo que va antes del primer `##` no se pierde: se recoge bajo un apartado sin
+    título. Tirarlo sería la forma más silenciosa de que alguien escriba una
+    cláusula y no aparezca en el documento.
+    """
+    apartados = []
+    titulo, lineas = "", []
+
+    def cerrar():
+        if titulo or lineas:
+            apartados.append((titulo, list(lineas)))
+
+    for cruda in str(texto or "").replace("\r\n", "\n").split("\n"):
+        linea = cruda.strip()
+        if linea.startswith(MARCA_APARTADO):
+            cerrar()
+            titulo, lineas = linea[len(MARCA_APARTADO):].strip(), []
+            continue
+        if linea:
+            lineas.append(linea)
+    cerrar()
+    return [(t, l) for t, l in apartados if l]
+
+
+def fetch_workspace_contrato_plantillas(conn, workspace_id, *, sembrar=True):
+    """Plantillas del workspace, sembrando las del código la primera vez."""
+    workspace_id = str(workspace_id or "").strip()
+    if not workspace_id:
+        return []
+
+    def leer():
+        return conn.execute(
+            "SELECT clave, etiqueta, titulo, cuerpo, pie, activo, orden "
+            "FROM workspace_contrato_plantillas WHERE workspace_id = ? ORDER BY orden, etiqueta",
+            (workspace_id,),
+        ).fetchall()
+
+    filas = leer()
+    if not filas and sembrar:
+        ahora = datetime.now().isoformat(timespec="seconds")
+        for orden, (clave, tmpl) in enumerate(get_workspace_contract_templates().items(), start=1):
+            conn.execute(
+                "INSERT INTO workspace_contrato_plantillas "
+                "(id, workspace_id, clave, etiqueta, titulo, cuerpo, pie, activo, orden, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                (os.urandom(16).hex(), workspace_id, clave,
+                 str(tmpl.get("label") or clave), str(tmpl.get("title") or ""),
+                 plantilla_contrato_a_texto(tmpl),
+                 "\n".join(str(l) for l in (tmpl.get("footer") or [])),
+                 orden, ahora, ahora),
+            )
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        filas = leer()
+    return [
+        {
+            "clave": row_value(f, "clave", ""),
+            "etiqueta": row_value(f, "etiqueta", ""),
+            "titulo": row_value(f, "titulo", "") or "",
+            "cuerpo": row_value(f, "cuerpo", "") or "",
+            "pie": row_value(f, "pie", "") or "",
+            "activo": int(row_value(f, "activo", 1) or 0),
+            "orden": int(row_value(f, "orden", 0) or 0),
+        }
+        for f in filas
+    ]
+
+
+def resolve_contract_template(conn, workspace_id, clave):
+    """La plantilla del workspace si la hay; si no, la del código.
+
+    Ante cualquier problema —tabla sin migrar, plantilla vaciada por error— se cae
+    a la del código. Un contrato en blanco es peor que uno desactualizado.
+    """
+    base = get_workspace_contract_templates().get(clave)
+    try:
+        for item in fetch_workspace_contrato_plantillas(conn, workspace_id):
+            if item["clave"] != clave or not item["activo"]:
+                continue
+            apartados = parse_plantilla_contrato(item["cuerpo"])
+            if not apartados:
+                break
+            return {
+                "label": item["etiqueta"] or (base or {}).get("label") or clave,
+                "servicio": (base or {}).get("servicio") or "",
+                "title": item["titulo"] or (base or {}).get("title") or "Contrato",
+                "sections": apartados,
+                "footer": [l.strip() for l in str(item["pie"] or "").split("\n") if l.strip()]
+                          or list((base or {}).get("footer") or []),
+            }
+    except Exception:
+        pass
+    return base
+
+
+def build_workspace_contract_pdf(template_key, company, client, payload=None, tmpl=None):
     payload = payload or {}
-    templates = get_workspace_contract_templates()
-    tmpl = templates.get(template_key)
+    # `tmpl` llega resuelto cuando quien llama tiene conexión: así la plantilla
+    # editada del workspace manda sobre la del código.
+    if tmpl is None:
+        tmpl = get_workspace_contract_templates().get(template_key)
     if not tmpl:
         return None
     company_name = company.get("nombre") or "Empresa"
@@ -62793,6 +62942,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_contabilizar_recibos",
             "/api/workspace_fincas_carta",
             "/api/workspace_fincas_equipo",
+            "/api/workspace_contrato_plantillas",
             "/api/workspace_fincas_portal_alta",
             "/api/workspace_fincas_portal_revocar",
             "/api/workspace_fincas_vecino_delete",
@@ -74539,6 +74689,8 @@ class Handler(BaseHTTPRequestHandler):
                     pdf_payload["company"],
                     pdf_payload["client"],
                     pdf_payload.get("body") or {},
+                    tmpl=resolve_contract_template(
+                        conn, workspace_id, pdf_payload["contract"].get("template_key")),
                 )
                 if not pdf_bytes:
                     json_response(self, {"error": "no se pudo generar el PDF"}, status=500)
@@ -75621,6 +75773,64 @@ class Handler(BaseHTTPRequestHandler):
             )
             conn.commit()
             json_response(self, {"ok": True})
+            return
+        elif parsed.path == "/api/workspace_contrato_plantillas":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            clave = str(payload.get("clave") or "").strip()
+            if not clave:
+                json_response(self, {"error": "clave requerida"}, status=400)
+                return
+            if str(payload.get("restaurar") or "") in {"1", "true", "True"}:
+                # Volver a la del código: si alguien deja una cláusula a medias, que
+                # haya marcha atrás sin tener que reescribirla de memoria.
+                base = get_workspace_contract_templates().get(clave)
+                if not base:
+                    json_response(self, {"error": "plantilla desconocida"}, status=404)
+                    return
+                cuerpo = plantilla_contrato_a_texto(base)
+                pie = "\n".join(str(l) for l in (base.get("footer") or []))
+                titulo = str(base.get("title") or "")
+            else:
+                cuerpo = str(payload.get("cuerpo") or "").strip()
+                pie = str(payload.get("pie") or "").strip()
+                titulo = str(payload.get("titulo") or "").strip()
+                if not parse_plantilla_contrato(cuerpo):
+                    json_response(self, {"error": "El cuerpo está vacío o no tiene ningún apartado"}, status=400)
+                    return
+            fetch_workspace_contrato_plantillas(conn, workspace_id)  # siembra si hiciera falta
+            ahora = datetime.now().isoformat(timespec="seconds")
+            fila = conn.execute(
+                "SELECT id FROM workspace_contrato_plantillas WHERE workspace_id = ? AND clave = ? LIMIT 1",
+                (workspace_id, clave),
+            ).fetchone()
+            if fila:
+                conn.execute(
+                    "UPDATE workspace_contrato_plantillas SET titulo = ?, cuerpo = ?, pie = ?, updated_at = ? "
+                    "WHERE id = ?",
+                    (titulo, cuerpo, pie, ahora, row_value(fila, "id", "")),
+                )
+            else:
+                base = get_workspace_contract_templates().get(clave) or {}
+                conn.execute(
+                    "INSERT INTO workspace_contrato_plantillas "
+                    "(id, workspace_id, clave, etiqueta, titulo, cuerpo, pie, activo, orden, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, 1, 99, ?, ?)",
+                    (os.urandom(16).hex(), workspace_id, clave, str(base.get("label") or clave),
+                     titulo, cuerpo, pie, ahora, ahora),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "items": fetch_workspace_contrato_plantillas(conn, workspace_id, sembrar=False)})
             return
         elif parsed.path == "/api/workspace_fincas_equipo":
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -89659,6 +89869,8 @@ class Handler(BaseHTTPRequestHandler):
                 payload["company"],
                 payload["client"],
                 payload.get("body") or {},
+                tmpl=resolve_contract_template(
+                    conn, workspace_id, payload["contract"].get("template_key")),
             )
             if not pdf_bytes:
                 json_response(self, {"error": "plantilla no encontrada"}, status=404)
@@ -90059,6 +90271,22 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             json_response(self, {"items": fetch_workspace_fincas_cartas(conn, workspace_id)})
+            return
+
+        if path == "/api/workspace_contrato_plantillas":
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, {"items": fetch_workspace_contrato_plantillas(conn, workspace_id)})
             return
 
         if path == "/api/workspace_fincas_equipo":
