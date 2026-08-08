@@ -40422,6 +40422,32 @@ const renderEditableGrid = (grid, fields, data, target) => {
     input.classList.add("inline-input");
     input.dataset.target = target;
     input.dataset.field = field.key;
+    // La etiqueta de al lado es un <div>, no un <label>, y no hay `for`: para un
+    // lector de pantalla los 38 campos de la ficha no tenían nombre, aunque en
+    // pantalla se vean etiquetados. Se enlazan por id. Se usa el texto de la
+    // etiqueta sin la píldora («Clave», «Obligatorio para cierre»), que es una
+    // anotación y no parte del nombre del campo.
+    if (!input.id) {
+      input.id = `campo-${target}-${String(field.key || "x").replace(/[^\w-]/g, "")}`;
+    }
+    // `aria-labelledby` apuntando al <div> arrastraría la píldora y el campo se
+    // llamaría «OperaciónCLAVE». Se toma el texto sin ella.
+    const nombreAccesible = (() => {
+      const copia = label.cloneNode(true);
+      copia.querySelectorAll(".editable-field-hint").forEach((n) => n.remove());
+      return copia.textContent.trim();
+    })();
+    if (nombreAccesible) {
+      input.setAttribute("aria-label", nombreAccesible);
+    }
+    if (useTecnoLayout) {
+      // El <div> no enfoca al pulsarlo como haría un <label>; se le añade.
+      label.style.cursor = "pointer";
+      label.addEventListener("click", (ev) => {
+        if (ev.target.closest(".editable-field-hint")) return;
+        input.focus();
+      });
+    }
     if (target === "cliente" || isInmueble || target === "captacion") {
       inputMap[field.key] = input;
     }

@@ -81,3 +81,49 @@ class ElListadoOrdenaPorLoQueSeMiraTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LosCamposDeLaFichaTienenNombreTests(unittest.TestCase):
+    """38 de los 39 campos de la ficha no tenían nombre accesible.
+
+    Las filas se pintan así:
+
+        <div class="tc-fieldrow">
+          <div class="tc-fieldlabel">Número</div>
+          <div class="tc-fieldvalue"><input data-field="direccion_numero"></div>
+        </div>
+
+    La etiqueta es un `<div>`, no un `<label>`, y no hay `for` ni
+    `aria-labelledby`. En pantalla se ve etiquetado; para un lector de pantalla los
+    38 campos del formulario principal del módulo eran «cuadro de texto» a secas. Y
+    pulsar el texto no llevaba el foco al campo, que es lo que hace un `<label>` de
+    verdad y lo que la gente espera.
+
+    Primero lo resolví con `aria-labelledby` apuntando al div, y el campo pasó a
+    llamarse «OperaciónCLAVE»: la etiqueta lleva dentro una píldora («Clave»,
+    «Obligatorio para cierre») que es una anotación, no parte del nombre. Se toma el
+    texto sin ella.
+    """
+
+    def test_cada_campo_recibe_su_nombre(self):
+        self.assertIn('input.setAttribute("aria-label", nombreAccesible)', APP)
+
+    def test_el_nombre_no_arrastra_la_pildora(self):
+        i = APP.index("const nombreAccesible = (() => {")
+        cuerpo = APP[i: i + 400]
+        self.assertIn('querySelectorAll(".editable-field-hint").forEach((n) => n.remove())', cuerpo)
+
+    def test_pulsar_la_etiqueta_enfoca_el_campo(self):
+        """Es lo que haría un <label> y lo que la gente espera al pulsar el texto."""
+        i = APP.index("label.addEventListener(\"click\"")
+        self.assertIn("input.focus();", APP[i: i + 260])
+
+    def test_pulsar_la_pildora_no_enfoca(self):
+        """La píldora es informativa; llevar el foco al pulsarla despistaría."""
+        i = APP.index("label.addEventListener(\"click\"")
+        self.assertIn('ev.target.closest(".editable-field-hint")', APP[i: i + 260])
+
+    def test_solo_en_la_maqueta_que_usa_divs(self):
+        """La otra maqueta usa <h3> y no necesita el apaño del clic."""
+        i = APP.index("const nombreAccesible")
+        self.assertIn("if (useTecnoLayout) {", APP[i: i + 900])
