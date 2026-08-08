@@ -54473,6 +54473,112 @@ def build_mapa_estatico(lat, lon, *, zoom=17, ancho=900, alto=380):
         return None
 
 
+#: Ortofoto aérea del PNOA (Plan Nacional de Ortofotografía Aérea) servida por el
+#: Instituto Geográfico Nacional. De las fuentes que probé es la única gratuita,
+#: **sin clave**, con cobertura de toda España y con una licencia que permite meter
+#: la imagen en un documento comercial: CC-BY 4.0, que solo obliga a citar al IGN.
+#: La cita va impresa dentro de la propia imagen, porque el PDF circula suelto.
+#:
+#: Las otras dos que miré no valían: KartaView no tiene cobertura en la calle del
+#: primer edificio que probé, y Mapillary exige un token aunque sea gratuito.
+#:
+#: Es vista cenital, no fachada. Para una comunidad enseña lo que importa —la
+#: manzana, la parcela, los patios, la piscina—, pero no sustituye a una foto de
+#: portal: si hay foto subida a mano, manda esa.
+IGN_ORTOFOTO_WMS = "https://www.ign.es/wms-inspire/pnoa-ma"
+IGN_ORTOFOTO_CAPA = "OI.OrthoimageCoverage"
+IGN_ORTOFOTO_ATRIBUCION = "© Instituto Geográfico Nacional de España"
+#: Metros de lado (alto) que abarca la foto. 170 m deja ver la manzana entera sin
+#: que el edificio quede como un punto.
+IGN_ORTOFOTO_METROS = 170.0
+#: Metros por grado de latitud. Para el ancho se corrige por el coseno de la
+#: latitud, o el edificio saldría estirado.
+METROS_POR_GRADO = 111320.0
+_AEREA_CACHE = {}
+_AEREA_CACHE_MAX = 40
+
+
+def build_vista_aerea(lat, lon, *, ancho=900, alto=420, metros=None):
+    """Ortofoto aérea del edificio, del PNOA del IGN.
+
+    Igual que `build_mapa_estatico`: devuelve `None` ante cualquier fallo —sin
+    coordenadas, sin red, el servicio caído o una zona sin vuelo— y quien llama no
+    pinta el bloque. Un presupuesto no se queda sin entregar porque el IGN no
+    conteste, y el hueco no se rellena con nada que finja ser una foto.
+    """
+    try:
+        lat = float(str(lat).replace(",", "."))
+        lon = float(str(lon).replace(",", "."))
+    except (TypeError, ValueError):
+        return None
+    if not (-90 <= lat <= 90) or not (-180 <= lon <= 180):
+        return None
+    ancho = max(1, int(ancho))
+    alto = max(1, int(alto))
+    metros = float(metros or IGN_ORTOFOTO_METROS)
+
+    clave = (round(lat, 6), round(lon, 6), ancho, alto, round(metros, 1))
+    if clave in _AEREA_CACHE:
+        return _AEREA_CACHE[clave]
+
+    try:
+        # El recuadro se calcula en metros y se pasa a grados, para que la escala
+        # horizontal y la vertical coincidan y el edificio no salga deformado.
+        alto_m = metros
+        ancho_m = metros * (ancho / alto)
+        d_lat = (alto_m / 2.0) / METROS_POR_GRADO
+        coseno = max(0.01, math.cos(math.radians(lat)))
+        d_lon = (ancho_m / 2.0) / (METROS_POR_GRADO * coseno)
+        # WMS 1.3.0 con EPSG:4326 pide el bbox en orden lat,lon (no lon,lat).
+        bbox = f"{lat - d_lat},{lon - d_lon},{lat + d_lat},{lon + d_lon}"
+        url = IGN_ORTOFOTO_WMS + "?" + urllib.parse.urlencode({
+            "service": "WMS", "request": "GetMap", "version": "1.3.0",
+            "layers": IGN_ORTOFOTO_CAPA, "styles": "",
+            "crs": "EPSG:4326", "bbox": bbox,
+            "width": ancho, "height": alto, "format": "image/jpeg",
+        })
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)",
+            "Accept": "image/jpeg",
+        })
+        with urllib.request.urlopen(req, timeout=12) as respuesta:
+            tipo = str(respuesta.headers.get("Content-Type") or "")
+            crudo = respuesta.read()
+        # Ante un error el WMS responde 200 con un XML de excepción, así que no
+        # basta con mirar el código: hay que comprobar que de verdad es una imagen.
+        if "image" not in tipo.lower():
+            return None
+        foto = Image.open(BytesIO(crudo)).convert("RGB")
+    except Exception:
+        return None
+
+    try:
+        # Un círculo fino en el centro, no una chincheta rellena: sobre una foto
+        # cenital una chincheta taparía justo el tejado que se quiere enseñar.
+        dibujo = ImageDraw.Draw(foto)
+        cx, cy = ancho // 2, alto // 2
+        radio = max(14, min(ancho, alto) // 16)
+        dibujo.ellipse((cx - radio - 2, cy - radio - 2, cx + radio + 2, cy + radio + 2),
+                       outline=(255, 255, 255), width=4)
+        dibujo.ellipse((cx - radio, cy - radio, cx + radio, cy + radio),
+                       outline=(220, 38, 38), width=3)
+        # Atribución del IGN: es condición de la licencia y el PDF circula suelto.
+        fuente = ImageFont.load_default()
+        caja = dibujo.textbbox((0, 0), IGN_ORTOFOTO_ATRIBUCION, font=fuente)
+        ancho_txt, alto_txt = caja[2] - caja[0], caja[3] - caja[1]
+        dibujo.rectangle((ancho - ancho_txt - 12, alto - alto_txt - 10, ancho, alto), fill=(255, 255, 255))
+        dibujo.text((ancho - ancho_txt - 6, alto - alto_txt - 7), IGN_ORTOFOTO_ATRIBUCION,
+                    fill=(60, 60, 60), font=fuente)
+    except Exception:
+        # Sin marca ni atribución no se entrega: la cita es obligatoria.
+        return None
+
+    if len(_AEREA_CACHE) >= _AEREA_CACHE_MAX:
+        _AEREA_CACHE.clear()
+    _AEREA_CACHE[clave] = foto
+    return foto
+
+
 def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     """Presupuesto en vectorial: texto de verdad, no una fotografía del documento.
 
@@ -54638,14 +54744,27 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
             "caption": limpio(calc.get("comunidad_direccion")),
         }))
 
+    # La foto del edificio: primero la que se haya subido a mano, que es la buena
+    # —una fachada de verdad—; si no hay ninguna, la ortofoto aérea del IGN. Nunca
+    # las dos: dos imágenes del mismo edificio seguidas rellenan, no informan.
+    puesta_foto = False
     foto_key = limpio(calc.get("edificio_foto_key"))
     if foto_key:
         try:
             crudo, _err = s3_get_object_bytes(foto_key)
             if crudo:
                 sections.append(("Edificio", {"kind": "image", "image": Image.open(BytesIO(crudo)), "height": 210}))
+                puesta_foto = True
         except Exception:
             pass
+
+    if not puesta_foto and lat and lon:
+        aerea = build_vista_aerea(lat, lon)
+        if aerea is not None:
+            sections.append(("Vista aérea del edificio", {
+                "kind": "image", "image": aerea, "height": 210,
+                "caption": "Ortofoto del Plan Nacional de Ortofotografía Aérea (PNOA).",
+            }))
 
     servicios = [str(s).strip() for s in (calc.get("servicios_incluidos") or []) if str(s or "").strip()]
     if servicios:
