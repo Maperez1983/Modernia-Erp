@@ -92,3 +92,55 @@ class CadaColumnaRecibeSuDatoTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ElFiltroQueFiltrabaSinVerseTests(unittest.TestCase):
+    """«Mostrando 3 de 5 inmuebles» y ningún filtro a la vista.
+
+    El listado aplica un filtro de estado que por defecto vale «activos», así que
+    esconde los vendidos y los cerrados. El pie lo delataba —«3 de 5»— pero el
+    control estaba en el HTML con `class="hidden"` y **nadie se la quitaba nunca**:
+    el `select` existía, su `change` funcionaba, y era invisible.
+
+    O sea que faltaban inmuebles, se decía en letra pequeña, y no había forma de
+    saber por qué ni de llegar a ellos. Para ver una venta cerrada había que saber
+    que el filtro existía.
+    """
+
+    HTML = (RAIZ / "web" / "index.html").read_text(encoding="utf-8")
+
+    def test_el_filtro_de_estado_se_ve(self):
+        i = self.HTML.index('id="crmInmuebleEstadoFilterMirror"')
+        etiqueta = self.HTML[self.HTML.rindex("<select", 0, i): self.HTML.index(">", i) + 1]
+        self.assertNotIn('class="hidden"', etiqueta)
+
+    def test_sigue_ofreciendo_las_cuatro_opciones(self):
+        i = self.HTML.index('id="crmInmuebleEstadoFilterMirror"')
+        bloque = self.HTML[i: self.HTML.index("</select>", i)]
+        for v in ("activos", "vendidos", "cerrados", "todos"):
+            with self.subTest(opcion=v):
+                self.assertIn(f'value="{v}"', bloque)
+
+    def test_el_cambio_sigue_atendido(self):
+        self.assertIn("crmInmuebleEstadoFilterMirror.addEventListener", APP)
+
+
+class LosDosBuscadoresDicenQueBuscanTests(unittest.TestCase):
+    """Dos campos idénticos a 90 píxeles uno de otro.
+
+    `syncCrmGlobalSearchUi` copiaba el `placeholder` del buscador de la vista al de
+    la barra, así que los dos ponían «Buscar en la lista...». No hacen lo mismo: el
+    de la barra busca en todo el CRM y despliega sugerencias; el de la lista filtra
+    la tabla que tienes delante.
+    """
+
+    def test_el_de_la_barra_ya_no_copia_al_de_la_lista(self):
+        i = APP.index("const syncCrmGlobalSearchUi")
+        cuerpo = APP[i: APP.index("\nconst ", i + 10)]
+        self.assertNotIn('getAttribute?.("placeholder")', cuerpo)
+        self.assertIn('crmGlobalSearch.placeholder = "Buscar en todo el CRM...";', cuerpo)
+
+    def test_el_de_la_lista_sigue_diciendo_lo_suyo(self):
+        html = (RAIZ / "web" / "index.html").read_text(encoding="utf-8")
+        i = html.index('id="crmInmuebleSearchMirror"')
+        self.assertIn("Buscar en la lista", html[i: i + 300])

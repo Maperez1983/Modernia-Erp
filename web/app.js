@@ -30066,9 +30066,11 @@ const syncCrmGlobalSearchUi = (view = "") => {
   if (crmGlobalSearch.value !== current) {
     crmGlobalSearch.value = current;
   }
-  const target = getCrmSearchTargetForView(view);
-  const placeholder = String(target?.getAttribute?.("placeholder") || "").trim();
-  crmGlobalSearch.placeholder = placeholder || (String(view || "").trim() ? "Buscar en la lista..." : "Buscar...");
+  // El texto NO se copia del buscador de la vista. Al hacerlo, este campo y el de
+  // la lista quedaban con el mismo «Buscar en la lista...» a 90 px uno de otro, y
+  // no hacen lo mismo: este busca en todo el CRM y despliega sugerencias; el de la
+  // lista filtra lo que hay en la tabla.
+  crmGlobalSearch.placeholder = "Buscar en todo el CRM...";
 };
 
 const syncCrmGlobalSearchTargetValue = (view = "") => {
