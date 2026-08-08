@@ -26553,6 +26553,7 @@ const FINCAS_SERVICIOS_DEFAULT = [
   "Gestión de cobros, seguimiento e impagados",
   "Custodia y gestión documental (actas, contratos, facturas)",
   "Cumplimiento LPH: comunicaciones y soporte administrativo",
+  "Portal del propietario: cada vecino consulta sus recibos y los documentos de la comunidad",
 ];
 
 // Lo que hace el grupo además de administrar la finca. Va en su propia lista y no
@@ -27496,19 +27497,64 @@ const buildFincasContractPayloadFromBudgetRow = (row = {}) => {
   };
 };
 
+/** Cuántos presupuestos damos y cuántos entran.
+ *
+ * Es la pregunta que se hace cualquiera que vive de presentar propuestas, y hasta
+ * ahora había que contarlos a ojo en la lista. Los borradores se cuentan aparte:
+ * un presupuesto que no se ha llegado a presentar no ha ganado ni perdido nada,
+ * y meterlo en el denominador hunde la tasa sin motivo.
+ */
+const renderWorkspaceFincasBudgetsKpis = (rows) => {
+  const caja = document.getElementById("workspaceFincasBudgetsKpis");
+  if (!caja) return;
+  const items = Array.isArray(rows) ? rows : [];
+  const cuenta = (nombre) => items.filter((r) => normalizeSimple(String(r.estado || "")) === nombre).length;
+  const borradores = cuenta("borrador");
+  const aceptados = cuenta("aceptado");
+  const rechazados = cuenta("rechazado");
+  const estudio = cuenta("estudio");
+  const presentados = aceptados + rechazados + estudio;
+  const resueltos = aceptados + rechazados;
+  const tasa = resueltos ? Math.round((aceptados / resueltos) * 100) : null;
+  const cartera = items
+    .filter((r) => normalizeSimple(String(r.estado || "")) === "aceptado")
+    .reduce((acc, r) => acc + (Number(r.subtotal || 0) || 0), 0);
+  caja.innerHTML = `
+    <div><span>Presentados</span><strong>${presentados}</strong><em>${borradores} en borrador</em></div>
+    <div><span>Aceptados</span><strong>${aceptados}</strong><em>${rechazados} rechazados</em></div>
+    <div><span>Tasa de aceptación</span><strong>${tasa === null ? "—" : tasa + " %"}</strong><em>${resueltos ? `sobre ${resueltos} resueltos` : "aún sin resolver ninguno"}</em></div>
+    <div><span>Cartera aceptada</span><strong>${euroFormatter.format(cartera)}</strong><em>al mes, sin IVA</em></div>
+  `;
+};
+
 const renderWorkspaceFincasBudgetsList = () => {
   if (!workspaceFincasBudgetsTable) return;
   const raw = state.currentWorkspaceData || {};
   const all = shouldScopeFincasByCompany()
     ? filterWorkspaceRowsByCompany(raw.budgetRows || [])
     : (Array.isArray(raw.budgetRows) ? raw.budgetRows : []);
-  let items = all.filter((row) => normalizeBudgetServiceKey(row.servicio || "") === "fincas");
-  const filterEstado = String(workspaceFincasBudgetsEstadoFilter?.value || "all").trim();
-  if (filterEstado && filterEstado !== "all") {
+  const deFincas = all.filter((row) => normalizeBudgetServiceKey(row.servicio || "") === "fincas");
+  // Las cifras se cuentan sobre TODOS, no sobre lo filtrado: si no, mirar el
+  // histórico daría una tasa de aceptación del 0 %.
+  renderWorkspaceFincasBudgetsKpis(deFincas);
+  let items = deFincas;
+  const filterEstado = String(workspaceFincasBudgetsEstadoFilter?.value || "activos").trim();
+  const esRechazado = (row) => normalizeSimple(String(row.estado || "")) === "rechazado";
+  if (filterEstado === "activos") {
+    // Por defecto no se ven los rechazados: son historia, y mezclados con los
+    // vivos hacen que la lista deje de servir para saber qué hay que atender.
+    items = items.filter((row) => !esRechazado(row));
+  } else if (filterEstado === "historico") {
+    items = items.filter(esRechazado);
+  } else if (filterEstado && filterEstado !== "all") {
     items = items.filter((row) => String(row.estado || "").trim() === filterEstado);
   }
   if (!items.length) {
-    workspaceFincasBudgetsTable.innerHTML = "<p class='muted'>Sin presupuestos todavía.</p>";
+    if (workspaceFincasBudgetsTable) {
+      workspaceFincasBudgetsTable.innerHTML = filterEstado === "historico"
+        ? "<p class='muted'>Ningún presupuesto rechazado. Mejor así.</p>"
+        : "<p class='muted'>Sin presupuestos todavía.</p>";
+    }
     if (workspaceFincasBudgetsInfo) workspaceFincasBudgetsInfo.textContent = "0 presupuestos";
     return;
   }

@@ -126,24 +126,27 @@ class LasTresPlantillasTests(unittest.TestCase):
         cambio = server.FINCAS_CARTAS_DEFECTO[1]["cuerpo"]
         self.assertIn("de dónde sale cada euro", cambio)
 
-    def test_las_tres_cuentan_el_portal_del_propietario(self):
-        """Es lo que os diferencia de un administrador clásico, así que va en todas."""
+    def test_ninguna_explica_el_portal_a_parrafo(self):
+        """Lo metí en las tres y el usuario lo cortó en seco: «eso no pinta nada en
+        una carta de presentación». Tenía razón — una carta no es una ficha de
+        producto. El portal existe y se sigue vendiendo, pero desde la lista de
+        servicios incluidos, que es donde el cliente busca qué compra por su cuota."""
         for plantilla in server.FINCAS_CARTAS_DEFECTO:
             with self.subTest(clave=plantilla["clave"]):
                 cuerpo = plantilla["cuerpo"]
-                self.assertIn("enlace propio", cuerpo)
-                self.assertIn("sus recibos", cuerpo)
+                self.assertNotIn("enlace propio", cuerpo)
+                self.assertNotIn("sin usuario ni contraseña", cuerpo)
 
-    def test_lo_que_se_promete_del_portal_es_lo_que_hace(self):
-        """Cada afirmación de la carta se corresponde con algo construido y probado
-        en `test_portal_del_propietario.py`: sin contraseña, solo lo suyo, caduca y
-        se puede anular."""
-        cuerpo = server.FINCAS_CARTAS_DEFECTO[0]["cuerpo"]
-        self.assertIn("sin usuario ni contraseña", cuerpo)
-        self.assertIn("Solo ve lo suyo", cuerpo)
-        self.assertIn("caduca y", cuerpo)
-        self.assertIn("anular", cuerpo)
-        # Y las tres cosas existen en el código del portal.
+    def test_el_portal_sigue_ofreciendose_donde_toca(self):
+        self.assertIn("Portal del propietario", APP)
+        i = APP.index("const FINCAS_SERVICIOS_DEFAULT")
+        self.assertIn("Portal del propietario", APP[i: APP.index("];", i)])
+
+    def test_lo_que_se_ofrece_del_portal_es_lo_que_hace(self):
+        """Aunque ya no vaya en la carta, la lista de servicios lo promete: que sea
+        verdad se comprueba igual. Cada pieza existe y está probada en
+        `test_portal_del_propietario.py`: sin contraseña, solo lo suyo, caduca y se
+        puede anular."""
         self.assertIn("FINCAS_PORTAL_DIAS_VALIDEZ", SERVER)
         self.assertIn("revocado", SERVER)
         i = SERVER.index("def fetch_fincas_portal_public")

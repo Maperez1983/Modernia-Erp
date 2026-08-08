@@ -9,7 +9,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=311" />
+	    <link rel="stylesheet" href="styles.css?v=312" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -2628,15 +2628,17 @@
             </div>
             <div class="toolbar">
               <select id="workspaceFincasBudgetsEstadoFilter">
-                <option value="all" selected>Todos</option>
+                <option value="activos" selected>En curso</option>
                 <option value="Borrador">Borrador</option>
                 <option value="Estudio">Estudio</option>
                 <option value="Aceptado">Aceptado</option>
-                <option value="Rechazado">Rechazado</option>
+                <option value="historico">Histórico (rechazados)</option>
+                <option value="all">Todos</option>
               </select>
               <button type="button" class="secondary ghost" id="workspaceFincasBudgetsRefreshBtn">Recargar</button>
             </div>
           </div>
+          <div class="presu-kpis" id="workspaceFincasBudgetsKpis"></div>
           <div id="workspaceFincasBudgetsTable"></div>
           <div class="footer" id="workspaceFincasBudgetsInfo"></div>
         </div>
@@ -12006,7 +12008,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=863",
+              "app.js?v=864",
             ];
 
             const getParams = () => {

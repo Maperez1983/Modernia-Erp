@@ -40825,6 +40825,10 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_fincas_comunidades", "referencia_catastral", "referencia_catastral TEXT")
     ensure_column(conn, "workspace_fincas_comunidades", "foto_edificio_key", "foto_edificio_key TEXT")
     ensure_column(conn, "workspace_fincas_comunidades", "activo", "activo INTEGER")
+    # De qué presupuesto salió el alta. Sirve para lo contrario: si ese presupuesto
+    # se acaba rechazando, saber que esta comunidad la creó él y nadie la ha tocado
+    # desde entonces. Una comunidad dada de alta a mano no se toca nunca por esto.
+    ensure_column(conn, "workspace_fincas_comunidades", "origen_presupuesto_id", "origen_presupuesto_id TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_tarifas (
@@ -54280,6 +54284,10 @@ FINCAS_NOMBRE_COMERCIAL = "Fincas Velázquez"
 #: campo `carta_presentacion` llevaba desde siempre vacío y nadie podía tocarlo sin
 #: un despliegue. Las otras dos cubren los casos que de verdad se dan.
 #:
+#: El portal del propietario estaba metido a párrafo en las tres. Una carta de
+#: presentación no es una ficha de producto: eso va en la lista de servicios
+#: incluidos, que es donde el cliente busca qué compra por su cuota.
+#:
 #: Cuidado con una cosa: la primera afirma cosas sobre el despacho —los años, los
 #: servicios— que son de la casa, no mías. Las otras dos no añaden ninguna
 #: afirmación nueva de ese tipo a propósito: describen lo que el presupuesto trae
@@ -54300,7 +54308,6 @@ FINCAS_CARTAS_DEFECTO = [
             "el presidente y la junta puedan decidir con seguridad.\n"
             "Le remitimos la propuesta para {comunidad}, con una cuota calculada de forma objetiva a partir de "
             "las unidades del edificio: {unidades}.\n"
-            "Cada propietario recibe un enlace propio con el que entra desde el móvil, sin instalar nada y sin usuario ni contraseña: ve sus recibos, cuáles están cobrados y cuáles pendientes, lo que debe y los documentos que la comunidad publique, como las actas.\nSolo ve lo suyo. No aparecen los datos ni los pagos de ningún otro vecino, el enlace caduca y se puede anular en cualquier momento.\n"
             "Si lo desea, concertamos una visita y revisamos su documentación actual para afinar la cuota y "
             "proponer mejoras inmediatas, sin compromiso."
         ),
@@ -54317,7 +54324,6 @@ FINCAS_CARTAS_DEFECTO = [
             "resumen de cómo está la comunidad antes de tocar nada.\n"
             "La cuota que le proponemos sale de las unidades del edificio ({unidades}), no de una estimación: en "
             "el detalle de este presupuesto puede ver de dónde sale cada euro.\n"
-            "Cada propietario recibe un enlace propio con el que entra desde el móvil, sin instalar nada y sin usuario ni contraseña: ve sus recibos, cuáles están cobrados y cuáles pendientes, lo que debe y los documentos que la comunidad publique, como las actas.\nSolo ve lo suyo. No aparecen los datos ni los pagos de ningún otro vecino, el enlace caduca y se puede anular en cualquier momento.\n"
             "Usted, como presidente, recibe además la información de cuentas, morosidad e incidencias de forma "
             "periódica y sin tener que pedirla.\n"
             "Quedamos a su disposición para vernos en la finca y resolver cualquier duda antes de la junta."
@@ -54336,7 +54342,6 @@ FINCAS_CARTAS_DEFECTO = [
             "Nos ocupamos de todo ese arranque y se lo dejamos documentado, para que la comunidad empiece con las "
             "cuentas claras y sin arrastrar decisiones sin tomar.\n"
             "La cuota que le proponemos sale de las unidades del edificio: {unidades}.\n"
-            "Cada propietario recibe un enlace propio con el que entra desde el móvil, sin instalar nada y sin usuario ni contraseña: ve sus recibos, cuáles están cobrados y cuáles pendientes, lo que debe y los documentos que la comunidad publique, como las actas.\nSolo ve lo suyo. No aparecen los datos ni los pagos de ningún otro vecino, el enlace caduca y se puede anular en cualquier momento.\n"
             "Estamos a su disposición para revisar juntos la documentación de la promoción y ajustar lo que haga "
             "falta antes de la constitución."
         ),
@@ -54509,7 +54514,7 @@ def clave_comunidad(nombre):
     return re.sub(r"\s+", "", normalize_lookup_text(nombre or ""))
 
 
-def alta_comunidad_desde_presupuesto(conn, workspace_id, empresa_id, calc, *, subtotal=0.0, now=None):
+def alta_comunidad_desde_presupuesto(conn, workspace_id, empresa_id, calc, *, subtotal=0.0, now=None, presupuesto_id=""):
     """Da de alta la comunidad al aceptar el presupuesto, o enlaza la que ya está.
 
     Hasta ahora aceptar un presupuesto de fincas solo abría una tarea de «formalizar
@@ -54575,8 +54580,8 @@ def alta_comunidad_desde_presupuesto(conn, workspace_id, empresa_id, calc, *, su
         INSERT INTO workspace_fincas_comunidades
           (id, workspace_id, empresa_id, nombre, referencia_catastral, cif, direccion,
            foto_edificio_key, presidente, estado, num_vecinos, num_locales, num_trasteros,
-           num_aparcamientos, cuota_sugerida, cuota_mensual, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Activa', ?, ?, ?, ?, ?, ?, ?, ?)
+           num_aparcamientos, cuota_sugerida, cuota_mensual, origen_presupuesto_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Activa', ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             comunidad_id, workspace_id, empresa_id or None,
@@ -54596,10 +54601,90 @@ def alta_comunidad_desde_presupuesto(conn, workspace_id, empresa_id, calc, *, su
             # Sin IVA, como la sugerida: la ficha de comunidad y el panel suman
             # cuotas base, y meter ahí el IVA inflaría la cifra de cartera.
             round(float(subtotal or 0), 2) or None,
+            str(presupuesto_id or "").strip() or None,
             now, now,
         ),
     )
     return comunidad_id, True
+
+
+#: Todo lo que puede colgar de una comunidad. Si hay una sola fila en cualquiera de
+#: estas tablas, la comunidad ya se está usando y no se toca por un rechazo.
+TABLAS_CON_VIDA_DE_COMUNIDAD = (
+    "workspace_fincas_vecinos",
+    "workspace_fincas_recibos",
+    "workspace_fincas_asientos",
+    "workspace_fincas_juntas",
+    "workspace_fincas_incidencias",
+    "workspace_fincas_documentos",
+    "workspace_fincas_extracto",
+    "workspace_fincas_presupuesto_anual",
+    "workspace_fincas_grupos",
+)
+
+
+def comunidad_tiene_movimiento(conn, comunidad_id):
+    """¿Cuelga algo de esta comunidad? Devuelve la primera tabla con datos."""
+    comunidad_id = str(comunidad_id or "").strip()
+    if not comunidad_id:
+        return ""
+    for tabla in TABLAS_CON_VIDA_DE_COMUNIDAD:
+        try:
+            fila = conn.execute(
+                f"SELECT 1 FROM {tabla} WHERE comunidad_id = ? LIMIT 1", (comunidad_id,)
+            ).fetchone()
+        except Exception:
+            # Una tabla que aún no exista en esta base no puede tener datos.
+            continue
+        if fila:
+            return tabla
+    return ""
+
+
+def baja_comunidad_por_rechazo(conn, workspace_id, comunidad_id, presupuesto_id, *, now=None):
+    """Da de baja la comunidad que creó un presupuesto que luego se rechaza.
+
+    No se borra: puede haber quedado algo dentro, y borrar se lo llevaría por
+    delante. Pero dejarla «Activa» tampoco es verdad —no se administra—, y así se
+    colaría en el panel de fincas, sumaría en la cartera de cuotas y saldría al
+    emitir recibos.
+
+    Solo se toca si se cumplen las dos condiciones:
+
+    - **La creó ese mismo presupuesto.** Una comunidad dada de alta a mano, o por
+      otro presupuesto, no se toca jamás.
+    - **No cuelga nada de ella.** Si ya tiene censo, recibos, asientos, juntas,
+      incidencias, documentos o presupuesto anual, alguien ha estado trabajando en
+      ella y la decisión deja de ser automática.
+
+    Devuelve `(bajada, motivo)`; `motivo` dice por qué no se hizo, para poder
+    contarlo en pantalla en vez de callarlo.
+    """
+    workspace_id = str(workspace_id or "").strip()
+    comunidad_id = str(comunidad_id or "").strip()
+    if not workspace_id or not comunidad_id:
+        return False, "sin comunidad"
+    fila = conn.execute(
+        "SELECT estado, origen_presupuesto_id FROM workspace_fincas_comunidades "
+        "WHERE id = ? AND workspace_id = ? LIMIT 1",
+        (comunidad_id, workspace_id),
+    ).fetchone()
+    if not fila:
+        return False, "sin comunidad"
+    origen = str(row_value(fila, "origen_presupuesto_id", "") or "").strip()
+    if not origen or origen != str(presupuesto_id or "").strip():
+        return False, "no la creó este presupuesto"
+    if str(row_value(fila, "estado", "") or "") == "Baja":
+        return False, "ya estaba de baja"
+    tabla = comunidad_tiene_movimiento(conn, comunidad_id)
+    if tabla:
+        return False, f"ya tiene datos ({tabla.replace('workspace_fincas_', '')})"
+    conn.execute(
+        "UPDATE workspace_fincas_comunidades SET estado = 'Baja', updated_at = datetime(?) "
+        "WHERE id = ? AND workspace_id = ?",
+        (now or datetime.now().isoformat(timespec="seconds"), comunidad_id, workspace_id),
+    )
+    return True, ""
 
 
 def build_mapa_estatico(lat, lon, *, zoom=17, ancho=900, alto=380):
@@ -73691,6 +73776,16 @@ class Handler(BaseHTTPRequestHandler):
                     notas=seguimiento_nota,
                     now=now,
                 )
+                # Si este presupuesto había dado de alta la comunidad y se rechaza,
+                # esa comunidad deja de administrarse: se pasa a Baja para que no
+                # siga contando en el panel ni saliendo al emitir recibos. Solo si
+                # no se ha empezado a trabajar en ella; ver la función.
+                if servicio_es_fincas and estado == "Rechazado":
+                    try:
+                        baja_comunidad_por_rechazo(
+                            conn, workspace_id, calculo.get("comunidad_id"), record_id, now=now)
+                    except Exception:
+                        pass
             elif estado == "Aceptado":
                 close_workspace_budget_action(conn, seguimiento_accion_id, now=now, status="Hecho")
                 seguimiento_accion_id = None
@@ -73715,7 +73810,7 @@ class Handler(BaseHTTPRequestHandler):
                     try:
                         comunidad_id, creada = alta_comunidad_desde_presupuesto(
                             conn, workspace_id, empresa_id, calculo,
-                            subtotal=subtotal, now=now,
+                            subtotal=subtotal, now=now, presupuesto_id=record_id,
                         )
                         if comunidad_id and calculo.get("comunidad_id") != comunidad_id:
                             calculo["comunidad_id"] = comunidad_id

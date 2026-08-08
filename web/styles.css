@@ -15282,3 +15282,16 @@ samp {
 @media (max-width: 720px) {
   .equipo-fila { grid-template-columns: 1fr; }
 }
+
+/* Cifras de conversión de presupuestos: cuántos damos y cuántos entran. */
+.presu-kpis {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;
+  margin: 4px 0 14px;
+}
+.presu-kpis > div {
+  padding: 10px 12px; border: 1px solid rgba(0, 0, 0, 0.08); border-radius: 12px;
+  background: var(--surface, #fff);
+}
+.presu-kpis span { display: block; font-size: 11px; opacity: 0.7; text-transform: uppercase; letter-spacing: .03em; }
+.presu-kpis strong { display: block; font-size: 22px; line-height: 1.2; margin-top: 2px; }
+.presu-kpis em { font-style: normal; font-size: 11px; opacity: 0.6; }
