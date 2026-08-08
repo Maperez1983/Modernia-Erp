@@ -54497,6 +54497,111 @@ def describe_miembro_equipo(miembro):
     return f"{nombre} — {cargo}" if cargo else nombre
 
 
+def clave_comunidad(nombre):
+    """Clave para reconocer que dos nombres son la misma finca.
+
+    `normalize_lookup_text` convierte los puntos en espacios, así que «C.P. Rocío
+    Jurado 18» queda como «C P ROCIO JURADO 18» y no casa con «CP Rocío Jurado 18».
+    En administración de fincas esa es justo la variante que más se da: en la base
+    hay «C.P ASTREA 3» y «C.P Maria Manrique 4» escritos de esa forma. Quitando
+    también los espacios, las dos escrituras caen en la misma clave.
+    """
+    return re.sub(r"\s+", "", normalize_lookup_text(nombre or ""))
+
+
+def alta_comunidad_desde_presupuesto(conn, workspace_id, empresa_id, calc, *, subtotal=0.0, now=None):
+    """Da de alta la comunidad al aceptar el presupuesto, o enlaza la que ya está.
+
+    Hasta ahora aceptar un presupuesto de fincas solo abría una tarea de «formalizar
+    nota de encargo»: la comunidad había que teclearla otra vez a mano —denominación,
+    dirección, CIF, referencia catastral y unidades— con todos esos datos ya escritos
+    en el presupuesto. Era la única puerta desconectada de un módulo que va desde el
+    censo hasta el cierre del ejercicio.
+
+    Devuelve `(comunidad_id, creada)`. No crea nada dos veces:
+
+    - Si el presupuesto ya apunta a una comunidad viva, se queda con esa.
+    - Si no, busca por **referencia catastral**, que es lo único que identifica un
+      edificio sin ambigüedad, y después por nombre normalizado.
+    - Solo si no hay nada, la crea.
+
+    Volver a guardar un presupuesto ya aceptado, por tanto, no llena la pantalla de
+    comunidades repetidas: es el mismo fallo que acabamos de arreglar en los
+    presupuestos y no tiene sentido reproducirlo aquí.
+    """
+    workspace_id = str(workspace_id or "").strip()
+    if not workspace_id:
+        return "", False
+    calc = calc if isinstance(calc, dict) else {}
+    nombre = str(calc.get("comunidad_denominacion") or "").strip()
+    catastro = str(calc.get("referencia_catastral") or "").strip()
+    if not nombre and not catastro:
+        return "", False
+    now = now or datetime.now().isoformat(timespec="seconds")
+
+    def existe(comunidad_id):
+        if not comunidad_id:
+            return ""
+        fila = conn.execute(
+            "SELECT id FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+            (comunidad_id, workspace_id),
+        ).fetchone()
+        return row_value(fila, "id", "") if fila else ""
+
+    ya = existe(str(calc.get("comunidad_id") or "").strip())
+    if ya:
+        return ya, False
+
+    if catastro:
+        fila = conn.execute(
+            "SELECT id FROM workspace_fincas_comunidades WHERE workspace_id = ? AND referencia_catastral = ? LIMIT 1",
+            (workspace_id, catastro),
+        ).fetchone()
+        if fila:
+            return row_value(fila, "id", ""), False
+
+    if nombre:
+        buscado = clave_comunidad(nombre)
+        for fila in conn.execute(
+            "SELECT id, nombre FROM workspace_fincas_comunidades WHERE workspace_id = ?",
+            (workspace_id,),
+        ).fetchall():
+            if buscado and clave_comunidad(row_value(fila, "nombre", "")) == buscado:
+                return row_value(fila, "id", ""), False
+
+    comunidad_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO workspace_fincas_comunidades
+          (id, workspace_id, empresa_id, nombre, referencia_catastral, cif, direccion,
+           foto_edificio_key, presidente, estado, num_vecinos, num_locales, num_trasteros,
+           num_aparcamientos, cuota_sugerida, cuota_mensual, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'Activa', ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            comunidad_id, workspace_id, empresa_id or None,
+            nombre or f"Comunidad {catastro}",
+            catastro or None,
+            str(calc.get("comunidad_cif") or "").strip() or None,
+            str(calc.get("comunidad_direccion") or "").strip() or None,
+            str(calc.get("edificio_foto_key") or "").strip() or None,
+            # Quien pidió el presupuesto suele ser el presidente, pero «suele» no es
+            # «es»: se guarda como está y ya se corregirá en la ficha si hace falta.
+            str(calc.get("solicitante_nombre") or "").strip() or None,
+            parse_non_negative_int(calc.get("num_vecinos")),
+            parse_non_negative_int(calc.get("num_locales")),
+            parse_non_negative_int(calc.get("num_trasteros")),
+            parse_non_negative_int(calc.get("num_aparcamientos")),
+            round(parse_money_value(calc.get("cuota_sugerida")), 2) or None,
+            # Sin IVA, como la sugerida: la ficha de comunidad y el panel suman
+            # cuotas base, y meter ahí el IVA inflaría la cifra de cartera.
+            round(float(subtotal or 0), 2) or None,
+            now, now,
+        ),
+    )
+    return comunidad_id, True
+
+
 def build_mapa_estatico(lat, lon, *, zoom=17, ancho=900, alto=380):
     """Mapa del edificio, cosido a partir de teselas y con su chincheta.
 
@@ -73368,7 +73473,8 @@ class Handler(BaseHTTPRequestHandler):
             referencia_id = str(payload.get("referencia_id") or "").strip() or None
             lineas = parse_workspace_presupuesto_lineas(payload.get("lineas"))
             calculo = {}
-            if servicio in {"administracion fincas", "fincas"}:
+            servicio_es_fincas = servicio in {"administracion fincas", "fincas"}
+            if servicio_es_fincas:
                 calculo = {
                     "num_vecinos": parse_non_negative_int(payload.get("num_vecinos")),
                     "num_locales": parse_non_negative_int(payload.get("num_locales")),
@@ -73603,6 +73709,24 @@ class Handler(BaseHTTPRequestHandler):
                     notas=f"{action_note_base} · Estado encargo: {encargo_estado or 'Pendiente'}",
                     now=now,
                 )
+                # Aceptar una comunidad la da de alta. Antes solo quedaba la tarea de
+                # encargo y había que teclear otra vez lo que ya estaba escrito aquí.
+                if servicio_es_fincas:
+                    try:
+                        comunidad_id, creada = alta_comunidad_desde_presupuesto(
+                            conn, workspace_id, empresa_id, calculo,
+                            subtotal=subtotal, now=now,
+                        )
+                        if comunidad_id and calculo.get("comunidad_id") != comunidad_id:
+                            calculo["comunidad_id"] = comunidad_id
+                            conn.execute(
+                                "UPDATE workspace_presupuestos SET calculo_json = ? WHERE id = ? AND workspace_id = ?",
+                                (json.dumps(calculo, ensure_ascii=False), record_id, workspace_id),
+                            )
+                    except Exception:
+                        # Que falle el alta no puede tumbar la aceptación del
+                        # presupuesto: el estado y su tarea ya están guardados.
+                        pass
             else:
                 close_workspace_budget_action(conn, seguimiento_accion_id, now=now, status="Cancelado")
                 close_workspace_budget_action(conn, encargo_accion_id, now=now, status="Cancelado")
