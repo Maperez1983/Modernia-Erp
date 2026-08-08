@@ -347,3 +347,95 @@ class LosServiciosComplementariosVanAparteTests(unittest.TestCase):
     def test_sin_complementarios_no_sale_el_bloque(self):
         _pdf, _l, texto = genera(calc={"servicios_grupo": []})
         self.assertNotIn("Servicios complementarios", texto)
+
+
+@unittest.skipUnless(LISTO, "hace falta web.server y pypdf")
+class ElPrecioPactadoMandaTests(unittest.TestCase):
+    """El PDF imprimía la tarifa, no lo acordado.
+
+    Cuando se negocia un precio distinto del que sale de la tarifa, el presupuesto
+    guarda el pactado en `subtotal` pero las partidas siguen siendo las de tarifa. El
+    PDF sumaba las partidas e ignoraba el pactado, así que **el documento que se le
+    manda al presidente decía otra cifra que la acordada**:
+
+    - C.P ASTREA 3: 140 € pactados, el PDF imprimía 222,64 €/mes.
+    - La comunidad de 177 viviendas: 1.210 € pactados contra 1.523,39 € impresos.
+
+    Los dos son presupuestos reales de producción. Ahora manda lo pactado y la
+    diferencia sale como una línea más: disimularla cuadrando los números por dentro
+    dejaría un desglose que no suma lo que dice.
+    """
+
+    def genera_con(self, subtotal, impuestos, total, lineas):
+        budget = {"id": "x", "servicio": "fincas", "titulo": "Prueba", "fecha": "2026-08-08",
+                  "subtotal": subtotal, "impuestos": impuestos, "total": total,
+                  "calculo_json": json.dumps({"num_vecinos": 28})}
+        with mock.patch.object(server, "fetch_geocode_coordinates", return_value=None), \
+             mock.patch.object(server, "build_mapa_estatico", return_value=None), \
+             mock.patch.object(server, "build_vista_aerea", return_value=None):
+            pdf = server.build_workspace_budget_pdf(budget, WORKSPACE, EMPRESA, CLIENTE, lineas)
+        return "\n".join((p.extract_text() or "") for p in PdfReader(BytesIO(pdf)).pages)
+
+    TARIFA = [
+        {"categoria": "Edificio", "concepto": "Viviendas", "cantidad": 28,
+         "unidad": "vivienda", "precio_unitario": 5, "total_linea": 140},
+        {"categoria": "Edificio", "concepto": "Aparcamientos", "cantidad": 44,
+         "unidad": "plaza", "precio_unitario": 1, "total_linea": 44},
+    ]
+
+    def test_el_caso_real_de_astrea(self):
+        texto = self.genera_con(140.0, 29.4, 169.4, self.TARIFA)
+        self.assertIn("169,40", texto)
+        self.assertNotIn("222,64", texto)
+
+    def test_la_rebaja_se_enseña_no_se_disimula(self):
+        texto = self.genera_con(140.0, 29.4, 169.4, self.TARIFA)
+        self.assertIn("Ajuste comercial acordado", texto)
+        self.assertIn("-44,00", texto)
+
+    def test_un_suplemento_tambien_sale(self):
+        texto = self.genera_con(200.0, 42.0, 242.0, self.TARIFA)
+        self.assertIn("Suplemento acordado", texto)
+        self.assertIn("242,00", texto)
+
+    def test_sin_negociacion_no_aparece_ninguna_linea(self):
+        """Lo normal es que coincidan: no hay que ensuciar el desglose."""
+        texto = self.genera_con(184.0, 38.64, 222.64, self.TARIFA)
+        self.assertNotIn("Ajuste comercial", texto)
+        self.assertNotIn("Suplemento acordado", texto)
+        self.assertIn("222,64", texto)
+
+    def test_lo_puntual_no_se_confunde_con_una_rebaja(self):
+        """El subtotal lleva dentro los trabajos de una sola vez: restarlos mal
+        haría aparecer un «ajuste» que nadie ha pactado."""
+        lineas = self.TARIFA + [{"categoria": "Servicios puntuales", "concepto": "Alta",
+                                 "cantidad": 1, "unidad": "servicio",
+                                 "precio_unitario": 350, "total_linea": 350}]
+        texto = self.genera_con(534.0, 112.14, 646.14, lineas)
+        self.assertNotIn("Ajuste comercial", texto)
+        self.assertIn("222,64", texto)
+
+    def test_un_subtotal_que_no_incluye_lo_puntual_no_inventa_un_descuento(self):
+        """Casi siempre el subtotal lleva dentro los trabajos de una sola vez, pero
+        no siempre. Restarlos a ciegas hacía aparecer un «ajuste» de -350 € que
+        nadie había pactado: lo cazó un test que ya existía."""
+        lineas = self.TARIFA + [{"categoria": "Servicios puntuales", "concepto": "Alta",
+                                 "cantidad": 1, "unidad": "servicio",
+                                 "precio_unitario": 350, "total_linea": 350}]
+        texto = self.genera_con(184.0, 38.64, 222.64, lineas)
+        self.assertNotIn("Ajuste comercial", texto)
+        self.assertNotIn("-350,00", texto)
+        self.assertIn("222,64", texto)
+
+    def test_no_se_pinta_una_cuota_negativa(self):
+        """Si las cifras guardadas no tienen sentido, mejor la tarifa que un
+        importe en negativo en un documento que va al cliente."""
+        lineas = self.TARIFA + [{"categoria": "Servicios puntuales", "concepto": "Alta",
+                                 "cantidad": 1, "unidad": "servicio",
+                                 "precio_unitario": 900, "total_linea": 900}]
+        texto = self.genera_con(500.0, 105.0, 605.0, lineas)
+        self.assertNotIn("-400", texto)
+
+    def test_sin_subtotal_guardado_manda_la_tarifa(self):
+        texto = self.genera_con(0, 0, 0, self.TARIFA)
+        self.assertIn("184,00", texto)

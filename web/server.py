@@ -54941,6 +54941,33 @@ def build_workspace_budget_pdf(budget, workspace, company, client, lineas):
     # El tipo se deduce de lo guardado en vez de darlo por hecho: hay presupuestos
     # antiguos sin IVA y otros con un tipo distinto del 21 %.
     tipo_iva = (impuestos / subtotal) if subtotal else 0.21
+
+    # Cuando se pacta un precio distinto del que sale de la tarifa, el presupuesto
+    # guarda el pactado en `subtotal` pero las partidas siguen siendo las de tarifa.
+    # El PDF sumaba las partidas e ignoraba el precio pactado: el de C.P ASTREA 3
+    # tenía 140 € acordados y **el documento imprimía 222,64 €/mes**. En el de 177
+    # viviendas eran 1.210 € pactados contra 1.523,39 € impresos. Es la cifra que
+    # lee el presidente en la junta, así que manda lo pactado, y la diferencia se
+    # enseña como una línea más en vez de disimularse.
+    # El subtotal guardado lleva dentro los trabajos puntuales… casi siempre. Hay
+    # presupuestos donde no, y restarlos a ciegas inventaba un descuento enorme que
+    # nadie ha pactado. Solo se considera negociado lo que no cuadra de ninguna de
+    # las dos formas.
+    cuadra_con_puntuales = abs(subtotal - (base_mensual + base_puntual)) < 0.01
+    cuadra_sin_puntuales = abs(subtotal - base_mensual) < 0.01
+    acordado_mensual = round(subtotal - base_puntual, 2) if subtotal else base_mensual
+    ajuste_comercial = round(acordado_mensual - base_mensual, 2)
+    if (base_mensual and subtotal and acordado_mensual > 0
+            and not cuadra_con_puntuales and not cuadra_sin_puntuales
+            and abs(ajuste_comercial) >= 0.01):
+        mensuales = list(mensuales) + [{
+            "categoria": "Edificio",
+            "concepto": "Ajuste comercial acordado" if ajuste_comercial < 0 else "Suplemento acordado",
+            "cantidad": 1, "unidad": "mes",
+            "precio_unitario": ajuste_comercial, "total_linea": ajuste_comercial,
+        }]
+        base_mensual = acordado_mensual
+
     mensual_con_iva = round(base_mensual * (1 + tipo_iva), 2)
     puntual_con_iva = round(base_puntual * (1 + tipo_iva), 2)
 
