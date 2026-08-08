@@ -5790,6 +5790,11 @@ const closeActionEditor = () => {
 };
 
 const agendaStates = new Map();
+// Todas las citas cargadas, **sin filtrar**. El aviso de solape se hacía contra la
+// lista filtrada, así que dependía de lo que hubiera en pantalla: con un filtro de
+// servicio puesto, o desde la agenda de un inmueble concreto, dos citas del mismo
+// responsable a la misma hora no avisaban de nada.
+let lastAgendaAllEvents = [];
 const agendaViews = ["day", "week", "month", "year"];
 let lastAgendaEvents = [];
 
@@ -5971,6 +5976,13 @@ const renderAgendaCalendar = (container, events, label = "") => {
   const availableServices = Array.from(
     new Set(events.map((ev) => ev.serviceId || ev.service).filter(Boolean))
   );
+  // Si el servicio filtrado ya no existe en lo que se está mostrando, el filtro se
+  // suelta: al reutilizar el contenedor para otra ficha se quedaba puesto y la
+  // agenda salía vacía sin explicar por qué.
+  if (state.serviceFilter && state.serviceFilter !== "all" && !availableServices.includes(state.serviceFilter)) {
+    state.serviceFilter = "all";
+    agendaStates.set(container, state);
+  }
   const filteredEvents = events.filter((ev) => {
     if (state.serviceFilter && state.serviceFilter !== "all") {
       if ((ev.serviceId || ev.service) !== state.serviceFilter) return false;
@@ -5988,6 +6000,7 @@ const renderAgendaCalendar = (container, events, label = "") => {
     eventsByDate.get(ev.dateKey).push(ev);
   });
   lastAgendaEvents = filteredEvents;
+  lastAgendaAllEvents = Array.isArray(events) ? events : [];
 
   const reminderEvents = filteredEvents.filter((ev) => {
     if (!ev.recordatorio_min || !ev.dateKey) return false;
@@ -84384,7 +84397,9 @@ if (actionModalSave) {
         }
       }
     }
-    const conflict = lastAgendaEvents.find((ev) => {
+    // Contra todas las citas, no contra las que se ven: un solape no deja de serlo
+    // porque el filtro de servicio lo esconda.
+    const conflict = lastAgendaAllEvents.find((ev) => {
       if (editId && ev.id === editId) return false;
       if (!ev.dateKey || !payload.fecha) return false;
       if (ev.dateKey !== payload.fecha) return false;
