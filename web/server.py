@@ -46302,6 +46302,13 @@ def enforce_accion_access(conn, session, accion_id, *, write=False):
     empresa_id = str(row_value(fila, "empresa_id", "") or "").strip()
     if not empresa_id:
         return False, "No autorizado", None
+    # Aquí la empresa puede ser un relleno —el esquema exige `empresa_id NOT NULL` y el
+    # servidor pone la técnica de plataforma cuando la petición no trae ninguna—, con
+    # lo que la guarda acaba preguntando «¿perteneces al workspace de la empresa
+    # técnica?». No es una buena pregunta, pero **denegar esas filas dejaría 11 citas
+    # reales sin poder editarse**, y romper datos vivos por pureza es mal negocio. Se
+    # ataja en el origen: al crear una cita se estampa la empresa del workspace, no la
+    # técnica (ver el alta de `/api/acciones`). Estas 11 son el rastro de antes.
     ok, err = enforce_empresa_membership(conn, session, empresa_id, write=write)
     return (True, "", fila) if ok else (False, err or "No autorizado", None)
 
@@ -87461,11 +87468,22 @@ class Handler(BaseHTTPRequestHandler):
             action_id = os.urandom(16).hex()
             # En agenda (acciones) no dependemos de empresa. Por compatibilidad con el esquema legacy,
             # usamos `empresa_id` si viene y existe; si no, una empresa técnica de plataforma.
-            empresa_id_fk = (
-                str(payload.get("empresa_id") or "").strip()
-                or get_platform_empresa_id(conn)
-                or None
-            )
+            # Si la petición no trae empresa, antes se estampaba directamente la
+            # técnica de plataforma. Eso dejó 34 de las 36 citas con workspace
+            # apuntando a «Verifika2», una empresa que no tiene nada que ver con ellas
+            # y que sin embargo gobierna la guarda por empresa cuando falta el
+            # workspace. Ahora se prueba primero con la empresa del propio workspace,
+            # que es la respuesta correcta a «¿de quién es esta cita?». La técnica
+            # queda de último recurso, porque la columna no admite nulos.
+            empresa_id_fk = str(payload.get("empresa_id") or "").strip()
+            if not empresa_id_fk and workspace_id_fk:
+                try:
+                    del_workspace = resolve_workspace_scope_empresa_ids(conn, workspace_id_fk) or []
+                    empresa_id_fk = str(del_workspace[0]).strip() if del_workspace else ""
+                except Exception:
+                    _rollback_best_effort(conn)
+                    empresa_id_fk = ""
+            empresa_id_fk = empresa_id_fk or get_platform_empresa_id(conn) or None
             if not empresa_id_fk:
                 json_response(self, {"error": "empresa_id no resoluble"}, status=500)
                 return

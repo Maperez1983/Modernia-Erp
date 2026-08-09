@@ -3876,6 +3876,7 @@ const crmResumenPendientes = document.getElementById("crmResumenPendientes");
 	const crmAgendaSearch = document.getElementById("crmAgendaSearch");
 	const crmAgendaEstadoFilter = document.getElementById("crmAgendaEstadoFilter");
 	const crmAgendaPreset = document.getElementById("crmAgendaPreset");
+	const crmAgendaQuien = document.getElementById("crmAgendaQuien");
 	const crmAgendaAmbitoFilter = document.getElementById("crmAgendaAmbitoFilter");
 	const crmAgendaTable = document.getElementById("crmAgendaTable");
 	const crmAgendaInfo = document.getElementById("crmAgendaInfo");
@@ -4808,6 +4809,31 @@ const normalizeSimple = (value) =>
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+
+// El preset de la agenda llevaba dos ejes en un solo desplegable de catorce
+// opciones: qué miras y de quién. El «de quién» tiene ya su propio control, pero el
+// valor que se guarda y que lee el resto del código sigue siendo el de siempre,
+// con su sufijo `_equipo`. Estas dos funciones son el puente entre ambas cosas.
+const AGENDA_SUFIJO_EQUIPO = "_equipo";
+
+const partePresetAgenda = (valor) => {
+  const crudo = String(valor || "").trim();
+  const equipo = crudo.endsWith(AGENDA_SUFIJO_EQUIPO);
+  return { base: equipo ? crudo.slice(0, -AGENDA_SUFIJO_EQUIPO.length) : crudo, equipo };
+};
+
+const presetAgendaCompuesto = () => {
+  const base = String(crmAgendaPreset?.value || "").trim();
+  if (!base) return "";
+  const equipo = String(crmAgendaQuien?.value || "equipo").trim() !== "mias";
+  return equipo ? `${base}${AGENDA_SUFIJO_EQUIPO}` : base;
+};
+
+const aplicaPresetAgenda = (valor) => {
+  const { base, equipo } = partePresetAgenda(valor);
+  if (crmAgendaPreset && base) crmAgendaPreset.value = base;
+  if (crmAgendaQuien) crmAgendaQuien.value = equipo ? "equipo" : "mias";
+};
 
 const esCitaPorSuTramo = (row) => {
   // Qué es cita y qué es actividad se decidía buscando la palabra «cita» en el tipo
@@ -31556,7 +31582,7 @@ const openCrmAlertsModal = () => {
       const preset = String(btn.dataset.crmAgendaPreset || "").trim();
       modal.classList.add("hidden");
       if (view === "agenda" && preset && crmAgendaPreset) {
-        crmAgendaPreset.value = preset;
+        aplicaPresetAgenda(preset);
         setCrmWorkspaceView("agenda");
         loadCrmAgenda();
         return;
@@ -60188,16 +60214,12 @@ const initCrmAgendaPrefsIfNeeded = () => {
     state.crmAgendaAmbito = "";
   }
   if (crmAgendaPreset) {
-    const domPreset = String(crmAgendaPreset.value || "").trim();
-    if (domPreset) {
-      state.crmAgendaPreset = domPreset;
-    }
-    let preset = String(state.crmAgendaPreset || "").trim() || DEFAULT_PRESET;
-    const allowed = new Set(Array.from(crmAgendaPreset.options || []).map((opt) => String(opt.value || "").trim()));
-    if (!allowed.has(preset)) preset = DEFAULT_PRESET;
-    if (!domPreset || domPreset !== preset) {
-      crmAgendaPreset.value = preset;
-    }
+    // Lo guardado lleva el sufijo `_equipo`; los dos controles lo reparten.
+    let preset = String(state.crmAgendaPreset || "").trim() || presetAgendaCompuesto() || DEFAULT_PRESET;
+    const permitidas = new Set(Array.from(crmAgendaPreset.options || []).map((opt) => String(opt.value || "").trim()));
+    if (!permitidas.has(partePresetAgenda(preset).base)) preset = DEFAULT_PRESET;
+    aplicaPresetAgenda(preset);
+    state.crmAgendaPreset = presetAgendaCompuesto();
   }
   if (crmAgendaDay) {
     crmAgendaDay.value = String(state.crmAgendaAnchorDay || "").trim();
@@ -60216,7 +60238,7 @@ const persistCrmAgendaPrefs = () => {
     localStorage.setItem("crm.agenda.day", String(state.crmAgendaAnchorDay || ""));
     localStorage.setItem("crm.agenda.ambito", String(state.crmAgendaAmbito || ""));
     if (crmAgendaPreset) {
-      localStorage.setItem("crm.agenda.preset", String(crmAgendaPreset.value || "citas_equipo"));
+      localStorage.setItem("crm.agenda.preset", presetAgendaCompuesto() || "citas_equipo");
     }
   } catch (e) {}
 };
@@ -60256,7 +60278,7 @@ const syncCrmAgendaControls = () => {
       btn.setAttribute("aria-selected", key === view ? "true" : "false");
     });
   }
-  const presetRaw = String(crmAgendaPreset?.value || state.crmAgendaPreset || "citas_7dias_equipo").trim() || "citas_7dias_equipo";
+  const presetRaw = presetAgendaCompuesto() || String(state.crmAgendaPreset || "").trim() || "citas_7dias_equipo";
   const presetEquipo = presetRaw.endsWith("_equipo");
   const preset = presetEquipo ? presetRaw.slice(0, -"_equipo".length) : presetRaw;
   const isWindowPreset = preset === "citas_hoy" || preset === "citas_7dias" || preset === "citas_7dias_caducadas" || preset === "actividades_hoy";
@@ -61083,7 +61105,18 @@ const renderCrmAgendaWorkspace = () => {
       crmAgendaTable.innerHTML = "";
       const node = buildCrmAgendaDenseTableNode(filtered);
       if (!node) {
-        crmAgendaTable.innerHTML = "<p class='muted'>Sin acciones.</p>";
+        // «Sin acciones» a secas es engañoso cuando hay 121 cargadas y ninguna cae en
+        // esta ventana: buscas «encargo», no sale nada y concluyes que no existe.
+        // Pasado en producción, con nueve citas que sí lo llevaban en el asunto.
+        const cargadas = Array.isArray(state.crmAgendaRowsAll) ? state.crmAgendaRowsAll.length : 0;
+        const busqueda = String(crmAgendaSearch?.value || "").trim();
+        let pista = "";
+        if (cargadas) {
+          pista = busqueda
+            ? ` Ninguna de las ${cargadas} cargadas coincide con «${escapeHtml(busqueda)}» en esta vista: prueba a cambiar «qué se muestra» o a quitar el filtro de estado.`
+            : ` Hay ${cargadas} en total, pero ninguna entra en esta vista: prueba a cambiar «qué se muestra».`;
+        }
+        crmAgendaTable.innerHTML = `<p class='muted'>Sin acciones aquí.${pista}</p>`;
       } else {
         crmAgendaTable.appendChild(node);
       }
@@ -61109,7 +61142,7 @@ const applyCrmAgendaFilters = (rows = []) => {
   // IMPORTANTE: no normalizar el preset aquí: los valores usan sufijo `_equipo` y underscores.
   // Si lo normalizamos, se pierde el sufijo y la agenda filtra solo por usuario (parece que “desaparecen” citas del equipo).
   // Defaults: en caso de duda, mostrar agenda de equipo 7 días (equilibrado) para evitar parecer vacía.
-  const presetRaw = String(crmAgendaPreset?.value || state.crmAgendaPreset || "citas_7dias_equipo").trim() || "citas_7dias_equipo";
+  const presetRaw = presetAgendaCompuesto() || String(state.crmAgendaPreset || "").trim() || "citas_7dias_equipo";
   const presetEquipo = presetRaw.endsWith("_equipo");
   const preset = presetEquipo ? presetRaw.slice(0, -"_equipo".length) : presetRaw;
   state.crmAgendaPreset = presetRaw;
@@ -61265,10 +61298,20 @@ const upsertCrmAgendaActionRow = (accion) => {
   renderCrmAgendaWorkspace();
 };
 
+// Testigo de petición de la agenda.
+//
+// Cambiar de vista o de preset dispara otra carga, y la anterior puede llegar
+// después y pisar los datos buenos. Me pasó varias veces probando en producción:
+// entrabas en «Día», volvías a «Lista» y la lista salía vacía con el pie diciendo
+// «2026-08-09 → 2026-08-09», el rango de la petición vieja. Sólo se pinta la
+// respuesta de la última petición lanzada.
+let crmAgendaPeticionEnCurso = 0;
+
 const loadCrmAgenda = () => {
   if (!crmAgendaTable && !crmAgendaCalendar) {
     return;
   }
+  const miPeticion = ++crmAgendaPeticionEnCurso;
   // Evitar “mezclas”: en Agenda no debe quedar renderizada la ficha del inmueble
   // debajo (aunque se haya abierto previamente desde otra vista).
   if (inmuebleDetail) {
@@ -61290,7 +61333,7 @@ const loadCrmAgenda = () => {
   const view = normalizeCrmAgendaView(state.crmAgendaView || "week");
   const anchorDayKey = String(state.crmAgendaAnchorDay || "").trim() || formatAgendaDate(new Date());
   const anchor = parseAgendaDate(anchorDayKey) || new Date();
-  const presetRaw = String(crmAgendaPreset?.value || state.crmAgendaPreset || "citas_equipo").trim() || "citas_equipo";
+  const presetRaw = presetAgendaCompuesto() || String(state.crmAgendaPreset || "").trim() || "citas_equipo";
   const presetEquipo = presetRaw.endsWith("_equipo");
   const preset = presetEquipo ? presetRaw.slice(0, -"_equipo".length) : presetRaw;
 
@@ -61357,6 +61400,7 @@ const loadCrmAgenda = () => {
     params.set("range", "all");
   }
   api(`/api/acciones?${params.toString()}`).then((data) => {
+    if (miPeticion !== crmAgendaPeticionEnCurso) return;
     const rows = Array.isArray(data.rows) ? data.rows : [];
     renderCrmHomeAgendaPreview();
     applyCrmAgendaFilters(rows);
@@ -82674,7 +82718,7 @@ if (crmWorkspaceTabs) {
     if (view === "agenda") {
       const preset = String(btn.dataset.crmAgendaPreset || "").trim();
       if (preset && crmAgendaPreset) {
-        crmAgendaPreset.value = preset;
+        aplicaPresetAgenda(preset);
         setCrmAgendaView("list");
         setCrmWorkspaceView("agenda");
         loadCrmAgenda();
@@ -83962,6 +84006,16 @@ if (crmAgendaSearch) {
 
 if (crmAgendaPreset) {
   crmAgendaPreset.addEventListener("change", () => {
+    state.crmAgendaPreset = presetAgendaCompuesto();
+    persistCrmAgendaPrefs();
+    loadCrmAgenda();
+  });
+}
+
+if (crmAgendaQuien) {
+  crmAgendaQuien.addEventListener("change", () => {
+    state.crmAgendaPreset = presetAgendaCompuesto();
+    persistCrmAgendaPrefs();
     loadCrmAgenda();
   });
 }

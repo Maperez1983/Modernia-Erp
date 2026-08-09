@@ -335,6 +335,95 @@ class ElCrmAvisaDeLosExpedientesParadosTests(unittest.TestCase):
         self.assertIn("+ expedientesParadosCount;", APP)
 
 
+class LosDosEjesDelPresetVanSeparadosTests(unittest.TestCase):
+    """Catorce opciones en un desplegable, con dos ejes dentro.
+
+    Había que leerse «Citas Equipo (7 días + caducadas)» entera para saber dónde
+    estabas, y el eje de quién es justo el que hace que parezca que «desaparecen»
+    citas —hay un comentario en el código avisando de eso—. El «de quién» pasa a su
+    propio control y el resto va agrupado: siete opciones en vez de catorce.
+
+    El valor guardado sigue siendo el de siempre, con su sufijo `_equipo`, así que
+    nada de lo que lo lee ha tenido que cambiar.
+    """
+
+    HTML = (RAIZ / "web" / "index.html").read_text(encoding="utf-8")
+
+    def test_el_desplegable_va_agrupado_y_sin_repetir_el_ambito(self):
+        i = self.HTML.index('<select id="crmAgendaPreset"')
+        bloque = self.HTML[i:self.HTML.index("</select>", i)]
+        self.assertIn('<optgroup label="Citas">', bloque)
+        self.assertIn('<optgroup label="Actividades">', bloque)
+        self.assertNotIn("Equipo", bloque, "el ámbito ya no se repite en cada opción")
+        self.assertEqual(bloque.count("<option"), 7)
+
+    def test_existe_el_control_de_quien(self):
+        self.assertIn('<select id="crmAgendaQuien"', self.HTML)
+        i = self.HTML.index('<select id="crmAgendaQuien"')
+        bloque = self.HTML[i:self.HTML.index("</select>", i)]
+        self.assertIn('value="equipo"', bloque)
+        self.assertIn('value="mias"', bloque)
+
+    def test_el_valor_guardado_sigue_llevando_el_sufijo(self):
+        self.assertIn("const presetAgendaCompuesto = () =>", APP)
+        self.assertIn("localStorage.setItem(\"crm.agenda.preset\", presetAgendaCompuesto()", APP)
+        # Y nadie lee ya el select a pelo esperando el sufijo.
+        self.assertNotIn('String(crmAgendaPreset?.value || state.crmAgendaPreset', APP)
+
+    def test_los_atajos_de_las_alertas_reparten_el_valor_en_los_dos_controles(self):
+        self.assertNotIn("crmAgendaPreset.value = preset;", APP)
+        self.assertGreaterEqual(APP.count("aplicaPresetAgenda(preset);"), 2)
+
+    def test_la_composicion(self):
+        node = shutil.which("node")
+        if not node:
+            raise unittest.SkipTest("node no está disponible")
+        i = APP.index("const AGENDA_SUFIJO_EQUIPO")
+        trozo = APP[i:APP.index("const esCitaPorSuTramo")]
+        casos = [("citas", "equipo", "citas_equipo"), ("citas", "mias", "citas"),
+                 ("citas_caducadas", "equipo", "citas_caducadas_equipo"),
+                 ("actividades_hoy", "mias", "actividades_hoy")]
+        script = (
+            "const preset={value:''},quien={value:''};"
+            + trozo.replace("crmAgendaPreset", "preset").replace("crmAgendaQuien", "quien")
+            + "const casos=" + json.dumps([[c[0], c[1]] for c in casos]) + ";"
+            + "console.log(JSON.stringify(casos.map(([b,q])=>{preset.value=b;quien.value=q;return presetAgendaCompuesto();})));"
+        )
+        salida = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
+        for (base, quien, esperado), real in zip(casos, json.loads(salida.stdout.strip())):
+            with self.subTest(caso=f"{base}+{quien}"):
+                self.assertEqual(real, esperado)
+
+
+class LaAgendaNoSePisaConRespuestasAtrasadasTests(unittest.TestCase):
+    """Cambiar de vista dispara otra carga, y la vieja podía llegar después.
+
+    Me pasó varias veces probando en producción: entrabas en «Día», volvías a
+    «Lista» y la lista salía vacía con el pie diciendo «2026-08-09 → 2026-08-09», el
+    rango de la petición anterior.
+    """
+
+    def test_solo_se_pinta_la_ultima_peticion(self):
+        self.assertIn("let crmAgendaPeticionEnCurso = 0;", APP)
+        self.assertIn("const miPeticion = ++crmAgendaPeticionEnCurso;", APP)
+        self.assertIn("if (miPeticion !== crmAgendaPeticionEnCurso) return;", APP)
+
+
+class ElVacioDeLaAgendaExplicaLoQueHayFueraTests(unittest.TestCase):
+    """«Sin acciones» a secas es engañoso con 121 cargadas y ninguna en la ventana."""
+
+    def test_el_mensaje_dice_cuantas_hay_cargadas(self):
+        i = APP.index("Sin acciones aquí.")
+        bloque = APP[max(0, i - 900):i + 200]
+        self.assertIn("state.crmAgendaRowsAll", bloque)
+        self.assertIn("crmAgendaSearch?.value", bloque)
+        self.assertIn("qué se muestra", bloque)
+
+    def test_el_texto_de_busqueda_va_escapado(self):
+        i = APP.index("Sin acciones aquí.")
+        self.assertIn("escapeHtml(busqueda)", APP[max(0, i - 900):i + 200])
+
+
 class ElSolapeMiraElTramoNoSoloLaHoraDeArranqueTests(unittest.TestCase):
     """El aviso comparaba `ev.time !== payload.hora`: solo la hora de arranque.
 

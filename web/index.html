@@ -4328,21 +4328,34 @@
 				                <div class="tc-listview">
 				                  <div class="tc-listhead">
 				                    <div class="tc-listleft">
-							                      <select id="crmAgendaPreset" title="Act./Citas">
-							                        <option value="citas_hoy">Citas Personales (hoy)</option>
-								                        <option value="citas_7dias">Citas Personales (7 días)</option>
-							                        <option value="citas_7dias_caducadas">Citas Personales (7 días + caducadas)</option>
-							                        <option value="citas">Citas Personales</option>
-							                        <option value="citas_caducadas">Citas Personales (caducadas)</option>
-							                        <option value="citas_hoy_equipo">Citas Equipo (hoy)</option>
-								                        <option value="citas_7dias_equipo">Citas Equipo (7 días)</option>
-								                        <option value="citas_7dias_caducadas_equipo">Citas Equipo (7 días + caducadas)</option>
-								                        <option value="citas_equipo" selected>Citas Equipo</option>
-							                        <option value="citas_caducadas_equipo">Citas Equipo (caducadas)</option>
-							                        <option value="actividades_caducadas">Actividades Personales (caducadas)</option>
-							                        <option value="actividades_hoy">Actividades Personales (hoy)</option>
-							                        <option value="actividades_caducadas_equipo">Actividades Equipo (caducadas)</option>
-							                        <option value="actividades_hoy_equipo">Actividades Equipo (hoy)</option>
+							                      <!--
+							                        Eran catorce opciones en una sola lista, con dos ejes metidos dentro:
+							                        qué miras (citas o actividades, y en qué ventana) y de quién
+							                        (tuyas o del equipo). Había que leerse «Citas Equipo (7 días +
+							                        caducadas)» entera para saber dónde estabas, y el eje de quién es
+							                        justo el que hace que parezca que «desaparecen» citas.
+
+							                        Ahora el «de quién» tiene su propio control y lo demás va agrupado:
+							                        siete opciones en vez de catorce. El valor que se guarda sigue
+							                        siendo el mismo de antes, con su sufijo `_equipo`, así que nada de
+							                        lo que lo lee ha tenido que cambiar.
+							                      -->
+							                      <select id="crmAgendaPreset" title="Qué se muestra" aria-label="Qué se muestra">
+							                        <optgroup label="Citas">
+							                          <option value="citas" selected>Todas</option>
+							                          <option value="citas_hoy">Hoy</option>
+							                          <option value="citas_7dias">Próximos 7 días</option>
+							                          <option value="citas_7dias_caducadas">7 días + caducadas</option>
+							                          <option value="citas_caducadas">Sólo caducadas</option>
+							                        </optgroup>
+							                        <optgroup label="Actividades">
+							                          <option value="actividades_hoy">Hoy</option>
+							                          <option value="actividades_caducadas">Sólo caducadas</option>
+							                        </optgroup>
+							                      </select>
+							                      <select id="crmAgendaQuien" title="De quién" aria-label="De quién">
+							                        <option value="equipo" selected>De todo el equipo</option>
+							                        <option value="mias">Sólo mías</option>
 							                      </select>
 						                      <select id="crmAgendaAmbitoFilter" title="Ámbito">
 						                        <option value="">Ámbito (todos)</option>
@@ -12040,7 +12053,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=882",
+              "app.js?v=883",
             ];
 
             const getParams = () => {
