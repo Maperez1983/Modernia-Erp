@@ -25722,6 +25722,50 @@ def cliente_workspace_id_for_write(conn, *, workspace_id="", empresa_id=""):
     return resolve_workspace_id_for_empresa(conn, empresa_id)
 
 
+def workspaces_propios_de_empresa(conn, empresa_id):
+    """Los workspaces de una empresa **sin contar el de plataforma**.
+
+    El workspace de plataforma (el que contiene la empresa técnica «Verifika2»)
+    agrupa a todas las empresas, así que cuenta doble en cualquier deducción y la
+    vuelve ambigua siempre. Quitándolo, las 9 empresas de producción quedan con
+    exactamente uno: el de su agencia.
+
+    Se identifica por dónde cuelga la empresa técnica, no por un id escrito a mano
+    ni por el nombre, que se puede cambiar desde la interfaz.
+    """
+    eid = str(empresa_id or "").strip()
+    if not eid:
+        return []
+    try:
+        filas = conn.execute(
+            "SELECT DISTINCT workspace_id FROM workspace_empresas WHERE empresa_id = ?",
+            (eid,),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return []
+    candidatos = []
+    for f in filas or []:
+        v = str(row_value(f, "workspace_id") or row_value(f, 0) or "").strip()
+        if v and v not in candidatos:
+            candidatos.append(v)
+    plataforma = ""
+    try:
+        pid = str(get_platform_empresa_id(conn) or "").strip()
+        if pid and pid != eid:
+            fila = conn.execute(
+                "SELECT workspace_id FROM workspace_empresas WHERE empresa_id = ? LIMIT 1",
+                (pid,),
+            ).fetchone()
+            plataforma = str(row_value(fila, "workspace_id", "") or "").strip() if fila else ""
+    except Exception:
+        _rollback_best_effort(conn)
+        plataforma = ""
+    if plataforma and len(candidatos) > 1:
+        candidatos = [c for c in candidatos if c != plataforma] or candidatos
+    return candidatos
+
+
 def workspace_para_alta_de_cliente(conn, session, empresa_id, workspace_id=""):
     """Con qué workspace nace un cliente dado de alta desde inmobiliaria.
 
@@ -32088,41 +32132,35 @@ def create_portal_inmueble_lead(conn, payload, now):
     if not nombre and not telefono and not email:
         return {"error": "nombre, teléfono o email requerido"}, 400
     empresa_id = inmueble["empresa_id"]
-    workspace_id = str(
-        payload.get("workspace_id")
-        or listing_payload.get("workspace_id")
-        or row_value(inmueble, "workspace_id")
-        or ""
-    ).strip()
+    # El lead entra por el portal Verifika2, que publica los anuncios de varias
+    # agencias. Un lead colocado en el workspace equivocado es el contacto de una
+    # agencia dentro del CRM de otra, así que el destino se deduce del anuncio y no
+    # se acepta del cuerpo de la petición: el portal es un integrante de confianza,
+    # pero el ámbito del dato no es cosa suya.
+    workspace_id = str(row_value(inmueble, "workspace_id") or "").strip()
     if not workspace_id:
-        try:
-            rows = conn.execute(
-                """
-                SELECT workspace_id
-                FROM workspace_companies
-                WHERE legacy_empresa_id = ?
-                  AND COALESCE(activo, 1) = 1
-                UNION
-                SELECT workspace_id
-                FROM workspace_empresas
-                WHERE empresa_id = ?
-                """,
-                (empresa_id, empresa_id),
-            ).fetchall()
-            candidates = [
-                str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip()
-                for r in (rows or [])
-            ]
-            candidates = [c for c in candidates if c]
-            if len(set(candidates)) == 1:
-                workspace_id = candidates[0]
-        except Exception:
-            workspace_id = ""
+        # Los 81 de 86 inmuebles anteriores al campo `workspace_id` llegan aquí. La
+        # empresa cuelga también del workspace de plataforma, que agrupa a todas y
+        # por eso vuelve ambigua cualquier deducción; quitándolo, cada empresa de
+        # producción se queda con exactamente uno, el de su agencia.
+        propios = workspaces_propios_de_empresa(conn, empresa_id)
+        if len(propios) == 1:
+            workspace_id = propios[0]
     if not workspace_id:
         workspace_id = str(os.environ.get("PORTAL_LEADS_WORKSPACE_ID") or "").strip()
     if not workspace_id:
-        # Workspace de producción del CRM inmobiliario de Grupo Modernia.
-        workspace_id = "6e63e1d1205c4c2a85dde7e20d5409f0"
+        # Antes había aquí el id de Modernia escrito a mano. Acertaba por
+        # casualidad —lo único publicado es de empresas de Modernia—, pero el día
+        # que publique ANSA, que es de Modernia Centro, su lead se archivaría en el
+        # CRM de otra agencia y nadie lo notaría. Es preferible que el portal reciba
+        # un error y reintente a que el dato acabe donde no es.
+        return {
+            "error": "No se puede determinar el workspace del anuncio",
+            "detail": (
+                f"El inmueble {listing_id} no tiene workspace y su empresa pertenece a varios. "
+                "Configura PORTAL_LEADS_WORKSPACE_ID o asigna el workspace del inmueble."
+            ),
+        }, 409
     cliente_id = ensure_cliente_for_inmobiliaria(
         conn,
         empresa_id,
