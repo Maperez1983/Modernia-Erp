@@ -98966,6 +98966,20 @@ class Handler(BaseHTTPRequestHandler):
                     (inmueble_id,),
                 ).fetchone()
                 if captacion_row:
+                    # Este camino llega a CREAR una ficha (más abajo), así que la
+                    # pertenencia se comprueba sobre la captación antes de tocar nada:
+                    # de lo contrario un id ajeno provocaba un alta en otra empresa.
+                    session = getattr(self, "auth_session", None) or self._current_session()
+                    ok_cap, err_cap, _fila_cap = enforce_inmueble_access(
+                        conn, session, inmueble_id, tabla="captaciones"
+                    )
+                    if not ok_cap:
+                        json_response(
+                            self,
+                            {"error": err_cap},
+                            status=404 if err_cap == "Inmueble no encontrado" else 403,
+                        )
+                        return
                     linked_inmueble_id = str(captacion_row["inmueble_id"] or "").strip()
                     if linked_inmueble_id:
                         inmueble_id = linked_inmueble_id
@@ -99026,6 +99040,18 @@ class Handler(BaseHTTPRequestHandler):
                         ).fetchone()
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            # La respuesta lleva los propietarios con nombre, NIF, teléfono y email.
+            # Sin esta guarda bastaba con conocer un id para leer la ficha completa de
+            # otra agencia: la sesión se exigía, la pertenencia no.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id)
+            if not ok_acc:
+                json_response(
+                    self,
+                    {"error": err_acc},
+                    status=404 if err_acc == "Inmueble no encontrado" else 403,
+                )
                 return
             propietarios = conn.execute(
                 """
@@ -100002,6 +100028,16 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
+            # La cronología reúne citas, visitas, documentos y notas del expediente.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id)
+            if not ok_acc:
+                json_response(
+                    self,
+                    {"error": err_acc},
+                    status=404 if err_acc == "Inmueble no encontrado" else 403,
+                )
+                return
             try:
                 cap_row = conn.execute(
                     "SELECT id FROM captaciones WHERE inmueble_id = ? LIMIT 1",
@@ -100394,6 +100430,17 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
+            # El cruce devuelve las demandas que encajan, con el nombre de cada
+            # cliente. Es la cartera de demanda de la agencia dueña del inmueble.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id)
+            if not ok_acc:
+                json_response(
+                    self,
+                    {"error": err_acc},
+                    status=404 if err_acc == "Inmueble no encontrado" else 403,
+                )
+                return
             matches = fetch_demanda_matches_for_inmueble(conn, inmueble_id, limit=100)
             if matches is None:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
@@ -100412,6 +100459,17 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            # Devuelve el nombre del cliente interesado y las notas privadas de la
+            # negociación: la cartera de compradores de la agencia.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id)
+            if not ok_acc:
+                json_response(
+                    self,
+                    {"error": err_acc},
+                    status=404 if err_acc == "Inmueble no encontrado" else 403,
+                )
                 return
             rows = conn.execute(
                 """
@@ -100448,6 +100506,15 @@ class Handler(BaseHTTPRequestHandler):
             etapa = params.get("etapa", [""])[0]
             if not inmueble_id:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id)
+            if not ok_acc:
+                json_response(
+                    self,
+                    {"error": err_acc},
+                    status=404 if err_acc == "Inmueble no encontrado" else 403,
+                )
                 return
             where = ["inmueble_id = ?"]
             values = [inmueble_id]
