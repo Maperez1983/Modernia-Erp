@@ -27202,6 +27202,46 @@ def ensure_pending_inmueble_stage_actions(conn, empresa_id, inmueble_id, etapa, 
     return created_any
 
 
+ESTADOS_DE_ACCION = ("Pendiente", "Completada", "Cancelada")
+
+
+def normalizar_estado_de_accion(valor, *, defecto="Pendiente"):
+    """Deja el estado de una cita en uno de los tres que existen.
+
+    El desplegable ofrece Pendiente, Completada y Cancelada, pero la API aceptaba
+    cualquier texto, así que en producción convivían «Completada» (140), «Completado»
+    (1), «Hecho» (1) y una fila sin estado. Tres filas de 166, pero cualquier filtro o
+    recuento que compare por texto se las pierde en silencio, y eso sale caro el día
+    que alguien cuenta cuántas citas se cerraron.
+
+    Se aceptan las formas que la gente escribe de verdad y se guarda siempre la
+    canónica. Lo que no se reconozca se deja tal cual: mejor un estado raro visible
+    que uno cambiado a la brava por una heurística.
+    """
+    crudo = str(valor or "").strip()
+    if not crudo:
+        return defecto
+    clave = normalize_lookup_text(crudo).lower()
+    equivalencias = {
+        "pendiente": "Pendiente",
+        "abierta": "Pendiente",
+        "abierto": "Pendiente",
+        "completada": "Completada",
+        "completado": "Completada",
+        "hecha": "Completada",
+        "hecho": "Completada",
+        "realizada": "Completada",
+        "realizado": "Completada",
+        "cerrada": "Completada",
+        "cerrado": "Completada",
+        "cancelada": "Cancelada",
+        "cancelado": "Cancelada",
+        "anulada": "Cancelada",
+        "anulado": "Cancelada",
+    }
+    return equivalencias.get(clave, crudo)
+
+
 def normalize_inmo_action_type(value):
     normalized = normalize_lookup_text(value or "").lower()
     aliases = {
@@ -87391,7 +87431,7 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "servicio requerido"}, status=400)
                     return
             tipo = str(payload.get("tipo") or "").strip()
-            estado = str(payload.get("estado") or "").strip() or "Pendiente"
+            estado = normalizar_estado_de_accion(payload.get("estado"))
             resultado_cierre = str(payload.get("resultado_cierre") or "").strip()
             estado_siguiente = str(payload.get("estado_siguiente") or "").strip()
             servicio_norm = normalize_lookup_text(servicio)
@@ -87637,6 +87677,11 @@ class Handler(BaseHTTPRequestHandler):
             ):
                 if key in payload:
                     updates[key] = payload.get(key)
+            # El estado se guarda siempre en su forma canónica: la API aceptaba
+            # cualquier texto y así se colaron «Completado» y «Hecho» junto a
+            # «Completada».
+            if "estado" in updates and str(updates.get("estado") or "").strip():
+                updates["estado"] = normalizar_estado_de_accion(updates.get("estado"))
             # Normaliza tipos para evitar "API error" en Postgres por '' -> INTEGER/REAL.
             if "recordatorio_min" in updates:
                 updates["recordatorio_min"] = parse_optional_int(updates.get("recordatorio_min"))

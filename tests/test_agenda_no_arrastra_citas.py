@@ -261,6 +261,80 @@ class LoQueOcupaUnTramoEsUnaCitaTests(unittest.TestCase):
                 self.assertEqual(real, esperado, f"{fila.get('tipo')} {fila.get('hora')}-{fila.get('hora_fin')}: {desc}")
 
 
+class ElEstadoDeUnaCitaSeGuardaCanonicoTests(unittest.TestCase):
+    """El desplegable ofrece tres estados; la API aceptaba cualquier texto.
+
+    En producción convivían «Completada» (140), «Completado» (1), «Hecho» (1) y una
+    fila sin estado. Tres de 166, pero cualquier filtro o recuento que compare por
+    texto se las pierde en silencio.
+    """
+
+    def setUp(self):
+        import os
+        os.environ.setdefault("DATABASE_URL", "")
+        from web.server import normalizar_estado_de_accion
+        self.normaliza = normalizar_estado_de_accion
+
+    def test_las_formas_que_la_gente_escribe_acaban_en_la_canonica(self):
+        for entrada, esperado in (
+            ("Completado", "Completada"), ("completado", "Completada"),
+            ("Hecho", "Completada"), ("hecha", "Completada"),
+            ("Realizada", "Completada"), ("Cerrado", "Completada"),
+            ("Cancelado", "Cancelada"), ("anulada", "Cancelada"),
+            ("Pendiente", "Pendiente"), ("abierta", "Pendiente"),
+        ):
+            with self.subTest(entrada=entrada):
+                self.assertEqual(self.normaliza(entrada), esperado)
+
+    def test_vacio_es_pendiente(self):
+        for entrada in ("", "   ", None):
+            with self.subTest(entrada=entrada):
+                self.assertEqual(self.normaliza(entrada), "Pendiente")
+
+    def test_lo_que_no_se_reconoce_se_respeta(self):
+        """Mejor un estado raro visible que uno cambiado a la brava por una
+        heurística: si aparece algo nuevo, que se vea y se decida."""
+        self.assertEqual(self.normaliza("En negociación"), "En negociación")
+
+    def test_el_servidor_lo_aplica_al_crear_y_al_editar(self):
+        servidor = (RAIZ / "web" / "server.py").read_text(encoding="utf-8")
+        self.assertIn('estado = normalizar_estado_de_accion(payload.get("estado"))', servidor)
+        self.assertIn('updates["estado"] = normalizar_estado_de_accion(updates.get("estado"))', servidor)
+
+
+class ElCrmAvisaDeLosExpedientesParadosTests(unittest.TestCase):
+    """«Sin próxima acción» sólo mira si el campo está vacío.
+
+    Eso no detecta el caso que hace daño: un encargo con su próxima acción escrita
+    hace dos meses y a la que nadie ha vuelto. Medido en producción el 2026-08-09: la
+    última cita de toda la agenda era del 12 de junio, no había ninguna futura, y los
+    19 expedientes vivos llevaban parados entre 65 y 115 días —uno sin una sola
+    acción en toda su vida—.
+    """
+
+    def test_existe_la_alerta_y_va_la_primera(self):
+        self.assertIn("expedientesParadosCount", APP)
+        i_parados = APP.index('title: "Expedientes parados"')
+        i_noticias = APP.index('title: "Noticias sin verificar"')
+        self.assertLess(i_parados, i_noticias, "la alerta de parados debe encabezar la lista")
+
+    def test_cuenta_solo_expedientes_vivos(self):
+        i = APP.index("const expedientesParados = captacionesRows.filter")
+        bloque = APP[i:i + 700]
+        self.assertIn('etapa !== "Noticia" && etapa !== "Encargo"', bloque)
+
+    def test_un_expediente_sin_ninguna_accion_tambien_cuenta(self):
+        """Es el peor caso, no el más benigno: `|| 0` y 0 siempre es menor que el
+        límite, así que entra."""
+        i = APP.index("const expedientesParados = captacionesRows.filter")
+        bloque = APP[i:i + 700]
+        self.assertIn("ultimaAccionPorInmueble.get(inmuebleId) || 0", bloque)
+        self.assertIn("return ultima < limiteFrio;", bloque)
+
+    def test_suma_al_total_de_alertas(self):
+        self.assertIn("+ expedientesParadosCount;", APP)
+
+
 class ElSolapeMiraElTramoNoSoloLaHoraDeArranqueTests(unittest.TestCase):
     """El aviso comparaba `ev.time !== payload.hora`: solo la hora de arranque.
 

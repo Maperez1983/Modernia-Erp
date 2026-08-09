@@ -31353,6 +31353,41 @@ const collectCrmAlertsSnapshot = () => {
   const citasCaducadasCount = agendaRows.filter((row) => esCitaPorSuTramo(row) && isCaducada(row)).length;
   const actividadesCaducadasCount = agendaRows.filter((row) => !esCitaPorSuTramo(row) && isCaducada(row)).length;
 
+  // Expedientes vivos que llevan semanas sin que nadie los toque.
+  //
+  // «Sin próxima acción» sólo mira si el campo está vacío, y eso no detecta el caso
+  // que de verdad hace daño: un encargo con su próxima acción escrita hace dos meses
+  // y a la que nadie ha vuelto. Medido el 2026-08-09: la última cita de toda la
+  // agenda de inmobiliaria era del 12 de junio y no había ni una futura. El CRM
+  // guardaba muy bien lo que ya había pasado y no decía a quién llamar hoy.
+  const DIAS_PARA_ENFRIARSE = 21;
+  const ultimaAccionPorInmueble = new Map();
+  agendaRows.forEach((row) => {
+    const inmuebleId = String(row?.inmueble_id || "").trim();
+    if (!inmuebleId) return;
+    const ts = parseRowTs(row);
+    if (!ts) return;
+    const previo = ultimaAccionPorInmueble.get(inmuebleId) || 0;
+    if (ts > previo) ultimaAccionPorInmueble.set(inmuebleId, ts);
+  });
+  const limiteFrio = Date.now() - DIAS_PARA_ENFRIARSE * 24 * 60 * 60 * 1000;
+  const expedientesParados = captacionesRows.filter((row) => {
+    const etapa = normalizeCrmMainEtapa(String(row?.etapa || "").trim());
+    if (etapa !== "Noticia" && etapa !== "Encargo") return false;
+    const inmuebleId = String(row?.inmueble_id || "").trim();
+    // Sin inmueble asociado no se puede fechar la última acción; no se cuenta, que
+    // más vale un aviso de menos que uno que nadie entiende.
+    if (!inmuebleId) return false;
+    const ultima = ultimaAccionPorInmueble.get(inmuebleId) || 0;
+    return ultima < limiteFrio;
+  });
+  const expedientesParadosCount = expedientesParados.length;
+  const diasDelMasParado = expedientesParados.reduce((peor, row) => {
+    const ultima = ultimaAccionPorInmueble.get(String(row?.inmueble_id || "").trim()) || 0;
+    if (!ultima) return peor;
+    return Math.max(peor, Math.floor((Date.now() - ultima) / (24 * 60 * 60 * 1000)));
+  }, 0);
+
   const total =
     noticiasSinVerificarCount
     + sinProximaAccionCount
@@ -31360,7 +31395,8 @@ const collectCrmAlertsSnapshot = () => {
     + pedidosVisitaCount
     + prioridadAltaCount
     + citasCaducadasCount
-    + actividadesCaducadasCount;
+    + actividadesCaducadasCount
+    + expedientesParadosCount;
 
   return {
     total,
@@ -31375,6 +31411,8 @@ const collectCrmAlertsSnapshot = () => {
     sinProximaAccionCount,
     citasCaducadasCount,
     actividadesCaducadasCount,
+    expedientesParadosCount,
+    diasDelMasParado,
   };
 };
 
@@ -31455,6 +31493,18 @@ const openCrmAlertsModal = () => {
   state.crmAlertsSeenKey = crmAlertsSnapshotKey(snapshot);
   updateCrmAlertsBadge(snapshot);
   const tiles = [
+    // Va la primera a propósito: es la única que avisa de un expediente que se está
+    // enfriando, y las demás hablan de cosas que ya sabes que tienes que hacer.
+    snapshot.expedientesParadosCount
+      ? {
+          title: "Expedientes parados",
+          meta: `${snapshot.expedientesParadosCount}`,
+          sub: snapshot.diasDelMasParado
+            ? `Sin actividad desde hace más de 3 semanas. El peor lleva ${snapshot.diasDelMasParado} días.`
+            : "Sin actividad desde hace más de 3 semanas.",
+          quick: "captaciones:quick_sin_proxima_accion",
+        }
+      : null,
     snapshot.noticiasSinVerificarCount ? { title: "Noticias sin verificar", meta: `${snapshot.noticiasSinVerificarCount}`, sub: "Valorar/verificar para avanzar pipeline.", quick: "captaciones:quick_noticia_sin_verificar" } : null,
     snapshot.sinProximaAccionCount ? { title: "Sin próxima acción", meta: `${snapshot.sinProximaAccionCount}`, sub: "Planifica siguientes pasos.", quick: "captaciones:quick_sin_proxima_accion" } : null,
     snapshot.pedidosAnalizarCount ? { title: "Pedidos a analizar", meta: `${snapshot.pedidosAnalizarCount}`, sub: "Primera llamada y cualificación.", quick: "demandas:a_analizar" } : null,
