@@ -5779,6 +5779,7 @@ const openActionEditor = (ev, context = null) => {
   }
   syncActionModalClienteButtons();
   actionModal.classList.remove("hidden");
+  soltarFocoDelModalDeCita = gobiernaFocoDelModal(actionModal, closeActionEditor);
   syncCrmModalOpenState();
 };
 
@@ -5846,10 +5847,77 @@ const openActionCreator = (dateValue, timeValue, serviceValue, context = null) =
   }
   syncActionModalClienteButtons();
   actionModal.classList.remove("hidden");
+  soltarFocoDelModalDeCita = gobiernaFocoDelModal(actionModal, closeActionEditor);
   syncCrmModalOpenState();
 };
 
+// Un modal abierto tiene que quedarse con el teclado.
+//
+// Los tres modales de cita —el editor, el creador y el de la pantalla Act./Citas— no
+// se llevaban el foco al abrirse, no se cerraban con Escape y no atrapaban el
+// tabulador, así que al tabular te ibas al fondo de la página sin darte cuenta y
+// seguías escribiendo en la pantalla de detrás. Cinco modales de otros módulos sí
+// cierran con Escape; éstos se quedaron fuera.
+//
+// Devuelve una función para soltarlo, que hay que llamar al cerrar.
+const SELECTOR_ENFOCABLES =
+  'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), ' +
+  'select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+const gobiernaFocoDelModal = (modal, alCerrar) => {
+  if (!modal) return () => {};
+  const previo = document.activeElement;
+  const enfocables = () =>
+    Array.from(modal.querySelectorAll(SELECTOR_ENFOCABLES)).filter(
+      (el) => el.offsetParent !== null || el === document.activeElement
+    );
+
+  const primeros = enfocables();
+  if (primeros.length) {
+    // El primer campo con contenido, no el botón de cerrar: se abre para escribir.
+    const campo = primeros.find((el) => /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) || primeros[0];
+    try { campo.focus(); } catch (e) {}
+  }
+
+  const alPulsar = (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      soltar();
+      if (typeof alCerrar === "function") alCerrar();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const lista = enfocables();
+    if (!lista.length) return;
+    const primero = lista[0];
+    const ultimo = lista[lista.length - 1];
+    if (event.shiftKey && document.activeElement === primero) {
+      event.preventDefault();
+      ultimo.focus();
+    } else if (!event.shiftKey && document.activeElement === ultimo) {
+      event.preventDefault();
+      primero.focus();
+    }
+  };
+
+  const soltar = () => {
+    document.removeEventListener("keydown", alPulsar, true);
+    // Devolver el foco a donde estaba: si no, aterriza en el <body> y el siguiente
+    // tabulador empieza por el principio de la página.
+    try { if (previo && previo.focus) previo.focus(); } catch (e) {}
+  };
+
+  document.addEventListener("keydown", alPulsar, true);
+  return soltar;
+};
+
+let soltarFocoDelModalDeCita = null;
+
 const closeActionEditor = () => {
+  if (soltarFocoDelModalDeCita) {
+    soltarFocoDelModalDeCita();
+    soltarFocoDelModalDeCita = null;
+  }
   if (actionModal) actionModal.classList.add("hidden");
   currentActionEdit = null;
   state.actionModalEditId = "";
@@ -60050,6 +60118,10 @@ const openCrmAgendaEditModal = (row) => {
   }
 
   const cleanup = () => {
+    if (soltarFocoDelModalDeCita) {
+      soltarFocoDelModalDeCita();
+      soltarFocoDelModalDeCita = null;
+    }
     modal.classList.add("hidden");
     modal.classList.remove("open");
     document.body.classList.remove("modal-open");
@@ -60115,6 +60187,7 @@ const openCrmAgendaEditModal = (row) => {
   modal.classList.remove("hidden");
   modal.classList.add("open");
   document.body.classList.add("modal-open");
+  soltarFocoDelModalDeCita = gobiernaFocoDelModal(modal, cleanup);
 };
 
 const resolveCrmAgendaRowById = (id) => {

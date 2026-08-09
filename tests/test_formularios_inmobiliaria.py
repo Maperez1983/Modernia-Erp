@@ -80,3 +80,44 @@ class LosBorradosAvisanTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UnModalAbiertoSeQuedaConElTecladoTests(unittest.TestCase):
+    """Los tres modales de cita no gobernaban el foco.
+
+    No se lo llevaban al abrirse, no cerraban con Escape —cinco modales de otros
+    módulos sí— y no atrapaban el tabulador: tabulando te ibas al fondo de la página
+    sin verlo y seguías escribiendo en la pantalla de detrás.
+    """
+
+    def test_existe_un_solo_ayudante_para_los_tres(self):
+        self.assertEqual(APP.count("const gobiernaFocoDelModal = "), 1)
+        self.assertEqual(APP.count("gobiernaFocoDelModal("), 3)
+
+    def test_cierra_con_escape(self):
+        c = APP[APP.index("const gobiernaFocoDelModal"):]
+        c = c[:c.index("\n};")]
+        self.assertIn('event.key === "Escape"', c)
+
+    def test_atrapa_el_tabulador_en_los_dos_sentidos(self):
+        c = APP[APP.index("const gobiernaFocoDelModal"):]
+        c = c[:c.index("\n};")]
+        self.assertIn('event.key !== "Tab"', c)
+        self.assertIn("event.shiftKey && document.activeElement === primero", c)
+        self.assertIn("!event.shiftKey && document.activeElement === ultimo", c)
+
+    def test_enfoca_un_campo_y_no_el_boton_de_cerrar(self):
+        c = APP[APP.index("const gobiernaFocoDelModal"):]
+        c = c[:c.index("\n};")]
+        self.assertIn("/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)", c)
+
+    def test_devuelve_el_foco_a_donde_estaba(self):
+        c = APP[APP.index("const gobiernaFocoDelModal"):]
+        c = c[:c.index("\n};")]
+        self.assertIn("const previo = document.activeElement;", c)
+        self.assertIn("previo.focus()", c)
+
+    def test_se_suelta_al_cerrar_los_tres(self):
+        # Si no se suelta, el manejador de teclado sigue vivo y Escape cerraría un
+        # modal que ya no está.
+        self.assertEqual(APP.count("soltarFocoDelModalDeCita = null;"), 3)
