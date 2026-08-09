@@ -27770,6 +27770,43 @@ def send_signature_webhook_message(conn, request_row, *, token, otp="", base_url
 build_signature_evidence_pdf = runtime_document_pdf.build_signature_evidence_pdf
 
 
+# Un OTP de seis dígitos son un millón de combinaciones: sin tope de intentos se
+# agota probando. El OTP existe justo para el caso en que el enlace de firma se ha
+# ido de las manos —un correo reenviado, un móvil compartido—, así que si no aguanta
+# la fuerza bruta no aguanta nada. Cinco intentos y a pedir el código de nuevo, que
+# regenera token y OTP.
+SIGNATURE_OTP_MAX_ATTEMPTS = max(3, int(os.environ.get("APP_SIGNATURE_OTP_MAX_ATTEMPTS", "5")))
+
+
+def contar_intentos_de_otp(conn, request_id, desde=None):
+    """Cuántas veces se ha fallado el OTP desde que se envió el código vigente.
+
+    No hace falta columna nueva: los fallos ya se registran como evento `otp_failed`
+    y la tabla de eventos está indexada por solicitud. Se cuentan sólo los
+    posteriores a `sent_at` porque reenviar el código regenera el OTP —y entonces
+    los intentos anteriores ya no valen contra el nuevo—.
+    """
+    try:
+        if desde:
+            fila = conn.execute(
+                """
+                SELECT COUNT(*) AS n FROM inmueble_signature_events
+                WHERE request_id = ? AND event = 'otp_failed' AND created_at >= ?
+                """,
+                (request_id, desde),
+            ).fetchone()
+        else:
+            fila = conn.execute(
+                "SELECT COUNT(*) AS n FROM inmueble_signature_events WHERE request_id = ? AND event = 'otp_failed'",
+                (request_id,),
+            ).fetchone()
+        return int(row_value(fila, "n", 0) or 0)
+    except Exception:
+        _rollback_best_effort(conn)
+        # Si no se puede contar, se prefiere bloquear a dejar barra libre.
+        return SIGNATURE_OTP_MAX_ATTEMPTS
+
+
 def sign_inmueble_signature_request(conn, token, payload, *, handler=None, now=None):
     ensure_inmueble_signature_schema(conn)
     row = _signature_request_row_by_token(conn, token)
@@ -27790,10 +27827,23 @@ def sign_inmueble_signature_request(conn, token, payload, *, handler=None, now=N
         record_signature_event(conn, data["id"], "expired", handler=handler, now=now)
         return {"error": "Solicitud caducada"}, 410
     if int(data.get("otp_required") or 0):
+        fallidos = contar_intentos_de_otp(conn, data["id"], desde=data.get("sent_at"))
+        if fallidos >= SIGNATURE_OTP_MAX_ATTEMPTS:
+            record_signature_event(conn, data["id"], "otp_blocked", handler=handler, now=now)
+            return {
+                "error": "Demasiados intentos con el código. Pide que te lo envíen de nuevo.",
+            }, 429
         otp = str(payload.get("otp") or "").strip()
-        if not otp or hash_signature_token(otp) != str(data.get("otp_hash") or ""):
+        # Comparación en tiempo constante: es un hash, pero no cuesta nada hacerlo bien.
+        if not otp or not hmac.compare_digest(
+            hash_signature_token(otp), str(data.get("otp_hash") or "")
+        ):
             record_signature_event(conn, data["id"], "otp_failed", handler=handler, now=now)
-            return {"error": "Código OTP inválido"}, 403
+            restantes = max(0, SIGNATURE_OTP_MAX_ATTEMPTS - (fallidos + 1))
+            return {
+                "error": "Código OTP inválido",
+                "intentos_restantes": restantes,
+            }, 403
     signed_name = str(payload.get("signed_name") or "").strip()
     signed_nif = str(payload.get("signed_nif") or "").strip()
     acceptance_text = str(payload.get("acceptance_text") or "").strip()
