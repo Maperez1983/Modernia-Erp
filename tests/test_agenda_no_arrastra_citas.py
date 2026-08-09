@@ -18,7 +18,10 @@ indexado por el contenedor, así que al reutilizar el mismo contenedor para otra
 se quedaba puesto, y la agenda salía vacía sin explicar por qué.
 """
 
+import json
 import re
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -47,11 +50,13 @@ class ElAvisoDeSolapeMiraTodasLasCitasTests(unittest.TestCase):
         """No se quita: la vista sí debe respetar el filtro."""
         self.assertIn("lastAgendaEvents = filteredEvents;", APP)
 
-    def test_el_solape_se_mide_por_responsable_fecha_y_hora(self):
+    def test_el_solape_se_mide_por_responsable_fecha_y_tramo(self):
+        # Antes esto exigía `ev.time !== payload.hora`, la comparación por hora de
+        # arranque. Se cambió por el solape de tramos; ver la clase de más abajo.
         c = APP[APP.index("const conflict = lastAgendaAllEvents"):][:900]
         self.assertIn("ev.dateKey !== payload.fecha", c)
-        self.assertIn("ev.time !== payload.hora", c)
-        self.assertIn("ev.responsable === payload.responsable", c)
+        self.assertIn("ev.responsable !== payload.responsable", c)
+        self.assertIn("agendaTramosSePisan(", c)
 
     def test_editar_una_cita_no_choca_consigo_misma(self):
         c = APP[APP.index("const conflict = lastAgendaAllEvents"):][:900]
@@ -104,6 +109,59 @@ class ElModalDeCitaSeLimpiaTests(unittest.TestCase):
         self.assertIn('state.actionModalEditId = "";', c)
         self.assertIn("state.actionModalEditSnapshot = null;", c)
         self.assertIn("state.actionModalContext = null;", c)
+
+
+class ElSolapeMiraElTramoNoSoloLaHoraDeArranqueTests(unittest.TestCase):
+    """El aviso comparaba `ev.time !== payload.hora`: solo la hora de arranque.
+
+    Una visita de 10:00 a 11:00 y otra a las 10:30 con el mismo responsable se
+    guardaban sin decir nada. En producción hay dos casos así, encontrados cruzando
+    la tabla el 2026-08-08: SLallana con 09:30-10:30 contra una cita a las 10:00, y
+    D.Garcia con 10:10-10:30 contra 10:20-10:25. 95 de las 166 citas de inmobiliaria
+    llevan hora de fin, que era justo la que no se miraba.
+
+    A la cita sin hora de fin no se le inventa duración: se trata como un instante.
+    Suponerle, por ejemplo, una hora llenaría de avisos falsos una agenda donde 71
+    citas no la tienen.
+    """
+
+    CASOS = [
+        ("10:00", "11:00", "10:30", "11:30", True, "dos tramos que se pisan"),
+        ("09:30", "10:30", "10:00", "", True, "un instante dentro de un tramo"),
+        ("10:10", "10:30", "10:20", "10:25", True, "un tramo dentro de otro"),
+        ("10:00", "11:00", "11:00", "12:00", False, "pegadas: una acaba donde empieza la otra"),
+        ("10:00", "11:00", "09:00", "10:00", False, "la anterior acaba al empezar esta"),
+        ("10:00", "", "10:00", "", True, "dos instantes a la misma hora"),
+        ("10:00", "", "10:30", "", False, "dos instantes distintos"),
+        ("10:00", "11:00", "12:00", "13:00", False, "sin relación"),
+        ("10:00", "09:00", "10:30", "", False, "hora de fin anterior al inicio: se ignora"),
+        ("", "", "10:00", "11:00", False, "sin hora no se compara"),
+    ]
+
+    def test_la_comparacion_usa_el_tramo(self):
+        self.assertIn("agendaTramosSePisan(payload.hora, payload.hora_fin, ev.time, ev.timeEnd)", APP)
+        self.assertNotIn("if (ev.time !== payload.hora) return false;", APP)
+
+    def test_el_evento_lleva_el_asunto_para_poder_nombrar_el_choque(self):
+        self.assertIn('asunto: row.asunto || "",', APP)
+
+    def test_los_diez_casos(self):
+        node = shutil.which("node")
+        if not node:
+            raise unittest.SkipTest("node no está disponible")
+        trozo = APP[APP.index("const normalizeAgendaTimeString"):
+                    APP.index("const formatAgendaTimeFromMinutes")]
+        casos = json.dumps([list(c[:4]) for c in self.CASOS])
+        script = (
+            trozo
+            + "const casos = " + casos + ";"
+            + "console.log(JSON.stringify(casos.map((c) => agendaTramosSePisan(c[0], c[1], c[2], c[3]))));"
+        )
+        salida = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
+        obtenido = json.loads(salida.stdout.strip())
+        for (a1, a2, b1, b2, esperado, desc), real in zip(self.CASOS, obtenido):
+            with self.subTest(caso=desc):
+                self.assertEqual(real, esperado, f"{a1}-{a2} contra {b1}-{b2}: {desc}")
 
 
 if __name__ == "__main__":

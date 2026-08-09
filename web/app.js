@@ -5847,6 +5847,33 @@ const normalizeAgendaTimeString = (value) => {
   return `${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
 };
 
+const agendaMinutosDeHora = (value) => {
+  const norm = normalizeAgendaTimeString(value);
+  const m = norm.match(/^(\d{2}):(\d{2})$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+};
+
+const agendaTramosSePisan = (inicioA, finA, inicioB, finB) => {
+  // El aviso de solape comparaba solo la hora de arranque, así que una visita de
+  // 10:00 a 11:00 y otra a las 10:30 con el mismo responsable se guardaban sin decir
+  // nada. En producción hay dos casos así. 95 de las 166 citas de inmobiliaria
+  // llevan hora de fin, que es justo la que no se estaba mirando.
+  const a1 = agendaMinutosDeHora(inicioA);
+  const b1 = agendaMinutosDeHora(inicioB);
+  if (a1 === null || b1 === null) return false;
+  const a2 = agendaMinutosDeHora(finA);
+  const b2 = agendaMinutosDeHora(finB);
+  // Sin hora de fin la cita es un instante, no un tramo: no se le inventa duración,
+  // que llenaría de avisos falsos una agenda donde 71 citas no la tienen.
+  const finalA = a2 !== null && a2 > a1 ? a2 : null;
+  const finalB = b2 !== null && b2 > b1 ? b2 : null;
+  if (finalA === null && finalB === null) return a1 === b1;
+  if (finalA === null) return a1 >= b1 && a1 < finalB;
+  if (finalB === null) return b1 >= a1 && b1 < finalA;
+  return a1 < finalB && b1 < finalA;
+};
+
 const formatAgendaTimeFromMinutes = (minutes) => {
   if (!Number.isFinite(minutes)) return "";
   const total = ((Math.round(minutes) % (24 * 60)) + (24 * 60)) % (24 * 60);
@@ -5946,6 +5973,9 @@ const buildAgendaEvents = (rows = [], serviceId = "", serviceLabel = "") => {
         dateKey: formatAgendaDate(date),
         time: normalizeAgendaTimeString(row.hora || ""),
         timeEnd: normalizeAgendaTimeString(row.hora_fin || ""),
+        // El asunto es lo que identifica una cita para quien la lee; hace falta para
+        // poder decir con cuál se choca, y no solo que se choca con algo.
+        asunto: row.asunto || "",
         tipo: row.tipo || "",
         cliente: row.cliente || "",
         responsable: row.responsable || "",
@@ -84455,15 +84485,16 @@ if (actionModalSave) {
       if (!ev.dateKey || !payload.fecha) return false;
       if (ev.dateKey !== payload.fecha) return false;
       if (!payload.hora || !ev.time) return false;
-      if (ev.time !== payload.hora) return false;
-      if (payload.responsable && ev.responsable && ev.responsable === payload.responsable) {
-        return true;
-      }
-      return false;
+      if (!payload.responsable || !ev.responsable) return false;
+      if (ev.responsable !== payload.responsable) return false;
+      return agendaTramosSePisan(payload.hora, payload.hora_fin, ev.time, ev.timeEnd);
     });
     if (conflict) {
+      const tramo = conflict.timeEnd ? `${conflict.time}-${conflict.timeEnd}` : conflict.time;
+      const quien = conflict.asunto || conflict.tipo || "otra cita";
       const ok = window.confirm(
-        "Existe otra cita con el mismo responsable y hora. ¿Quieres guardarla igualmente?"
+        `${conflict.responsable} ya tiene algo a esa hora: «${quien}» (${tramo}). ` +
+        "¿Quieres guardarla igualmente?"
       );
       if (!ok) {
         if (actionModalStatus) actionModalStatus.textContent = "Cancelado.";

@@ -46224,6 +46224,48 @@ def ensure_partner_membership(conn, source_workspace_id, target_workspace_id, *,
     return added
 
 
+def enforce_accion_access(conn, session, accion_id, *, write=False):
+    """Deja tocar una cita de la agenda sólo a quien pertenece a su ámbito.
+
+    `/api/acciones_update` comprobaba el workspace así:
+
+        if payload_ws and current_ws:
+            if payload_ws != current_ws: -> 403
+
+    Es decir, **sólo si el cliente se molestaba en mandar `workspace_id`**. Omitiendo
+    ese campo no se comprobaba nada, y el endpoint está además en la lista de exentos
+    del filtro por empresa. Verificado levantando el servidor: una usuaria que sólo
+    pertenece al workspace A cambió el asunto de una cita del workspace B y la base lo
+    guardó. Crear, borrar y listar sí devolvían 403; modificar era el único hueco.
+
+    De las 170 acciones de producción, 136 no tienen `workspace_id` pero **todas**
+    tienen `empresa_id`, así que atar sólo por workspace habría dejado esas 136 sin
+    guarda. Se decide sobre el ámbito que la fila tenga: workspace si lo hay, y si no,
+    la empresa. En ningún caso sobre lo que diga quien llama.
+    """
+    accion_id = str(accion_id or "").strip()
+    if not accion_id:
+        return False, "id requerido", None
+    try:
+        fila = conn.execute(
+            "SELECT * FROM acciones WHERE id = ? LIMIT 1", (accion_id,)
+        ).fetchone()
+    except Exception:
+        _rollback_best_effort(conn)
+        return False, "No autorizado", None
+    if not fila:
+        return False, "Acción no encontrada", None
+    workspace_id = str(row_value(fila, "workspace_id", "") or "").strip()
+    if workspace_id:
+        ok, err = enforce_workspace_membership(conn, session, workspace_id, write=write)
+        return (True, "", fila) if ok else (False, err or "No autorizado", None)
+    empresa_id = str(row_value(fila, "empresa_id", "") or "").strip()
+    if not empresa_id:
+        return False, "No autorizado", None
+    ok, err = enforce_empresa_membership(conn, session, empresa_id, write=write)
+    return (True, "", fila) if ok else (False, err or "No autorizado", None)
+
+
 def enforce_registro_de_inmueble(conn, session, tabla, registro_id, *, write=False, campo="inmueble_id"):
     """Como `enforce_inmueble_access`, para lo que cuelga de un inmueble.
 
@@ -87543,12 +87585,18 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            current = conn.execute(
-                "SELECT * FROM acciones WHERE id = ? LIMIT 1",
-                (record_id,),
-            ).fetchone()
-            if not current:
-                json_response(self, {"error": "Acción no encontrada"}, status=404)
+            # El ámbito lo pone la cita, no quien llama. Antes esto miraba el workspace
+            # sólo `if payload_ws and current_ws`, así que omitir el campo en la
+            # petición saltaba la comprobación entera.
+            ok_acc, err_acc, current = enforce_accion_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                record_id, write=True,
+            )
+            if not ok_acc:
+                json_response(
+                    self, {"error": err_acc or "No autorizado"},
+                    status=404 if err_acc == "Acción no encontrada" else 403,
+                )
                 return
             current_service = normalize_service_key(current["servicio"] or "")
             payload_service = normalize_service_key(payload.get("servicio") or "")
@@ -87563,14 +87611,6 @@ class Handler(BaseHTTPRequestHandler):
                 if not service_allowed:
                     json_response(self, {"error": "Sin permisos para este servicio"}, status=403)
                     return
-            try:
-                payload_ws = str(payload.get("workspace_id") or "").strip()
-                current_ws = str(current["workspace_id"] or "").strip() if "workspace_id" in current.keys() else ""
-                if payload_ws and current_ws and payload_ws != current_ws:
-                    json_response(self, {"error": "La acción pertenece a otro workspace"}, status=403)
-                    return
-            except Exception:
-                pass
             updates = {}
             for key in (
                 "fecha",
@@ -87998,12 +88038,17 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
-            current = conn.execute(
-                "SELECT * FROM acciones WHERE id = ? LIMIT 1",
-                (record_id,),
-            ).fetchone()
-            if not current:
-                json_response(self, {"error": "Acción no encontrada"}, status=404)
+            # Aquí el 403 lo daba de rebote el filtro por empresa, y sólo porque el
+            # borrado exige `empresa_nombre`. Se ata a la propia cita, como el update.
+            ok_acc, err_acc, current = enforce_accion_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                record_id, write=True,
+            )
+            if not ok_acc:
+                json_response(
+                    self, {"error": err_acc or "No autorizado"},
+                    status=404 if err_acc == "Acción no encontrada" else 403,
+                )
                 return
             current_service = normalize_service_key(current["servicio"] or "")
             payload_service = normalize_service_key(payload.get("servicio") or "")
