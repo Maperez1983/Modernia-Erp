@@ -25722,6 +25722,55 @@ def cliente_workspace_id_for_write(conn, *, workspace_id="", empresa_id=""):
     return resolve_workspace_id_for_empresa(conn, empresa_id)
 
 
+def workspace_para_alta_de_cliente(conn, session, empresa_id, workspace_id=""):
+    """Con qué workspace nace un cliente dado de alta desde inmobiliaria.
+
+    `resolve_workspace_id_for_empresa` se niega —con razón— a adivinar cuando una
+    empresa cuelga de varios workspaces: estampar el equivocado sería mezclar
+    tenants. El problema es que en producción **todas** las empresas cuelgan de dos,
+    porque el workspace de plataforma («Verifika²») las contiene todas además del
+    workspace del cliente. Así que la deducción por empresa no resuelve ninguna, y
+    las altas que no pasaban el dato reventaban con un 500.
+
+    Aquí se resuelve sin adivinar:
+
+    1. Lo que traiga la petición, que ya pasó por `enforce_*_membership`.
+    2. Si no, los workspaces de la empresa cruzados con los de quien firma. Diez de
+       los diecisiete usuarios activos pertenecen a uno solo, así que para ellos el
+       cruce es único y no hay nada que suponer.
+    3. Si el cruce sigue siendo ambiguo, '' — y quien llama debe pedir el dato en
+       vez de elegir por su cuenta.
+    """
+    ws = str(workspace_id or "").strip()
+    if ws:
+        return ws
+    eid = str(empresa_id or "").strip()
+    uid = str((session or {}).get("user_id") or "").strip()
+    if not eid or not uid:
+        return resolve_workspace_id_for_empresa(conn, eid)
+    try:
+        filas = conn.execute(
+            """
+            SELECT DISTINCT we.workspace_id
+            FROM workspace_empresas we
+            JOIN workspace_miembros m ON m.workspace_id = we.workspace_id
+            WHERE we.empresa_id = ? AND m.usuario_id = ?
+            """,
+            (eid, uid),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return resolve_workspace_id_for_empresa(conn, eid)
+    candidatos = []
+    for f in filas or []:
+        v = str(row_value(f, "workspace_id") or row_value(f, 0) or "").strip()
+        if v and v not in candidatos:
+            candidatos.append(v)
+    if len(candidatos) == 1:
+        return candidatos[0]
+    return resolve_workspace_id_for_empresa(conn, eid)
+
+
 def insert_cliente_scoped(conn, columnas, valores, *, workspace_id="", empresa_id=""):
     """Único punto por el que pasan las altas internas de cliente.
 
@@ -26885,7 +26934,7 @@ def create_operacion_for_inmueble_cierre(conn, empresa_id, inmueble_id, tipo_lab
     return op_id
 
 
-def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=None, fecha_cierre=None, importe_final=None, numero_citas=None, tipo=None, notas=None, archive_pending=True, honorarios=None, motivo_cierre=None, nuevo_propietario=None):
+def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=None, fecha_cierre=None, importe_final=None, numero_citas=None, tipo=None, notas=None, archive_pending=True, honorarios=None, motivo_cierre=None, nuevo_propietario=None, workspace_id=""):
     empresa_id = str(empresa_id or "").strip()
     inmueble_id = str(inmueble_id or "").strip()
     if not empresa_id or not inmueble_id:
@@ -26928,6 +26977,7 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
                 "telefono": nuevo_propietario.get("telefono"),
                 "email": nuevo_propietario.get("email"),
             },
+            workspace_id=workspace_id,
         )
     operacion_id = create_operacion_for_inmueble_cierre(
         conn,
@@ -30133,7 +30183,7 @@ def get_inmueble_servicios(conn, inmueble_id):
     return [str(row_value(r, "servicio", "") or "").strip() for r in rows if str(row_value(r, "servicio", "") or "").strip()]
 
 
-def resolve_inmobiliaria_contact_candidate(conn, empresa_id, payload, *, role_prefix="", demanda_id="", inmueble_id=""):
+def resolve_inmobiliaria_contact_candidate(conn, empresa_id, payload, *, role_prefix="", demanda_id="", inmueble_id="", workspace_id=""):
     nombre = normalize_person_name(payload.get(f"{role_prefix}_nombre")) if role_prefix else ""
     nif = normalize_nif(payload.get(f"{role_prefix}_nif")) if role_prefix else ""
     telefono = str(payload.get(f"{role_prefix}_telefono") or "").strip() if role_prefix else ""
@@ -30147,6 +30197,7 @@ def resolve_inmobiliaria_contact_candidate(conn, empresa_id, payload, *, role_pr
             nif,
             datetime.now(timezone.utc).isoformat(),
             {"telefono": telefono, "email": email},
+            workspace_id=workspace_id,
         )
         return {
             "cliente_id": cliente_id,
@@ -82030,6 +82081,22 @@ class Handler(BaseHTTPRequestHandler):
                         status=400,
                     )
                     return
+                # Los propietarios y compradores que no existan se dan de alta como
+                # clientes, y un cliente sin workspace nace invisible. La empresa sola
+                # no basta para deducirlo —todas cuelgan también del workspace de
+                # plataforma—, así que se resuelve con lo que trae la petición o, si no
+                # trae nada, cruzando la empresa con los workspaces de quien firma.
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ws_alta = workspace_para_alta_de_cliente(
+                    conn, session, empresa["id"], payload_workspace_id
+                )
+                if not ws_alta:
+                    json_response(
+                        self,
+                        {"error": "Indica el workspace de la operación: la empresa pertenece a varios."},
+                        status=400,
+                    )
+                    return
                 allow_duplicate = str(payload.get("allow_duplicate") or "").strip().lower() in {"1", "true", "yes", "si"}
                 duplicate_matches = detect_inmobiliaria_duplicates(
                     conn,
@@ -82071,6 +82138,7 @@ class Handler(BaseHTTPRequestHandler):
                         "fecha_nacimiento": payload.get("propietario1_fecha_nacimiento"),
                         "direccion": direccion,
                     },
+                    workspace_id=ws_alta,
                 )
                 propietario2_id = ensure_cliente_for_inmobiliaria(
                     conn,
@@ -82084,6 +82152,7 @@ class Handler(BaseHTTPRequestHandler):
                         "fecha_nacimiento": payload.get("propietario2_fecha_nacimiento"),
                         "direccion": direccion,
                     },
+                    workspace_id=ws_alta,
                 )
                 contraparte1_id = ensure_cliente_for_inmobiliaria(
                     conn,
@@ -82097,6 +82166,7 @@ class Handler(BaseHTTPRequestHandler):
                         "fecha_nacimiento": payload.get("contraparte1_fecha_nacimiento"),
                         "direccion": "",
                     },
+                    workspace_id=ws_alta,
                 )
                 contraparte2_id = ensure_cliente_for_inmobiliaria(
                     conn,
@@ -82110,6 +82180,7 @@ class Handler(BaseHTTPRequestHandler):
                         "fecha_nacimiento": payload.get("contraparte2_fecha_nacimiento"),
                         "direccion": "",
                     },
+                    workspace_id=ws_alta,
                 )
                 inmueble_id = ensure_inmueble_for_compraventa(conn, empresa["id"], payload, now)
                 if not contraparte1_id and not contraparte2_id:
@@ -83080,6 +83151,19 @@ class Handler(BaseHTTPRequestHandler):
                 propietarios = payload.get("propietarios") or []
                 if isinstance(propietarios, str):
                     propietarios = [p for p in propietarios.split(",") if p]
+                # Igual que en compraventas: el propietario nace como cliente y sin
+                # workspace no lo vería nadie.
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ws_alta = workspace_para_alta_de_cliente(
+                    conn, session, empresa["id"], payload_workspace_id
+                )
+                if not ws_alta:
+                    json_response(
+                        self,
+                        {"error": "Indica el workspace de la captación: la empresa pertenece a varios."},
+                        status=400,
+                    )
+                    return
                 propietario_principal_id = ensure_cliente_for_inmobiliaria(
                     conn,
                     empresa["id"],
@@ -83091,6 +83175,7 @@ class Handler(BaseHTTPRequestHandler):
                         "email": payload.get("propietario_email"),
                         "direccion": payload.get("direccion"),
                     },
+                    workspace_id=ws_alta,
                 )
                 if propietario_principal_id and propietario_principal_id not in propietarios:
                     propietarios.append(propietario_principal_id)
@@ -84039,6 +84124,12 @@ class Handler(BaseHTTPRequestHandler):
                     honorarios = parse_money_value(payload.get("honorarios"))
                     if honorarios is None:
                         honorarios = parse_money_value(inmueble.get("honorarios"))
+                    # El contacto que no exista nace como cliente: hace falta su ámbito.
+                    session = getattr(self, "auth_session", None) or self._current_session()
+                    ws_alta = workspace_para_alta_de_cliente(
+                        conn, session, empresa["id"],
+                        str(row_value(inmueble, "workspace_id", "") or "").strip(),
+                    )
                     buyer = resolve_inmobiliaria_contact_candidate(
                         conn,
                         empresa["id"],
@@ -84046,6 +84137,7 @@ class Handler(BaseHTTPRequestHandler):
                         role_prefix="comprador",
                         demanda_id=str(payload.get("demanda_id") or "").strip(),
                         inmueble_id=captacion["inmueble_id"],
+                        workspace_id=ws_alta,
                     )
                     comprador_id = buyer.get("cliente_id")
                     record = conn.execute(
@@ -84251,6 +84343,12 @@ class Handler(BaseHTTPRequestHandler):
                 precio_alquiler = parse_money_value(payload.get("precio") or payload.get("precio_alquiler"))
                 if precio_alquiler is None:
                     precio_alquiler = parse_money_value(captacion["precio_objetivo"]) or parse_money_value(inmueble["precio_objetivo"])
+                # El contacto que no exista nace como cliente: hace falta su ámbito.
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ws_alta = workspace_para_alta_de_cliente(
+                    conn, session, empresa["id"],
+                    str(row_value(inmueble, "workspace_id", "") or "").strip(),
+                )
                 tenant = resolve_inmobiliaria_contact_candidate(
                     conn,
                     empresa["id"],
@@ -84258,6 +84356,7 @@ class Handler(BaseHTTPRequestHandler):
                     role_prefix="inquilino",
                     demanda_id=str(payload.get("demanda_id") or "").strip(),
                     inmueble_id=captacion["inmueble_id"],
+                    workspace_id=ws_alta,
                 )
                 inquilino_id = tenant.get("cliente_id")
                 alquiler = conn.execute(
@@ -85149,6 +85248,12 @@ class Handler(BaseHTTPRequestHandler):
                 "telefono": str(payload.get("nuevo_propietario_telefono") or "").strip(),
                 "email": str(payload.get("nuevo_propietario_email") or "").strip(),
             }
+            # El contacto que no exista nace como cliente: hace falta su ámbito.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ws_alta = workspace_para_alta_de_cliente(
+                conn, session, inmueble["empresa_id"],
+                str(row_value(inmueble, "workspace_id", "") or "").strip(),
+            )
             result = close_inmueble_encargo_positive(
                 conn,
                 inmueble["empresa_id"],
@@ -85164,6 +85269,7 @@ class Handler(BaseHTTPRequestHandler):
                 honorarios=honorarios,
                 motivo_cierre=motivo_cierre,
                 nuevo_propietario=nuevo_propietario,
+                workspace_id=ws_alta,
             )
             if not result.get("ok"):
                 json_response(self, {"error": result.get("error") or "No se pudo cerrar"}, status=400)
@@ -85237,6 +85343,15 @@ class Handler(BaseHTTPRequestHandler):
             if not ok_acc:
                 json_response(self, {"error": err_acc}, status=404 if err_acc == "Inmueble no encontrado" else 403)
                 return
+            # El propietario nace como cliente, y sin workspace nacería invisible. El
+            # ámbito más preciso es el del propio inmueble; si es de los anteriores a
+            # ese campo, se resuelve por empresa y sesión.
+            ws_alta = workspace_para_alta_de_cliente(
+                conn,
+                session,
+                inmueble["empresa_id"],
+                str(row_value(_fila_acc, "workspace_id", "") or "").strip(),
+            )
             cliente_id = ensure_cliente_for_inmobiliaria(
                 conn,
                 inmueble["empresa_id"],
@@ -85248,6 +85363,7 @@ class Handler(BaseHTTPRequestHandler):
                     "email": email_value,
                     "direccion": inmueble["direccion"] or "",
                 },
+                workspace_id=ws_alta,
             )
             ensure_inmueble_propietario_link(conn, inmueble_id, cliente_id, now)
             sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
