@@ -27793,6 +27793,105 @@ def create_inmueble_signature_request(
     }
 
 
+def hay_canal_aparte_para_el_otp():
+    """¿Se puede mandar el código por un canal distinto del correo?
+
+    Meter el código en el mismo correo que el enlace deja el segundo factor en
+    nada: si el buzón se compromete o alguien reenvía el mensaje, los dos viajan
+    juntos. El OTP existe justo para el caso en que el enlace se ha ido de las
+    manos. Con SMS o WhatsApp configurado, el correo deja de llevarlo.
+    """
+    return bool(
+        str(os.environ.get("SIGNATURE_SMS_WEBHOOK_URL") or "").strip()
+        or str(os.environ.get("SIGNATURE_WHATSAPP_WEBHOOK_URL") or "").strip()
+    )
+
+
+def _url_absoluta_para_correo(valor, base):
+    """Un `/uploads/...` no se ve en un correo: hace falta el dominio delante."""
+    crudo = str(valor or "").strip()
+    if not crudo:
+        return ""
+    if crudo.startswith(("http://", "https://", "data:")):
+        return crudo
+    if crudo.startswith("/") and base:
+        return f"{str(base).rstrip('/')}{crudo}"
+    return ""
+
+
+def correo_de_firma_html(*, agencia, logo, firmante, documento, enlace, otp="", caduca="", recordatorio=False):
+    """El correo de firma, con la marca de la agencia que lo manda.
+
+    Antes eran cuatro `<p>` y un enlace azul del navegador. Y justo detrás va un
+    PDF vectorial con tipografía de marca y cabecera propia: el cliente veía lo
+    peor primero, porque el correo llega antes que el documento.
+
+    Se escribe con tablas y estilos en línea a propósito. Los clientes de correo
+    —Outlook sobre todo— ignoran hojas de estilo, `flex` y `grid`; lo que aguanta
+    en todos es esto, por antiguo que parezca.
+    """
+    agencia = html.escape(str(agencia or "").strip() or "Tu agencia")
+    firmante_txt = html.escape(str(firmante or "").strip())
+    documento_txt = html.escape(str(documento or "documento").strip())
+    enlace_txt = html.escape(str(enlace or ""))
+    saludo = f"Hola {firmante_txt}," if firmante_txt else "Hola,"
+    titulo = "Recordatorio de firma" if recordatorio else "Solicitud de firma"
+
+    cabecera = (
+        f'<img src="{html.escape(logo)}" alt="{agencia}" '
+        f'style="max-height:44px;max-width:200px;display:block;border:0;">'
+        if logo
+        else f'<span style="font:600 19px/1.2 Helvetica,Arial,sans-serif;color:#0B1D33;">{agencia}</span>'
+    )
+    bloque_otp = (
+        f'<tr><td style="padding:0 32px 20px;">'
+        f'<div style="background:#F5F7FB;border:1px solid #E2E8F0;border-radius:10px;padding:14px 16px;">'
+        f'<div style="font:500 12px/1.4 Helvetica,Arial,sans-serif;color:#556070;'
+        f'letter-spacing:.06em;text-transform:uppercase;">Código de verificación</div>'
+        f'<div style="font:700 26px/1.3 Helvetica,Arial,sans-serif;color:#0B1D33;'
+        f'letter-spacing:.18em;">{html.escape(str(otp))}</div></div></td></tr>'
+        if otp
+        else ""
+    )
+    bloque_caduca = (
+        f'<tr><td style="padding:0 32px 20px;font:400 13px/1.6 Helvetica,Arial,sans-serif;color:#556070;">'
+        f'El enlace caduca el {html.escape(str(caduca))}.</td></tr>'
+        if caduca
+        else ""
+    )
+
+    return f"""<!doctype html>
+<html lang="es"><body style="margin:0;padding:0;background:#EEF2F6;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#EEF2F6;padding:28px 12px;">
+<tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+  style="max-width:560px;background:#FFFFFF;border-radius:14px;overflow:hidden;
+         box-shadow:0 1px 3px rgba(11,29,51,.10);">
+  <tr><td style="height:4px;background:#16A34A;font-size:0;line-height:0;">&nbsp;</td></tr>
+  <tr><td style="padding:26px 32px 8px;">{cabecera}</td></tr>
+  <tr><td style="padding:0 32px 6px;font:600 22px/1.3 Georgia,'Times New Roman',serif;color:#0B1D33;">
+    {titulo}</td></tr>
+  <tr><td style="padding:0 32px 18px;font:400 15px/1.65 Helvetica,Arial,sans-serif;color:#334155;">
+    {saludo} tienes pendiente la firma electrónica de
+    <strong style="color:#0B1D33;">{documento_txt}</strong>.</td></tr>
+  <tr><td style="padding:0 32px 22px;">
+    <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+      <td style="background:#16A34A;border-radius:9px;">
+        <a href="{enlace_txt}" style="display:inline-block;padding:13px 26px;
+           font:600 15px/1 Helvetica,Arial,sans-serif;color:#FFFFFF;text-decoration:none;">
+          Revisar y firmar</a></td></tr></table></td></tr>
+  {bloque_otp}
+  {bloque_caduca}
+  <tr><td style="padding:0 32px 26px;font:400 13px/1.6 Helvetica,Arial,sans-serif;color:#556070;
+         border-top:1px solid #E2E8F0;padding-top:18px;">
+    Si no esperabas esta solicitud, no abras el enlace y avisa a {agencia}.<br>
+    Si el botón no funciona, copia esta dirección en tu navegador:<br>
+    <span style="color:#334155;word-break:break-all;">{enlace_txt}</span></td></tr>
+</table>
+</td></tr></table>
+</body></html>"""
+
+
 def send_inmueble_signature_email(conn, request_row, *, token, otp="", base_url="", reminder=False, now=None):
     row = dict(request_row) if request_row else {}
     email = normalize_email(row.get("signer_email") or "")
@@ -27809,23 +27908,64 @@ def send_inmueble_signature_email(conn, request_row, *, token, otp="", base_url=
         return {"sent": False, "reason": "smtp_no_configurado"}
     base = resolve_public_link_base_url(base_url)
     full_url = build_public_fragment_url("firma_inmo", token, base_url=base)
-    subject = "Recordatorio de firma electrónica" if reminder else "Solicitud de firma electrónica"
     doc_name = str(row.get("doc_nombre") or "documento").strip()
     signer = str(row.get("signer_nombre") or "").strip()
-    otp_line = f"\nCódigo OTP: {otp}\n" if otp else ""
-    text_body = (
-        f"Hola {signer or ''},\n\n"
-        f"Tienes pendiente la firma electrónica del documento: {doc_name}.\n\n"
-        f"Accede desde este enlace:\n{full_url}\n"
-        f"{otp_line}\n"
-        "Si no esperabas esta solicitud, contacta con la oficina.\n"
+
+    # El correo lo manda la agencia, no «el CRM»: quien firma tiene que reconocer
+    # de quién es antes de pinchar nada.
+    agencia, logo = "", ""
+    try:
+        emp = conn.execute(
+            "SELECT nombre, razon_social, logo_url FROM empresas WHERE id = ? LIMIT 1",
+            (row.get("empresa_id"),),
+        ).fetchone()
+        if emp:
+            agencia = str(row_value(emp, "nombre", "") or row_value(emp, "razon_social", "") or "").strip()
+            logo = _url_absoluta_para_correo(row_value(emp, "logo_url", ""), base)
+    except Exception:
+        _rollback_best_effort(conn)
+
+    subject = (
+        f"Recordatorio de firma · {doc_name}" if reminder else f"Firma pendiente · {doc_name}"
     )
-    html_body = (
-        f"<p>Hola {html.escape(signer or '')},</p>"
-        f"<p>Tienes pendiente la firma electrónica del documento: <strong>{html.escape(doc_name)}</strong>.</p>"
-        f"<p><a href=\"{html.escape(full_url)}\">Abrir solicitud de firma</a></p>"
-        f"{f'<p><strong>Código OTP:</strong> {html.escape(str(otp))}</p>' if otp else ''}"
-        "<p>Si no esperabas esta solicitud, contacta con la oficina.</p>"
+    if agencia:
+        subject = f"{subject} · {agencia}"
+
+    # Con SMS o WhatsApp configurado, el código va por ahí y el correo no lo repite:
+    # los dos factores en el mismo mensaje son un solo factor.
+    otp_en_correo = str(otp or "").strip() if (otp and not hay_canal_aparte_para_el_otp()) else ""
+    caduca = ""
+    try:
+        dt = _parse_iso_dt_utc(row.get("expires_at"))
+        if dt:
+            caduca = dt.strftime("%d/%m/%Y")
+    except Exception:
+        caduca = ""
+
+    lineas = [
+        f"Hola {signer}," if signer else "Hola,",
+        "",
+        f"Tienes pendiente la firma electrónica de {doc_name}.",
+        "",
+        "Revisa y firma desde este enlace:",
+        full_url,
+    ]
+    if otp_en_correo:
+        lineas += ["", f"Código de verificación: {otp_en_correo}"]
+    if caduca:
+        lineas += ["", f"El enlace caduca el {caduca}."]
+    lineas += ["", f"Si no esperabas esta solicitud, no abras el enlace y avisa a {agencia or 'la oficina'}.", ""]
+    text_body = "\n".join(lineas)
+
+    html_body = correo_de_firma_html(
+        agencia=agencia,
+        logo=logo,
+        firmante=signer,
+        documento=doc_name,
+        enlace=full_url,
+        otp=otp_en_correo,
+        caduca=caduca,
+        recordatorio=reminder,
     )
     try:
         send_mail_smtp(subject, email, text_body, html_body=html_body)
@@ -31997,17 +32137,31 @@ def build_inmueble_anuncio_copy(inmueble):
     zona = text("zona")
     poblacion = text("poblacion", "localidad")
     provincia = text("provincia")
-    ubicacion = " en ".join([part for part in [zona, poblacion] if part]) or poblacion or provincia
+    # Antes se unía con « en », y salía «en San Andrés en Málaga» porque abajo se
+    # vuelve a anteponer «en». Barrio y ciudad se separan con coma, como en cualquier
+    # anuncio.
+    ubicacion = ", ".join([part for part in [zona, poblacion] if part]) or poblacion or provincia
     location_phrase = f" en {ubicacion}" if ubicacion else ""
     m2 = num("m2")
     habitaciones = num("habitaciones")
     banos = num("banos")
-    estado = text("estado_inmueble", "estado")
+    # OJO: sólo `estado_inmueble`, que es el estado de conservación. `estado` es la
+    # etapa del expediente —«Encargo», «Noticia»—, vocabulario interno del CRM que no
+    # pinta nada en un anuncio: salía publicado un «estado encargo» que no significa
+    # nada para quien busca casa.
+    estado = text("estado_inmueble")
     ocupacion = text("situacion_ocupacion")
     precio = data.get("precio_encargo") or data.get("precio_objetivo") or data.get("precio_pedido_cliente") or data.get("precio_valoracion")
 
-    tipo_label = f"{subtipo} {tipo}".strip() if subtipo and subtipo.lower() not in tipo.lower() else tipo
-    op_label = "alquiler" if operacion in {"alquiler", "arrendamiento", "renta"} else "venta"
+    # «BAJO Local» se lee como un error de plantilla; el tipo va delante y el subtipo
+    # lo matiza, que es como se nombra un inmueble en castellano.
+    tipo_label = f"{tipo} {subtipo.lower()}".strip() if subtipo and subtipo.lower() not in tipo.lower() else tipo
+    # `normalize_lookup_text` devuelve MAYÚSCULAS, así que esta comparación contra
+    # minúsculas no se cumplía nunca: **todos** los anuncios se generaban como venta,
+    # también los alquileres. Con el texto anterior no se notaba porque hablaba de
+    # «una operación de venta» en una frase larga; al escribir «Se alquila / Se vende»
+    # delante del todo, saltó a la vista.
+    op_label = "alquiler" if operacion in {"ALQUILER", "ARRENDAMIENTO", "RENTA"} else "venta"
     title_parts = [tipo_label, location_phrase.strip()]
     title = " ".join([part for part in title_parts if part]).strip()
     if not title:
@@ -32016,7 +32170,7 @@ def build_inmueble_anuncio_copy(inmueble):
 
     feature_bits = []
     if m2:
-        feature_bits.append(f"{m2} m2")
+        feature_bits.append(f"{m2} m²")
     if habitaciones:
         feature_bits.append(f"{habitaciones} dormitorio{'s' if int(habitaciones) != 1 else ''}")
     if banos:
@@ -32024,40 +32178,45 @@ def build_inmueble_anuncio_copy(inmueble):
     if estado:
         feature_bits.append(f"estado {estado.lower()}")
     if ocupacion:
-        feature_bits.append(f"ocupacion: {ocupacion.lower()}")
+        feature_bits.append(f"ocupación: {ocupacion.lower()}")
 
+    # El anuncio lo lee alguien que busca casa, no alguien que compra el CRM. El
+    # texto anterior empezaba por «Verifika2 presenta este local… con información
+    # contrastada desde el CRM inmobiliario» y terminaba ofreciendo «seguimiento con
+    # trazabilidad»: palabras que le importan a quien contrata el software y a nadie
+    # más. Y estaba escrito sin tildes —«operacion», «informacion», «banos»—, que en
+    # un portal público se lee como descuido.
     short = f"{tipo_label}{location_phrase}"
     if feature_bits:
         short = f"{short} con {', '.join(feature_bits[:3])}"
-    if precio:
-        short = f"{short}. Precio de {op_label} disponible en ficha."
-    else:
-        short = f"{short}. Solicita mas informacion y visita."
+    short = f"{short}. Consulta el precio y concierta una visita."
 
-    paragraphs = [
-        f"Verifika2 presenta este {tipo_label.lower()}{location_phrase}, una oportunidad pensada para quienes buscan una operacion de {op_label} con informacion clara y contrastada.",
-    ]
+    if op_label == "alquiler":
+        apertura = f"Se alquila {tipo_label.lower()}{location_phrase}."
+    else:
+        apertura = f"Se vende {tipo_label.lower()}{location_phrase}."
+    paragraphs = [apertura]
     if feature_bits:
-        paragraphs.append(f"La vivienda cuenta con {', '.join(feature_bits)}.")
+        paragraphs.append(f"Cuenta con {', '.join(feature_bits)}.")
     base_desc = text("descripcion")
     if base_desc:
         paragraphs.append(base_desc)
-    paragraphs.append("Contacta con nuestro equipo para ampliar informacion, resolver dudas y coordinar una visita.")
+    paragraphs.append("Escríbenos o llámanos para resolver dudas y concertar una visita sin compromiso.")
     long = "\n\n".join(paragraphs).strip()
 
     highlights = []
     if m2:
-        highlights.append(f"{m2} m2 construidos")
+        highlights.append(f"{m2} m² construidos")
     if habitaciones:
-        highlights.append(f"{habitaciones} dormitorios")
+        highlights.append(f"{habitaciones} dormitorio{'s' if int(habitaciones) != 1 else ''}")
     if banos:
-        highlights.append(f"{banos} banos")
+        highlights.append(f"{banos} baño{'s' if int(banos) != 1 else ''}")
     if ubicacion:
         highlights.append(ubicacion)
     if estado:
         highlights.append(estado)
     if not highlights:
-        highlights.append("Inmueble verificado")
+        highlights.append(tipo_label)
 
     slug_source = " ".join([title, poblacion, provincia]).strip() or text("referencia") or text("id")
     return {
@@ -62712,6 +62871,15 @@ class Handler(BaseHTTPRequestHandler):
                     "db_dsn_source": db_source,
                     "db_host": db_host,
                     "pg_pool": pool_stats,
+                    # De aquí salen TODOS los enlaces que se mandan a personas: activar
+                    # cuenta, invitación, firma de documentos, portal del propietario y
+                    # la URL de cada anuncio del portal. Si `APP_BASE_URL` no está
+                    # puesta se cae a RENDER_EXTERNAL_URL, y un cliente recibe un
+                    # correo para firmar una escritura con un enlace a onrender.com.
+                    # Sale aquí para poder comprobarlo de un vistazo, sin entrar en
+                    # Render y sin adivinar si la variable llegó a aplicarse.
+                    "public_base_url": self._external_base_url(),
+                    "public_base_url_configurada": bool(configured_app_base_url()),
                     "recent_api_errors": Handler._recent_api_errors(limit=12),
                 },
             )

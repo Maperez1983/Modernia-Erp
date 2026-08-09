@@ -12827,15 +12827,55 @@ body.auth-pending #authLoginOverlay.auth-login-overlay.hidden {
 }
 
 .auth-login-actions {
+  /* En columna, no en fila. El botón «Entrar» era pequeño y alineado a la izquierda
+     mientras los campos ocupaban todo el ancho: rompía el ritmo de la tarjeta y en
+     móvil quedaba en una esquina, lejos del pulgar. La acción principal de un
+     formulario de acceso pesa lo mismo que sus campos. */
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
   margin-top: 2px;
 }
 
+.auth-login-actions button[type="submit"] {
+  width: 100%;
+  padding-block: 12px;
+  font-size: 1rem;
+}
+
+/* Enlace de recuperación: presente, pero sin competir con «Entrar». */
+.auth-forgot-link {
+  appearance: none;
+  background: none;
+  /* Hereda de la regla general de `button` una sombra y un radio que lo hacían
+     parecer un botón secundario compitiendo con «Entrar». Es un enlace. */
+  box-shadow: none;
+  border-radius: 0;
+  border: 0;
+  padding: 4px 0;
+  margin-top: 2px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.92rem;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  align-self: center;
+}
+
+.auth-forgot-link:hover,
+.auth-forgot-link:focus-visible {
+  color: var(--ink);
+}
+
 .auth-login-actions .muted {
-  min-height: 2.7em;
+  /* Reservaba 2.7em para que el mensaje de error no empujara el botón. Con la
+     columna, el botón ya está arriba y ese hueco vacío sólo separaba «Entrar» del
+     enlace de recuperación. Se deja lo justo para una línea. */
+  min-height: 1.35em;
   line-height: 1.35;
+  text-align: center;
 }
 
 .auth-login-actions button:disabled,

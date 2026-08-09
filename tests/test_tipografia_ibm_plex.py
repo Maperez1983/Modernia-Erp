@@ -83,26 +83,42 @@ class LasVistasDeImpresionYLosCorreosTests(unittest.TestCase):
                 self.assertIn("IBM Plex", decl)
 
     def test_toda_declaracion_de_fuente_del_servidor_es_ibm_plex(self):
-        for decl in re.findall(r"font-family:\s*([^;}]+)", SERVER):
+        # El correo de firma queda fuera: no puede cargar webfonts ni contar con que
+        # IBM Plex esté instalada en el ordenador de quien lo abre. Ver
+        # `LosDocumentosGeneradosTests.test_no_queda_helvetica_escrita_a_mano`.
+        texto = SERVER
+        if "def correo_de_firma_html" in texto:
+            i = texto.index("def correo_de_firma_html")
+            texto = texto[:i] + texto[texto.index("\ndef ", i + 10):]
+        for decl in re.findall(r"font-family:\s*([^;}]+)", texto):
             with self.subTest(decl=decl.strip()[:40]):
                 self.assertIn("IBM Plex", decl)
 
 
 class LosDocumentosGeneradosTests(unittest.TestCase):
     def test_no_queda_helvetica_escrita_a_mano(self):
-        """Salvo en los campos de formulario, donde el formato no admite otra cosa.
+        """Con dos excepciones, y las dos son del formato, no del gusto.
 
-        Los campos AcroForm sólo aceptan las 14 fuentes estándar del PDF. Se le
-        estaba pasando IBMPlexSans, así que reportlab lanzaba en cada campo y el
-        `except` de al lado lo escondía: el reconocimiento de honorarios salía sin
-        un solo campo. La excepción vive aislada en `_fuente_para_formulario`; fuera
-        de ahí, Helvetica sigue prohibida.
+        **Campos de formulario.** Los AcroForm sólo aceptan las 14 fuentes estándar
+        del PDF. Se le estaba pasando IBMPlexSans, así que reportlab lanzaba en cada
+        campo y el `except` de al lado lo escondía: el reconocimiento de honorarios
+        salía sin un solo campo. Vive aislada en `_fuente_para_formulario`.
+
+        **El correo de firma.** Un correo no puede cargar webfonts —Gmail y Outlook
+        las descartan— ni fiarse de que IBM Plex esté instalada en el ordenador de
+        quien lo recibe. Lo que se ve igual en todos los clientes es la pila del
+        sistema, y ahí Helvetica/Arial es lo correcto. Vive en
+        `correo_de_firma_html`.
+
+        Fuera de esas dos funciones, Helvetica sigue prohibida.
         """
+        aisladas = ("def _fuente_para_formulario", "def correo_de_firma_html")
         for fichero in ("server.py", "document_pdf.py"):
             texto = (RAIZ / "web" / fichero).read_text(encoding="utf-8")
-            if "def _fuente_para_formulario" in texto:
-                i = texto.index("def _fuente_para_formulario")
-                texto = texto[:i] + texto[texto.index("\ndef ", i + 10):]
+            for marca in aisladas:
+                if marca in texto:
+                    i = texto.index(marca)
+                    texto = texto[:i] + texto[texto.index("\ndef ", i + 10):]
             with self.subTest(fichero=fichero):
                 self.assertNotIn("Helvetica", texto)
 

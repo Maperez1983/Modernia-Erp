@@ -93260,6 +93260,19 @@ if (authLoginForm) {
   });
 }
 
+// «¿Has olvidado la contraseña?»: la recuperación ya existía, pero su botón sólo
+// aparecía tras fallar un intento. Reutiliza ese mismo camino.
+const authForgotLink = document.getElementById("authForgotLink");
+if (authForgotLink) {
+  authForgotLink.addEventListener("click", () => {
+    if (!AuthModule || typeof AuthModule.startAccessRecovery !== "function") return;
+    AuthModule.startAccessRecovery(
+      { authLoginUser, authLoginStatus },
+      authLoginUser?.value || ""
+    );
+  });
+}
+
 if (authLoginPassToggle && authLoginPass) {
   const applyPasswordVisibility = (visible) => {
     authLoginPass.type = visible ? "text" : "password";

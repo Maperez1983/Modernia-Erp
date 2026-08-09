@@ -123,6 +123,25 @@
     setRecoveryBusyState(btn, false);
   }
 
+  function startAccessRecovery(deps, login) {
+    // El enlace «¿Has olvidado la contraseña?» de la pantalla de acceso. Antes la
+    // recuperación sólo se ofrecía DESPUÉS de fallar un intento —el botón nacía con
+    // display:none y sólo aparecía si el servidor decía `recovery_available`—, así
+    // que había que equivocarse para descubrir que se podía. Esto entra por el mismo
+    // sitio en vez de duplicar la llamada: prepara el botón y lo dispara.
+    const usuario = String(login || "").trim();
+    if (!usuario) {
+      if (deps.authLoginStatus) {
+        deps.authLoginStatus.textContent = "Escribe tu usuario o email y vuelve a pulsar.";
+      }
+      if (deps.authLoginUser) deps.authLoginUser.focus();
+      return;
+    }
+    showRecoveryButton(deps, usuario);
+    const btn = window.__authRecoveryBtn;
+    if (btn) btn.click();
+  }
+
   async function waitForHealth(deps, options) {
     const maxMs = Math.max(5000, Number(options?.maxMs || 120000) || 120000);
     const reqTimeoutMs = Math.max(1500, Number(options?.requestTimeoutMs || 10000) || 10000);
@@ -578,5 +597,6 @@
     submitActivationPassword,
     submitAuthLogin,
     logoutAuthSession,
+    startAccessRecovery,
   };
 })();

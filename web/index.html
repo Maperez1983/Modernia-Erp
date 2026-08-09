@@ -9,7 +9,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=318" />
+	    <link rel="stylesheet" href="styles.css?v=319" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -11764,13 +11764,12 @@
       <div class="auth-brand">
         <img src="/assets/verifika2/verifika2_wordmark_traced.svg" alt="Verifika²" width="766" height="162" />
         <p class="muted">CRM · Operativa inmobiliaria</p>
-        <div class="auth-brand-badges" aria-hidden="true">
-          <span class="auth-brand-badge">Acceso seguro</span>
-          <span class="auth-brand-badge">Workspace · CRM · Portal</span>
-        </div>
+        <!-- Aquí había dos insignias, «Acceso seguro» y «Workspace · CRM · Portal».
+             Eran publicidad dirigida a quien ya ha comprado el producto y sólo quiere
+             entrar, y en móvil se comían dos líneas enteras encima del formulario. -->
       </div>
       <h2>Acceso</h2>
-      <p class="muted">Accede al workspace, retoma tu contexto y continúa la operativa sin ruido.</p>
+      <p class="muted">Entra con tu usuario del equipo.</p>
         <form id="authLoginForm" class="auth-login-form">
           <label>
             Usuario / email
@@ -11841,6 +11840,10 @@
             <button type="submit">Entrar</button>
             <span id="authLoginStatus" class="muted" role="status" aria-live="polite"></span>
           </div>
+          <!-- La recuperación de acceso ya existía, pero su botón sólo aparecía
+               DESPUÉS de fallar un intento: había que equivocarse para descubrir que
+               se podía. Esto lleva al mismo sitio sin obligar a fallar antes. -->
+          <button type="button" id="authForgotLink" class="auth-forgot-link">¿Has olvidado la contraseña?</button>
         </form>
       </div>
     </div>
@@ -12044,7 +12047,7 @@
                 });
               })();
             </script>
-            <script src="app-auth.js?v=17"></script>
+            <script src="app-auth.js?v=18"></script>
         <script>
           (function () {
             if (window.__APP_SHELL_BOOTSTRAP__) return;
@@ -12058,7 +12061,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=886",
+              "app.js?v=888",
             ];
 
             const getParams = () => {
@@ -12263,6 +12266,26 @@
               btn.style.display = btn.dataset.login ? "" : "none";
               setRecoveryBusyState(btn, false);
             };
+
+            // El enlace «¿Has olvidado la contraseña?» reutiliza el camino de
+            // recuperación que ya existía, sin duplicar la llamada: rellena el login
+            // con lo que haya escrito y dispara el mismo botón.
+            try {
+              const forgot = document.getElementById("authForgotLink");
+              if (forgot) {
+                forgot.addEventListener("click", () => {
+                  const login = String((loginUser && loginUser.value) || "").trim();
+                  if (!login) {
+                    setStatus("Escribe tu usuario o email y vuelve a pulsar.");
+                    if (loginUser) loginUser.focus();
+                    return;
+                  }
+                  showRecoveryButton(login);
+                  const btn = window.__authRecoveryBtn;
+                  if (btn) btn.click();
+                });
+              }
+            } catch (e) {}
 
             // Si el body se queda en auth-pending, garantizamos que se vea el login.
             try {
