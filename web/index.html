@@ -5,11 +5,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="description" content="Verifika² CRM 360 para inmobiliaria, gestoría, seguros y financiación con acceso local, portal público y workspaces." />
     <meta name="theme-color" content="#0B1D33" />
+    <script>
+      // Tema, antes de pintar. Si esto viviera en app.js, la primera pantalla
+      // saldría en claro y cambiaría a oscuro medio segundo después: el fogonazo
+      // blanco que delata a los modos oscuros añadidos con calzador.
+      (function () {
+        try {
+          var elegido = localStorage.getItem("verifika2_tema") || "sistema";
+          if (elegido === "oscuro" || elegido === "claro") {
+            document.documentElement.dataset.theme = elegido === "oscuro" ? "dark" : "light";
+          }
+          var oscuro =
+            document.documentElement.dataset.theme === "dark" ||
+            (elegido === "sistema" &&
+              window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta && oscuro) meta.setAttribute("content", "#0A0F18");
+        } catch (e) {}
+      })();
+    </script>
     <meta name="apple-mobile-web-app-capable" content="yes" />
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=319" />
+	    <link rel="stylesheet" href="styles.css?v=328" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -12061,7 +12081,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=888",
+              "app.js?v=889",
             ];
 
             const getParams = () => {

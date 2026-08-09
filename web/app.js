@@ -14250,7 +14250,7 @@ const renderWorkspaceCompanies = (rows = []) => {
               ${
                 logo
                   ? `<img src="${escapeHtml(logo)}" alt="" loading="lazy" style="width:26px;height:26px;object-fit:contain;border-radius:8px;background:#fff;border:1px solid #e1e5ea;padding:4px" />`
-                  : `<span style="width:26px;height:26px;border-radius:8px;background:#f5f7f9;border:1px solid #e1e5ea;display:flex;align-items:center;justify-content:center;color:#7a8690;font-weight:700;font-size:12px">${escapeHtml(String((empresa?.nombre || "E").slice(0, 1)).toUpperCase())}</span>`
+                  : `<span style="width:26px;height:26px;border-radius:8px;background:light-dark(#f5f7f9,#1B293D);border:1px solid #e1e5ea;display:flex;align-items:center;justify-content:center;color:light-dark(#7a8690,#AFB8C0);font-weight:700;font-size:12px">${escapeHtml(String((empresa?.nombre || "E").slice(0, 1)).toUpperCase())}</span>`
               }
               <span>${escapeHtml(String(empresa?.nombre || "-"))}</span>
             </label>
@@ -17800,10 +17800,10 @@ const renderWorkspaceRrhhHub = () => {
             const days = Math.round((end - today) / 86400000);
             if (isNaN(days)) return "";
             if (days < 0) {
-              return `<div class="span-2" style="padding:8px 12px;border-radius:8px;background:#fdecea;color:#8a1c1c;font-weight:600;">⚠️ Contrato vencido hace ${Math.abs(days)} día(s) · ${escapeHtml(ff)}</div>`;
+              return `<div class="span-2" style="padding:8px 12px;border-radius:8px;background:light-dark(#fdecea,#332632);color:light-dark(#8a1c1c,#D89797);font-weight:600;">⚠️ Contrato vencido hace ${Math.abs(days)} día(s) · ${escapeHtml(ff)}</div>`;
             }
             if (days <= 30) {
-              return `<div class="span-2" style="padding:8px 12px;border-radius:8px;background:#fff4e0;color:#7a4a00;font-weight:600;">⏳ El contrato vence en ${days} día(s) · ${escapeHtml(ff)}</div>`;
+              return `<div class="span-2" style="padding:8px 12px;border-radius:8px;background:light-dark(#fff4e0,#333432);color:light-dark(#7a4a00,#D8BE97);font-weight:600;">⏳ El contrato vence en ${days} día(s) · ${escapeHtml(ff)}</div>`;
             }
             return "";
           })()}
@@ -31691,6 +31691,66 @@ const openCrmAlertsModal = () => {
   modal.classList.remove("hidden");
 };
 
+// ── Tema claro / oscuro ────────────────────────────────────────────────────────
+// Tres estados y no dos: «Sistema» es el que debe venir por defecto —quien pone el
+// portátil en oscuro a las ocho de la tarde espera que todo le siga— y los otros dos
+// existen para quien quiere lo contrario de lo que dice su sistema. Con un
+// interruptor de dos posiciones no se puede volver a «lo que diga el sistema».
+const TEMA_CLAVE = "verifika2_tema";
+const TEMAS = [
+  { valor: "sistema", etiqueta: "Sistema" },
+  { valor: "claro", etiqueta: "Claro" },
+  { valor: "oscuro", etiqueta: "Oscuro" },
+];
+
+const temaGuardado = () => {
+  try {
+    const v = localStorage.getItem(TEMA_CLAVE);
+    return TEMAS.some((t) => t.valor === v) ? v : "sistema";
+  } catch {
+    return "sistema";
+  }
+};
+
+const temaEstaOscuro = (elegido = temaGuardado()) => {
+  if (elegido === "oscuro") return true;
+  if (elegido === "claro") return false;
+  try {
+    return Boolean(window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  } catch {
+    return false;
+  }
+};
+
+const aplicaTema = (elegido) => {
+  const valor = TEMAS.some((t) => t.valor === elegido) ? elegido : "sistema";
+  try {
+    localStorage.setItem(TEMA_CLAVE, valor);
+  } catch {}
+  if (valor === "sistema") {
+    delete document.documentElement.dataset.theme;
+  } else {
+    document.documentElement.dataset.theme = valor === "oscuro" ? "dark" : "light";
+  }
+  // La barra del navegador en móvil: si no se cambia, queda una franja clara
+  // encima de una aplicación oscura.
+  try {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute("content", temaEstaOscuro(valor) ? "#0A0F18" : "#0B1D33");
+  } catch {}
+  return valor;
+};
+
+// Con «Sistema», seguir al sistema también cuando cambia con la aplicación abierta.
+try {
+  const consulta = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+  if (consulta && consulta.addEventListener) {
+    consulta.addEventListener("change", () => {
+      if (temaGuardado() === "sistema") aplicaTema("sistema");
+    });
+  }
+} catch (e) {}
+
 const openCrmProfileModal = () => {
   const user = getAuthScopeUser() || {};
   const modal = ensureCrmModal(
@@ -31704,6 +31764,7 @@ const openCrmProfileModal = () => {
   const rol = String(user?.rol || "").trim() || "-";
   const servicios = String(user?.servicio || "").trim() || "-";
   const workspace = String(state.currentWorkspaceName || "").trim() || "-";
+  const temaActual = temaGuardado();
   body.innerHTML = `
     <div class="crm-modal-grid">
       <div class="crm-modal-tile">
@@ -31721,12 +31782,32 @@ const openCrmProfileModal = () => {
         </div>
         <button type="button" class="secondary ghost" data-crm-profile-open-workspaces="1">Workspaces</button>
       </div>
+      <div class="crm-modal-tile">
+        <div>
+          <strong>Aspecto</strong>
+          <p class="muted">Claro, oscuro o lo que diga tu sistema.</p>
+        </div>
+        <div class="tema-selector" role="group" aria-label="Tema de la interfaz">
+          ${TEMAS.map((t) => `
+            <button type="button" class="tema-opcion" data-crm-tema="${t.valor}"
+              aria-pressed="${temaActual === t.valor ? "true" : "false"}">${escapeHtml(t.etiqueta)}</button>
+          `).join("")}
+        </div>
+      </div>
     </div>
     <div style="margin-top:12px; display:flex; gap:10px; flex-wrap:wrap;">
       <button type="button" class="secondary" data-crm-profile-logout="1">Salir</button>
       <button type="button" class="secondary ghost" data-crm-modal-close-inline="1">Cerrar</button>
     </div>
   `;
+  body.querySelectorAll("[data-crm-tema]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const elegido = aplicaTema(btn.dataset.crmTema);
+      body.querySelectorAll("[data-crm-tema]").forEach((otro) => {
+        otro.setAttribute("aria-pressed", otro.dataset.crmTema === elegido ? "true" : "false");
+      });
+    });
+  });
   body.querySelector('[data-crm-modal-close-inline="1"]')?.addEventListener("click", () => modal.classList.add("hidden"));
   body.querySelector('[data-crm-profile-logout="1"]')?.addEventListener("click", () => {
     modal.classList.add("hidden");
@@ -46579,7 +46660,7 @@ const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}, br
   if (!total) {
     return `
       <style>
-        .hipoteca-print-shell{font-family:"IBM Plex Sans","Segoe UI",sans-serif;background:linear-gradient(180deg,#f8fafc 0%,#eef4ff 100%);padding:24px;color:#102131;}
+        .hipoteca-print-shell{font-family:"IBM Plex Sans","Segoe UI",sans-serif;background:linear-gradient(180deg,#f8fafc 0%,#eef4ff 100%);padding:24px;color:light-dark(#102131,#ABB8C5);}
         .hipoteca-print-card{background:#fff;border:1px solid #dbe3ed;border-radius:24px;box-shadow:0 20px 42px rgba(15,23,42,.08);overflow:hidden;}
         .hipoteca-print-hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;padding:24px 28px;background:linear-gradient(135deg,#0f172a 0%,#15803d 58%,#16A34A 100%);color:#fff;}
         .hipoteca-print-brand{display:flex;gap:16px;align-items:center;min-width:0;}
@@ -46591,9 +46672,9 @@ const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}, br
         .hipoteca-print-stat{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);border-radius:18px;padding:12px 14px;backdrop-filter:blur(8px);}
         .hipoteca-print-stat span{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.12em;opacity:.82;margin-bottom:8px;}
         .hipoteca-print-stat strong{display:block;font-size:20px;line-height:1.1;}
-        .hipoteca-print-summary{padding:14px 28px 4px;color:#475569;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
+        .hipoteca-print-summary{padding:14px 28px 4px;color:light-dark(#475569,#AAB5C5);font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
         .hipoteca-print-empty-wrap{padding:0 28px 28px;}
-        .hipoteca-print-empty{padding:24px;border:1px dashed #cbd5e1;border-radius:18px;color:#64748b;font-size:13px;background:#f8fafc;}
+        .hipoteca-print-empty{padding:24px;border:1px dashed #cbd5e1;border-radius:18px;color:light-dark(#64748b,#A8B5C7);font-size:13px;background:light-dark(#f8fafc,#1B293D);}
         @media print{
           body{background:#fff;}
           .hipoteca-print-shell{padding:0;background:#fff;}
@@ -46645,7 +46726,7 @@ const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}, br
 
   return `
     <style>
-      .hipoteca-print-shell{font-family:"IBM Plex Sans","Segoe UI",sans-serif;background:linear-gradient(180deg,#f8fafc 0%,#eef4ff 100%);padding:24px;color:#102131;}
+      .hipoteca-print-shell{font-family:"IBM Plex Sans","Segoe UI",sans-serif;background:linear-gradient(180deg,#f8fafc 0%,#eef4ff 100%);padding:24px;color:light-dark(#102131,#ABB8C5);}
       .hipoteca-print-card{background:#fff;border:1px solid #dbe3ed;border-radius:24px;box-shadow:0 20px 42px rgba(15,23,42,.08);overflow:hidden;}
       .hipoteca-print-hero{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;padding:24px 28px;background:linear-gradient(135deg,#0f172a 0%,#15803d 58%,#16A34A 100%);color:#fff;}
       .hipoteca-print-brand{display:flex;gap:16px;align-items:center;min-width:0;}
@@ -46657,15 +46738,15 @@ const buildHipotecaListadoPrintHtml = (rows = [], columns = [], filters = {}, br
       .hipoteca-print-stat{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);border-radius:18px;padding:12px 14px;backdrop-filter:blur(8px);}
       .hipoteca-print-stat span{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.12em;opacity:.82;margin-bottom:8px;}
       .hipoteca-print-stat strong{display:block;font-size:20px;line-height:1.1;}
-      .hipoteca-print-summary{padding:14px 28px 4px;color:#475569;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
+      .hipoteca-print-summary{padding:14px 28px 4px;color:light-dark(#475569,#AAB5C5);font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;}
       .hipoteca-print-table-wrap{padding:0 18px 18px 18px;}
       .hipoteca-print-table{width:100%;border-collapse:separate;border-spacing:0;table-layout:fixed;border:1px solid #dbe3ed;border-radius:18px;overflow:hidden;}
       .hipoteca-print-table thead th{background:#123024;color:#fff;font-size:10px;line-height:1.1;letter-spacing:.08em;text-transform:uppercase;}
       .hipoteca-print-table th:first-child{border-top-left-radius:12px;}
       .hipoteca-print-table th:last-child{border-top-right-radius:12px;}
       .hipoteca-print-table th, .hipoteca-print-table td{padding:9px 10px;border-bottom:1px solid #dbe3ed;vertical-align:top;word-break:break-word;}
-      .hipoteca-print-table tbody tr:nth-child(even) td{background:#f8fafc;}
-      .hipoteca-print-table tbody tr:hover td{background:#eef4ff;}
+      .hipoteca-print-table tbody tr:nth-child(even) td{background:light-dark(#f8fafc,#1B293D);}
+      .hipoteca-print-table tbody tr:hover td{background:light-dark(#eef4ff,#192C4C);}
       .hipoteca-print-table td:nth-child(1){white-space:nowrap;}
       .hipoteca-print-table td:nth-child(4), .hipoteca-print-table td:nth-child(5){text-align:right;white-space:nowrap;}
       @media print{
@@ -58515,11 +58596,11 @@ const openCrmPrintWindow = ({ title = "Impresión", html = "" } = {}) => {
           <meta name="viewport" content="width=device-width, initial-scale=1" />
           <title>${escapeHtml(title)}</title>
           <style>
-            body{font-family:"IBM Plex Sans","Segoe UI",sans-serif;padding:18px;color:#0f172a;}
+            body{font-family:"IBM Plex Sans","Segoe UI",sans-serif;padding:18px;color:light-dark(#0f172a,#ADB3C2);}
             h1{font-size:18px;margin:0 0 12px;}
             table{width:100%;border-collapse:collapse;font-size:12px;}
             th,td{padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:left;vertical-align:top;}
-            th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#475569;}
+            th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:light-dark(#475569,#AAB5C5);}
           </style>
         </head>
         <body>
@@ -58557,11 +58638,11 @@ const writeCrmPrintWindow = (win, { title = "Impresión", html = "" } = {}) => {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>${escapeHtml(title)}</title>
         <style>
-          body{font-family:"IBM Plex Sans","Segoe UI",sans-serif;padding:18px;color:#0f172a;}
+          body{font-family:"IBM Plex Sans","Segoe UI",sans-serif;padding:18px;color:light-dark(#0f172a,#ADB3C2);}
           h1{font-size:18px;margin:0 0 12px;}
           table{width:100%;border-collapse:collapse;font-size:12px;}
           th,td{padding:8px 10px;border-bottom:1px solid #e2e8f0;text-align:left;vertical-align:top;}
-          th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#475569;}
+          th{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:light-dark(#475569,#AAB5C5);}
         </style>
       </head>
       <body>
@@ -75939,9 +76020,9 @@ const renderGestoriaPrintableTable = (title, headers, rows = [], note = "") => {
     .map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(String(cell ?? ""))}</td>`).join("")}</tr>`)
     .join("");
   return `
-    <div style="font-family:'IBM Plex Sans','Segoe UI',sans-serif;padding:20px;color:#111827;">
+    <div style="font-family:'IBM Plex Sans','Segoe UI',sans-serif;padding:20px;color:light-dark(#111827,#AFB4C0);">
       <h1 style="margin:0 0 8px 0;font-size:20px;">${escapeHtml(title || "Informe")}</h1>
-      ${note ? `<p style="margin:0 0 16px 0;color:#6b7280;">${escapeHtml(note)}</p>` : ""}
+      ${note ? `<p style="margin:0 0 16px 0;color:light-dark(#6b7280,#AFB5C0);">${escapeHtml(note)}</p>` : ""}
       <table style="width:100%;border-collapse:collapse;font-size:12px;">
         <thead>
           <tr>${headHtml}</tr>
@@ -88768,9 +88849,9 @@ if (workspaceFincasBudgetQuickForm) {
 	      pdfWindow = window.open("about:blank", "_blank");
 	      if (pdfWindow) {
 	        pdfWindow.document.title = "Generando PDF...";
-	        pdfWindow.document.body.innerHTML = `<div style="font-family:'IBM Plex Sans','Segoe UI',sans-serif;padding:24px;color:#111827;">
+	        pdfWindow.document.body.innerHTML = `<div style="font-family:'IBM Plex Sans','Segoe UI',sans-serif;padding:24px;color:light-dark(#111827,#AFB4C0);">
 	          <h2 style="margin:0 0 10px;font-size:18px;">Generando PDF…</h2>
-	          <p style="margin:0;color:#6b7280;font-size:13px;">En unos segundos se cargará el presupuesto.</p>
+	          <p style="margin:0;color:light-dark(#6b7280,#AFB5C0);font-size:13px;">En unos segundos se cargará el presupuesto.</p>
 	        </div>`;
 	      }
 	    } catch (e) {}
