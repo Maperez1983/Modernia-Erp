@@ -172,6 +172,95 @@ class ElResponsableNoSePierdeAlEditarTests(unittest.TestCase):
         self.assertEqual(APP.count("asegurarOpcionDeResponsable(") , 2)
 
 
+class LoQueOcupaUnTramoEsUnaCitaTests(unittest.TestCase):
+    """Una firma en notaría de 10:30 a 13:30 no puede vivir en «Actividades».
+
+    La clasificación miraba si la palabra «cita» aparecía en el tipo o el asunto, y
+    la hora sólo si ambos venían vacíos. Encontrado probando en producción el
+    2026-08-09: con el preset «Citas Equipo (caducadas)», buscar «encargo» daba «Sin
+    acciones», y las nueve aparecían al pasar a «Actividades».
+
+    Mirando los datos reales, el discriminador es el **tramo**: 12 acciones tienen
+    hora de inicio y de fin y estaban de actividades —firmas de contrato, notaría y
+    asesoramientos—, mientras que las 46 que se quedan como actividad —«Seguimiento»
+    (27) y «Llamada» (19)— llevan hora de aviso pero no de fin y son tareas de
+    verdad. Mi primera lectura, «45 citas mal clasificadas», era exagerada.
+
+    La regla vive en un único sitio porque había DOS copias —la de la agenda y la de
+    los contadores de la portada— y afinar sólo una habría hecho que el contador
+    dijera un número y la lista que abre, otro.
+    """
+
+    CASOS = [
+        ({"tipo": "Cita de adquisición", "hora": "10:00", "hora_fin": "11:00"}, True,
+         "una cita de las de siempre"),
+        ({"tipo": "Seguimiento", "hora": "10:00", "hora_fin": ""}, False,
+         "seguimiento sin hora de fin: es una tarea"),
+        ({"tipo": "Llamada", "hora": "10:00", "hora_fin": ""}, False,
+         "llamada sin hora de fin: es una tarea"),
+        ({"tipo": "Firma Notaria", "hora": "10:30", "hora_fin": "13:30"}, True,
+         "tres horas en la notaría son una cita"),
+        ({"tipo": "Firma contrato alquiler", "hora": "18:30", "hora_fin": "19:30"}, True,
+         "firma de contrato con tramo"),
+        ({"tipo": "contrato arrendamiento", "hora": "18:30", "hora_fin": "19:00"}, True,
+         "contrato de arrendamiento con tramo"),
+        ({"tipo": "Asesoramiento renta antigua", "hora": "17:00", "hora_fin": "17:30"}, True,
+         "asesoramiento con tramo"),
+        ({"tipo": "Post-aceptación", "hora": "18:30", "hora_fin": "19:30"}, True,
+         "post-aceptación con tramo"),
+        ({"tipo": "Post-aceptación", "hora": "10:00", "hora_fin": ""}, False,
+         "la misma sin tramo se queda de tarea"),
+        ({"tipo": "Actividad comercial", "hora": "10:00", "hora_fin": "11:00"}, False,
+         "si el tipo dice actividad, manda lo escrito"),
+        ({"tipo": "", "asunto": "", "hora": "10:00", "hora_fin": ""}, True,
+         "sin tipo pero con hora: se respeta el comportamiento anterior"),
+        ({"tipo": "", "asunto": "", "hora": "", "hora_fin": ""}, False, "sin nada"),
+    ]
+
+    def test_la_regla_vive_en_un_solo_sitio(self):
+        self.assertEqual(APP.count("const esCitaPorSuTramo = (row) => {"), 1)
+        # Tira de ella la agenda y los dos contadores de la portada.
+        self.assertGreaterEqual(APP.count("esCitaPorSuTramo("), 3)
+
+    def test_no_queda_ninguna_copia_de_la_regla_vieja(self):
+        """Había dos `normalizeTipoKey` con el mismo cuerpo duplicado.
+
+        Ojo con no pasarse: `resolveAgendaTipoKey` se le parece pero es otra cosa
+        —reparte la etiqueta CITA / LLAM. / WA / MAIL / TAREA y sólo recibe el tipo,
+        no la fila, así que no puede mirar la hora de fin—. Ésa se queda como está.
+        """
+        self.assertNotIn(
+            'const hasHora = Boolean(String(row?.hora || row?.hora_fin || "").trim());', APP)
+        # Ninguna pantalla vuelve a declarar la suya con cuerpo propio.
+        self.assertEqual(APP.count("const normalizeTipoKey = (row) => {"), 0)
+
+    def test_los_doce_casos(self):
+        node = shutil.which("node")
+        if not node:
+            raise unittest.SkipTest("node no está disponible")
+        i = APP.index("const esCitaPorSuTramo = (row) => {")
+        prof, fin = 0, -1
+        for k in range(APP.index("{", i), len(APP)):
+            if APP[k] == "{":
+                prof += 1
+            elif APP[k] == "}":
+                prof -= 1
+                if prof == 0:
+                    fin = k + 1
+                    break
+        script = (
+            'const normalizeSimple = (s) => String(s||"").normalize("NFD")'
+            '.replace(/[\\u0300-\\u036f]/g,"").toLowerCase().trim();\n'
+            + APP[i:fin] + ";\n"
+            + "const casos = " + json.dumps([c[0] for c in self.CASOS]) + ";\n"
+            + "console.log(JSON.stringify(casos.map(esCitaPorSuTramo)));"
+        )
+        salida = subprocess.run([node, "-e", script], check=True, capture_output=True, text=True)
+        for (fila, esperado, desc), real in zip(self.CASOS, json.loads(salida.stdout.strip())):
+            with self.subTest(caso=desc):
+                self.assertEqual(real, esperado, f"{fila.get('tipo')} {fila.get('hora')}-{fila.get('hora_fin')}: {desc}")
+
+
 class ElSolapeMiraElTramoNoSoloLaHoraDeArranqueTests(unittest.TestCase):
     """El aviso comparaba `ev.time !== payload.hora`: solo la hora de arranque.
 

@@ -4809,6 +4809,29 @@ const normalizeSimple = (value) =>
     .toLowerCase()
     .trim();
 
+const esCitaPorSuTramo = (row) => {
+  // Qué es cita y qué es actividad se decidía buscando la palabra «cita» en el tipo
+  // o el asunto, y la hora sólo se miraba si ambos venían vacíos. Así, una firma en
+  // notaría de 10:30 a 13:30 con tipo «Firma Notaria» caía en el cajón de actividades
+  // y no aparecía en ningún preset de citas. Encontrado probando en producción: son
+  // 12 —firmas de contrato, notaría y asesoramientos—.
+  //
+  // El discriminador que funciona con los datos reales es el **tramo**: lo que ocupa
+  // un hueco de principio a fin en el calendario es una cita. Las 46 que se quedan
+  // como actividad —«Seguimiento» y «Llamada»— llevan hora de aviso pero no de fin, y
+  // son tareas de verdad; ésas no se mueven.
+  //
+  // Vive aquí, y no dentro de cada pantalla, porque había dos copias de esta regla
+  // —la de la agenda y la de los contadores de la portada— y al afinar una sola, los
+  // contadores habrían contado distinto que la lista que abren.
+  const texto = normalizeSimple(row?.tipo || row?.asunto || "");
+  if (texto.includes("cita")) return true;
+  if (texto.includes("actividad")) return false;
+  if (String(row?.hora_fin || "").trim()) return true;
+  if (!texto) return Boolean(String(row?.hora || "").trim());
+  return false;
+};
+
 // Normaliza textos de "lookups" (catálogos/alias) para comparaciones robustas.
 // - Quita tildes
 // - Minúsculas
@@ -31325,15 +31348,10 @@ const collectCrmAlertsSnapshot = () => {
     const ts = parseRowTs(row);
     return ts > 0 && ts < Date.now();
   };
-		  const normalizeTipoKey = (row) => {
-		    const tipo = normalizeSimple(row?.tipo || row?.asunto || "");
-		    if (!tipo) return "cita";
-		    if (tipo.includes("cita")) return "cita";
-		    if (tipo.includes("actividad")) return "actividad";
-		    return "actividad";
-		  };
-  const citasCaducadasCount = agendaRows.filter((row) => normalizeTipoKey(row) === "cita" && isCaducada(row)).length;
-  const actividadesCaducadasCount = agendaRows.filter((row) => normalizeTipoKey(row) !== "cita" && isCaducada(row)).length;
+  // Los contadores de la portada tenían su propia copia de la regla, y al afinarla
+  // en la agenda se habrían quedado contando distinto que la lista que abren.
+  const citasCaducadasCount = agendaRows.filter((row) => esCitaPorSuTramo(row) && isCaducada(row)).length;
+  const actividadesCaducadasCount = agendaRows.filter((row) => !esCitaPorSuTramo(row) && isCaducada(row)).length;
 
   const total =
     noticiasSinVerificarCount
@@ -61074,16 +61092,7 @@ const applyCrmAgendaFilters = (rows = []) => {
     const respKey = normalizePersonKey(row?.responsable || "");
     return !respKey || currentUserKeys.has(respKey);
   };
-  const normalizeTipoKey = (row) => {
-    const tipoNorm = normalizeSimple(row?.tipo || row?.asunto || "");
-    if (!tipoNorm) {
-      const hasHora = Boolean(String(row?.hora || row?.hora_fin || "").trim());
-      return hasHora ? "cita" : "actividad";
-    }
-    if (tipoNorm.includes("cita")) return "cita";
-    if (tipoNorm.includes("actividad")) return "actividad";
-    return "actividad";
-  };
+  const normalizeTipoKey = (row) => (esCitaPorSuTramo(row) ? "cita" : "actividad");
   const parseRowTs = (row) => {
     const fechaKey = String(row?.fecha || "").trim();
     if (!fechaKey) return 0;
