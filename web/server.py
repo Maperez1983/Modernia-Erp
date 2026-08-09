@@ -30171,7 +30171,32 @@ def resolve_inmobiliaria_contact_candidate(conn, empresa_id, payload, *, role_pr
 
 
 def normalize_inmobiliaria_address(value):
-    return re.sub(r"\s+", " ", normalize_lookup_text(value or "")).strip()
+    """Deja una dirección lista para compararla con otra.
+
+    Sólo la usa el detector de duplicados. Antes se limitaba a quitar acentos,
+    pasar a mayúsculas y colapsar espacios, así que la comparación era literal:
+    «CALLE Goya 12», «C/ Goya 12» y «Goya nº 12» eran tres direcciones distintas y
+    ninguna avisaba de las otras.
+
+    Ahora se aprovecha el mapa de tipos de vía que ya existía —y que sólo se usaba
+    para consultar al Catastro— y se normaliza la forma de escribir el número.
+
+    **No se toca la planta ni la puerta a propósito.** «Postas 22 bajo 3G» y «Postas
+    22 bajo 6G» son dos viviendas distintas y tienen que seguir siéndolo; si un día
+    resultan ser la misma con una errata, quien lo cazará es la referencia catastral,
+    que para eso identifica el inmueble sin ambigüedad.
+    """
+    texto = re.sub(r"\s+", " ", normalize_lookup_text(value or "")).strip()
+    if not texto:
+        return ""
+    # «Nº22», «N 22», «NUM. 22», «NUMERO 22» -> «22». El grado ya lo ha limpiado
+    # `normalize_lookup_text` en unos casos y en otros no, así que se contempla.
+    texto = re.sub(r"\b(?:N[º°O]?|NUM|NUMERO)\s*(?=\d)", "", texto)
+    texto = re.sub(r"\s+", " ", texto).strip()
+    partes = texto.split(" ")
+    if partes and partes[0] in CATRASTRO_STREET_TYPE_MAP:
+        partes[0] = CATRASTRO_STREET_TYPE_MAP[partes[0]]
+    return " ".join(p for p in partes if p).strip()
 
 
 CATRASTRO_STREET_TYPE_MAP = {
@@ -30188,8 +30213,15 @@ CATRASTRO_STREET_TYPE_MAP = {
     "PS": "PS",
     "PASAJE": "PJ",
     "PJ": "PJ",
-    "PLAZA": "PJ",
-    "PL": "PJ",
+    # La sigla del Catastro para plaza es PZ, no PJ (que es pasaje). Con PJ, la
+    # consulta al Catastro de cualquier plaza no encontraba la vía, y en el
+    # chequeo de duplicados una plaza y un pasaje del mismo nombre se veían
+    # como la misma dirección.
+    "PLAZA": "PZ",
+    "PZA": "PZ",
+    "PLZ": "PZ",
+    "PZ": "PZ",
+    "PL": "PZ",
     "CAMINO": "CM",
     "CM": "CM",
     "CARRETERA": "CR",
