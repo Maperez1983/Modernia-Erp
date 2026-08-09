@@ -81936,6 +81936,18 @@ class Handler(BaseHTTPRequestHandler):
                 if not direccion:
                     json_response(self, {"error": "direccion requerida"}, status=400)
                     return
+                # Sin empresa resuelta, la línea de abajo hacía `empresa["id"]` sobre
+                # None y el endpoint devolvía un 500 con el `TypeError` de Python
+                # dentro del cuerpo. No creaba nada —el fallo era antes de escribir—,
+                # pero es una forma pésima de decir «falta un dato»: sale cuando la
+                # petición no trae ni `workspace_id` ni `empresa_nombre`.
+                if not empresa:
+                    json_response(
+                        self,
+                        {"error": "Falta el workspace o la empresa de la operación"},
+                        status=400,
+                    )
+                    return
                 allow_duplicate = str(payload.get("allow_duplicate") or "").strip().lower() in {"1", "true", "yes", "si"}
                 duplicate_matches = detect_inmobiliaria_duplicates(
                     conn,
