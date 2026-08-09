@@ -59925,8 +59925,15 @@ const openCrmAgendaEditModal = (row) => {
     }
     if (responsableSelect) {
       const nextResp = rowSnapshot.responsable || "";
+      // Este es el segundo editor de citas —el de la pantalla Act./Citas—, y tenía el
+      // mismo fallo que el otro: si el responsable guardado no estaba entre las
+      // opciones, se vaciaba el desplegable a propósito, y al guardar se enviaba ""
+      // y el servidor lo pasaba a NULL. Encontrado probando en producción: las nueve
+      // «Firmar encargo» de Estudio Velázquez salen con el responsable en blanco, y
+      // una de ellas es de «Miguel Angel Pérez», escrito con el nombre completo en
+      // vez del usuario. Se añade la opción antes de asignar, como en el otro editor.
+      asegurarOpcionDeResponsable(responsableSelect, nextResp);
       responsableSelect.value = nextResp;
-      if (nextResp && responsableSelect.value !== nextResp) responsableSelect.value = "";
     }
     if (estadoSelect) {
       const nextEstado = rowSnapshot.estado || "Pendiente";

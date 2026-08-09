@@ -148,6 +148,29 @@ class ElResponsableNoSePierdeAlEditarTests(unittest.TestCase):
         c = cuerpo("const asegurarOpcionDeResponsable")
         self.assertIn("if (!select || !valor) return;", c)
 
+    def test_el_otro_editor_de_citas_tambien_lo_conserva(self):
+        """Hay DOS editores de cita y arreglé sólo uno.
+
+        `openCrmAgendaEditModal`, el de la pantalla Act./Citas, construye su propio
+        modal y hacía esto:
+
+            if (nextResp && responsableSelect.value !== nextResp)
+                responsableSelect.value = "";
+
+        Es decir, vaciaba el desplegable **a propósito** cuando el valor guardado no
+        estaba entre las opciones, y al guardar enviaba `responsable: ""`. Encontrado
+        probando en producción: abrí una de las nueve «Firmar encargo» de Estudio
+        Velázquez y el responsable salía en blanco teniendo «Miguel Angel Pérez».
+        """
+        c = cuerpo("const openCrmAgendaEditModal")
+        self.assertIn("asegurarOpcionDeResponsable(responsableSelect, nextResp);", c)
+        self.assertNotIn(
+            'if (nextResp && responsableSelect.value !== nextResp) responsableSelect.value = "";', c
+        )
+
+    def test_los_dos_editores_usan_el_mismo_ayudante(self):
+        self.assertEqual(APP.count("asegurarOpcionDeResponsable(") , 2)
+
 
 class ElSolapeMiraElTramoNoSoloLaHoraDeArranqueTests(unittest.TestCase):
     """El aviso comparaba `ev.time !== payload.hora`: solo la hora de arranque.
