@@ -13697,6 +13697,54 @@ def _request_token_param(handler, params, *param_names, header_names=("X-Access-
     return ""
 
 
+def tokens_del_feed_del_portal():
+    """Tokens que valen para el feed del portal Verifika2.
+
+    Se aceptan varios separados por comas para poder **rotar sin cortar el feed**:
+    se añade el nuevo, se avisa al portal, y cuando ya usa el nuevo se quita el
+    viejo. Con un único token, rotarlo obliga a que los dos lados cambien en el
+    mismo segundo, que es como no poder rotarlo nunca.
+    """
+    crudo = str(os.environ.get("INMO_EXTERNAL_FEED_TOKEN") or "")
+    vistos = []
+    for trozo in crudo.split(","):
+        t = trozo.strip()
+        if t and t not in vistos:
+            vistos.append(t)
+    return vistos
+
+
+def feed_del_portal_autorizado(handler, params):
+    """¿Puede servirse el feed? Devuelve (ok, aviso).
+
+    Sin token configurado se sirve abierto, como hasta ahora. Configurado, se exige
+    —por query o por cabecera, que es como lo mandan la mayoría de integraciones—.
+
+    `INMO_EXTERNAL_FEED_ENFORCE=0` activa un modo de observación: se sirve igual,
+    pero cada petición sin token válido deja una línea en el log. Sirve para poner
+    el token en el CRM **antes** de saber si el portal ya lo manda, mirar el log un
+    par de días y sólo entonces cerrar. Sin esa fase, el día que se configura el
+    token el portal se queda sin anuncios hasta que alguien se entera.
+    """
+    validos = tokens_del_feed_del_portal()
+    if not validos:
+        return True, ""
+    entregado = _request_token_param(
+        handler, params, "token",
+        header_names=("X-Access-Token", "X-API-Key"),
+    )
+    if not entregado:
+        cabecera = str(handler.headers.get("Authorization") or "").strip()
+        if cabecera.lower().startswith("bearer "):
+            entregado = cabecera.split(" ", 1)[1].strip()
+    if any(_ct_eq(v, entregado) for v in validos):
+        return True, ""
+    exigir = str(os.environ.get("INMO_EXTERNAL_FEED_ENFORCE", "1")).strip().lower() not in {"0", "false", "no"}
+    if exigir:
+        return False, ""
+    return True, "sin token válido" if entregado else "sin token"
+
+
 def _login_rate_key(ip, username):
     ip = str(ip or "").strip()
     user = normalize_lookup_text(username or "")
@@ -98717,11 +98765,22 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/inmueble_portal_feed":
-            expected_token = str(os.environ.get("INMO_EXTERNAL_FEED_TOKEN") or "").strip()
-            provided_token = (params.get("token", [""])[0] or "").strip()
-            if expected_token and not _ct_eq(expected_token, provided_token):
+            ok_feed, aviso_feed = feed_del_portal_autorizado(self, params)
+            if not ok_feed:
                 json_response(self, {"error": "token inválido"}, status=403)
                 return
+            if aviso_feed:
+                # Modo observación: se sirve, pero queda dicho en el log de Render
+                # para poder comprobar si el portal ya manda el token antes de cerrar.
+                try:
+                    print(
+                        f"[feed-portal] servido {aviso_feed} desde {_get_client_ip(self)} "
+                        f"ua={str(self.headers.get('User-Agent') or '')[:120]}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                except Exception:
+                    pass
             try:
                 limit_val = max(1, min(500, int(str(params.get("limit", ["200"])[0] or "200").strip())))
             except Exception:
