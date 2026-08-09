@@ -3568,7 +3568,10 @@
 		                    </label>
 		                    <label>
 		                      Necesidad
-		                      <select name="necesidad_venta_alquiler">
+		                      <!-- Obligatorio: sin esto la ficha nace sin tipo de operación. Así llegaron 78
+                             inmuebles sin saber si eran venta o alquiler, y hubo que deducirlo
+                             del nombre («ALQ Gaucin») o dejarlos en blanco. -->
+		                      <select name="necesidad_venta_alquiler" required>
 		                        <option value=""></option>
 		                        <option>Venta</option>
 		                        <option>Alquiler</option>
@@ -4375,7 +4378,7 @@
 				                        <button type="button" class="secondary ghost" id="crmAgendaPrev" title="Anterior">‹</button>
 				                        <button type="button" class="secondary ghost" id="crmAgendaToday" title="Hoy">Hoy</button>
 			                        <button type="button" class="secondary ghost" id="crmAgendaNext" title="Siguiente">›</button>
-			                        <input id="crmAgendaDay" type="date" />
+			                        <input id="crmAgendaDay" type="date" aria-label="Día que se muestra en la agenda" title="Día que se muestra" />
 			                      </div>
 			                    </div>
 			                    <div class="tc-listright">
@@ -4883,7 +4886,9 @@
                   <div class="form-grid">
                     <label>
                       Cliente
-                      <select id="inmuebleDemandaCliente" name="cliente_id"></select>
+                      <!-- Un pedido sin cliente no es un pedido: el formulario no exigía nada y se
+                           podía crear entero en blanco. -->
+                      <select id="inmuebleDemandaCliente" name="cliente_id" required></select>
                     </label>
                     <label>
                       Tipo
@@ -12053,7 +12058,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=883",
+              "app.js?v=884",
             ];
 
             const getParams = () => {
