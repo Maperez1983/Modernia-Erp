@@ -199,6 +199,39 @@ class ElInterruptorTests(unittest.TestCase):
         self.assertIn("aria-pressed", APP[i - 200:i + 200])
 
 
+class ElVerdeTieneDosOficiosTests(unittest.TestCase):
+    """Recorriendo Fincas y Seguros en oscuro salió el fallo más sutil de todos.
+
+    El verde de marca hace dos trabajos que en oscuro piden lo contrario: como FONDO
+    de botón necesita seguir siendo oscuro para que el texto casi blanco de encima se
+    lea; como TEXTO sobre una tarjeta oscura necesita aclararse. Aclaré el token y
+    arreglé lo segundo rompiendo lo primero: el botón «Retomar trabajo» pasó de 3.02
+    a 2.09. Por eso hay dos tokens.
+    """
+
+    def test_el_verde_de_fondo_no_cambia_en_oscuro(self):
+        claro = tokens_del_bloque(":root {")
+        oscuro = tokens_del_bloque(':root[data-theme="dark"] {')
+        for token in ("--gold", "--gold-deep"):
+            with self.subTest(token):
+                self.assertEqual(oscuro[token], claro[token],
+                                 "si se aclara, el texto blanco de los botones deja de leerse")
+
+    def test_el_verde_de_texto_si_se_aclara(self):
+        oscuro = tokens_del_bloque(':root[data-theme="dark"] {')
+        self.assertIn("--gold-text", oscuro)
+        tarjeta = oscuro["--cloud"]
+        self.assertGreaterEqual(contraste(oscuro["--gold-text"], tarjeta), 4.5)
+
+    def test_en_claro_el_verde_de_texto_es_el_de_siempre(self):
+        """No puede cambiar lo que ya se veía bien."""
+        self.assertEqual(tokens_del_bloque(":root {")["--gold-text"], "#15803D")
+
+    def test_ya_no_se_usa_el_verde_de_fondo_como_color_de_texto(self):
+        restos = re.findall(r"color\s*:\s*var\(--gold(?:-deep)?\)", CSS_SIN_COMENTARIOS)
+        self.assertEqual(restos, [])
+
+
 class ElLogotipoTests(unittest.TestCase):
     def test_hay_una_version_clara(self):
         claro = RAIZ / "assets" / "verifika2" / "verifika2_wordmark_traced_light.svg"

@@ -12,6 +12,10 @@
   --gold: #16A34A;
   --gold-deep: #15803D;
   --gold-soft: #DCFCE7;
+  /* El verde de marca tiene dos oficios que piden lo contrario en oscuro: como
+     FONDO de botón necesita seguir siendo oscuro para que el texto blanco encima
+     se lea; como TEXTO necesita aclararse. Por eso hay dos tokens. */
+  --gold-text: #15803D;
   /* Oro real, reservado a "premium" (hitos, KPIs destacados, badges). */
   --premium: #F2C14E;
   --premium-deep: #B9892B;
@@ -26,6 +30,7 @@
   /* Tinta que NO cambia en oscuro: para los «chips» que ya eran oscuros con texto
      blanco encima. Si su fondo se aclarase, el texto blanco quedaría ilegible. */
   --ink-fixed-rgb: 11, 29, 51;
+  --ink-fixed: #0B1D33;
   --gold-rgb: 22, 163, 74;
   --sage-rgb: 34, 197, 94;
   --ink-soft: #334155;
@@ -94,12 +99,13 @@
     --black: #E8EDF4;
     --charcoal: #E8EDF4;
     --oxblood: #E8EDF4;
-    --gold: #22C55E;
-    --gold-deep: #16A34A;
+    --gold: #16A34A;
+    --gold-deep: #15803D;
+    --gold-text: #4ADE80;
     --gold-soft: #10301D;
     --gold-rgb: 34, 197, 94;
-    --sage: #4ADE80;
-    --sage-rgb: 74, 222, 128;
+    --sage: #22C55E;
+    --sage-rgb: 34, 197, 94;
     --premium: #F2C14E;
     --premium-deep: #F5D083;
     --premium-soft: #3A2E12;
@@ -129,12 +135,13 @@
   --black: #E8EDF4;
   --charcoal: #E8EDF4;
   --oxblood: #E8EDF4;
-  --gold: #22C55E;
-  --gold-deep: #16A34A;
+  --gold: #16A34A;
+  --gold-deep: #15803D;
+  --gold-text: #4ADE80;
   --gold-soft: #10301D;
   --gold-rgb: 34, 197, 94;
-  --sage: #4ADE80;
-  --sage-rgb: 74, 222, 128;
+  --sage: #22C55E;
+  --sage-rgb: 34, 197, 94;
   --premium: #F2C14E;
   --premium-deep: #F5D083;
   --premium-soft: #3A2E12;
@@ -159,8 +166,9 @@
    medio oscura y medio clara, con las etiquetas de los campos en navy sobre navy. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) body.theme-operativa {
-    --gold: #22C55E;
-    --gold-deep: #16A34A;
+    --gold: #16A34A;
+    --gold-deep: #15803D;
+    --gold-text: #4ADE80;
     --gold-soft: #10301D;
     --black: #E8EDF4;
     --charcoal: #E8EDF4;
@@ -173,10 +181,9 @@
     --cloud: rgba(28, 39, 56, 0.9);
     --line: rgba(232, 237, 244, 0.16);
     --muted: #93A3B8;
-    --sage: #4ADE80;
+    --sage: #22C55E;
     --shadow: rgba(0, 0, 0, 0.55);
-    background:
-      radial-gradient(circle at top left, rgba(var(--gold-rgb), 0.10), transparent 26%),
+    background:radial-gradient(circle at top left, rgba(var(--gold-rgb), 0.10), transparent 26%),
       radial-gradient(circle at 100% 0%, rgba(var(--sage-rgb), 0.08), transparent 30%),
       radial-gradient(circle at 50% 100%, rgba(var(--gold-rgb), 0.07), transparent 34%),
       linear-gradient(180deg, #0A0F18 0%, #0D1420 46%, #0A1017 100%);
@@ -184,8 +191,9 @@
 }
 
 :root[data-theme="dark"] body.theme-operativa {
-    --gold: #22C55E;
-    --gold-deep: #16A34A;
+    --gold: #16A34A;
+    --gold-deep: #15803D;
+    --gold-text: #4ADE80;
     --gold-soft: #10301D;
     --black: #E8EDF4;
     --charcoal: #E8EDF4;
@@ -198,10 +206,9 @@
     --cloud: rgba(28, 39, 56, 0.9);
     --line: rgba(232, 237, 244, 0.16);
     --muted: #93A3B8;
-    --sage: #4ADE80;
+    --sage: #22C55E;
     --shadow: rgba(0, 0, 0, 0.55);
-    background:
-      radial-gradient(circle at top left, rgba(var(--gold-rgb), 0.10), transparent 26%),
+    background:radial-gradient(circle at top left, rgba(var(--gold-rgb), 0.10), transparent 26%),
       radial-gradient(circle at 100% 0%, rgba(var(--sage-rgb), 0.08), transparent 30%),
       radial-gradient(circle at 50% 100%, rgba(var(--gold-rgb), 0.07), transparent 34%),
       linear-gradient(180deg, #0A0F18 0%, #0D1420 46%, #0A1017 100%);
@@ -430,7 +437,7 @@ header {
 }
 
 #globalInternalCopilotToggle.global-internal-copilot-toggle--docked {
-  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
+  background:linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
   font-size: 13px;
   color: #fff;
   border-color:rgba(var(--surface-rgb), 0.22);
@@ -439,7 +446,7 @@ header {
 
 #globalInternalCopilotToggle.global-internal-copilot-toggle--floating {
   position: fixed;
-  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
+  background:linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
   color: #f5f5f5;
   border: 0;
   box-shadow:0 10px 24px rgba(var(--ink-rgb), 0.18);
@@ -588,7 +595,7 @@ textarea {
 
 button,
 .btn {
-  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
+  background:linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
   color: #f5f5f5;
   border: none;
   border-radius: 14px;
@@ -616,7 +623,7 @@ button.secondary,
    recomendada. Las variantes .secondary/.ghost ya tienen su propio tratamiento. */
 button.danger:not(.secondary):not(.ghost),
 .btn.danger:not(.secondary):not(.ghost) {
-  background: linear-gradient(135deg, #b3261e 0%, #8d1f1f 100%);
+  background:linear-gradient(135deg, #b3261e 0%, #8d1f1f 100%);
   color: #fdf2f2;
 }
 
@@ -650,7 +657,7 @@ button.danger:not(.secondary):not(.ghost),
   height: 34px;
   padding: 0 10px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #1b4f72 0%, #2d6c98 56%, #5a9cc7 100%);
+  background:linear-gradient(135deg, #1b4f72 0%, #2d6c98 56%, #5a9cc7 100%);
   color: #fff;
   font-size: 10px;
   font-weight: 700;
@@ -1796,7 +1803,7 @@ body.crm-fin #companySummary {
 }
 
 .admin-user-item.active {
-  border-color: var(--gold);
+  border-color: var(--gold-text);
   box-shadow:0 0 0 2px rgba(60, 110, 113, 0.18);
 }
 
@@ -1929,7 +1936,7 @@ body.crm-fin #companySummary {
 }
 
 .pill-option input {
-  accent-color: var(--gold);
+  accent-color: var(--gold-text);
 }
 
 .icon-action {
@@ -1982,7 +1989,7 @@ body.crm-fin #companySummary {
 }
 
 .tab.active {
-  background: linear-gradient(135deg, #0B1D33 0%, #0F2742 56%, #182F55 100%);
+  background:linear-gradient(135deg, #0B1D33 0%, #0F2742 56%, #182F55 100%);
   color: #f5f5f5;
   border-color:rgba(var(--gold-rgb), 0.55);
   box-shadow:0 10px 18px rgba(var(--ink-rgb), 0.22);
@@ -2047,7 +2054,7 @@ body.crm-fin #companySummary {
   border-radius: 999px;
   padding: 8px 14px;
   background: var(--black);
-  color: var(--gold);
+  color: var(--gold-text);
   cursor: pointer;
 }
 
@@ -2123,7 +2130,7 @@ body.crm-fin #companySummary {
   gap: 16px;
   padding: 16px 18px;
   border-radius: 18px;
-  background: linear-gradient(120deg, #ffffff 0%, #f2ece1 100%);
+  background:linear-gradient(120deg, light-dark(#ffffff, #1C2738) 0%, light-dark(#f2ece1, #353532) 100%);
   border: 1px solid #e4ded4;
   margin-bottom: 12px;
 }
@@ -2275,7 +2282,7 @@ body.theme-operativa #holdingSection .workspace-central-layout {
   border-radius: 18px;
   border:1px solid rgba(var(--gold-rgb), 0.28);
   background:linear-gradient(135deg, rgba(var(--surface-rgb), 0.98), rgba(var(--surface-rgb), 0.96)),
-    #fff;
+    light-dark(#fff, #1C2738);
   box-shadow:0 12px 28px rgba(var(--ink-rgb), 0.05);
 }
 
@@ -2351,7 +2358,7 @@ body.theme-operativa #holdingSection .workspace-central-layout {
   padding: 16px 18px;
   border-radius: 20px;
   background:linear-gradient(135deg, rgba(var(--surface-rgb), 0.96), rgba(var(--surface-rgb), 0.94)),
-    #fff;
+    light-dark(#fff, #1C2738);
   border:1px solid rgba(var(--ink-rgb), 0.12);
   box-shadow:0 14px 30px rgba(var(--ink-rgb), 0.08);
 }
@@ -2393,7 +2400,7 @@ body.theme-operativa #holdingSection .workspace-central-layout {
   border-radius: 24px;
   border:1px solid rgba(var(--ink-rgb), 0.12);
   background:linear-gradient(135deg, rgba(var(--surface-rgb), 0.98), rgba(var(--surface-rgb), 0.98)),
-    #fff;
+    light-dark(#fff, #1C2738);
   box-shadow:0 14px 32px rgba(var(--ink-rgb), 0.06);
 }
 
@@ -2407,7 +2414,7 @@ body.theme-operativa #holdingSection .workspace-central-layout {
 }
 
 #holdingSection .home-section-kicker {
-  color: var(--gold-deep);
+  color: var(--gold-text);
   background:rgba(var(--gold-rgb), 0.08);
   border-color:rgba(var(--gold-rgb), 0.16);
 }
@@ -2429,7 +2436,7 @@ body.theme-operativa #holdingSection .workspace-central-layout {
 }
 
 .workspace-company-pill.is-active {
-  background: linear-gradient(135deg, #0B1D33 0%, #0F2742 56%, #182F55 100%);
+  background:linear-gradient(135deg, #0B1D33 0%, #0F2742 56%, #182F55 100%);
   color: #f5f5f5;
   border-color:rgba(var(--gold-rgb), 0.5);
   box-shadow:0 10px 18px rgba(var(--ink-rgb), 0.16);
@@ -2679,7 +2686,7 @@ body.theme-operativa #holdingSection .workspace-central-layout {
   border-radius: 18px;
   border:1px solid rgba(var(--gold-rgb), 0.22);
   background:linear-gradient(135deg, rgba(var(--surface-rgb), 0.98), rgba(var(--surface-rgb), 0.96)),
-    #fff;
+    light-dark(#fff, #1C2738);
   box-shadow:0 12px 28px rgba(var(--ink-rgb), 0.05);
 }
 
@@ -2723,7 +2730,7 @@ body.theme-operativa #holdingSection .workspace-central-layout {
   padding: 18px;
   border:1px solid rgba(var(--ink-rgb), 0.1);
   background:linear-gradient(180deg, rgba(var(--surface-rgb), 0.98), rgba(var(--surface-rgb), 0.98)),
-    #fff;
+    light-dark(#fff, #1C2738);
   box-shadow:0 14px 28px rgba(var(--ink-rgb), 0.05);
   border-radius: 24px;
 }
@@ -2780,7 +2787,7 @@ body.theme-operativa #holdingSection .workspace-central-layout {
   border-radius: 20px;
   border:1px solid rgba(var(--gold-rgb), 0.2);
   background:linear-gradient(135deg, rgba(var(--surface-rgb), 0.98), rgba(var(--surface-rgb), 0.96)),
-    #fff;
+    light-dark(#fff, #1C2738);
 }
 
 .workspace-company-editor-context-label {
@@ -2832,7 +2839,7 @@ body.theme-operativa #holdingSection .workspace-central-layout {
   border-radius: 18px;
   border:1px solid rgba(60, 110, 113, 0.16);
   background:linear-gradient(135deg, rgba(var(--surface-rgb), 0.98), rgba(var(--surface-rgb), 0.98)),
-    #fff;
+    light-dark(#fff, #1C2738);
 }
 
 .workspace-module-explainer-meta {
@@ -2926,7 +2933,7 @@ body.theme-operativa #holdingSection .workspace-company-switcher-card {
 
 body.theme-operativa #holdingSection .workspace-entry-banner-context .pill {
   background:rgba(var(--gold-rgb), 0.10);
-  color: var(--gold-deep);
+  color: var(--gold-text);
   border-color:rgba(var(--gold-rgb), 0.18);
 }
 
@@ -2936,7 +2943,7 @@ body.theme-operativa #holdingSection .workspace-entry-banner-metric {
 }
 
 body.theme-operativa #holdingSection .workspace-entry-banner-metric .label {
-  color: var(--gold-deep);
+  color: var(--gold-text);
 }
 
 body.theme-operativa #holdingSection .workspace-entry-banner-metric strong {
@@ -2948,7 +2955,7 @@ body.theme-operativa #holdingSection .workspace-entry-banner-metric .muted {
 }
 
 body.theme-operativa #holdingSection .workspace-company-switcher-copy .home-section-kicker {
-  color: var(--gold-deep);
+  color: var(--gold-text);
   background:rgba(var(--gold-rgb), 0.08);
   border-color:rgba(var(--gold-rgb), 0.16);
 }
@@ -2979,7 +2986,7 @@ body.theme-operativa #holdingSection .workspace-company-switcher-copy .muted {
   place-items: center;
   background:linear-gradient(135deg, rgba(var(--gold-rgb), 0.92), rgba(var(--gold-rgb), 0.68));
   border:1px solid rgba(var(--ink-rgb), 0.12);
-  color: rgba(var(--ink-rgb), 0.92);
+  color: rgba(var(--ink-fixed-rgb), 0.92);
   box-shadow:0 14px 26px rgba(var(--ink-rgb), 0.10);
 }
 
@@ -3358,7 +3365,7 @@ body.theme-operativa .workspace-home-count {
   padding: 0 6px;
   margin-left: 6px;
   border-radius: 999px;
-  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
+  background:linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
   color: #2b2b2b;
   font-size: 11px;
   font-weight: 900;
@@ -3470,7 +3477,7 @@ body.theme-operativa .workspace-home-count {
   top: 0;
   width: 100%;
   height: 4px;
-  background: linear-gradient(90deg, var(--rrhh-accent) 0%, var(--rrhh-accent-2) 100%);
+  background:linear-gradient(90deg, var(--rrhh-accent) 0%, var(--rrhh-accent-2) 100%);
   opacity: 0.9;
 }
 
@@ -3563,7 +3570,7 @@ body.theme-operativa .workspace-home-count {
 .rrhh-avatar-initials {
   font-weight: 800;
   font-size: 13px;
-  color: rgba(43, 43, 43, 0.78);
+  color: rgba(var(--ink-rgb), 0.78);
 }
 
 .rrhh-avatar-lg {
@@ -3614,7 +3621,7 @@ body.theme-operativa .workspace-home-count {
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: linear-gradient(135deg, var(--rrhh-accent) 0%, var(--rrhh-accent-2) 100%);
+  background:linear-gradient(135deg, var(--rrhh-accent) 0%, var(--rrhh-accent-2) 100%);
   opacity: 0.55;
   flex: 0 0 auto;
 }
@@ -3646,7 +3653,7 @@ body.theme-operativa .workspace-home-count {
 .rrhh-vacbar-fill {
   height: 100%;
   border-radius: 999px;
-  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
+  background:linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
   width: 0%;
 }
 
@@ -3733,7 +3740,7 @@ body.theme-operativa .workspace-home-count {
 .rrhh-cal-num {
   font-size: 12px;
   font-weight: 700;
-  color: rgba(43, 43, 43, 0.78);
+  color: rgba(var(--ink-rgb), 0.78);
 }
 
 .rrhh-cal-legend {
@@ -4766,7 +4773,7 @@ body.theme-operativa .workspace-home-count {
   border-radius: 18px;
   border:1px solid rgba(130, 76, 69, 0.12);
   background:linear-gradient(180deg, rgba(var(--surface-rgb), 0.98), light-dark(rgba(244, 238, 227, 0.96), rgba(53, 53, 50, 0.96))),
-    #fff;
+    light-dark(#fff, #1C2738);
 }
 
 .crm-workspace-tabs .tab {
@@ -5875,7 +5882,7 @@ body.tc-resizing {
   border-radius: 16px;
   border:1px solid rgba(var(--ink-rgb), 0.14);
   background:linear-gradient(180deg, rgba(var(--gold-rgb), 0.92), rgba(var(--gold-rgb), 0.74));
-  color: rgba(var(--ink-rgb), 0.94);
+  color: rgba(var(--ink-fixed-rgb), 0.94);
 }
 
 .tc-modulebar .tab.tc-module:hover {
@@ -6031,7 +6038,7 @@ body.tc-resizing {
   border-radius: 14px;
   background:linear-gradient(180deg, rgba(var(--gold-rgb), 0.92), rgba(var(--gold-rgb), 0.72));
   border:1px solid rgba(var(--ink-rgb), 0.12);
-  color: rgba(var(--ink-rgb), 0.92);
+  color: rgba(var(--ink-fixed-rgb), 0.92);
 }
 
 .tc-modulebar.tc-modulebar--list .tc-mod-ico svg {
@@ -6162,7 +6169,7 @@ body.tc-resizing {
   padding: 7px 12px;
   border:1px solid rgba(var(--ink-rgb), 0.14);
   background:linear-gradient(135deg, rgba(var(--gold-rgb), 0.95), rgba(var(--gold-rgb), 0.80));
-  color: rgba(var(--ink-rgb), 0.92);
+  color: rgba(var(--ink-fixed-rgb), 0.92);
   font-weight: 800;
   font-size: 12px;
 }
@@ -6185,7 +6192,7 @@ body.tc-resizing {
   border-radius: 14px;
   border:1px solid rgba(var(--ink-rgb), 0.14);
   background:linear-gradient(180deg, rgba(var(--gold-rgb), 0.92), rgba(var(--gold-rgb), 0.74));
-  color: rgba(var(--ink-rgb), 0.94);
+  color: rgba(var(--ink-fixed-rgb), 0.94);
   flex: 0 1 auto;
   max-width: 96px;
 }
@@ -8461,7 +8468,7 @@ body.crm-context-inmo #inmuebleDetail .inmueble-advanced {
   border:1px solid rgba(var(--ink-rgb), 0.1);
   background:radial-gradient(circle at top right, rgba(var(--gold-rgb), 0.16), transparent 34%),
     linear-gradient(135deg, rgba(var(--surface-rgb), 0.98), rgba(var(--surface-rgb), 0.96)),
-    #fff;
+    light-dark(#fff, #1C2738);
   box-shadow:0 18px 38px rgba(var(--ink-rgb), 0.07);
   position: relative;
   overflow: hidden;
@@ -8695,7 +8702,7 @@ tr.is-selected td {
   border-radius: 16px;
   border:1px solid rgba(130, 76, 69, 0.12);
   background:linear-gradient(145deg, rgba(var(--surface-rgb), 0.98), rgba(var(--surface-rgb), 0.98)),
-    #fff;
+    light-dark(#fff, #1C2738);
   text-align: left;
   color: var(--ink);
   cursor: pointer;
@@ -8752,7 +8759,7 @@ tr.is-selected td {
   border:1px solid rgba(var(--gold-rgb), 0.22);
   border-radius: 20px;
   background:radial-gradient(circle at top right, light-dark(rgba(247, 232, 0, 0.18), rgba(55, 63, 50, 0.18)), transparent 28%),
-    linear-gradient(135deg, #fffef7 0%, #f5efe4 52%, #eef4f8 100%);
+    linear-gradient(135deg, light-dark(#fffef7, #283035) 0%, light-dark(#f5efe4, #353532) 52%, light-dark(#eef4f8, #1B2E44) 100%);
   text-align: left;
   cursor: pointer;
   box-shadow:0 14px 30px rgba(var(--ink-rgb), 0.08);
@@ -9087,7 +9094,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
   border-radius: 18px;
   border: 1px solid var(--line);
   background:linear-gradient(180deg, rgba(var(--surface-rgb), 0.98), rgba(var(--surface-rgb), 0.96)),
-    #fff;
+    light-dark(#fff, #1C2738);
   cursor: pointer;
   transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
 }
@@ -9181,7 +9188,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
   border: 1px solid var(--line);
   border-radius: 18px;
   background:linear-gradient(145deg, rgba(var(--surface-rgb), 0.98), rgba(var(--surface-rgb), 0.98)),
-    #fff;
+    light-dark(#fff, #1C2738);
 }
 
 .inmueble-summary-card {
@@ -9942,7 +9949,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
   padding: 14px;
   border:1px solid rgba(60, 110, 113, 0.12);
   border-radius: 16px;
-  background: linear-gradient(180deg, #fffdfa 0%, #ffffff 100%);
+  background:linear-gradient(180deg, light-dark(#fffdfa, #232B36) 0%, light-dark(#ffffff, #1C2738) 100%);
   box-shadow: none;
 }
 
@@ -9957,11 +9964,11 @@ body.crm-context-inmo .crm-resumen-compact-note {
 
 .editable-card--location,
 .editable-card--catastro {
-  background: linear-gradient(180deg, #fffdfa 0%, #f8f3ea 100%);
+  background:linear-gradient(180deg, light-dark(#fffdfa, #232B36) 0%, light-dark(#f8f3ea, #313233) 100%);
 }
 
 .editable-card--money {
-  background: linear-gradient(180deg, #fffdfa 0%, #f6f2e9 100%);
+  background:linear-gradient(180deg, light-dark(#fffdfa, #232B36) 0%, light-dark(#f6f2e9, #2F3334) 100%);
 }
 
 .editable-card--technical {
@@ -9985,7 +9992,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
 
 .inline-input:focus {
   outline: none;
-  border-color: var(--gold);
+  border-color: var(--gold-text);
   box-shadow:0 0 0 2px rgba(60, 110, 113, 0.18);
 }
 
@@ -10021,7 +10028,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
 .renta-card {
   width: 100%;
   text-align: left;
-  background: linear-gradient(180deg, #fffdfa 0%, #f6f1e7 100%);
+  background:linear-gradient(180deg, light-dark(#fffdfa, #232B36) 0%, light-dark(#f6f1e7, #323433) 100%);
   color: var(--ink);
   border:1px solid rgba(60, 110, 113, 0.18);
   box-shadow: none;
@@ -10092,7 +10099,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
   padding: 18px;
   border-radius: 18px;
   border:1px solid rgba(var(--gold-rgb), 0.22);
-  background: linear-gradient(180deg, #fffdfa 0%, #f5efe4 100%);
+  background:linear-gradient(180deg, light-dark(#fffdfa, #232B36) 0%, light-dark(#f5efe4, #353532) 100%);
   color: var(--ink);
   box-shadow:0 12px 28px rgba(var(--ink-rgb), 0.08);
   cursor: pointer;
@@ -10660,7 +10667,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
 }
 
 .agenda-day.active {
-  border-color: var(--gold);
+  border-color: var(--gold-text);
   box-shadow:0 0 0 2px rgba(60, 110, 113, 0.18);
 }
 
@@ -11004,8 +11011,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
   border-radius: 8px;
   padding: 16px;
   margin: 0 0 14px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--surface) 94%, #ffffff 6%), color-mix(in srgb, var(--surface) 86%, #d7b04c 14%));
+  background:linear-gradient(135deg, color-mix(in srgb, var(--surface) 94%, light-dark(#ffffff, #1C2738) 6%), color-mix(in srgb, var(--surface) 86%, #d7b04c 14%));
 }
 
 .cliente-premium-main,
@@ -11158,8 +11164,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
   padding: 16px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--surface) 92%, #0f172a 8%), var(--surface)),
+  background:linear-gradient(135deg, color-mix(in srgb, var(--surface) 92%, #0f172a 8%), var(--surface)),
     var(--surface);
   box-shadow:0 18px 42px rgba(var(--ink-rgb), 0.08);
 }
@@ -11460,7 +11465,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
 .crm-pipeline button.active {
   background: var(--gold);
   color: #f5f5f5;
-  border-color: var(--gold);
+  border-color: var(--gold-text);
 }
 
 .crm-pipeline button.stage-prospecto {
@@ -11772,7 +11777,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
 }
 
 .crm-kanban-column.drag-over {
-  border-color: var(--gold);
+  border-color: var(--gold-text);
   box-shadow:0 0 0 2px rgba(215, 176, 76, 0.15);
 }
 
@@ -11781,7 +11786,7 @@ body.crm-context-inmo .crm-resumen-compact-note {
   padding: 16px;
   border-radius: 14px;
   border: 1px solid #e3ddd3;
-  background: linear-gradient(140deg, #fffdfa 0%, #f2ede2 100%);
+  background:linear-gradient(140deg, light-dark(#fffdfa, #232B36) 0%, light-dark(#f2ede2, #333532) 100%);
 }
 
 .dashboard.hidden {
@@ -12052,7 +12057,7 @@ body.crm-context-gestoria #gestoriaDashboardSection .dashboard-kpis.grid {
 .progress-bar span {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, var(--gold), var(--ink));
+  background:linear-gradient(90deg, var(--gold), var(--ink));
   border-radius: 999px;
 }
 
@@ -12082,7 +12087,7 @@ table button {
   border-radius: 999px;
   padding: 6px 12px;
   background: var(--black);
-  color: var(--gold);
+  color: var(--gold-text);
   cursor: pointer;
   font-size: 12px;
 }
@@ -12095,7 +12100,7 @@ td {
 }
 
 th {
-  background: linear-gradient(90deg, #f7f1e6 0%, #efe8db 100%);
+  background:linear-gradient(90deg, light-dark(#f7f1e6, #353532) 0%, light-dark(#efe8db, #373632) 100%);
   color: var(--ink);
   font-weight: 600;
   letter-spacing: 0.2px;
@@ -12280,7 +12285,7 @@ body.density-compact #crmSection [id$="Table"] table {
 
 #hipotecaBdtPanel .view-toggle button.active {
   background: var(--gold);
-  border-color:rgba(var(--ink-rgb), 0.08);
+  border-color:rgba(var(--ink-fixed-rgb), 0.08);
   color: #1b1b1b;
 }
 
@@ -13553,8 +13558,8 @@ body.theme-operativa .company-card .card-link,
 body.theme-operativa .toolbar button,
 body.theme-operativa .form-actions button,
 body.theme-operativa .inline-row button {
-  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
-  color: rgba(var(--ink-rgb), 0.92);
+  background:linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
+  color: rgba(var(--ink-fixed-rgb), 0.92);
   box-shadow:0 12px 24px rgba(var(--ink-rgb), 0.14);
 }
 
@@ -13682,7 +13687,7 @@ body.theme-operativa .crm-pipeline button {
 
 body.theme-operativa .crm-pipeline button.active {
   background:linear-gradient(135deg, rgba(var(--gold-rgb), 0.95) 0%, rgba(var(--gold-rgb), 0.78) 100%);
-  color: rgba(var(--ink-rgb), 0.94);
+  color: rgba(var(--ink-fixed-rgb), 0.94);
   box-shadow:0 14px 24px rgba(var(--ink-rgb), 0.14);
 }
 
@@ -13764,13 +13769,13 @@ body.theme-operativa .auth-login-card::before {
   position: absolute;
   inset: 0 0 auto 0;
   height: 6px;
-  background: linear-gradient(90deg, #22C55E 0%, #73986f 62%, #4ADE80 100%);
+  background:linear-gradient(90deg, #22C55E 0%, #73986f 62%, #4ADE80 100%);
 }
 
 body.theme-operativa .auth-brand-badge {
   background:rgba(var(--surface-rgb), 0.92);
   border-color:rgba(var(--gold-rgb), 0.18);
-  color: var(--gold-deep);
+  color: var(--gold-text);
 }
 
 body.theme-operativa .auth-login-card h2 {
@@ -13904,7 +13909,7 @@ body.theme-operativa {
   background:radial-gradient(circle at top left, rgba(var(--gold-rgb), 0.2), transparent 26%),
     radial-gradient(circle at 100% 0%, rgba(var(--sage-rgb), 0.16), transparent 30%),
     radial-gradient(circle at 50% 100%, rgba(var(--gold-rgb), 0.12), transparent 34%),
-    linear-gradient(180deg, #f7f3e8 0%, #eef2ea 46%, #f7f7f2 100%);
+    linear-gradient(180deg, light-dark(#f7f3e8, #323533) 0%, light-dark(#eef2ea, #213235) 46%, light-dark(#f7f7f2, #232E36) 100%);
 }
 
 body.theme-operativa header {
@@ -14079,7 +14084,7 @@ body.theme-operativa .company-summary::before {
   position: absolute;
   inset: 0 auto 0 0;
   width: 5px;
-  background: linear-gradient(180deg, #22C55E 0%, #73986f 100%);
+  background:linear-gradient(180deg, #22C55E 0%, #73986f 100%);
   opacity: 0.9;
 }
 
@@ -14089,7 +14094,7 @@ body.theme-operativa .toolbar button,
 body.theme-operativa .form-actions button,
 body.theme-operativa .inline-row button,
 body.theme-operativa .crm-pipeline button.active {
-  background: linear-gradient(135deg, #22C55E 0%, #73986f 100%);
+  background:linear-gradient(135deg, #22C55E 0%, #73986f 100%);
   color: #fffdf7;
   box-shadow:0 14px 26px rgba(138, 135, 67, 0.2);
 }
@@ -14116,13 +14121,13 @@ body.theme-operativa .tab {
 }
 
 body.theme-operativa .tab.active {
-  background: linear-gradient(135deg, #263a30 0%, #73986f 55%, #22C55E 100%);
+  background:linear-gradient(135deg, #263a30 0%, #73986f 55%, #22C55E 100%);
   color: #fffdf5;
 }
 
 body.theme-operativa .dashboard-kpis .card::before,
 body.theme-operativa .crm-kpis .card::before {
-  background: linear-gradient(90deg, #22C55E 0%, #93a867 40%, #73986f 100%);
+  background:linear-gradient(90deg, #22C55E 0%, #93a867 40%, #73986f 100%);
 }
 
 body.theme-operativa .kpi-value {
@@ -14159,7 +14164,7 @@ body.theme-operativa #homeSection.hero {
   background:radial-gradient(circle at 8% 0%, rgba(var(--gold-rgb), 0.12), transparent 30%),
     radial-gradient(circle at 92% 20%, rgba(115, 152, 111, 0.12), transparent 24%),
     linear-gradient(135deg, rgba(var(--surface-rgb), 0.96) 0%, rgba(var(--surface-rgb), 0.94) 52%, rgba(var(--surface-rgb), 0.96) 100%);
-  color: #213129;
+  color: light-dark(#213129, #B2BDB8);
 }
 
 body.theme-operativa #homeSection.hero::before {
@@ -14177,7 +14182,7 @@ body.theme-operativa #homeSection .home-section-header {
 }
 
 body.theme-operativa #homeSection .home-section-kicker {
-  color: var(--gold-deep);
+  color: var(--gold-text);
   background:rgba(var(--gold-rgb), 0.08);
   border-color:rgba(var(--gold-rgb), 0.16);
 }
@@ -14219,7 +14224,7 @@ body.theme-operativa #homeSection .hero-aside {
 
 body.theme-operativa #homeSection .hero-chip {
   background:rgba(var(--gold-rgb), 0.1);
-  color: var(--gold-deep);
+  color: var(--gold-text);
   border-color:rgba(var(--gold-rgb), 0.18);
 }
 
@@ -14233,7 +14238,7 @@ body.theme-operativa #homeSection .hero-metric {
 }
 
 body.theme-operativa #homeSection .hero-metric strong {
-  color: var(--gold-deep);
+  color: var(--gold-text);
 }
 
 body.theme-operativa #homeSection .hero-metric span {
@@ -14257,7 +14262,7 @@ body.theme-operativa #homeSection .home-guidance-last-action {
 
 body.theme-operativa #homeSection .home-guidance-kicker,
 body.theme-operativa #homeSection .home-guidance-search-head label {
-  color: var(--gold-deep);
+  color: var(--gold-text);
 }
 
 body.theme-operativa #homeSection .home-guidance-title {
@@ -14295,7 +14300,7 @@ body.theme-operativa #homeSection .home-guidance-secondary .secondary.ghost {
 
 body.theme-operativa #homeSection .home-guidance-last-action .pill {
   background:rgba(var(--gold-rgb), 0.10);
-  color: var(--gold-deep);
+  color: var(--gold-text);
   border-color:rgba(var(--gold-rgb), 0.18);
 }
 
@@ -14322,7 +14327,7 @@ body.theme-operativa .meta-user select {
   width: 100%;
   min-width: 0;
   background:rgba(var(--surface-rgb), 0.94);
-  color: #213129;
+  color: light-dark(#213129, #B2BDB8);
   border-color:rgba(var(--gold-rgb), 0.18);
 }
 
@@ -14506,7 +14511,7 @@ body.crm-context-inmo #crmSection .crm-side-item:focus-visible {
 body.crm-context-inmo #crmSection .crm-side-new .crm-side-ico {
   background:linear-gradient(135deg, rgba(var(--gold-rgb), 0.95), rgba(var(--gold-rgb), 0.78));
   border-color:rgba(var(--surface-rgb), 0.40);
-  color: rgba(var(--ink-rgb), 0.98);
+  color: rgba(var(--ink-fixed-rgb), 0.98);
 }
 
 /* Verifika² branding: CRM Gestoría (mismo patrón visual que Inmobiliaria) */
@@ -14540,7 +14545,7 @@ body.crm-context-gestoria #crmSection .crm-side-item:focus-visible {
 body.crm-context-gestoria #crmSection .crm-side-new .crm-side-ico {
   background:linear-gradient(135deg, rgba(var(--gold-rgb), 0.95), rgba(var(--gold-rgb), 0.78));
   border-color:rgba(var(--surface-rgb), 0.40);
-  color: rgba(var(--ink-rgb), 0.98);
+  color: rgba(var(--ink-fixed-rgb), 0.98);
 }
 
 /* En cualquier vertical CRM, los módulos deben mantener el mismo formato (solo estilo). */
@@ -14751,15 +14756,15 @@ body.theme-operativa {
   --v2-card-border-hover:rgba(var(--gold-rgb), 0.32);
   --v2-card-accent: rgba(var(--gold-rgb), 0.52);
   --v2-card-bg:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 248, 244, 0.92)),
+    linear-gradient(180deg, light-dark(rgba(255, 255, 255, 0.96), rgba(28, 39, 56, 0.96)), light-dark(rgba(247, 248, 244, 0.92), rgba(28, 39, 56, 0.92))),
     radial-gradient(circle at 12% 0%, rgba(var(--gold-rgb), 0.16), transparent 55%),
     radial-gradient(circle at 90% 18%, rgba(var(--ink-rgb), 0.06), transparent 52%);
   --v2-card-shadow:
     0 16px 40px rgba(var(--ink-rgb), 0.10),
-    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+    inset 0 1px 0 light-dark(rgba(255, 255, 255, 0.92), rgba(28, 39, 56, 0.92));
   --v2-card-shadow-hover:
     0 24px 56px rgba(var(--ink-rgb), 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 0.94);
+    inset 0 1px 0 light-dark(rgba(255, 255, 255, 0.94), rgba(28, 39, 56, 0.94));
 }
 
 body.theme-operativa .card,
@@ -14810,7 +14815,7 @@ body.theme-operativa .toolbar button,
 body.theme-operativa .form-actions button,
 body.theme-operativa .inline-row button,
 body.theme-operativa .crm-pipeline button.active {
-  background: linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
+  background:linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
   color: #0b1d33;
   box-shadow:0 14px 26px rgba(var(--ink-rgb), 0.18);
 }
@@ -14898,7 +14903,7 @@ body.theme-operativa .pill {
 .skeleton-line {
   height: 14px;
   border-radius: 8px;
-  background: linear-gradient(90deg, var(--cream) 25%, #e9edf3 37%, var(--cream) 63%);
+  background:linear-gradient(90deg, var(--cream) 25%, light-dark(#e9edf3, #1B2B44) 37%, var(--cream) 63%);
   background-size: 400% 100%;
   animation: skeleton-shimmer 1.4s ease infinite;
 }
@@ -14940,7 +14945,7 @@ body.theme-operativa .pill {
 .workspace-config-layout .form-grid select:focus,
 .workspace-config-layout .form-grid textarea:focus {
   outline: none;
-  border-color: var(--gold-deep);
+  border-color: var(--gold-text);
   box-shadow: 0 0 0 3px var(--gold-soft);
 }
 /* Campo de color con swatch: input de texto + muestra de color sincronizada. */
