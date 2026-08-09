@@ -230,6 +230,47 @@ def build_branded_document_pdf(title, subtitle, sections, footer_lines=None, bra
     return buffer.getvalue()
 
 
+def _resuelve_logo_de_empresa(company, brand_logo_url=None):
+    """El logo de la empresa que emite el documento, y nunca el de otra.
+
+    `load_brand_logo` cae siempre al wordmark de Verifika² cuando no puede cargar lo
+    que le piden. Para los documentos de empresa eso es peor que no poner nada: cuatro
+    de las nueve empresas guardan el logo en S3 —ANSA, Estudio Velázquez, Inmovere
+    Proyect e Inversure— y si el bucket no responde, su nota de encargo saldría con la
+    marca de Verifika² encima. Un cliente de Estudio Velázquez recibiría un contrato
+    con el logotipo de otra casa.
+
+    Así que: si la empresa tiene logo configurado y no se puede cargar, se dibuja un
+    distintivo con **su** nombre. El respaldo neutro se reserva para las empresas que
+    no han configurado ninguno.
+    """
+    company = company or {}
+    url = str(brand_logo_url or company.get("logo_url") or "").strip()
+    cargar = _dep("load_brand_logo")
+    neutro = cargar(None, max_width=560)
+    if not url:
+        return neutro
+    propio = cargar(url, max_width=560)
+    if propio is not None and not _es_la_misma_imagen(propio, neutro):
+        return propio
+    nombre = str(company.get("nombre_comercial") or company.get("nombre") or "").strip()
+    if not nombre:
+        return neutro
+    try:
+        return _build_logo_badge_image(nombre, max_width=560)
+    except Exception:
+        return neutro
+
+
+def _es_la_misma_imagen(a, b):
+    if a is None or b is None:
+        return a is b
+    try:
+        return a.size == b.size and a.tobytes() == b.tobytes()
+    except Exception:
+        return False
+
+
 def build_company_branded_document_pdf(company, title, subtitle, sections, footer_lines=None, brand_logo_url=None):
     """Documento con la marca de la empresa que lo emite.
 
@@ -246,11 +287,7 @@ def build_company_branded_document_pdf(company, title, subtitle, sections, foote
     sobraba. `PDF_MOTOR=imagen` sigue devolviendo el aspecto anterior sin desplegar.
     """
     company = company or {}
-    logo = brand_logo_url or company.get("logo_url")
-    if not logo:
-        # Empresas sin logo (Inmovere Fincas, Verifika2): se resuelve aquí el mismo
-        # respaldo que aplicaba el motor de imagen, para que no cambie la marca.
-        logo = _dep("load_brand_logo")(None, max_width=560)
+    logo = _resuelve_logo_de_empresa(company, brand_logo_url)
     return _dep("build_modernia_branded_document_pdf")(
         title,
         subtitle,

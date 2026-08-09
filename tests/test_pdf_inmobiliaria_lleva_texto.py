@@ -121,6 +121,49 @@ class LosDiezDocumentosTests(unittest.TestCase):
         self.assertLess(len(self.docs["nota de encargo"]), 100_000)
 
 
+class NingunaEmpresaLlevaLaMarcaDeOtraTests(unittest.TestCase):
+    """Un documento de Estudio Velázquez no puede salir con el logo de Verifika².
+
+    `load_brand_logo` cae siempre al wordmark de Verifika² cuando no puede cargar lo
+    que le piden. Cuatro de las nueve empresas guardan su logo en S3 —ANSA, Estudio
+    Velázquez, Inmovere Proyect e Inversure—, así que si el bucket no responde su nota
+    de encargo saldría con la marca de otra casa encima. Para un contrato que se firma
+    eso es peor que no poner nada.
+
+    Ahora, si la empresa tiene logo configurado y no se puede cargar, se dibuja un
+    distintivo con **su** nombre. El respaldo neutro se reserva para quien no ha
+    configurado ninguno.
+    """
+
+    def setUp(self):
+        from web import document_pdf as D
+        self.D = D
+        self.neutro = D._DEPENDENCIES["load_brand_logo"](None, max_width=560)
+
+    def _resuelto(self, nombre, logo_url):
+        return self.D._resuelve_logo_de_empresa({"nombre": nombre, "logo_url": logo_url})
+
+    def test_el_logo_propio_se_respeta(self):
+        img = self._resuelto("Grupo Modernia", "/assets/grupo_modernia_logo.png")
+        self.assertIsNotNone(img)
+        self.assertFalse(self.D._es_la_misma_imagen(img, self.neutro))
+
+    def test_si_el_logo_no_carga_sale_su_nombre_y_no_otra_marca(self):
+        img = self._resuelto("Estudio Velazquez 2012 SL", "s3://company_logos/no-existe.jpg")
+        self.assertIsNotNone(img)
+        self.assertFalse(
+            self.D._es_la_misma_imagen(img, self.neutro),
+            "un documento de esta empresa saldría con el logotipo de Verifika²",
+        )
+
+    def test_sin_logo_configurado_se_usa_el_respaldo_neutro(self):
+        img = self._resuelto("Inmovere Fincas", "")
+        self.assertTrue(self.D._es_la_misma_imagen(img, self.neutro))
+
+    def test_una_empresa_sin_nombre_ni_logo_no_revienta(self):
+        self.assertIsNotNone(self.D._resuelve_logo_de_empresa({}))
+
+
 class LosDosDocumentosQueEranUnEsbozoTests(unittest.TestCase):
     """`web/templates/inmo/` nunca se subió a git y Render despliega desde git, así
     que producción jamás tuvo las cinco plantillas PDF: todo el código de relleno por
