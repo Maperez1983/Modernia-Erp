@@ -111,6 +111,44 @@ class ElModalDeCitaSeLimpiaTests(unittest.TestCase):
         self.assertIn("state.actionModalContext = null;", c)
 
 
+class ElResponsableNoSePierdeAlEditarTests(unittest.TestCase):
+    """Editar una cita podía dejarla sin responsable sin que nadie lo tocara.
+
+    El desplegable se llena con los usuarios activos **del servicio de la cita**, y su
+    valor es el nombre de usuario. Pero hay citas guardadas a nombre de gente que ya no
+    está, o escritas con el nombre completo en vez del usuario: en producción, 4 citas
+    con «Miguel Angel Pérez» y 1 con «Sebastian Lallana», ninguno de los dos entre las
+    opciones.
+
+    Asignar a un `<select>` un valor que no existe lo deja en blanco —selectedIndex
+    -1—, comprobado en el navegador. Al guardar se enviaba `responsable: ""` y el
+    servidor lo pasa a NULL, así que abrir una de esas citas y darle a guardar le
+    borraba el responsable.
+    """
+
+    def test_el_valor_guardado_se_anade_a_la_lista_si_no_estaba(self):
+        self.assertIn("const asegurarOpcionDeResponsable", APP)
+        c = cuerpo("const openActionEditor")
+        self.assertIn("asegurarOpcionDeResponsable(actionModalResponsable, ev.responsable);", c)
+
+    def test_se_anade_antes_de_asignar_el_valor(self):
+        """Si se asignara primero, el select ya se habría quedado en blanco."""
+        c = cuerpo("const openActionEditor")
+        self.assertLess(
+            c.index("asegurarOpcionDeResponsable(actionModalResponsable"),
+            c.index('actionModalResponsable.value = ev.responsable || ""'),
+        )
+
+    def test_se_avisa_de_que_ese_responsable_ya_no_esta(self):
+        c = cuerpo("const asegurarOpcionDeResponsable")
+        self.assertIn("ya no está en el equipo", c)
+
+    def test_sigue_sin_arrastrarse_cuando_la_cita_no_tiene_responsable(self):
+        """El arreglo no puede reabrir el fallo antiguo: sin responsable, en blanco."""
+        c = cuerpo("const asegurarOpcionDeResponsable")
+        self.assertIn("if (!select || !valor) return;", c)
+
+
 class ElSolapeMiraElTramoNoSoloLaHoraDeArranqueTests(unittest.TestCase):
     """El aviso comparaba `ev.time !== payload.hora`: solo la hora de arranque.
 

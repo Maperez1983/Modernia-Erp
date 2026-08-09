@@ -5554,6 +5554,20 @@ const normalizeMatch = (value) =>
 let currentActionEdit = null;
 let modalLoading = false;
 
+const asegurarOpcionDeResponsable = (select, responsable) => {
+  // Mete el responsable guardado en la lista si no estaba, para que se vea y para que
+  // no se borre al guardar. Se marca como «ya no está en el equipo» para que quien
+  // edita entienda por qué ese nombre no sale entre los demás.
+  const valor = String(responsable || "").trim();
+  if (!select || !valor) return;
+  const opciones = Array.from(select.options || []);
+  if (opciones.some((o) => o.value === valor)) return;
+  const opcion = createOption(valor, `${valor} (ya no está en el equipo)`);
+  const primera = select.options && select.options.length > 1 ? select.options[1] : null;
+  if (primera) select.insertBefore(opcion, primera);
+  else select.appendChild(opcion);
+};
+
 const populateActionModalResponsables = (serviceValue = "") => {
   if (!actionModalResponsable) return;
   const filter = normalizeSimple(serviceValue || "");
@@ -5692,8 +5706,16 @@ const openActionEditor = (ev, context = null) => {
   if (actionModalEstado) actionModalEstado.value = ev.estado || "Pendiente";
   if (actionModalResponsable) {
     populateActionModalResponsables(ev.serviceId || ev.service || "");
-    // IMPORTANTE: si la acción no tiene responsable, no arrastres el valor anterior del <select>.
-    // (Bug: al editar una cita "sin responsable" se quedaba el responsable de la cita anterior).
+    // El responsable guardado puede no estar entre las opciones: el desplegable se
+    // llena con los usuarios activos del servicio, y hay citas a nombre de gente que
+    // ya no está, o escritas con el nombre completo en vez del usuario. Asignar al
+    // <select> un valor que no existe lo deja en blanco (selectedIndex -1), y al
+    // guardar se enviaba "" y el servidor lo convertía en NULL: la cita perdía su
+    // responsable sin que nadie lo tocara. En producción hay 5 así.
+    asegurarOpcionDeResponsable(actionModalResponsable, ev.responsable);
+    // Si la acción no tiene responsable, no se arrastra el valor anterior del
+    // <select>. (Fallo antiguo: al editar una cita «sin responsable» se quedaba el
+    // de la cita anterior).
     actionModalResponsable.value = ev.responsable || "";
   }
   if (state.actionModalContext) {
