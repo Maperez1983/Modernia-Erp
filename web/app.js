@@ -31482,6 +31482,20 @@ const collectCrmAlertsSnapshot = () => {
     return Math.max(peor, Math.floor((Date.now() - ultima) / (24 * 60 * 60 * 1000)));
   }, 0);
 
+  // Un inmueble en encargo que no está en el portal Verifika2 es escaparate que no
+  // se usa. Publicar exige tres condiciones a mano y nada avisaba de que quedaran
+  // sin cumplir: 4 de 86 fichas publicadas, todas de la misma agencia.
+  const inmueblesRows = Array.isArray(cachedCrmInmuebles) ? cachedCrmInmuebles : [];
+  const sinPublicarEnPortal = inmueblesRows.filter((row) => {
+    const etapa = normalizeCrmMainEtapa(String(row?.estado || "").trim());
+    if (etapa !== "Encargo") return false;
+    if (String(row?.portal_publicado ?? "").trim() === "1") return false;
+    // Sin la noticia verificada el portal no lo aceptaría aunque se marcara, así que
+    // el aviso sería una invitación a intentar algo que no funciona.
+    return String(row?.noticia_verificada ?? "").trim() === "1";
+  });
+  const sinPublicarEnPortalCount = sinPublicarEnPortal.length;
+
   const total =
     noticiasSinVerificarCount
     + sinProximaAccionCount
@@ -31490,7 +31504,8 @@ const collectCrmAlertsSnapshot = () => {
     + prioridadAltaCount
     + citasCaducadasCount
     + actividadesCaducadasCount
-    + expedientesParadosCount;
+    + expedientesParadosCount
+    + sinPublicarEnPortalCount;
 
   return {
     total,
@@ -31507,6 +31522,7 @@ const collectCrmAlertsSnapshot = () => {
     actividadesCaducadasCount,
     expedientesParadosCount,
     diasDelMasParado,
+    sinPublicarEnPortalCount,
   };
 };
 
@@ -31597,6 +31613,16 @@ const openCrmAlertsModal = () => {
             ? `Sin actividad desde hace más de 3 semanas. El peor lleva ${snapshot.diasDelMasParado} días.`
             : "Sin actividad desde hace más de 3 semanas.",
           quick: "captaciones:quick_sin_proxima_accion",
+        }
+      : null,
+    // Va justo después de los parados: es la otra que avisa de algo que no estás
+    // haciendo, en vez de recordarte lo que ya sabes que tienes pendiente.
+    snapshot.sinPublicarEnPortalCount
+      ? {
+          title: "En encargo, fuera del portal",
+          meta: `${snapshot.sinPublicarEnPortalCount}`,
+          sub: "Verificados y listos, pero sin publicar en Verifika2.",
+          view: "inmuebles",
         }
       : null,
     snapshot.noticiasSinVerificarCount ? { title: "Noticias sin verificar", meta: `${snapshot.noticiasSinVerificarCount}`, sub: "Valorar/verificar para avanzar pipeline.", quick: "captaciones:quick_noticia_sin_verificar" } : null,

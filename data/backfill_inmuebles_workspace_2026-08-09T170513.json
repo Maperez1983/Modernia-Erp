@@ -1,0 +1,488 @@
+[
+  {
+    "id": "5f147846e218431792fbbf1ca3a666ea",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "100 - SOR TERESA PRAT 59 2º G",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "e536be4ba0f8436eb096178518d20af9",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "100 - VELAZQUEZ 31 esc 2 1º2",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "968e7d8afc954ba6ab51ad7c1dc103d4",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "102 - ILDEFONSO MARZO 4 3º A",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "1a50cb39c5cc476cb920d483a60ca08f",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "103 - ALHUCEMAS 5 LOCALES 6-8",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "7284140abefa44e4ba00cd3f46f06b9e",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "103 - Frigiliana",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "fcd9cc148a3649d59af66daf3390d3bc",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "103 - MOBY DICK 62",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "0e9ece6e994f45c5aa2d2750257c222f",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "103 - Perdiguera 3 2-2",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "22b89ec0b49d41c8b870ed90eb0ce520",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "104 - MOntaña Blanca 14",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "74fc3c90a6d24a51a5af8d25b3f94908",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "107 - RICARDO DE ORUETA DUARTE",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "cf293bc33b194a5f881734069446ff5d",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "108 - Agustin Montes Fuentes",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "01c185c9e5f54ffe809e795e75083c79",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "108 - Eduardo de Palacios 17 10C4",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "ff62b56da8b54a2086ed9fac0b702867",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "109 - AVDA ESCRITOR ANTONIO SOLER 13 BLQ 5 1ºA",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "2f3677a0be6643ab895542f82bca17d0",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "110 - Jose Bisso 17 3B",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "61d300f8746248838c912b4956ac9bf6",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "110 - Manuel Altolaguirre 2 5º2",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "6e3ef5798d9743bf997e5aea70b46b88",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "110 - NIÑO JESÚS DE PRAGA 15",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "df64bbdcee7441f4adab2b66c68ab537",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "111 - PERDIGUERA 3 4º3",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "c5efaa8205c949f7a1fd90b3de380bdc",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "112 - Perdigueras “jose Luis”",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "e205f3ad533c4b2fb1c2ffcd512b2389",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "114 - Sor Teresa Prat 59 3-G",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "e64586b2b64460c761bb7217102d3185",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "ALQ Cocherito",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "34ea9782dae691c9085288a5afd27562",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "ALQ Emilio Prados 8",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "20ac454ec7a5390d05b8b20a5fe9d71b",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "ALQ Gaucin",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "72042fd03e9532f25bcdf227b43ded24",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "ALQ Ildefonso Marzo 3",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "1d4dc41f6f6d115925eb9ff4c2944de5",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "ALQ Parking Ildefonso Marzo",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "5c7ce050cef74ee4934abc480e00986f",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "ALQ Parking Jose Bisso",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "272add3ad832beebe0ad3ecd0ab88e33",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Alquiler Avenida Europa",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "ad0d7b515359ef7adebcee06dd486f5d",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Alquiler San andres",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "b13c629a1a6a49939d63a88fa3a4e554",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Aparcamiento",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "d14d527bad47fec7774b41400be4abb8",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Aparcamiento Jose bisso",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "3575cb6373461b42f2051d131ce139e3",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "APOLO",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "e2a0f171d1d38a71e227e7beaa4f8eb8",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Ariza",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "20efddce6d35924c62b717a2edb02bc9",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Atico Velazquez",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "f5935d6894e05a9c083f312c3b0a0cb9",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Avenida de la Paloma 16",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "712c5e33f32440121e20f8655c783659",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Avenida Europa",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "384c28564c4311781062ca830bd80e59",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Avenida las Postas Nº22 bajo 6g",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "dbbbc5bcf9b75ff287ffd537025fda04",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "avenida palma de mayorca",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "d8f7682b04fa96255bfe6ad03266d045",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "AV VELAZQUEZ ",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "f7708ddb489188e3f93f4f4bca992dd9",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Barceló",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "1079eb599c895c6a3a0042b9a1f84c65",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Calle Balazon",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "68711f7e66f1abab61b593104c98e72d",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "calle encina",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "c93b4c017b3d32015b45087e4b5adc1d",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "CALLE FLORES GARCIA 3",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "1df5e217d47741919570ad777066606f",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "CALLE GOYA",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "272c3794a5392278ad5bd04835e64773",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "calle Juan Ramón Jimenez 3",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "3d1c2b91d92684c65298c106501eca1a",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Calle Puerto Oncala",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "0ba08563af97957877598510dcb162d1",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "CALLE PUERTO ONCALA ",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "b0c9bd8c1e7ec5de83cae13f5a9f6819",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "CALLE VAZQUEZ CLAVER",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "ee2bafad586f1d412764bd9a0bcca430",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Calle Vladimir Nabokov ",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "019e49edcac4f2e7fc9d58fdffd0c0bc",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Carnicerito",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "a8941d440d9e5bc3facafc8e0be34e79",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "CL CORTES EL VIEJO ",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "56b9df5416345c28c64358b155bf2422",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Compraventa Tratero",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "7f8e5a4052adbf93e239f1ce7102c0b6",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Cristobal Parking",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "4c1565740dbbd00243b10839a49a69c6",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "CR NAL-340 [EL PARAISO]",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "1e74c3fccdb840a0bc9e8cc6f05d231e",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Eduardo de Palacios 17 10C4",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "9281e5bf4f68eabc556d5e8eb6db53fb",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "FONTANA",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "f66f7cd200de4c2ab223d46aa036001b",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Guadiaro",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "86cc4b837fb3f6a8bb9043f97a03ccbb",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Hab Emilio Prados",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "78da755a1deaa35709eee6a7ca88c273",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "HABITACIONES  PISO SEBAS",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "501298dd53f8992c710ec66a95ca562d",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Horacio lengo",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "2244ae2511dfbf3e865fdb9e21760535",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Incosol",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "4e3d295a589c02bb0023f9930b4d0168",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "isaac peral",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "4c4669571633edeb54e3a28ce3500b4c",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Joselito",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "f299c2417f3ddad30225cdda92f67b39",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Lepanto",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "cdc5b682186584f84c5451276da8809f",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Local ildefonso Marzo",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "bdeaf5830050eaeca687dbc2c0867ac2",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Local Manuel Altolaguirre",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "b18b79111a50f7a239042cdd6c2dc9d7",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Local Vazquez claver",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "c6e66838d2fec201c47cb886df740670",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Mallorca",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "df47351f58c9101fd43a3b833c0647ea",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Marconi",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "c96ca7b6482f8145cbbdd180c334c2e1",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "MORETTI",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "7985fcbef45ee658ec4bc5acfc2e0fb2",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Ópalos",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "8e878c034e884b58b0195defea5a698e",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "PACÍFICO 53 1º B",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "be090c2e7a7cd573d607b0cf25949c86",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Parking",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "4c270cef4bba8b3ff55db46f4d1b6379",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Parking Avenida Europa",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "370fb43d01c8d8d8d257dec00d7cf870",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Parking Guadiaro",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "ed1c43652a7d9f70e0b9419ecdcdc500",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "PASAJE AUGUSTO GONZALEZ DE BESADA 2 14D",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "1d8aa8daf3eb2cef12c547bab902b75b",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Pasaje del Peligro",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "f0a93fd19a17ea05b9d0a1049dd8f55f",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "PUERTO DEL ESPINO",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "034c790a5e580cff2bde0da4beb8e2f3",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "San Andres",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "798dac6d2fa6d817a8209237e22a2ddc",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "SIERRA BLANCA",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "8df7e51bb73f98c022f3b27c6767f249",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "SIERRABLANCA",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "38584a02f1468b2c7f1415f78715b6d4",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Traspaso ildefonso Marzo 18",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "0db034123d631b64c92ab8a061d76243",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "Vazquez Claver",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  },
+  {
+    "id": "3ff0ac0e8a936f6994fc80e0aa46a8e7",
+    "empresa_id": "ceff9019-5715-4867-a8a5-31ecf447020b",
+    "direccion": "VICENTE ALEIXANDRE",
+    "workspace_id_nuevo": "6e63e1d1205c4c2a85dde7e20d5409f0"
+  }
+]

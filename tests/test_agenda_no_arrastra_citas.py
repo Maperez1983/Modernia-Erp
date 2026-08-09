@@ -302,6 +302,18 @@ class ElEstadoDeUnaCitaSeGuardaCanonicoTests(unittest.TestCase):
         self.assertIn('updates["estado"] = normalizar_estado_de_accion(updates.get("estado"))', servidor)
 
 
+def suma_de_alertas():
+    """La suma que compone el total de la campanita del CRM.
+
+    Hay varias `const total =` en app.js —minutos, vacaciones, importes—, así que se
+    ancla en la de `collectCrmAlertsSnapshot`, que es la única que suma recuentos de
+    alertas, y no en la primera que aparezca.
+    """
+    i = APP.index("const collectCrmAlertsSnapshot")
+    j = APP.index("  const total =", i)
+    return APP[j:APP.index(";", j)]
+
+
 class ElCrmAvisaDeLosExpedientesParadosTests(unittest.TestCase):
     """«Sin próxima acción» sólo mira si el campo está vacío.
 
@@ -332,7 +344,57 @@ class ElCrmAvisaDeLosExpedientesParadosTests(unittest.TestCase):
         self.assertIn("return ultima < limiteFrio;", bloque)
 
     def test_suma_al_total_de_alertas(self):
-        self.assertIn("+ expedientesParadosCount;", APP)
+        """Que el recuento entre en el total, sea o no el último sumando.
+
+        Antes esto comprobaba «+ expedientesParadosCount;» con el punto y coma, o sea
+        que exigía ser el último de la suma. Al añadir otra alerta —los inmuebles en
+        encargo fuera del portal— el test se rompió sin que nada estuviera mal. Se
+        mira la suma entera, que es lo que importa.
+        """
+        suma = suma_de_alertas()
+        self.assertIn("expedientesParadosCount", suma)
+
+
+class ElCrmAvisaDeLoQueNoEstaEnElPortalTests(unittest.TestCase):
+    """Un inmueble en encargo fuera del portal es escaparate que no se usa.
+
+    El CRM alimenta el portal Verifika2, pero publicar exige tres condiciones que se
+    cumplen a mano —marcar el inmueble, verificar la noticia, y que no esté vendido—
+    y nada avisaba de que quedaran a medias: 4 fichas publicadas de 86, todas de la
+    misma agencia.
+
+    El aviso sólo cuenta las que **podrían** publicarse ya: en encargo y con la
+    noticia verificada. Avisar de las que el portal rechazaría igualmente sería
+    invitar a intentar algo que no funciona, y a base de avisos inútiles se deja de
+    mirar la campanita.
+    """
+
+    def bloque(self):
+        i = APP.index("const sinPublicarEnPortal = inmueblesRows.filter")
+        return APP[i:i + 800]
+
+    def test_solo_cuenta_las_que_estan_en_encargo(self):
+        self.assertIn('if (etapa !== "Encargo") return false;', self.bloque())
+
+    def test_no_cuenta_las_que_ya_estan_publicadas(self):
+        self.assertIn('portal_publicado', self.bloque())
+
+    def test_exige_la_noticia_verificada(self):
+        """Sin verificar, el portal no la aceptaría aunque se marcara."""
+        self.assertIn("noticia_verificada", self.bloque())
+
+    def test_suma_al_total(self):
+        self.assertIn("sinPublicarEnPortalCount", suma_de_alertas())
+
+    def test_el_recuento_sale_en_el_snapshot(self):
+        i = APP.index("    expedientesParadosCount,\n    diasDelMasParado,")
+        self.assertIn("sinPublicarEnPortalCount", APP[i:i + 200])
+
+    def test_hay_una_tarjeta_que_lleva_al_listado(self):
+        i = APP.index('title: "En encargo, fuera del portal"')
+        tarjeta = APP[i - 200:i + 400]
+        self.assertIn("sinPublicarEnPortalCount", tarjeta)
+        self.assertIn('view: "inmuebles"', tarjeta)
 
 
 class LosDosEjesDelPresetVanSeparadosTests(unittest.TestCase):

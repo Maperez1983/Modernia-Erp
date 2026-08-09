@@ -32202,6 +32202,26 @@ def create_portal_inmueble_lead(conn, payload, now):
         # que publique ANSA, que es de Modernia Centro, su lead se archivaría en el
         # CRM de otra agencia y nadie lo notaría. Es preferible que el portal reciba
         # un error y reintente a que el dato acabe donde no es.
+        #
+        # Pero que el portal reciba el error no basta: el interesado existe y se
+        # perdería sin que nadie en la agencia lo supiera. Queda en auditoría con
+        # sus datos de contacto, para poder rescatarlo a mano.
+        audit_event(
+            conn,
+            empresa_id,
+            "portal_leads",
+            listing_id,
+            "Lead del portal rechazado: no se pudo determinar el workspace",
+            usuario="Portal",
+            detalles={
+                "inmueble_id": listing_id,
+                "nombre": nombre,
+                "telefono": telefono,
+                "email": email,
+                "mensaje": notas,
+            },
+            now=now,
+        )
         return {
             "error": "No se puede determinar el workspace del anuncio",
             "detail": (
@@ -37867,6 +37887,11 @@ def ensure_tables(db_path):
                 f"{idx_prefix} IF NOT EXISTS idx_visitas_empresa_fecha_estado ON visitas (empresa_id, fecha, estado)",
                 f"{idx_prefix} IF NOT EXISTS idx_demandas_empresa_estado ON demandas (empresa_id, estado)",
                 f"{idx_prefix} IF NOT EXISTS idx_captaciones_empresa_updated ON captaciones (empresa_id, updated_at)",
+                # El listado del portal Verifika2 filtra por `portal_publicado` y ordena
+                # por `portal_publicado_at`. Con 86 fichas da igual, pero es la consulta
+                # que sirve a un sitio público y la que más va a crecer.
+                f"{idx_prefix} IF NOT EXISTS idx_inmuebles_portal ON inmuebles (portal_publicado, portal_publicado_at)",
+                f"{idx_prefix} IF NOT EXISTS idx_captaciones_inmueble_verificada ON captaciones (inmueble_id, noticia_verificada)",
             ]
             for sql in index_sql:
                 try:
