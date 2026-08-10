@@ -31,6 +31,7 @@ De ahí que este fichero recorra los quince destinos del mapa, y no sólo uno.
 
 import json
 import os
+import re
 import tempfile
 import threading
 import unittest
@@ -234,6 +235,61 @@ class ConvertirCaptacionTests(unittest.TestCase):
                 self.fail(f"debería denegar y devolvió {r.status}")
         except urllib.error.HTTPError as e:
             self.assertIn(e.code, (403, 404))
+
+
+class SqlQueSoloFallaEnPostgresTests(unittest.TestCase):
+    """`SELECT DISTINCT` ordenando por una columna que no está en la selección.
+
+    SQLite lo acepta. Postgres lo rechaza:
+
+        for SELECT DISTINCT, ORDER BY expressions must appear in select list
+
+    Convertir una captación a Vendido o Alquiler pasaba por una consulta así y
+    devolvía 500 **sólo en producción**: la suite entera, que corre sobre SQLite, la
+    daba por buena. Apareció verificando el arreglo del mapa de destinos contra la
+    base de verdad.
+
+    Este test no puede ejecutar Postgres, así que revisa la forma del SQL. Es una red
+    más floja que una prueba real, pero coge exactamente el error que costó encontrar.
+    """
+
+    @staticmethod
+    def _consultas_invalidas():
+        fuente = (Path(__file__).resolve().parents[1] / "web" / "server.py").read_text(encoding="utf-8")
+        # Las listas de columnas que se interpolan por variable se resuelven antes,
+        # o darían falsos positivos: `cliente_list_cols` contiene `c.nombre`.
+        variables = dict(re.findall(r'(\w+_cols)\s*=\s*"""(.*?)"""', fuente, re.S))
+        malas = []
+        for m in re.finditer(r'"""(.*?)"""', fuente, re.S):
+            sql = m.group(1)
+            if "SELECT DISTINCT" not in sql.upper():
+                continue
+            for nombre, valor in variables.items():
+                sql = sql.replace("{" + nombre + "}", valor)
+            sel = re.search(r"SELECT\s+DISTINCT\s+(.*?)\s+FROM\s", sql, re.S | re.I)
+            orden = re.search(r"ORDER BY\s+(.+?)(?:\s+LIMIT|\s*$)", sql, re.S | re.I)
+            if not sel or not orden:
+                continue
+            for expr in [e.strip() for e in orden.group(1).split(",")]:
+                col = expr.split()[0] if expr.split() else ""
+                if not re.match(r"^[a-z_]+\.[a-z_]+$", col, re.I):
+                    continue
+                alias = col.split(".")[1]
+                if col in sel.group(1) or re.search(rf"\bAS\s+{alias}\b", sel.group(1), re.I):
+                    continue
+                malas.append((fuente[:m.start()].count("\n") + 1, col))
+        return malas
+
+    def test_no_queda_ninguna(self):
+        malas = self._consultas_invalidas()
+        self.assertEqual(malas, [], f"consultas que Postgres rechazará: {malas}")
+
+    def test_la_del_candidato_a_comprador_agrupa(self):
+        fuente = (Path(__file__).resolve().parents[1] / "web" / "server.py").read_text(encoding="utf-8")
+        i = fuente.index("def resolve_inmobiliaria_contact_candidate")
+        bloque = fuente[i:i + 4000]
+        self.assertIn("MAX(v.created_at) AS ultima_visita", bloque)
+        self.assertIn("GROUP BY d.cliente_id", bloque)
 
 
 class LasOtrasSieteConsultasTests(unittest.TestCase):

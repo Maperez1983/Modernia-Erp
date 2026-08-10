@@ -30466,14 +30466,23 @@ def resolve_inmobiliaria_contact_candidate(conn, empresa_id, payload, *, role_pr
     if inmueble_id:
         rows = conn.execute(
             """
-            SELECT DISTINCT d.cliente_id, c.nombre, c.nif, c.telefono, c.email
+            -- Esto era un SELECT DISTINCT ordenando por `v.created_at`, que no está
+            -- en la lista de columnas. SQLite lo acepta; Postgres lo rechaza con
+            -- «for SELECT DISTINCT, ORDER BY expressions must appear in select list».
+            -- O sea que funcionaba en la suite y reventaba en producción: convertir
+            -- una captación a Vendido o Alquiler daba 500. Con GROUP BY y MAX se
+            -- consigue lo mismo —un cliente por visita, el más reciente primero— y
+            -- vale en las dos bases.
+            SELECT d.cliente_id, c.nombre, c.nif, c.telefono, c.email,
+                   MAX(v.created_at) AS ultima_visita
             FROM visitas v
             JOIN demandas d ON d.id = v.demanda_id
             LEFT JOIN clientes c ON c.id = d.cliente_id
             WHERE v.empresa_id = ?
               AND v.inmueble_id = ?
               AND d.cliente_id IS NOT NULL
-            ORDER BY v.created_at DESC
+            GROUP BY d.cliente_id, c.nombre, c.nif, c.telefono, c.email
+            ORDER BY ultima_visita DESC
             """,
             (empresa_id, inmueble_id),
         ).fetchall()
