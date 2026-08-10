@@ -31806,6 +31806,48 @@ def empresas_del_ambito(conn, workspace_id="", empresa_id=""):
     return ids or ([eid] if eid else [])
 
 
+def desvincula_si_la_columna_existe(conn, tabla, columna, valor, ahora=None):
+    """Pone a NULL una referencia, comprobando ANTES que la columna existe.
+
+    Esto parece un rodeo y no lo es. El adaptador de Postgres hace `rollback()` de
+    **toda la transacción** cuando una sentencia falla, y luego relanza. Así que el
+    patrón habitual
+
+        try:
+            conn.execute("UPDATE otra_tabla SET inmueble_id = NULL WHERE ...")
+        except Exception:
+            pass
+
+    no es «intentarlo por si acaso»: si esa tabla no tiene esa columna, deshace en
+    silencio **todo el trabajo ya hecho en la transacción** y el `except` se lo traga.
+
+    Pasó de verdad, y se descubrió borrando en producción una ficha de pruebas:
+    `gestoria_contabilidad` no tiene `inmueble_id`, así que al borrar un inmueble se
+    revertían los doce borrados en cascada anteriores —captación, citas, documentos,
+    propietarios, checklist— y sólo se llegaba a borrar la ficha. La respuesta era
+    200 y el expediente quedaba desperdigado.
+
+    Mirar el esquema primero no lanza nunca, así que no hay nada que tragarse.
+    """
+    try:
+        columnas = table_columns(conn, tabla) or set()
+    except Exception:
+        _rollback_best_effort(conn)
+        return False
+    if columna not in columnas:
+        return False
+    if ahora is not None and "updated_at" in columnas:
+        conn.execute(
+            f"UPDATE {tabla} SET {columna} = NULL, updated_at = datetime(?) WHERE {columna} = ?",  # nosec B608
+            (ahora, valor),
+        )
+    else:
+        conn.execute(
+            f"UPDATE {tabla} SET {columna} = NULL WHERE {columna} = ?", (valor,)  # nosec B608
+        )
+    return True
+
+
 def resolve_scoped_record_access_multi(conn, record_id, empresa_ids, *, table, fetch_fn):
     """Como `resolve_scoped_record_access`, pero contra varias empresas."""
     rid = str(record_id or "").strip()
@@ -85324,18 +85366,12 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute("DELETE FROM visitas WHERE inmueble_id = ?", (inmueble_id,))
             conn.execute("DELETE FROM acciones WHERE inmueble_id = ?", (inmueble_id,))
             conn.execute("DELETE FROM captaciones WHERE inmueble_id = ?", (inmueble_id,))
-            try:
-                conn.execute("UPDATE operaciones_inmobiliarias SET inmueble_id = NULL, updated_at = datetime(?) WHERE inmueble_id = ?", (now, inmueble_id))
-            except Exception:
-                pass
-            try:
-                conn.execute("UPDATE gestoria_contabilidad SET inmueble_id = NULL, updated_at = datetime(?) WHERE inmueble_id = ?", (now, inmueble_id))
-            except Exception:
-                pass
-            try:
-                conn.execute("UPDATE asesoramientos_financiacion SET inmueble_id = NULL, updated_at = datetime(?) WHERE inmueble_id = ?", (now, inmueble_id))
-            except Exception:
-                pass
+            # Sin `try/except`: en Postgres una sentencia fallida deshace la
+            # transacción entera, así que un «por si acaso» aquí se llevaba por
+            # delante todos los borrados en cascada de arriba.
+            for tabla_suelta in ("operaciones_inmobiliarias", "gestoria_contabilidad",
+                                 "asesoramientos_financiacion"):
+                desvincula_si_la_columna_existe(conn, tabla_suelta, "inmueble_id", inmueble_id, ahora=now)
             conn.execute("DELETE FROM inmuebles WHERE id = ?", (inmueble_id,))
             conn.commit()
             json_response(self, {"ok": True, "id": inmueble_id})

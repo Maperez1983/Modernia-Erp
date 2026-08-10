@@ -1,0 +1,17 @@
+{
+  "cuando": "2026-08-10T08:47:26.258453",
+  "conteos": {
+    "inmuebles": 86,
+    "captaciones": 66,
+    "demandas": 3,
+    "visitas": 0,
+    "clientes": 2260,
+    "acciones": 170,
+    "operaciones_inmobiliarias": 38,
+    "inmueble_docs": 123,
+    "inmueble_compradores": 3,
+    "inmueble_propietarios": 51,
+    "inmueble_signature_requests": 1,
+    "auditoria": 1649
+  }
+}
