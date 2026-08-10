@@ -227,6 +227,26 @@ class ElVerdeTieneDosOficiosTests(unittest.TestCase):
         """No puede cambiar lo que ya se veía bien."""
         self.assertEqual(tokens_del_bloque(":root {")["--gold-text"], "#15803D")
 
+    def test_el_boton_verde_con_texto_claro_cumple_AA(self):
+        """El verde de marca con texto casi blanco encima daba 3.02: pasa para un
+        botón, no para leer. Con la parada clara en #15803D sube a 4.6.
+
+        Este fallo NO lo trajo el modo oscuro —era igual en claro— pero se arregla
+        aquí porque salió midiendo, y porque el modo oscuro lo empeoró hasta 2.09
+        antes de separar los dos oficios del verde.
+        """
+        claro = tokens_del_bloque(":root {")
+        self.assertGreaterEqual(contraste("#f5f5f5", claro["--gold-boton"]), 4.5)
+        oscuro = tokens_del_bloque(':root[data-theme="dark"] {')
+        self.assertGreaterEqual(contraste("#f5f5f5", oscuro["--gold-boton"]), 4.5)
+
+    def test_el_boton_se_ve_igual_en_los_dos_temas(self):
+        claro = tokens_del_bloque(":root {")
+        oscuro = tokens_del_bloque(':root[data-theme="dark"] {')
+        for token in ("--gold-boton", "--gold-boton-deep"):
+            with self.subTest(token):
+                self.assertEqual(claro[token], oscuro[token])
+
     def test_ya_no_se_usa_el_verde_de_fondo_como_color_de_texto(self):
         restos = re.findall(r"color\s*:\s*var\(--gold(?:-deep)?\)", CSS_SIN_COMENTARIOS)
         self.assertEqual(restos, [])

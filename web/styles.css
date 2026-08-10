@@ -16,6 +16,12 @@
      FONDO de botón necesita seguir siendo oscuro para que el texto blanco encima
      se lea; como TEXTO necesita aclararse. Por eso hay dos tokens. */
   --gold-text: #15803D;
+  /* El verde de los botones que llevan texto casi blanco encima. Con el de marca
+     (#16A34A) el contraste se queda en 3.02: pasa para un botón, no para leer.
+     Bajando la parada clara a #15803D sube a 4.6 y cumple AA sin dejar de ser el
+     verde de la casa. */
+  --gold-boton: #15803D;
+  --gold-boton-deep: #14682F;
   /* Oro real, reservado a "premium" (hitos, KPIs destacados, badges). */
   --premium: #F2C14E;
   --premium-deep: #B9892B;
@@ -102,6 +108,10 @@
     --gold: #16A34A;
     --gold-deep: #15803D;
     --gold-text: #4ADE80;
+  --gold-boton: #15803D;
+  --gold-boton-deep: #14682F;
+    --gold-boton: #15803D;
+    --gold-boton-deep: #14682F;
     --gold-soft: #10301D;
     --gold-rgb: 34, 197, 94;
     --sage: #22C55E;
@@ -138,6 +148,8 @@
   --gold: #16A34A;
   --gold-deep: #15803D;
   --gold-text: #4ADE80;
+  --gold-boton: #15803D;
+  --gold-boton-deep: #14682F;
   --gold-soft: #10301D;
   --gold-rgb: 34, 197, 94;
   --sage: #22C55E;
@@ -169,6 +181,10 @@
     --gold: #16A34A;
     --gold-deep: #15803D;
     --gold-text: #4ADE80;
+  --gold-boton: #15803D;
+  --gold-boton-deep: #14682F;
+    --gold-boton: #15803D;
+    --gold-boton-deep: #14682F;
     --gold-soft: #10301D;
     --black: #E8EDF4;
     --charcoal: #E8EDF4;
@@ -194,6 +210,10 @@
     --gold: #16A34A;
     --gold-deep: #15803D;
     --gold-text: #4ADE80;
+  --gold-boton: #15803D;
+  --gold-boton-deep: #14682F;
+    --gold-boton: #15803D;
+    --gold-boton-deep: #14682F;
     --gold-soft: #10301D;
     --black: #E8EDF4;
     --charcoal: #E8EDF4;
@@ -437,7 +457,7 @@ header {
 }
 
 #globalInternalCopilotToggle.global-internal-copilot-toggle--docked {
-  background:linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
+  background:linear-gradient(135deg, var(--gold-boton) 0%, var(--gold-boton-deep) 100%);
   font-size: 13px;
   color: #fff;
   border-color:rgba(var(--surface-rgb), 0.22);
@@ -446,7 +466,7 @@ header {
 
 #globalInternalCopilotToggle.global-internal-copilot-toggle--floating {
   position: fixed;
-  background:linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
+  background:linear-gradient(135deg, var(--gold-boton) 0%, var(--gold-boton-deep) 100%);
   color: #f5f5f5;
   border: 0;
   box-shadow:0 10px 24px rgba(var(--ink-rgb), 0.18);
@@ -595,7 +615,7 @@ textarea {
 
 button,
 .btn {
-  background:linear-gradient(135deg, var(--gold) 0%, var(--gold-deep) 100%);
+  background:linear-gradient(135deg, var(--gold-boton) 0%, var(--gold-boton-deep) 100%);
   color: #f5f5f5;
   border: none;
   border-radius: 14px;
