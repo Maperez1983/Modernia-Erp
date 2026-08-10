@@ -47794,10 +47794,32 @@ def log_workspace_registro_audit(conn, workspace_id, *, empresa_id=None, persona
     # Inmutabilidad tamper-evident: cadena de hashes. Cada registro incluye el hash del anterior del
     # mismo workspace, de modo que alterar/borrar un registro pasado rompe la cadena y es detectable
     # (verificable con verify_workspace_registro_audit_chain).
+    # La anterior es la PUNTA de la cadena: la línea firmada a la que no apunta
+    # ninguna otra. Antes se cogía la más reciente por `created_at DESC`, y eso
+    # partía la cadena en cuanto la fecha no ordenaba como se escribió: `created_at`
+    # es texto con formatos mezclados, y las líneas anteriores a que existiera la
+    # cadena no tienen hash, así que la «anterior» salía vacía y se empezaba una
+    # nueva. En producción quedaron 15 líneas diciendo ser la primera.
+    #
+    # Buscar la punta no depende de ninguna fecha. Si hay más de una —las bifurcaciones
+    # que dejó el fallo— se coge una de forma determinista y a partir de ahí la cadena
+    # vuelve a ser una sola.
     prev_hash = ""
     try:
         prow = conn.execute(
-            "SELECT integrity_hash FROM workspace_registro_audit WHERE workspace_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+            """
+            SELECT a.integrity_hash
+            FROM workspace_registro_audit a
+            WHERE a.workspace_id = ?
+              AND COALESCE(a.integrity_hash, '') <> ''
+              AND NOT EXISTS (
+                SELECT 1 FROM workspace_registro_audit b
+                WHERE b.workspace_id = a.workspace_id
+                  AND COALESCE(b.prev_hash, '') = a.integrity_hash
+              )
+            ORDER BY a.created_at DESC, a.id DESC
+            LIMIT 1
+            """,
             (workspace_id,),
         ).fetchone()
         if prow:
@@ -47810,11 +47832,21 @@ def log_workspace_registro_audit(conn, workspace_id, *, empresa_id=None, persona
     action_val = str(action or "").strip() or "update"
     empresa_val = str(empresa_id or "").strip() or None
     persona_val = str(persona_id or "").strip() or None
-    chain_payload = "|".join([
-        prev_hash, record_id, str(workspace_id or ""), str(empresa_val or ""), str(persona_val or ""),
-        entity_type_val, str(entity_id_val or ""), action_val, str(actor_user_id or ""),
-        before_json or "", after_json or "", now_ts,
-    ])
+    # El texto firmado lo arma la misma función que usa la verificación. Estaban
+    # duplicados —dos listas de doce campos que había que mantener iguales a mano— y
+    # eso es justo lo que no puede desincronizarse en una cadena de integridad.
+    chain_payload = workspace_registro_audit_chain_payload(workspace_id, {
+        "id": record_id,
+        "empresa_id": empresa_val,
+        "persona_id": persona_val,
+        "entity_type": entity_type_val,
+        "entity_id": entity_id_val,
+        "action": action_val,
+        "actor_user_id": actor_user_id,
+        "before_json": before_json,
+        "after_json": after_json,
+        "created_at": now_ts,
+    }, prev_hash)
     integrity_hash = hashlib.sha256(chain_payload.encode("utf-8")).hexdigest()
     conn.execute(
         """
@@ -47870,46 +47902,106 @@ def log_rrhh_read_access(conn, workspace_id, session, *, entity_type, entity_id=
         _rollback_best_effort(conn)
 
 
+def workspace_registro_audit_chain_payload(workspace_id, fila, prev_hash):
+    """El texto que se firma. Uno solo, para que escribir y verificar no puedan divergir."""
+    return "|".join([
+        str(prev_hash or ""),
+        str(row_value(fila, "id", "") or ""),
+        str(workspace_id or ""),
+        str(row_value(fila, "empresa_id", "") or ""),
+        str(row_value(fila, "persona_id", "") or ""),
+        str(row_value(fila, "entity_type", "") or ""),
+        str(row_value(fila, "entity_id", "") or ""),
+        str(row_value(fila, "action", "") or ""),
+        str(row_value(fila, "actor_user_id", "") or ""),
+        str(row_value(fila, "before_json", "") or ""),
+        str(row_value(fila, "after_json", "") or ""),
+        str(row_value(fila, "created_at", "") or ""),
+    ])
+
+
 def verify_workspace_registro_audit_chain(conn, workspace_id):
-    """
-    Verifica la cadena de integridad de la auditoría de fichajes de un workspace.
-    Devuelve {"ok": bool, "checked": n, "broken_at": id|None}. Detecta manipulación/borrado.
+    """Verifica la cadena tamper-evident de la auditoría de fichajes de un workspace.
+
+    **Por qué no se recorre por fecha.** La versión anterior leía las líneas con
+    `ORDER BY created_at ASC` y esperaba que ese orden reprodujera el encadenamiento.
+    No lo reproduce, por dos motivos: al escribir se busca la anterior con
+    `created_at DESC`, y `created_at` es texto con tres formatos mezclados (ISO con
+    T, `YYYY-MM-DD HH:MM:SS` y, hasta hoy, el literal `now`), que no ordenan igual.
+    Encima metía en el mismo recorrido las líneas anteriores a que existiera la
+    cadena, que no tienen hash ninguno.
+
+    Resultado: en producción decía «rota» en los tres workspaces sobre datos
+    intactos. Comprobado el 10-08-2026: las 240 líneas firmadas cuadran todas contra
+    su propio `prev_hash`. Una alarma que salta siempre no vigila nada, y en algo con
+    valor legal eso es peor que no tenerla.
+
+    Lo que se comprueba ahora es lo que la cadena prueba de verdad, sin inventarse un
+    orden:
+
+    - **Manipulación**: el hash de cada línea se recalcula con su propio contenido y
+      su propio `prev_hash`. Si alguien cambia un campo, deja de cuadrar.
+    - **Borrado**: si una línea apunta a un hash que ya no existe, falta la de en
+      medio.
+
+    Y se informa, sin llamarlo error, de lo que es historia y no manipulación: las
+    líneas sin firmar (anteriores a la cadena), en cuántos tramos está partida y
+    cuántas bifurcaciones dejó el fallo del orden.
+
+    Límite conocido, que ninguna cadena de hashes resuelve sola: **borrar la última
+    línea no se detecta**, porque no queda nadie que la apunte. Para eso haría falta
+    anclar la punta fuera de la propia tabla.
     """
     try:
-        rows = conn.execute(
+        filas = conn.execute(
             """
             SELECT id, empresa_id, persona_id, entity_type, entity_id, action, actor_user_id,
                    before_json, after_json, created_at, prev_hash, integrity_hash
             FROM workspace_registro_audit
             WHERE workspace_id = ?
-            ORDER BY created_at ASC, id ASC
+            ORDER BY id ASC
             """,
             (workspace_id,),
         ).fetchall()
     except Exception:
         _rollback_best_effort(conn)
         return {"ok": False, "checked": 0, "broken_at": None, "error": "no se pudo leer la auditoría"}
-    prev = ""
-    checked = 0
-    for r in rows or []:
-        stored = str(row_value(r, "integrity_hash", None) or "")
-        rec_prev = str(row_value(r, "prev_hash", None) or "")
-        if rec_prev != prev:
-            return {"ok": False, "checked": checked, "broken_at": row_value(r, "id", None)}
-        payload = "|".join([
-            prev, str(row_value(r, "id", "") or ""), str(workspace_id or ""),
-            str(row_value(r, "empresa_id", "") or ""), str(row_value(r, "persona_id", "") or ""),
-            str(row_value(r, "entity_type", "") or ""), str(row_value(r, "entity_id", "") or ""),
-            str(row_value(r, "action", "") or ""), str(row_value(r, "actor_user_id", "") or ""),
-            str(row_value(r, "before_json", "") or ""), str(row_value(r, "after_json", "") or ""),
-            str(row_value(r, "created_at", "") or ""),
-        ])
-        calc = hashlib.sha256(payload.encode("utf-8")).hexdigest()
-        if calc != stored:
-            return {"ok": False, "checked": checked, "broken_at": row_value(r, "id", None)}
-        prev = stored
-        checked += 1
-    return {"ok": True, "checked": checked, "broken_at": None}
+
+    filas = list(filas or [])
+    firmadas = [f for f in filas if str(row_value(f, "integrity_hash", None) or "")]
+    por_hash = {str(row_value(f, "integrity_hash", None) or ""): f for f in firmadas}
+
+    manipuladas, huecos, inicios = [], [], []
+    referencias = {}
+    for f in firmadas:
+        fid = row_value(f, "id", None)
+        guardado = str(row_value(f, "integrity_hash", None) or "")
+        anterior = str(row_value(f, "prev_hash", None) or "")
+        calculado = hashlib.sha256(
+            workspace_registro_audit_chain_payload(workspace_id, f, anterior).encode("utf-8")
+        ).hexdigest()
+        if calculado != guardado:
+            manipuladas.append(fid)
+        if not anterior:
+            inicios.append(fid)
+        else:
+            referencias[anterior] = referencias.get(anterior, 0) + 1
+            if anterior not in por_hash:
+                huecos.append(fid)
+
+    roto_en = (manipuladas or huecos or [None])[0]
+    return {
+        "ok": not manipuladas and not huecos,
+        "checked": len(firmadas),
+        "broken_at": roto_en,
+        # El detalle, para poder mirar una alarma y saber qué mira.
+        "total": len(filas),
+        "sin_firmar": len(filas) - len(firmadas),
+        "manipuladas": manipuladas,
+        "huecos": huecos,
+        "segmentos": len(inicios),
+        "bifurcaciones": sum(1 for n in referencias.values() if n > 1),
+    }
 
 
 def fetch_workspace_registro_audit(conn, workspace_id, *, persona_id=None, limit=60):
@@ -90793,6 +90885,24 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"rows": []})
                     return
             json_response(self, fetch_workspace_registro_audit(conn, workspace_id, persona_id=persona_id or None, limit=limit))
+            return
+
+        if path == "/api/workspace_registro_audit_verify":
+            # La cadena tamper-evident existía desde hace tiempo, pero la función que
+            # la comprueba sólo la llamaban los tests: desde la aplicación no había
+            # forma de verificar nada. Una auditoría que no se puede auditar no
+            # demuestra gran cosa ante una inspección.
+            workspace_id = params.get("workspace_id", [""])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not (session and workspace_actor_can_manage_workspace(conn, session, workspace_id)):
+                # Es la auditoría del registro horario de todo el mundo: la ve quien
+                # gestiona el workspace, no cada persona la suya.
+                json_response(self, {"error": "Sin permiso sobre este workspace"}, status=403)
+                return
+            json_response(self, verify_workspace_registro_audit_chain(conn, workspace_id))
             return
 
         if path == "/api/workspace_registro_horario_alerts_run":
