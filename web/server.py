@@ -31780,6 +31780,49 @@ def resolve_cliente_scope_access(conn, cliente_id, *, empresa_id="", empresa_ids
     return "missing"
 
 
+def empresas_del_ambito(conn, workspace_id="", empresa_id=""):
+    """Las empresas contra las que validar un registro en esta petición.
+
+    Cuando la petición trae `workspace_id` y no empresa, el despachador rellena
+    `empresa` con la empresa técnica de plataforma —hay tablas antiguas con
+    `empresa_id NOT NULL`—. Pero esa empresa no es dueña de nada: comparar contra
+    ella hace que un cliente o un inmueble de la agencia salgan «fuera de la
+    empresa» y la petición se deniegue con un 403 que no significa nada.
+
+    Con workspace, el ámbito son TODAS las empresas de ese workspace, que es la
+    pertenencia que ya se comprobó antes de llegar aquí.
+    """
+    ws = str(workspace_id or "").strip()
+    eid = str(empresa_id or "").strip()
+    if not ws:
+        return [eid] if eid else []
+    try:
+        ids = [str(x).strip() for x in (fetch_workspace_company_ids(conn, ws) or []) if str(x).strip()]
+    except Exception:
+        _rollback_best_effort(conn)
+        ids = []
+    if eid and eid not in ids:
+        ids.append(eid)
+    return ids or ([eid] if eid else [])
+
+
+def resolve_scoped_record_access_multi(conn, record_id, empresa_ids, *, table, fetch_fn):
+    """Como `resolve_scoped_record_access`, pero contra varias empresas."""
+    rid = str(record_id or "").strip()
+    ids = [str(e or "").strip() for e in (empresa_ids or []) if str(e or "").strip()]
+    if not rid or not ids:
+        return None
+    for eid in ids:
+        if fetch_fn(conn, rid, eid):
+            return "ok"
+    try:
+        existe = conn.execute(f"SELECT id FROM {table} WHERE id = ? LIMIT 1", (rid,)).fetchone()  # nosec B608
+    except Exception:
+        _rollback_best_effort(conn)
+        existe = None
+    return "forbidden" if existe else "missing"
+
+
 def resolve_scoped_record_access(conn, record_id, empresa_id, *, table, fetch_fn):
     rid = str(record_id or "").strip()
     eid = str(empresa_id or "").strip()
@@ -85827,7 +85870,10 @@ class Handler(BaseHTTPRequestHandler):
                     return
             cliente_id = payload.get("cliente_id")
             if cliente_id:
-                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=empresa["id"])
+                cliente_access = resolve_cliente_scope_access(
+                    conn, cliente_id,
+                    empresa_ids=empresas_del_ambito(conn, payload_workspace_id, empresa["id"]),
+                )
                 if cliente_access == "missing":
                     json_response(self, {"error": "Cliente no encontrado"}, status=404)
                     return
@@ -86112,10 +86158,11 @@ class Handler(BaseHTTPRequestHandler):
                     return
             inmueble_id = str(payload.get("inmueble_id") or "").strip()
             demanda_id = str(payload.get("demanda_id") or "").strip()
-            inmueble_scope = resolve_scoped_record_access(
+            ambito_visita = empresas_del_ambito(conn, payload_workspace_id, empresa["id"])
+            inmueble_scope = resolve_scoped_record_access_multi(
                 conn,
                 inmueble_id,
-                empresa["id"],
+                ambito_visita,
                 table="inmuebles",
                 fetch_fn=fetch_inmueble_for_empresa,
             )
@@ -86125,10 +86172,10 @@ class Handler(BaseHTTPRequestHandler):
             if inmueble_scope == "forbidden":
                 json_response(self, {"error": "Inmueble fuera del scope de empresa"}, status=403)
                 return
-            demanda_scope = resolve_scoped_record_access(
+            demanda_scope = resolve_scoped_record_access_multi(
                 conn,
                 demanda_id,
-                empresa["id"],
+                ambito_visita,
                 table="demandas",
                 fetch_fn=fetch_demanda_for_empresa,
             )

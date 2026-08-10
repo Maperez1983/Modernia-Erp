@@ -26,6 +26,14 @@ from web.auth_security import hash_password
 
 
 ROOT = Path(__file__).resolve().parents[2]
+# Terceros cuya caída no dice nada del producto: sin salida a internet, la página
+# se sirve igual y las tipografías caen a la pila del sistema.
+_DOMINIOS_EXTERNOS_TOLERADOS = (
+    "fonts.googleapis.com",
+    "fonts.gstatic.com",
+    "unpkg.com",
+)
+
 SCREENSHOTS_DIR = ROOT / "screenshots"
 TRACES_DIR = ROOT / "traces"
 VIDEOS_DIR = ROOT / "videos"
@@ -305,105 +313,34 @@ def _connect_db(db_path: Path) -> sqlite3.Connection:
 
 
 def _bootstrap_minimal_schema(db_path: Path) -> None:
-    conn = _connect_db(db_path)
+    """Crea el esquema con el creador de la propia aplicación.
+
+    Antes esto pre-creaba a mano una docena de tablas «mínimas»: `inmuebles(id)`,
+    `captaciones(id)`, `acciones(id)`, `inmueble_docs(id)` —una sola columna cada
+    una— y `clientes`/`empresas` sin `empresa_id`, `workspace_id` ni fechas.
+
+    El servidor crea su esquema con `CREATE TABLE IF NOT EXISTS`, así que se
+    encontraba esas tablas ya hechas y **nunca creaba las buenas**. A partir de ahí
+    ninguna escritura funcionaba, el arranque no llegaba a marcar la base como lista
+    y `/api/health` devolvía 503 para siempre: los nueve ficheros e2e morían en el
+    fixture, antes de ejecutar una sola comprobación. Por eso nadie los corría.
+
+    Llamando a `ensure_tables` se obtiene exactamente el esquema con el que corre la
+    aplicación, que además es lo que se quiere probar.
+    """
+    from web.server import (
+        ensure_auth_invites_table,
+        ensure_tables,
+        open_sqlite_conn,
+    )
+
+    ensure_tables(db_path)
+    # `auth_invites` y las sesiones se crean bajo demanda en su primer uso, no en
+    # `ensure_tables`. El arnés siembra invitaciones ANTES de que nadie las use, así
+    # que aquí se adelantan a mano.
+    conn = open_sqlite_conn(str(db_path), with_row_factory=True)
     try:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS empresas (
-              id TEXT PRIMARY KEY,
-              nombre TEXT,
-              activo INTEGER NOT NULL DEFAULT 1
-            );
-            CREATE TABLE IF NOT EXISTS clientes (
-              id TEXT PRIMARY KEY,
-              nombre TEXT,
-              nif TEXT,
-              telefono TEXT,
-              email TEXT
-            );
-            CREATE TABLE IF NOT EXISTS acciones (
-              id TEXT PRIMARY KEY
-            );
-            CREATE TABLE IF NOT EXISTS inmueble_docs (
-              id TEXT PRIMARY KEY
-            );
-            CREATE TABLE IF NOT EXISTS inmuebles (
-              id TEXT PRIMARY KEY
-            );
-            CREATE TABLE IF NOT EXISTS captaciones (
-              id TEXT PRIMARY KEY
-            );
-            CREATE TABLE IF NOT EXISTS gestoria (
-              id TEXT PRIMARY KEY,
-              empresa_id TEXT,
-              cliente TEXT,
-              cliente_id TEXT,
-              fecha TEXT,
-              cuota REAL,
-              precio REAL,
-              tipo TEXT,
-              perfil TEXT,
-              estado TEXT,
-              fecha_baja TEXT,
-              created_at TEXT,
-              updated_at TEXT
-            );
-            CREATE TABLE IF NOT EXISTS inversores (
-              id TEXT PRIMARY KEY,
-              empresa_id TEXT,
-              created_at TEXT,
-              updated_at TEXT
-            );
-            CREATE TABLE IF NOT EXISTS inversure_operaciones (
-              id TEXT PRIMARY KEY,
-              empresa_id TEXT,
-              created_at TEXT,
-              updated_at TEXT
-            );
-            CREATE TABLE IF NOT EXISTS seguros (
-              id TEXT PRIMARY KEY,
-              empresa_id TEXT,
-              cliente_id TEXT,
-              tomador TEXT,
-              compania TEXT,
-              ramo TEXT,
-              poliza_numero TEXT,
-              prima_total REAL,
-              comision REAL,
-              porcentaje REAL,
-              estado TEXT,
-              fecha_efecto TEXT,
-              fecha_vencimiento TEXT,
-              poliza_url TEXT,
-              poliza_key TEXT,
-              created_at TEXT,
-              updated_at TEXT
-            );
-            CREATE TABLE IF NOT EXISTS seguros_renovaciones (
-              id TEXT PRIMARY KEY,
-              empresa_id TEXT,
-              poliza_id TEXT,
-              poliza_key TEXT,
-              fecha_vencimiento TEXT,
-              estado TEXT,
-              proxima_accion_fecha TEXT,
-              ultimo_contacto_fecha TEXT,
-              notas TEXT,
-              created_at TEXT,
-              updated_at TEXT
-            );
-            CREATE TABLE IF NOT EXISTS auth_invites (
-              token TEXT PRIMARY KEY,
-              user_id TEXT NOT NULL,
-              expires_at TEXT,
-              created_at TEXT NOT NULL,
-              sent_at TEXT,
-              used_at TEXT,
-              revoked_at TEXT,
-              notes TEXT
-            );
-            """
-        )
+        ensure_auth_invites_table(conn)
         conn.commit()
     finally:
         conn.close()
@@ -805,6 +742,13 @@ class BrowserIssues:
         else:
             reason = str(failure_info or "requestfailed")
         if "aborted" in reason.lower() or "canceled" in reason.lower() or "cancelled" in reason.lower():
+            return
+        # Recursos de terceros: que no haya red hacia fuera es una circunstancia del
+        # entorno —un contenedor de CI, una máquina sin salida— y no un defecto de la
+        # aplicación. Las tipografías tienen respaldo del sistema y la página funciona
+        # igual; hacer fallar la suite por esto es la forma más rápida de que nadie la
+        # vuelva a ejecutar.
+        if any(dominio in request.url for dominio in _DOMINIOS_EXTERNOS_TOLERADOS):
             return
         self.request_failures.append(f"{request.resource_type} {_sanitize_text(_strip_query(request.url))} :: {_sanitize_text(reason)}")
 

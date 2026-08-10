@@ -18,16 +18,19 @@ def test_initial_load(page, e2e_app):
         () => Array.from(document.querySelectorAll('script[src]')).map((script) => script.getAttribute('src') || '')
         """
     )
-    assert scripts == ["app-auth.js?v=16"]
+    # Los `?v=` son los números de caché-busting: cambian en CADA despliegue, así
+    # que fijarlos aquí convertía este test en un aviso de «has vuelto a desplegar»
+    # en vez de en una comprobación. Se mira el fichero, no su versión.
+    assert len(scripts) == 1 and scripts[0].startswith("app-auth.js?v=")
 
     resources = page.evaluate(
         """
         () => Array.from(performance.getEntriesByType('resource')).map((entry) => entry.name)
         """
     )
-    assert not any("app.js?v=793" in name for name in resources)
-    assert not any("ui-foundation.js?v=5" in name for name in resources)
-    assert not any("app-routing.js?v=13" in name for name in resources)
-    assert not any("app_shared.js?v=1" in name for name in resources)
+    assert not any("app.js?v=" in name for name in resources)
+    assert not any("ui-foundation.js?v=" in name for name in resources)
+    assert not any("app-routing.js?v=" in name for name in resources)
+    assert not any("app_shared.js?v=" in name for name in resources)
     assert not any("leaflet.css" in name for name in resources)
     assert not any("leaflet.js" in name for name in resources)

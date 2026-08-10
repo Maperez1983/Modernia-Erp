@@ -24,21 +24,24 @@ def test_login_success(page, e2e_app):
         () => Array.from(document.querySelectorAll('script[data-crm-dynamic="1"]')).map((script) => script.dataset.crmSrc || '')
         """
     )
-    assert "ui-foundation.js?v=5" in scripts
-    assert "app-routing.js?v=13" in scripts
-    assert "app_shared.js?v=1" in scripts
+    # Los `?v=` son los números de caché-busting: cambian en CADA despliegue, así
+    # que fijarlos aquí convertía este test en un aviso de «has vuelto a desplegar»
+    # en vez de en una comprobación. Se mira el fichero, no su versión.
+    assert any(nombre.startswith("ui-foundation.js?v=") for nombre in scripts)
+    assert any(nombre.startswith("app-routing.js?v=") for nombre in scripts)
+    assert any(nombre.startswith("app_shared.js?v=") for nombre in scripts)
     assert "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" in scripts
-    assert "app.js?v=793" in scripts
+    assert any(nombre.startswith("app.js?v=") for nombre in scripts)
 
     resources = page.evaluate(
         """
         () => Array.from(performance.getEntriesByType('resource')).map((entry) => entry.name)
         """
     )
-    assert any("app.js?v=793" in name for name in resources)
-    assert any("ui-foundation.js?v=5" in name for name in resources)
-    assert any("app-routing.js?v=13" in name for name in resources)
-    assert any("app_shared.js?v=1" in name for name in resources)
+    assert any("app.js?v=" in name for name in resources)
+    assert any("ui-foundation.js?v=" in name for name in resources)
+    assert any("app-routing.js?v=" in name for name in resources)
+    assert any("app_shared.js?v=" in name for name in resources)
     assert any("leaflet.css" in name for name in resources)
     assert any("leaflet.js" in name for name in resources)
 
