@@ -27512,7 +27512,9 @@ def persist_generated_inmueble_pdf(
         )
     payload_text = payload_json
     if isinstance(payload_json, (dict, list)):
-        payload_text = json.dumps(payload_json, ensure_ascii=False)
+        # El payload lleva importes tal cual salen de la base: con Postgres son
+        # Decimal y el dumps estándar lanza TypeError. Ver `valor_json_seguro`.
+        payload_text = json_dumps_seguro(payload_json)
     conn.execute(
         """
         INSERT INTO inmueble_docs (
@@ -54718,6 +54720,43 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
             rows=len(processed_rows),
             queries=query_count,
         )
+
+
+def valor_json_seguro(value):
+    """Convierte a algo serializable lo que la base devuelve y JSON no entiende.
+
+    Desde que el dinero se guarda en `numeric`, Postgres devuelve `Decimal`. El
+    `json.dumps` estándar no sabe qué hacer con eso y lanza TypeError. En
+    `json_response` ya se contemplaba; el problema son los otros 103 `json.dumps`
+    del fichero, que serializan filas directamente.
+
+    Costó verlo porque sólo falla contra Postgres: en SQLite los importes vuelven
+    como float y todo pasa. Apareció probando en producción, y no en una ficha de
+    prueba: el expediente completo devolvía 500 en las 13 fichas en Encargo.
+    """
+    if isinstance(value, Decimal):
+        try:
+            if value == value.to_integral_value():
+                return int(value)
+        except Exception:
+            pass
+        try:
+            return float(value)
+        except Exception:
+            return str(value)
+    if isinstance(value, (datetime, date)):
+        try:
+            return value.isoformat()
+        except Exception:
+            return str(value)
+    return str(value)
+
+
+def json_dumps_seguro(data, **kwargs):
+    """`json.dumps` que no revienta con lo que devuelve la base."""
+    kwargs.setdefault("ensure_ascii", False)
+    kwargs.setdefault("default", valor_json_seguro)
+    return json.dumps(data, **kwargs)
 
 
 def json_response(handler, data, status=200, cookies=None, extra_headers=None):
@@ -83339,12 +83378,22 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
+            # Antes esto filtraba por `empresa["id"]`, que cuando la petición trae
+            # workspace y no empresa es la empresa técnica de plataforma: un inmueble
+            # que existe y es del usuario salía como «no encontrado», con un 404 que
+            # no se distingue de un id inventado. Quien decide el acceso es
+            # `enforce_inmueble_access`, unas líneas más abajo, que resuelve el ámbito
+            # por la propia fila.
             inmueble = conn.execute(
-                "SELECT * FROM inmuebles WHERE id = ? AND empresa_id = ? LIMIT 1",
-                (inmueble_id, empresa["id"]),
+                "SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)
             ).fetchone()
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                return
+            session_previa = getattr(self, "auth_session", None) or self._current_session()
+            ok_previo, err_previo, _f = enforce_inmueble_access(conn, session_previa, inmueble_id, write=True)
+            if not ok_previo:
+                json_response(self, {"error": err_previo}, status=404 if err_previo == "Inmueble no encontrado" else 403)
                 return
             current_estado = str(inmueble.get("estado") if isinstance(inmueble, dict) else inmueble["estado"] or "").strip()
             estado_norm = normalize_lookup_text(current_estado).lower()
@@ -85440,6 +85489,28 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble_id or not etapa or not isinstance(tareas, list):
                 json_response(self, {"error": "inmueble_id, etapa y tareas requeridos"}, status=400)
                 return
+            # Se comprobaba que `tareas` fuera una lista y luego se daba por hecho que
+            # cada elemento era un diccionario. Con una lista de textos —lo primero que
+            # escribe cualquiera que integre contra esta API— el `tarea.get(...)`
+            # lanzaba AttributeError y el cliente recibía un 500 con el rastro de
+            # Python dentro. Se admiten las dos formas y lo que no encaje se rechaza
+            # con un 400 que dice qué pasa.
+            tareas_normalizadas = []
+            for tarea in tareas:
+                if isinstance(tarea, str):
+                    texto = tarea.strip()
+                    if texto:
+                        tareas_normalizadas.append({"tarea": texto})
+                elif isinstance(tarea, dict):
+                    tareas_normalizadas.append(tarea)
+                else:
+                    json_response(
+                        self,
+                        {"error": "Cada tarea debe ser un texto o un objeto con «tarea»"},
+                        status=400,
+                    )
+                    return
+            tareas = tareas_normalizadas
             session = getattr(self, "auth_session", None) or self._current_session()
             ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
             if not ok_acc:
