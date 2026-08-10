@@ -1,0 +1,17 @@
+{
+  "clientes": [
+    {
+      "id": "27ac20deb38c2d9b096890316ee67cdc",
+      "nombre": "ZZZ-AUDITORIA Propietario",
+      "nif": "00000001R"
+    }
+  ],
+  "demandas": [
+    {
+      "id": "659ccd77e9daa0e032588e96d3602431",
+      "tipo": "Piso",
+      "zona": "Auditoría",
+      "origen": "ZZZ-AUDITORIA"
+    }
+  ]
+}

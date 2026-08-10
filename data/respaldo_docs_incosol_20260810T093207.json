@@ -1,0 +1,53 @@
+[
+  {
+    "id": "cd88937f1c0febfe73e56bc1ef0c92b1",
+    "inmueble_id": "2244ae2511dfbf3e865fdb9e21760535",
+    "nombre": "Nota de encargo (final) · Incosol",
+    "url": "/uploads/inmuebles/generated/nota_encargo_final_incosol_20260810073103_cd88937f.pdf",
+    "tipo": "Nota de encargo (PDF final)",
+    "estado": "Vigente",
+    "version": 1,
+    "plantilla_clave": "nota_encargo_final",
+    "origen_tipo": "expediente_completo",
+    "origen_id": "2244ae2511dfbf3e865fdb9e21760535",
+    "payload_json": "{\"tipo_operacion\": \"venta\", \"precio_venta\": 450000, \"renta_mensual\": 450000, \"honorarios_pct\": \"4\", \"honorarios_mensualidades\": \"1\", \"iva_pct\": \"21\", \"fecha_inicio\": \"2026-08-10\", \"fecha_fin\": \"2027-02-10\", \"destino_arrendamiento\": \"vivienda\", \"fianza_tipo\": \"una\", \"lugar_firma\": \"Marbella\"}",
+    "reviewed_at": null,
+    "reviewed_by": null,
+    "created_at": "2026-08-10T07:31:01.787544+00:00",
+    "updated_at": "2026-08-10T07:31:01.787544+00:00"
+  },
+  {
+    "id": "41c71fd03f3f08a3dc4b02b3617b1aef",
+    "inmueble_id": "2244ae2511dfbf3e865fdb9e21760535",
+    "nombre": "Documento informativo abreviado · Incosol",
+    "url": "/uploads/inmuebles/generated/dia_venta_incosol_20260810073103_41c71fd0.pdf",
+    "tipo": "Documento informativo abreviado",
+    "estado": "Vigente",
+    "version": 1,
+    "plantilla_clave": "venta_ficha",
+    "origen_tipo": "expediente_completo",
+    "origen_id": "2244ae2511dfbf3e865fdb9e21760535",
+    "payload_json": "{\"kind\": \"venta_ficha\"}",
+    "reviewed_at": null,
+    "reviewed_by": null,
+    "created_at": "2026-08-10T07:31:01.787544+00:00",
+    "updated_at": "2026-08-10T07:31:01.787544+00:00"
+  },
+  {
+    "id": "a3b71ff02283c0d7983889e961cbe8cb",
+    "inmueble_id": "2244ae2511dfbf3e865fdb9e21760535",
+    "nombre": "Justificación de precio · Incosol",
+    "url": "/uploads/inmuebles/generated/justificacion_precio_incosol_20260810073103_a3b71ff0.pdf",
+    "tipo": "Justificación de precio",
+    "estado": "Vigente",
+    "version": 1,
+    "plantilla_clave": "venta_precio",
+    "origen_tipo": "expediente_completo",
+    "origen_id": "2244ae2511dfbf3e865fdb9e21760535",
+    "payload_json": "{\"kind\": \"venta_precio\"}",
+    "reviewed_at": null,
+    "reviewed_by": null,
+    "created_at": "2026-08-10T07:31:01.787544+00:00",
+    "updated_at": "2026-08-10T07:31:01.787544+00:00"
+  }
+]

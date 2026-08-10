@@ -84344,8 +84344,16 @@ class Handler(BaseHTTPRequestHandler):
                 if not ok_acc:
                     json_response(self, {"error": err_acc}, status=404 if "no encontrado" in err_acc else 403)
                     return
+                # `normalize_lookup_text` devuelve MAYÚSCULAS y las claves de abajo
+                # están en minúsculas: la búsqueda no acertaba NUNCA, con ningún
+                # valor. O sea que marcar un inmueble como vendido, alquilado o
+                # cerrado devolvía 400 siempre —comprobado en producción sobre una
+                # ficha real con los cinco destinos—. Es el mismo despiste que había
+                # en el texto de los anuncios, donde todos salían como venta.
+                # Se normalizan también las claves, así el mapa se puede seguir
+                # escribiendo en minúsculas, que es como se lee.
                 destino = normalize_lookup_text(payload.get("destino") or "")
-                destino_map = {
+                destino_map_legible = {
                     "noticia": "Noticia",
                     "inmueble": "Inmueble",
                     "valoracion": "Valoración",
@@ -84362,23 +84370,40 @@ class Handler(BaseHTTPRequestHandler):
                     "cerrado negativamente": "Cerrado negativamente",
                     "alquiler": "Alquiler",
                 }
+                destino_map = {
+                    normalize_lookup_text(clave): valor
+                    for clave, valor in destino_map_legible.items()
+                }
                 destino_label = destino_map.get(destino)
                 if not destino_label or (not captacion_id and not inmueble_id):
                     json_response(self, {"error": "captacion_id o inmueble_id y destino válidos requeridos"}, status=400)
                     return
+                # El acceso ya se ha comprobado arriba con `enforce_*`. Filtrar aquí
+                # por `empresa["id"]` —que con workspace y sin empresa es la empresa
+                # técnica de plataforma— hacía que una captación propia saliera como
+                # inexistente. Y peor: la de abajo CREABA la captación estampada con
+                # esa empresa técnica, dejándola fuera del alcance de su agencia.
+                ambito_convert = empresas_del_ambito(conn, payload_workspace_id, empresa["id"])
                 captacion = None
                 if captacion_id:
-                    captacion = conn.execute(
-                        """
-                        SELECT *
-                        FROM captaciones
-                        WHERE id = ? AND empresa_id = ?
-                        LIMIT 1
-                        """,
-                        (captacion_id, empresa["id"]),
-                    ).fetchone()
+                    if ambito_convert:
+                        huecos = ",".join(["?"] * len(ambito_convert))
+                        captacion = conn.execute(
+                            f"SELECT * FROM captaciones WHERE id = ? AND empresa_id IN ({huecos}) LIMIT 1",  # nosec B608
+                            (captacion_id, *ambito_convert),
+                        ).fetchone()
+                    # Nada de respaldo «sin ámbito» aquí: buscar la captación por id a
+                    # secas cuando la acotada no la encuentra es abrir la puerta a
+                    # convertir la captación de otra agencia. Si no está en el ámbito,
+                    # no está.
                 if not captacion and inmueble_id:
-                    captacion = ensure_captacion_for_inmueble(conn, empresa["id"], inmueble_id, now)
+                    fila_inm = conn.execute(
+                        "SELECT empresa_id FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)
+                    ).fetchone()
+                    empresa_del_inmueble = str(row_value(fila_inm, "empresa_id", "") or "").strip() if fila_inm else ""
+                    captacion = ensure_captacion_for_inmueble(
+                        conn, empresa_del_inmueble or empresa["id"], inmueble_id, now
+                    )
                 if not captacion:
                     json_response(self, {"error": "Captación no encontrada"}, status=404)
                     return
@@ -84471,9 +84496,15 @@ class Handler(BaseHTTPRequestHandler):
                     }
                     if precio_encargo is not None:
                         cap_updates["precio_encargo"] = precio_encargo
-                        if parse_money_value(captacion.get("precio_objetivo")) in (None, 0):
+                        # `captacion` es una fila de la base, no un diccionario: con
+                        # SQLite es un `sqlite3.Row`, que no tiene `.get()`. Esta rama
+                        # nunca se había podido ejecutar —el mapa de destinos no
+                        # acertaba nunca—, así que el fallo llevaba escondido desde el
+                        # principio y sólo salió al arreglar el mapa. `row_value` es el
+                        # accesor que ya se usa en el resto del fichero.
+                        if parse_money_value(row_value(captacion, "precio_objetivo")) in (None, 0):
                             cap_updates["precio_objetivo"] = precio_encargo
-                        if parse_money_value(captacion.get("precio_valoracion")) in (None, 0):
+                        if parse_money_value(row_value(captacion, "precio_valoracion")) in (None, 0):
                             cap_updates["precio_valoracion"] = precio_encargo
                     set_clause = ", ".join([f"{key} = ?" for key in cap_updates])
                     conn.execute(
@@ -84483,9 +84514,9 @@ class Handler(BaseHTTPRequestHandler):
                     inm_updates = {"estado": destino_label}
                     if precio_encargo is not None:
                         inm_updates["precio_encargo"] = precio_encargo
-                        if parse_money_value(inmueble.get("precio_objetivo")) in (None, 0):
+                        if parse_money_value(row_value(inmueble, "precio_objetivo")) in (None, 0):
                             inm_updates["precio_objetivo"] = precio_encargo
-                        if parse_money_value(inmueble.get("precio_valoracion")) in (None, 0):
+                        if parse_money_value(row_value(inmueble, "precio_valoracion")) in (None, 0):
                             inm_updates["precio_valoracion"] = precio_encargo
                     if honorarios is not None:
                         inm_updates["honorarios"] = honorarios
