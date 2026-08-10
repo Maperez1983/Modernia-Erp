@@ -1,0 +1,341 @@
+{
+ "demandas.created_at": [
+  {
+   "id": "b8d63d8cd11ffd7c3af6e86d8377b357",
+   "antes": "now",
+   "despues": "2026-06-06 00:00:00"
+  },
+  {
+   "id": "e5ae73235d4aab16461a3788e77d4a7c",
+   "antes": "now",
+   "despues": "2026-06-06 00:00:00"
+  },
+  {
+   "id": "6c8cb5fd42077805c2141bd66c55b2db",
+   "antes": "now",
+   "despues": "2026-06-06 00:00:00"
+  }
+ ],
+ "demandas.updated_at": [
+  {
+   "id": "b8d63d8cd11ffd7c3af6e86d8377b357",
+   "antes": "now",
+   "despues": "2026-06-06 00:00:00"
+  },
+  {
+   "id": "e5ae73235d4aab16461a3788e77d4a7c",
+   "antes": "now",
+   "despues": "2026-06-06 00:00:00"
+  },
+  {
+   "id": "6c8cb5fd42077805c2141bd66c55b2db",
+   "antes": "now",
+   "despues": "2026-06-06 00:00:00"
+  }
+ ],
+ "inmueble_compradores.created_at": [
+  {
+   "id": "7ecb753f54cbe4e5f308cb95783dfcb6",
+   "antes": "now",
+   "despues": "2026-06-06 00:00:00"
+  },
+  {
+   "id": "2ff474edc8a459bced282029ae63d1d4",
+   "antes": "now",
+   "despues": "2026-06-06 00:00:00"
+  },
+  {
+   "id": "64b84b458186565a402688c36f49c10f",
+   "antes": "now",
+   "despues": "2026-06-06 00:00:00"
+  }
+ ],
+ "inmueble_compradores.updated_at": [
+  {
+   "id": "7ecb753f54cbe4e5f308cb95783dfcb6",
+   "antes": "now",
+   "despues": "2026-06-06 00:00:00"
+  },
+  {
+   "id": "2ff474edc8a459bced282029ae63d1d4",
+   "antes": "now",
+   "despues": "2026-06-06 00:00:00"
+  },
+  {
+   "id": "64b84b458186565a402688c36f49c10f",
+   "antes": "now",
+   "despues": "2026-06-06 00:00:00"
+  }
+ ],
+ "operaciones_inmobiliarias.created_at": [
+  {
+   "id": "80ff88157175e786217520dc7dd8d777",
+   "antes": "now",
+   "despues": "2025-09-17 00:00:00"
+  }
+ ],
+ "operaciones_inmobiliarias.updated_at": [
+  {
+   "id": "80ff88157175e786217520dc7dd8d777",
+   "antes": "now",
+   "despues": "2025-09-17 00:00:00"
+  }
+ ],
+ "clientes_empresas.created_at": [
+  {
+   "id": "d2d6e8694f6efd4ef381a9b15b77a241",
+   "antes": "now",
+   "despues": "2026-05-15 00:00:00"
+  },
+  {
+   "id": "c5f2d8e0c06d2621e98f81aa056ccaac",
+   "antes": "now",
+   "despues": "2026-06-24 00:00:00"
+  },
+  {
+   "id": "391d16d1c8927ad3454e53c1dfa0676c",
+   "antes": "now",
+   "despues": "2026-05-14 00:00:00"
+  },
+  {
+   "id": "1e0ba2cbb34279754b3ee12a8a2f414f",
+   "antes": "now",
+   "despues": "2026-05-18 00:00:00"
+  },
+  {
+   "id": "ed258c3cce3177cedd62d7492bdeec02",
+   "antes": "now",
+   "despues": "2026-05-18 00:00:00"
+  },
+  {
+   "id": "0650be5f750f05f47c620eabe730ac7d",
+   "antes": "now",
+   "despues": "2026-05-22 00:00:00"
+  },
+  {
+   "id": "b949abb4fd3cd20588942fd9ebb76acd",
+   "antes": "now",
+   "despues": "2026-06-01 00:00:00"
+  },
+  {
+   "id": "5c7def66933bd3d2befd2fc677988b5e",
+   "antes": "now",
+   "despues": "2026-06-01 00:00:00"
+  },
+  {
+   "id": "9830805dad66e9b76cc13d5e41e99c04",
+   "antes": "now",
+   "despues": "2026-05-13 00:00:00"
+  },
+  {
+   "id": "3b8d6b59a325c0e7f1c0db4ac7c0a8fe",
+   "antes": "now",
+   "despues": "2026-05-14 00:00:00"
+  },
+  {
+   "id": "06ce70fa3d69cb4f4a4a558c22ae84cc",
+   "antes": "now",
+   "despues": "2026-05-18 00:00:00"
+  },
+  {
+   "id": "8f4046fd5a7600d6063672d01d6bbd3a",
+   "antes": "now",
+   "despues": "2026-08-03 18:50:55.654637+00"
+  },
+  {
+   "id": "e43bdea6cc096e3250ade42030b28306",
+   "antes": "now",
+   "despues": "2026-05-20 00:00:00"
+  },
+  {
+   "id": "4034a1e41cb1678884f6647aa17eb51d",
+   "antes": "now",
+   "despues": "2026-05-19 00:00:00"
+  },
+  {
+   "id": "5cfb85b214a31d2a4ca60c76643bad4b",
+   "antes": "now",
+   "despues": "2026-05-20 00:00:00"
+  },
+  {
+   "id": "23afe126666bbcd6fa64ab6cb31769cd",
+   "antes": "now",
+   "despues": "2026-05-20 00:00:00"
+  },
+  {
+   "id": "b725f58a3d3539f1bc0aee877104e719",
+   "antes": "now",
+   "despues": "2026-05-22 00:00:00"
+  },
+  {
+   "id": "1bce0f43f533d4ede6c0dcfb7bcfb553",
+   "antes": "now",
+   "despues": "2026-05-26 00:00:00"
+  },
+  {
+   "id": "c9e2a36ffc3eeba1794c193ce39e5e2b",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "48e1db9be1c90561f1cfc615a9f8cc47",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "b8577d804e2782ba0a72b47178426c60",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "7a554f87516de0f85eaa4fa60194c8e8",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "fbf082ef1ac1bb06e479eab14d291dcc",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "e964684c951c58fddf31e1573d0f842a",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "247a2971282e8434655f460f440ee9be",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "c2e3a234f5fdadb9d6f4d9f3184a60db",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "4b2962de6276039046963a6bc53378e2",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "5277041554c469978a4a2909572dc7a8",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "efddc6bda7c02c0cea1222455f4bd3c6",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "456bcc875d18dd173c1f7c12b20a1f0a",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "d14ec04ec1677490cb4888b54fd92489",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "4a4f76927b1e9063a8e82d26195f0f02",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "9cd3ca1236c92601bd7acd71198997a9",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "27269538b043b777b7e56715b33781d1",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "06831a42d9d19b9e40058c70cfc07c8e",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "21b311de32c58e40205bb621f94ece90",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "838381921f9b1ebfe3f2063287b30b5b",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "d70fc395fa198bdaecdfe67808edaa3a",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "507adb4daae49c2f4fad6e21b41f005c",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "1df4b7888c0f7d325b2f7ac2a2a000a5",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "b2dbe1e4253e31d816e46d36013749b4",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "28e65916f9c0ce3706e4e81c62297eeb",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "49edeaa0fb202e2f65b411f8c4ade631",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "88227e013fae67c9816bbe6618c84df7",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "8beab537d6fcd2de74dc2359f70b8e0c",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "56b502db0a5d18a28c2c881dc9996a46",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "27e219d9328140688adf6d91f6f7897a",
+   "antes": "now",
+   "despues": "2026-06-03 00:00:00"
+  },
+  {
+   "id": "55b4a27f324d2d20a0b901fe63abe49a",
+   "antes": "now",
+   "despues": "2026-08-03 18:50:55.654637+00"
+  },
+  {
+   "id": "ad2e25e75795db144d1f4254ded5614b",
+   "antes": "now",
+   "despues": "2026-08-03 18:50:55.654637+00"
+  },
+  {
+   "id": "a41fbd67ed4eed5b2699ffafcb99e859",
+   "antes": "now",
+   "despues": "2026-07-16 00:00:00"
+  },
+  {
+   "id": "c5bdbe8a3ad1aaa86f4822478c8f3f84",
+   "antes": "now",
+   "despues": "2026-07-16 00:00:00"
+  }
+ ]
+}
