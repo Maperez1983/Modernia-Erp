@@ -204,7 +204,14 @@ class DondeSeEngranaTests(unittest.TestCase):
         """El estado y su tarea ya están guardados: perderlos por esto sería peor."""
         cuerpo = self.handler()
         i = cuerpo.index("alta_comunidad_desde_presupuesto")
-        self.assertIn("except Exception:", cuerpo[i: i + 900])
+        self.assertIn("except Exception as _fallo_tragado:", cuerpo[i: i + 1000])
+
+    def test_pero_deja_rastro_en_el_log(self):
+        """Tragarse el fallo sin decir nada fue lo que hizo invisible durante meses
+        que el borrado de un inmueble dejaba el expediente desperdigado."""
+        cuerpo = self.handler()
+        i = cuerpo.index("alta_comunidad_desde_presupuesto")
+        self.assertIn("apunta_escritura_tragada(", cuerpo[i: i + 1200])
 
     def test_la_cuota_que_se_pasa_es_la_base(self):
         cuerpo = self.handler()

@@ -281,49 +281,154 @@ def translate_sqlite_sql_to_postgres(sql):
     return text
 
 
+# Un `SELECT` no cambia nada, así que si falla no hay trabajo previo que perder.
+# Todo lo demás se considera escritura: equivocarse por exceso sólo cuesta un
+# viaje de más al servidor; equivocarse por defecto cuesta datos.
+_SOLO_LECTURA = ("SELECT", "SHOW", "EXPLAIN", "SET", "PRAGMA", "BEGIN", "COMMIT", "ROLLBACK",
+                 "SAVEPOINT", "RELEASE", "DEALLOCATE", "DISCARD", "FETCH", "CLOSE", "VALUES")
+_PRIMERA_PALABRA = re.compile(r"\s*(?:/\*.*?\*/|--[^\n]*\n|\s)*([A-Za-z_]+)", re.S)
+
+# Nombre único del punto de retorno. Se reutiliza siempre el mismo para que la pila
+# no crezca: `RELEASE` destruye el más reciente con ese nombre.
+_PUNTO_DE_RETORNO = "crm_sentencia"
+
+
+def _es_escritura(sql):
+    m = _PRIMERA_PALABRA.match(sql or "")
+    if not m:
+        return True
+    palabra = m.group(1).upper()
+    if palabra == "WITH":
+        # Un CTE puede terminar en INSERT/UPDATE/DELETE.
+        return bool(re.search(r"\b(INSERT|UPDATE|DELETE|MERGE)\b", sql, re.I))
+    return palabra not in _SOLO_LECTURA
+
+
 class PostgresCompatConnection:
+    """Conexión a Postgres que habla el SQL de SQLite.
+
+    **Por qué hay puntos de retorno aquí.** Postgres aborta la transacción entera
+    cuando una sentencia falla: a partir de ahí no acepta nada más hasta que se
+    deshaga. SQLite no; falla esa sentencia y sigue.
+
+    El código de la aplicación está escrito contra SQLite, y en 127 sitios envuelve
+    escrituras accesorias en `try/except` para seguir adelante si no salen —bitácora,
+    contadores, desvinculaciones—. Sobre Postgres eso significaba que **una sentencia
+    accesoria que fallara se llevaba por delante todo el trabajo real de la petición**,
+    y el `except` se tragaba el aviso. Ya pasó de verdad: borrar un inmueble
+    respondía 200, borraba la ficha y dejaba su expediente entero desperdigado,
+    porque una actualización «por si acaso» apuntaba a una tabla sin esa columna.
+    Sin rastro en el log.
+
+    El arreglo es acotar el daño a la sentencia que falla, no confiar en que nadie
+    escriba un `try/except` de más. Antes de cada sentencia, si hay trabajo sin
+    confirmar, se marca un punto de retorno; si falla, se vuelve a ese punto y lo
+    anterior sobrevive.
+
+    Cuesta un viaje extra al servidor por sentencia, y sólo desde la primera
+    escritura: las lecturas no pagan nada. `RELEASE` + `SAVEPOINT` van en la misma
+    orden para que sea un viaje y no dos, y reutilizan nombre para que la pila de
+    puntos no crezca en las transacciones largas.
+    """
+
     __crm_backend__ = "postgres"
 
     def __init__(self, conn):
         self._conn = conn
+        self._hay_trabajo_sin_confirmar = False
+        self._punto_puesto = False
+
+    # ---------- puntos de retorno ----------
+
+    def _dentro_de_transaccion(self):
+        try:
+            estado = self._conn.info.transaction_status
+        except Exception:
+            return False
+        # psycopg.pq.TransactionStatus.INTRANS == 2 (IDLE=0, ACTIVE=1, INERROR=3).
+        return int(estado) == 2
+
+    def _marca_punto_de_retorno(self):
+        """Deja el punto de retorno justo antes de la sentencia que viene.
+
+        Devuelve True si quedó puesto. Si no se puede poner, la llamada sigue
+        adelante sin red: nunca se impide ejecutar por esto.
+        """
+        if not self._hay_trabajo_sin_confirmar or not self._dentro_de_transaccion():
+            return False
+        orden = (f"RELEASE SAVEPOINT {_PUNTO_DE_RETORNO}; SAVEPOINT {_PUNTO_DE_RETORNO}"
+                 if self._punto_puesto else f"SAVEPOINT {_PUNTO_DE_RETORNO}")
+        try:
+            self._conn.execute(orden)
+            self._punto_puesto = True
+            return True
+        except Exception:
+            self._punto_puesto = False
+            return False
+
+    def _vuelve_al_punto_de_retorno(self):
+        """Deshace sólo la sentencia que ha fallado. True si lo anterior se salva."""
+        try:
+            self._conn.execute(f"ROLLBACK TO SAVEPOINT {_PUNTO_DE_RETORNO}")
+            return True
+        except Exception:
+            self._punto_puesto = False
+            return False
+
+    def _recoge_el_fallo(self, con_punto):
+        if con_punto and self._vuelve_al_punto_de_retorno():
+            return
+        # Sin red: sólo queda deshacer entero, que es lo que se hacía siempre. Si no
+        # se deshace, la conexión queda abortada y la siguiente sentencia falla con
+        # InFailedSqlTransaction.
+        self._punto_puesto = False
+        self._hay_trabajo_sin_confirmar = False
+        try:
+            self._conn.rollback()
+        except Exception:
+            pass
+
+    # ---------- ejecución ----------
 
     def execute(self, sql, params=None):
         sql2 = translate_sqlite_sql_to_postgres(sql)
+        con_punto = self._marca_punto_de_retorno()
         try:
-            if params is None:
-                return self._conn.execute(sql2)
-            return self._conn.execute(sql2, params)
+            cur = self._conn.execute(sql2) if params is None else self._conn.execute(sql2, params)
         except Exception:
-            # En Postgres, un error deja la transacción abortada hasta rollback.
-            # Mucho código llama a execute dentro de try/except "best-effort" y luego continúa.
-            # Si no hacemos rollback aquí, el siguiente comando puede fallar con InFailedSqlTransaction.
-            try:
-                self._conn.rollback()
-            except Exception:
-                pass
+            self._recoge_el_fallo(con_punto)
             raise
+        if _es_escritura(sql2):
+            self._hay_trabajo_sin_confirmar = True
+        return cur
 
     def executemany(self, sql, seq_of_params):
         sql2 = translate_sqlite_sql_to_postgres(sql)
+        con_punto = self._marca_punto_de_retorno()
         try:
             # psycopg3: executemany lives on cursors, not on the connection.
             cur = self._conn.cursor()
             cur.executemany(sql2, seq_of_params)
-            return cur
         except Exception:
-            try:
-                self._conn.rollback()
-            except Exception:
-                pass
+            self._recoge_el_fallo(con_punto)
             raise
+        if _es_escritura(sql2):
+            self._hay_trabajo_sin_confirmar = True
+        return cur
 
     def commit(self):
+        self._punto_puesto = False
+        self._hay_trabajo_sin_confirmar = False
         return self._conn.commit()
 
     def rollback(self):
+        self._punto_puesto = False
+        self._hay_trabajo_sin_confirmar = False
         return self._conn.rollback()
 
     def close(self):
+        self._punto_puesto = False
+        self._hay_trabajo_sin_confirmar = False
         return self._conn.close()
 
 

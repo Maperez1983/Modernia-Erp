@@ -433,8 +433,8 @@ def seed_workspace_service_matrix(conn, now=None):
                             """,
                             (os.urandom(16).hex(), ws_id, service_key, empresa_id, is_default, sort_order, now, now),
                         )
-                    except Exception:
-                        pass
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("seed_workspace_service_matrix/workspace_servicio_empresas", _fallo_tragado)
                 inserted.append(empresa_id)
                 sort_order += 10
 
@@ -452,8 +452,8 @@ def seed_workspace_service_matrix(conn, now=None):
                         """,
                         (now, ws_id, service_key, inserted[0]),
                     )
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("seed_workspace_service_matrix/workspace_servicio_empresas", _fallo_tragado)
 
             # Normaliza: 1 solo default por servicio.
             try:
@@ -481,8 +481,8 @@ def seed_workspace_service_matrix(conn, now=None):
                         """,
                         (default_empresa_id, now, ws_id, service_key),
                     )
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("seed_workspace_service_matrix/workspace_servicio_empresas", _fallo_tragado)
 
 
 _normalize_s3_key = runtime_security_utils._normalize_s3_key
@@ -600,8 +600,8 @@ def _s3_key_granted(session, key, *, conn=None):
         if exp:
             try:
                 conn.execute("DELETE FROM s3_grants WHERE user_id = ? AND key = ?", (uid, safe))
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_s3_key_granted/s3_grants", _fallo_tragado)
     except Exception:
         return False
     return False
@@ -1108,6 +1108,26 @@ WORKSPACE_TIME_SWEEP_SCHEMA_READY = False
 WORKSPACE_TIME_SWEEP_BATCH_SIZE = max(1, int(os.environ.get("WORKSPACE_TIME_SWEEP_BATCH_SIZE", "50")))
 APP_PERFORMANCE_LOGGING = os.environ.get("APP_PERFORMANCE_LOGGING", "0").strip().lower() in {"1", "true", "yes", "si", "sí", "on"}
 LOGGER = logging.getLogger(__name__)
+
+
+def apunta_escritura_tragada(donde, fallo=None):
+    """Deja rastro de una escritura accesoria que ha fallado y se ha ignorado.
+
+    Hay un centenar de escrituras de apoyo —bitácora, contadores, sellos de
+    workspace, desvinculaciones— envueltas en `try/except` para que un problema con
+    ellas no tumbe la operación principal. Está bien que no la tumben. Lo que no
+    está bien es que no se enteren ni el log ni nadie: el borrado en cascada que
+    dejaba el expediente desperdigado llevaba así quién sabe cuánto, respondiendo
+    200 y sin una sola línea que lo delatara.
+
+    Esto no cambia el comportamiento: se sigue continuando. Sólo deja de ser mudo.
+    """
+    try:
+        LOGGER.warning("escritura accesoria fallida en %s: %s", donde, fallo)
+    except Exception:
+        pass
+
+
 LEGAL_RADAR_AUTO_SCAN_ENABLED = os.environ.get("LEGAL_RADAR_AUTO_SCAN_ENABLED", "0").strip().lower() in (
     "1",
     "true",
@@ -1403,8 +1423,8 @@ def resolve_empresa_id_from_alias(conn, alias: str, *, source: str = "onedrive")
             """,
             (os.urandom(16).hex(), empresa_id, source_key, raw, alias_norm),
         )
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("resolve_empresa_id_from_alias/empresa_aliases", _fallo_tragado)
     return empresa_id
 
 
@@ -2304,8 +2324,8 @@ def _issue_auth_invite(conn, login_value, *, ttl_seconds=None, notes="", clear_p
             "UPDATE auth_invites SET revoked_at = COALESCE(NULLIF(revoked_at,''), datetime('now')) WHERE user_id = ? AND used_at IS NULL",
             (user_id,),
         )
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("_issue_auth_invite/auth_invites", _fallo_tragado)
     update_assignments = [
         "invite_token = ?",
         "invite_expires_at = ?",
@@ -2519,8 +2539,8 @@ def apply_auth_invite_password(conn, token, password):
                 """,
                 (user_id,),
             )
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("apply_auth_invite_password/auth_invites", _fallo_tragado)
         return {"ok": True}, 200
     row = conn.execute(
         """
@@ -9067,14 +9087,14 @@ def delete_hipoteca_record(conn, record_id):
                 """,
                 (record_id,),
             )
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("delete_hipoteca_record/gestoria_contabilidad", _fallo_tragado)
 
     try:
         if _table_exists("hipotecas_contabilidad_excluidas"):
             conn.execute("DELETE FROM hipotecas_contabilidad_excluidas WHERE hipoteca_id = ?", (record_id,))
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("delete_hipoteca_record/hipotecas_contabilidad_excluidas", _fallo_tragado)
     try:
         trash_backup_row(conn, "hipotecas", record_id, reason="api/hipotecas_delete", now=datetime.now(timezone.utc).isoformat())
     except Exception:
@@ -10580,8 +10600,8 @@ def _iivtnu_seed_malaga(conn, now_iso=None):
                     now_iso,
                 ),
             )
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("_iivtnu_seed_malaga/iivtnu_municipios", _fallo_tragado)
 
     tipo_data = _iivtnu_load_tipo_gravamen_malaga()
     years_map = (tipo_data.get("years") if isinstance(tipo_data, dict) else {}) or {}
@@ -10670,8 +10690,8 @@ def _iivtnu_seed_malaga(conn, now_iso=None):
                         now_iso,
                     ),
                 )
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_iivtnu_seed_malaga/iivtnu_param_sets", _fallo_tragado)
 
 
 _IIVTNU_ANDALUCIA_PROVINCES = (
@@ -10788,8 +10808,8 @@ def _iivtnu_seed_spain_municipios(conn, now_iso=None, min_count=8000):
                 """,
                 (ine, str(nombre), provincia, comunidad, es_capital, now_iso, now_iso),
             )
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("_iivtnu_seed_spain_municipios/iivtnu_municipios", _fallo_tragado)
 
 
 def _iivtnu_is_andalucia_province(value: object) -> bool:
@@ -10835,8 +10855,8 @@ def _iivtnu_seed_andalucia(conn, now_iso=None):
                 """,
                 (str(ine).zfill(5), str(nombre), str(provincia), "Andalucía", es_capital, now_iso, now_iso),
             )
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("_iivtnu_seed_andalucia/iivtnu_municipios", _fallo_tragado)
 
 
 def _iivtnu_parse_uploaded_pdf(body, content_type=""):
@@ -13507,8 +13527,8 @@ def _cleanup_expired_sessions():
             conn.commit()
         finally:
             conn.close()
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("_cleanup_expired_sessions/auth_sessions", _fallo_tragado)
 
 
 def create_auth_session(user_row):
@@ -13563,8 +13583,8 @@ def create_auth_session(user_row):
             conn.commit()
         finally:
             conn.close()
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("create_auth_session/auth_sessions", _fallo_tragado)
     return session
 
 
@@ -13609,8 +13629,8 @@ def get_auth_session(token):
                     conn.commit()
                 finally:
                     conn.close()
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("get_auth_session/auth_sessions", _fallo_tragado)
         return session_copy
 
     # Cache miss: try DB (useful after restarts/deploys).
@@ -13625,15 +13645,15 @@ def get_auth_session(token):
                 try:
                     conn.execute("DELETE FROM auth_sessions WHERE token = ?", [token])
                     conn.commit()
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("get_auth_session/auth_sessions", _fallo_tragado)
                 return None
             session["expires_at"] = time.time() + APP_SESSION_TTL_SECONDS
             try:
                 conn.execute("UPDATE auth_sessions SET expires_at = ? WHERE token = ?", [float(session["expires_at"]), token])
                 conn.commit()
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("get_auth_session/auth_sessions", _fallo_tragado)
         finally:
             conn.close()
         # Rehydrate in-memory cache.
@@ -13658,8 +13678,8 @@ def delete_auth_session(token):
             conn.commit()
         finally:
             conn.close()
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("delete_auth_session/auth_sessions", _fallo_tragado)
 
 def _get_client_ip(handler):
     xff = (handler.headers.get("X-Forwarded-For") or "").strip()
@@ -13789,8 +13809,8 @@ def _rate_check_single_db(conn, key, max_attempts, now):
         try:
             conn.execute("DELETE FROM login_rate_limits WHERE key = ?", [key])
             conn.commit()
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("_rate_check_single_db/login_rate_limits", _fallo_tragado)
         return True, 0
     if locked_until and locked_until > now:
         return False, int(max(1, locked_until - now))
@@ -13806,8 +13826,8 @@ def _rate_check_single_db(conn, key, max_attempts, now):
                 [float(locked_until), float(now), key],
             )
             conn.commit()
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("_rate_check_single_db/login_rate_limits", _fallo_tragado)
         return False, LOGIN_RATE_LOCK_SECONDS
     return True, 0
 
@@ -13818,8 +13838,8 @@ def _rate_register_single_db(conn, key, max_attempts, now, ok):
         try:
             conn.execute("DELETE FROM login_rate_limits WHERE key = ?", [key])
             conn.commit()
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("_rate_register_single_db/login_rate_limits", _fallo_tragado)
         return
     row = conn.execute(
         "SELECT attempts, window_started_at, locked_until FROM login_rate_limits WHERE key = ? LIMIT 1",
@@ -13854,8 +13874,8 @@ def _rate_register_single_db(conn, key, max_attempts, now, ok):
             [key, int(attempts), float(window_started_at), float(locked_until), float(window_started_at), float(now)],
         )
         conn.commit()
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("_rate_register_single_db/login_rate_limits", _fallo_tragado)
 
 
 def check_login_rate_limit(ip, username):
@@ -17056,8 +17076,8 @@ def reconcile_gestoria_factura_asiento(conn, factura_row, now, *, auto_link=True
                 "UPDATE gestoria_facturas SET asiento_auto = 1, updated_at = datetime(?) WHERE id = ?",
                 (now, factura_id_new),
             )
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("_create_auto_asiento_from_factura/gestoria_facturas", _fallo_tragado)
         return {
             "ok": True,
             "factura_id": factura_id_new,
@@ -17365,8 +17385,8 @@ def reconcile_gestoria_factura_asiento(conn, factura_row, now, *, auto_link=True
                 "UPDATE gestoria_asientos SET factura_id = NULL, updated_at = datetime(?) WHERE id = ?",
                 (now, existing_asiento["id"]),
             )
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("reconcile_gestoria_factura_asiento/gestoria_asientos", _fallo_tragado)
     return {
         "ok": True,
         "factura_id": factura_id,
@@ -17696,8 +17716,8 @@ def apply_gestoria_import_document(conn, document_row, now):
                 "lineas": [],
                 "totales": {"debe": 0.0, "haber": 0.0},
             }
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("apply_gestoria_import_document/gestoria_import_documentos", _fallo_tragado)
     lines, total_debe, total_haber = build_invoice_asiento(parsed_factura, counterpart_account)
     forced_account = str(document_row["cuenta_sugerida"] or "").strip() or map_import_category_to_account(categoria)
     if forced_account:
@@ -18676,8 +18696,8 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
                     "duplicate_of": dup_id,
                     "ocr_method": method,
                 }
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("process_gestoria_factura_ocr/gestoria_facturas", _fallo_tragado)
 
         factura_id = os.urandom(16).hex()
         conn.execute(
@@ -20361,8 +20381,8 @@ def purge_ocr_jobs(conn):
         )
         borrados = int(getattr(cur, "rowcount", 0) or 0)
         conn.commit()
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("purge_ocr_jobs/ocr_jobs", _fallo_tragado)
     return borrados
 
 
@@ -20541,8 +20561,8 @@ def ocr_worker_loop(jobs_db_path, main_db_path):
                                             doc_id,
                                         ),
                                     )
-                                except Exception:
-                                    pass
+                                except Exception as _fallo_tragado:
+                                    apunta_escritura_tragada("ocr_worker_loop/gestoria_docs", _fallo_tragado)
                 else:
                     raise RuntimeError("Tipo OCR no soportado")
                 try:
@@ -27021,8 +27041,8 @@ def create_operacion_for_inmueble_cierre(conn, empresa_id, inmueble_id, tipo_lab
                     now,
                 ),
             )
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("create_operacion_for_inmueble_cierre/alquileres", _fallo_tragado)
     return op_id
 
 
@@ -30115,8 +30135,8 @@ def convert_fin_asesoramiento_to_hipoteca(conn, empresa_id, row, now):
                 "UPDATE asesoramientos_financiacion SET cliente1_id = ?, updated_at = datetime(?) WHERE id = ?",
                 (cliente1_id, now, row["id"]),
             )
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("convert_fin_asesoramiento_to_hipoteca/asesoramientos_financiacion", _fallo_tragado)
     cliente_nombre = str(row["cliente1_nombre"] or "").strip()
     if not cliente_nombre and ocr_fields:
         cliente_nombre = str(ocr_fields.get("cliente1_nombre") or "").strip()
@@ -32638,8 +32658,8 @@ def create_portal_inmueble_lead(conn, payload, now):
                 now,
             ),
         )
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("create_portal_inmueble_lead/acciones", _fallo_tragado)
     audit_event(conn, empresa_id, "portal_leads", demanda_id, "Lead portal Verifika2", usuario="Portal", detalles={"inmueble_id": listing_id}, now=now)
     conn.commit()
     return {"ok": True, "listing_id": listing_id, "cliente_id": cliente_id, "demanda_id": demanda_id}, 200
@@ -36997,8 +37017,8 @@ def ensure_cliente_for_financiacion(conn, empresa_id, nombre, nif, now, extra=No
                     """,
                     (empresa_id, now, cliente_id),
                 )
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("ensure_cliente_for_financiacion/clientes", _fallo_tragado)
         if nif:
             updates["nif"] = nif
         for key in ("telefono", "email", "fecha_nacimiento", "direccion"):
@@ -37580,16 +37600,16 @@ def ensure_tables(db_path):
                     """,
                     (str(key),),
                 )
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_migration_mark/crm_migrations", _fallo_tragado)
             return
         try:
             _conn.execute(
                 f"INSERT OR IGNORE INTO crm_migrations (key, applied_at) VALUES (?, {now_expr})",
                 (str(key),),
             )
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("_migration_mark/crm_migrations", _fallo_tragado)
 
     _meta_tables(conn)
     ensure_crm_trash_schema(conn)
@@ -38293,8 +38313,8 @@ def ensure_tables(db_path):
     ensure_column(conn, "fiscal_scenarios", "slot", "slot TEXT")
     try:
         conn.execute("UPDATE fiscal_scenarios SET slot = 'A' WHERE slot IS NULL OR TRIM(slot) = ''")
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_tables/fiscal_scenarios", _fallo_tragado)
     try:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_fiscal_scenarios_cliente_kind ON fiscal_scenarios (empresa_id, cliente_id, kind, updated_at)"
@@ -38446,8 +38466,8 @@ def ensure_tables(db_path):
                     WHERE TRIM(COALESCE(etapa, '')) = 'Adquisición'
                     """
                 )
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("ensure_tables/captaciones", _fallo_tragado)
             try:
                 conn.execute(
                     """
@@ -38457,8 +38477,8 @@ def ensure_tables(db_path):
                     WHERE TRIM(COALESCE(estado, '')) = 'Adquisición'
                     """
                 )
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("ensure_tables/inmuebles", _fallo_tragado)
             try:
                 conn.execute(
                     """
@@ -38470,8 +38490,8 @@ def ensure_tables(db_path):
                       AND inmueble_id IS NOT NULL
                     """
                 )
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("ensure_tables/captaciones", _fallo_tragado)
             try:
                 conn.execute(
                     """
@@ -38483,11 +38503,11 @@ def ensure_tables(db_path):
                       AND inmueble_id IS NOT NULL
                     """
                 )
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("ensure_tables/captaciones", _fallo_tragado)
             _migration_mark(conn, "inmobiliaria_backfills_v1")
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_tables/captaciones", _fallo_tragado)
     # Backfills financiaciones (Phase 2): asegura `empresa_id` para hipotecas/asesoramientos legacy.
     # Objetivo: evitar que el servicio "Financiaciones" quede vacío por registros antiguos sin scope.
     try:
@@ -38527,8 +38547,8 @@ def ensure_tables(db_path):
                         """,
                         (fin_empresa_id,),
                     )
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("ensure_tables/hipotecas", _fallo_tragado)
                 try:
                     conn.execute(
                         """
@@ -38538,8 +38558,8 @@ def ensure_tables(db_path):
                         """,
                         (fin_empresa_id,),
                     )
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("ensure_tables/asesoramientos_financiacion", _fallo_tragado)
                 # Contabilidad vinculada a hipotecas: si falta empresa_id, herédala del scope de financiaciones.
                 try:
                     conn.execute(
@@ -38551,8 +38571,8 @@ def ensure_tables(db_path):
                         """,
                         (fin_empresa_id,),
                     )
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("ensure_tables/gestoria_contabilidad", _fallo_tragado)
                 # Enlaza clientes al servicio (para que el CRM 360/servicios no "pierda" cartera).
                 try:
                     rows = conn.execute(
@@ -38605,8 +38625,8 @@ def ensure_tables(db_path):
                 except Exception:
                     pass
                 _migration_mark(conn, "financiaciones_scope_backfill_v1")
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_tables/hipotecas", _fallo_tragado)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS operaciones_inmobiliarias (
@@ -39752,8 +39772,8 @@ def ensure_tables(db_path):
               AND COALESCE(NULLIF(tipo_trabajo,''), '') != ''
             """
         )
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_tables/gestoria_trabajos", _fallo_tragado)
     ensure_column(conn, "acciones", "responsable", "responsable TEXT")
     ensure_column(conn, "acciones", "recordatorio_min", "recordatorio_min INTEGER")
     ensure_column(conn, "acciones", "inmueble_id", "inmueble_id TEXT")
@@ -40812,8 +40832,8 @@ def ensure_workspace_product_tables(conn):
     # Normaliza nulls legacy antes de crear el índice unique (si la tabla ya existía).
     try:
         conn.execute("UPDATE workspace_registro_periodos SET empresa_id = '' WHERE empresa_id IS NULL")
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_workspace_product_tables/workspace_registro_periodos", _fallo_tragado)
     # Refuerza unicidad vía índice (útil si la tabla existía antes sin constraint).
     try:
         conn.execute(
@@ -40914,8 +40934,8 @@ def ensure_workspace_product_tables(conn):
               AND COALESCE(notas, '') LIKE '%Sincronizado automáticamente desde usuarios.%'
             """
         )
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_workspace_product_tables/workspace_registro_personal", _fallo_tragado)
     # Backfill: si la ficha tiene `empresa_id` (legacy) pero aún no existía `empresa_manual`, marcamos como manual.
     # Si no lo hacemos, al entrar con un tenant/empresa seleccionada el endpoint filtra y “desaparecen” todas las fichas.
     try:
@@ -40930,8 +40950,8 @@ def ensure_workspace_product_tables(conn):
               AND COALESCE(notas, '') NOT LIKE '%Sincronizado automáticamente desde usuarios.%'
             """
         )
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_workspace_product_tables/workspace_registro_personal", _fallo_tragado)
     # Backfill: si una ficha legacy ya tenía `usuario_id` pero el flag `usuario_manual` no existía todavía,
     # lo tratamos como vínculo manual salvo que sepamos que venía de sync automático (por notas).
     try:
@@ -40946,8 +40966,8 @@ def ensure_workspace_product_tables(conn):
               AND COALESCE(source, 'manual') != 'auto'
             """
         )
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_workspace_product_tables/workspace_registro_personal", _fallo_tragado)
     # Si tiene usuario_id y no fue vinculado manualmente, lo tratamos como auto/legacy SOLO cuando el source era vacío.
     # Evita que una ficha manual existente “desaparezca” de RRHH tras añadir columnas nuevas.
     try:
@@ -40960,8 +40980,8 @@ def ensure_workspace_product_tables(conn):
               AND COALESCE(usuario_manual, 0) = 0
             """
         )
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_workspace_product_tables/workspace_registro_personal", _fallo_tragado)
     # Limpieza: fichas marcadas como auto no deben conservar un vínculo manual (evita cruces al abrir fichas).
     try:
         conn.execute(
@@ -40971,8 +40991,8 @@ def ensure_workspace_product_tables(conn):
             WHERE COALESCE(source, '') = 'auto' AND COALESCE(usuario_manual, 0) = 1
             """
         )
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_workspace_product_tables/workspace_registro_personal", _fallo_tragado)
     # Limpieza: si por errores históricos hay más de una ficha vinculada al mismo usuario en un workspace,
     # conservamos la más reciente y desvinculamos el resto.
     try:
@@ -41009,8 +41029,8 @@ def ensure_workspace_product_tables(conn):
                 """,
                 (ws_id, user_id, keep_id),
             )
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_workspace_product_tables/workspace_registro_personal", _fallo_tragado)
     ensure_column(conn, "workspace_registro_audit", "empresa_id", "empresa_id TEXT")
     ensure_column(conn, "workspace_registro_audit", "persona_id", "persona_id TEXT")
     ensure_column(conn, "workspace_registro_audit", "entity_type", "entity_type TEXT")
@@ -42041,8 +42061,8 @@ def _m5_migration_mark(conn, key: str) -> None:
                 """,
                 (str(key),),
             )
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("_m5_migration_mark/crm_migrations", _fallo_tragado)
 
 
 def _ensure_m5_perf_indexes(conn) -> bool:
@@ -46304,8 +46324,8 @@ def maybe_send_workspace_notification_email(conn, workspace_id, persona_id, noti
             "UPDATE workspace_registro_notifications SET payload = ? WHERE id = ?",
             (json.dumps(payload2, ensure_ascii=False), notification_id),
         )
-    except Exception:
-        pass
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("maybe_send_workspace_notification_email/workspace_registro_notifications", _fallo_tragado)
     return {"ok": bool(ok_any)}
 
 
@@ -50493,8 +50513,8 @@ def match_gestoria_movimiento_bancario_asiento(conn, movement_row, now=None, loo
                 """,
                 (best_score, best_score, "sin_match" if not best else "baja_confianza", now, movimiento_id),
             )
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("match_gestoria_movimiento_bancario_asiento/gestoria_movimientos_bancarios", _fallo_tragado)
         return {
             "matched": False,
             "linked": False,
@@ -52196,8 +52216,8 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
                 (datetime.now().isoformat(timespec="seconds"), row_value(fila, "id", "")),
             )
             conn.commit()
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("fetch_fincas_portal_public/workspace_fincas_portal_accesos", _fallo_tragado)
 
     iban = normalizar_iban(row_value(fila, "iban", "") or "")
     return {
@@ -53949,8 +53969,8 @@ def fetch_workspace_detail(conn, workspace_id):
                 conn.commit()
             except Exception:
                 pass
-        except Exception:
-            pass
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("fetch_workspace_detail/workspace_companies", _fallo_tragado)
     try:
         companies_v2 = conn.execute(
             """
@@ -62817,8 +62837,8 @@ class Handler(BaseHTTPRequestHandler):
                         (now_iso, token),
                     )
                     conn.commit()
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("_do_GET/workspace_presupuesto_shares", _fallo_tragado)
                 payload = fetch_workspace_budget_pdf_payload(conn, share.get("presupuesto_id"), workspace_id=share.get("workspace_id"))
                 if not payload:
                     json_response(self, {"error": "presupuesto no encontrado"}, status=404)
@@ -63097,11 +63117,11 @@ class Handler(BaseHTTPRequestHandler):
                                 auth_conn.commit()
                             finally:
                                 auth_conn.close()
-                        except Exception:
-                            pass
+                        except Exception as _fallo_tragado:
+                            apunta_escritura_tragada("_do_GET/auth_sessions", _fallo_tragado)
                         session = refreshed_session
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("_do_GET/auth_sessions", _fallo_tragado)
             json_response(self, {"ok": True, "user": self._auth_user_payload(session)})
             return
         if parsed.path.startswith("/api/"):
@@ -65127,7 +65147,23 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "Empresa no encontrada"}, status=400)
                     return
 
-        now = "now"
+        # La convención de este handler es pasar `now` y envolverlo en `datetime(?)`,
+        # que en SQLite resuelve el literal 'now' a la hora UTC. Donde alguien olvidó
+        # envolverlo —y son unos cuantos: hay 27 sitios seguros y 73 con SQL montado
+        # a trozos que no se pueden comprobar leyendo— la columna se quedaba con el
+        # texto «now» dentro. En producción había 263 filas así, entre ellas la fecha
+        # de conversión de captaciones, `demandas`, `inmueble_compradores` y 104
+        # líneas de la bitácora de fichajes: no ordenan, no filtran por fecha y no
+        # restan días.
+        #
+        # Con una marca de tiempo de verdad, `datetime(?)` la devuelve tal cual en las
+        # dos bases —el shim de Postgres hace `btrim` y SQLite reconoce el formato—,
+        # así que los sitios correctos siguen igual y los descuidados dejan de mentir.
+        # Se calcula una vez por petición, así que todo lo que escribe una misma
+        # petición queda con la misma hora, que además es lo deseable.
+        #
+        # UTC a propósito: es lo que devolvía `datetime('now')` y lo que hay guardado.
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
         def audit(entidad, entidad_id, accion, detalles=None, usuario=None):
             conn.execute(
                 """
@@ -68435,9 +68471,9 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (token, user_id, expires_at, "usuarios_invitar_v2"),
                 )
-            except Exception:
+            except Exception as _fallo_tragado:
                 # Best-effort: no bloqueamos si la tabla no existe en un dataset legacy.
-                pass
+                apunta_escritura_tragada("_do_POST/auth_invites", _fallo_tragado)
             conn.execute(
                 """
                 UPDATE usuarios
@@ -68665,8 +68701,8 @@ class Handler(BaseHTTPRequestHandler):
                                 auth_conn.commit()
                             finally:
                                 auth_conn.close()
-                        except Exception:
-                            pass
+                        except Exception as _fallo_tragado:
+                            apunta_escritura_tragada("_do_POST/auth_sessions", _fallo_tragado)
 
                         # En memoria (AUTH_SESSIONS).
                         with AUTH_SESSIONS_LOCK:
@@ -68678,8 +68714,8 @@ class Handler(BaseHTTPRequestHandler):
                                 for t in tokens:
                                     AUTH_SESSIONS.pop(t, None)
                                     AUTH_SESSION_DB_REFRESH_AT.pop(t, None)
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_do_POST/auth_sessions", _fallo_tragado)
             json_response(self, {"ok": True, "id": user_id})
             return
         elif parsed.path == "/api/usuarios_delete":
@@ -68751,8 +68787,8 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (user_id,),
                 )
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_do_POST/auth_invites", _fallo_tragado)
 
             # 3) Desvincular del workspace (si sabemos cuál).
             if workspace_id:
@@ -68765,8 +68801,8 @@ class Handler(BaseHTTPRequestHandler):
                         "DELETE FROM workspace_miembros WHERE workspace_id = ? AND usuario_id = ?",
                         (workspace_id, user_id),
                     )
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("_do_POST/workspace_miembros", _fallo_tragado)
 
             conn.commit()
 
@@ -68778,8 +68814,8 @@ class Handler(BaseHTTPRequestHandler):
                     auth_conn.commit()
                 finally:
                     auth_conn.close()
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_do_POST/auth_sessions", _fallo_tragado)
             try:
                 with AUTH_SESSIONS_LOCK:
                     tokens = [t for t, s in AUTH_SESSIONS.items() if str(s.get("user_id") or "") == str(user_id)]
@@ -69265,14 +69301,14 @@ class Handler(BaseHTTPRequestHandler):
                     conn.execute("DELETE FROM empresas WHERE id = ?", (empresa_id,))
                     try:
                         conn.execute("DELETE FROM workspace_companies WHERE legacy_empresa_id = ?", (empresa_id,))
-                    except Exception:
-                        pass
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("_do_POST/workspace_companies", _fallo_tragado)
                     deleted_global = True
                 elif workspace_id:
                     try:
                         conn.execute("DELETE FROM workspace_companies WHERE workspace_id = ? AND legacy_empresa_id = ?", (workspace_id, empresa_id))
-                    except Exception:
-                        pass
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("_do_POST/workspace_companies", _fallo_tragado)
                 conn.commit()
                 # RGPD: purga best-effort de los objetos S3 de los documentos suprimidos.
                 if purge_doc_keys:
@@ -69312,8 +69348,8 @@ class Handler(BaseHTTPRequestHandler):
                     "UPDATE workspace_companies SET activo = 0, updated_at = datetime(?) WHERE workspace_id = ? AND legacy_empresa_id = ?",
                     (now, workspace_id, empresa_id),
                 )
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_do_POST/workspace_companies", _fallo_tragado)
             remaining = _count("workspace_empresas", "empresa_id = ?", (empresa_id,))
             if remaining == 0:
                 conn.execute(
@@ -69398,8 +69434,8 @@ class Handler(BaseHTTPRequestHandler):
                                 now_ts,
                             ),
                         )
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_do_POST/workspace_companies", _fallo_tragado)
             conn.commit()
             json_response(self, {"ok": True})
             return
@@ -69435,8 +69471,8 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (datetime.now(timezone.utc).isoformat(), workspace_id, empresa_id),
                 )
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_do_POST/workspace_companies", _fallo_tragado)
             conn.commit()
             json_response(self, {"ok": True})
             return
@@ -69505,8 +69541,8 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (uuid.uuid4().hex, workspace_id, legacy_empresa_id, now_ts, now_ts),
                     )
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("_do_POST/workspace_empresas", _fallo_tragado)
             conn.execute(
                 """
                 INSERT INTO workspace_companies (
@@ -69612,8 +69648,8 @@ class Handler(BaseHTTPRequestHandler):
                         vals.append(datetime.now(timezone.utc).isoformat())
                         vals.append(legacy_empresa_id)
                         conn.execute(f"UPDATE empresas SET {', '.join(parts)} WHERE id = ?", vals)
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("_do_POST/empresas", _fallo_tragado)
             conn.commit()
             json_response(self, {"ok": True})
             return
@@ -69817,8 +69853,8 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (now, workspace_id, servicio_key, empresa_id),
                     )
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("_do_POST/workspace_servicio_empresas", _fallo_tragado)
             conn.commit()
             json_response(self, {"ok": True})
             return
@@ -69874,8 +69910,8 @@ class Handler(BaseHTTPRequestHandler):
                             """,
                             (next_empresa_id, now, workspace_id, servicio_key),
                         )
-                    except Exception:
-                        pass
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("_do_POST/workspace_servicio_empresas", _fallo_tragado)
             conn.commit()
             json_response(self, {"ok": True, "deleted": True})
             return
@@ -70156,8 +70192,8 @@ class Handler(BaseHTTPRequestHandler):
                                 now,
                             ),
                         )
-                    except Exception:
-                        pass
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("_do_POST/workspace_links", _fallo_tragado)
                     try:
                         ensure_partner_membership(conn, partner_id, workspace_id, role="Miembro", now=now)
                     except Exception:
@@ -70570,8 +70606,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not dry_run:
                     try:
                         conn.execute("DELETE FROM workspace_miembros WHERE usuario_id = ? AND workspace_id <> ?", (user_id, ws_id))
-                    except Exception:
-                        pass
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("_do_POST/workspace_miembros", _fallo_tragado)
                     conn.execute(
                         """
                         INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
@@ -70601,8 +70637,8 @@ class Handler(BaseHTTPRequestHandler):
                         )
                         url = build_public_fragment_url("activar_token", token, base_url=base_url)
                         invites.append({"usuario": usuario_value, "email": email_value, "activar_url": url})
-                    except Exception:
-                        pass
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("_do_POST/auth_invites", _fallo_tragado)
 
             if not dry_run:
                 conn.commit()
@@ -70708,8 +70744,8 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (now, workspace_id),
                     )
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("_do_POST/workspace_modulos", _fallo_tragado)
             conn.commit()
             json_response(self, {"ok": True, "id": record_id, "enabled": enabled})
             return
@@ -70751,8 +70787,8 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (now, target_id, link_type, source_id),
                     )
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("_do_POST/workspace_links", _fallo_tragado)
             existing = conn.execute(
                 """
                 SELECT id
@@ -72483,8 +72519,8 @@ class Handler(BaseHTTPRequestHandler):
                             (empresa_id, now_fix, workspace_id, persona_id),
                         )
                         conn.commit()
-                    except Exception:
-                        pass
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("_do_POST/workspace_registro_personal", _fallo_tragado)
                 if not empresa_id:
                     json_response(self, {"error": "empresa_id requerido"}, status=400)
                     return
@@ -73452,13 +73488,13 @@ class Handler(BaseHTTPRequestHandler):
                             f"DELETE FROM workspace_registro_personal WHERE workspace_id = ? AND id NOT IN ({protected_placeholders})",
                             (workspace_id, *sorted(protected_persona_ids)),
                         )
-                    except Exception:
-                        pass
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("_do_POST/workspace_registro_personal", _fallo_tragado)
                 else:
                     try:
                         conn.execute("DELETE FROM workspace_registro_personal WHERE workspace_id = ?", (workspace_id,))
-                    except Exception:
-                        pass
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("_do_POST/workspace_registro_personal", _fallo_tragado)
                 # Opcional (seguro): desvincula miembros del workspace (NO borra cuentas globales).
                 deleted_members = 0
                 if delete_members_flag:
@@ -74531,8 +74567,8 @@ class Handler(BaseHTTPRequestHandler):
                             "SELECT * FROM workspace_rrhh_documentos WHERE id = ? AND workspace_id = ? LIMIT 1",
                             (record_id, workspace_id),
                         ).fetchone()
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_do_POST/workspace_rrhh_documentos", _fallo_tragado)
             log_workspace_registro_audit(
                 conn,
                 workspace_id,
@@ -74749,8 +74785,8 @@ class Handler(BaseHTTPRequestHandler):
                                 """,
                                 (ocr_status, confidence, err2, encrypt_field(ocr_json), now_local, now_local, record_id, workspace_id),
                             )
-                        except Exception:
-                            pass
+                        except Exception as _fallo_tragado:
+                            apunta_escritura_tragada("_do_POST/workspace_rrhh_documentos", _fallo_tragado)
 
                     if not dry_run:
                         after_row = conn.execute(
@@ -75268,10 +75304,10 @@ class Handler(BaseHTTPRequestHandler):
                                 "UPDATE workspace_presupuestos SET calculo_json = ? WHERE id = ? AND workspace_id = ?",
                                 (json.dumps(calculo, ensure_ascii=False), record_id, workspace_id),
                             )
-                    except Exception:
+                    except Exception as _fallo_tragado:
                         # Que falle el alta no puede tumbar la aceptación del
                         # presupuesto: el estado y su tarea ya están guardados.
-                        pass
+                        apunta_escritura_tragada("_do_POST/workspace_presupuestos", _fallo_tragado)
             else:
                 close_workspace_budget_action(conn, seguimiento_accion_id, now=now, status="Cancelado")
                 close_workspace_budget_action(conn, encargo_accion_id, now=now, status="Cancelado")
@@ -75334,8 +75370,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 conn.execute("DELETE FROM workspace_presupuesto_lineas WHERE presupuesto_id = ?", (record_id,))
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_do_POST/workspace_presupuesto_lineas", _fallo_tragado)
             conn.execute("DELETE FROM workspace_presupuestos WHERE id = ? AND workspace_id = ?", (record_id, workspace_id))
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
@@ -75709,8 +75745,8 @@ class Handler(BaseHTTPRequestHandler):
                     """,
                     (now, cliente_id, empresa_id, servicio_label),
                 )
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_do_POST/clientes_empresas", _fallo_tragado)
             body = {"clausulas_extra": clausulas_extra}
             if body_text:
                 body["body_text"] = body_text
@@ -82898,16 +82934,16 @@ class Handler(BaseHTTPRequestHandler):
                     "UPDATE operaciones_inmobiliarias SET estado = ?, updated_at = datetime(?) WHERE id = ?",
                     ("Cerrada positiva", now, record_id),
                 )
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_do_POST/operaciones_inmobiliarias", _fallo_tragado)
             if ws_id and "workspace_id" in op_cols:
                 try:
                     conn.execute(
                         "UPDATE operaciones_inmobiliarias SET workspace_id = ?, updated_at = datetime(?) WHERE id = ?",
                         (ws_id, now, record_id),
                     )
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("_do_POST/operaciones_inmobiliarias", _fallo_tragado)
 
             inmueble_id = str(row["inmueble_id"] or "").strip()
             if not inmueble_id:
@@ -82938,8 +82974,8 @@ class Handler(BaseHTTPRequestHandler):
                             "UPDATE inmuebles SET workspace_id = ?, updated_at = datetime(?) WHERE id = ?",
                             (ws_id, now, inmueble_id),
                         )
-                    except Exception:
-                        pass
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("_do_POST/inmuebles", _fallo_tragado)
 
             if inmueble_id:
                 try:
@@ -82947,8 +82983,8 @@ class Handler(BaseHTTPRequestHandler):
                         "UPDATE inmuebles SET estado = ?, updated_at = datetime(?) WHERE id = ?",
                         ("Historico vendido", now, inmueble_id),
                     )
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("_do_POST/inmuebles", _fallo_tragado)
 
             try:
                 conn.commit()
@@ -83224,8 +83260,8 @@ class Handler(BaseHTTPRequestHandler):
                         now=datetime.now(timezone.utc).isoformat(),
                     )
                     result["otp"] = ""
-                except Exception:
-                    pass
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("_do_POST/inmueble_signature_requests", _fallo_tragado)
             conn.commit()
             response = dict(result)
             response["email"] = email_result
@@ -83744,8 +83780,8 @@ class Handler(BaseHTTPRequestHandler):
                                 "UPDATE inmuebles SET workspace_id = ?, updated_at = datetime(?) WHERE id = ?",
                                 (ws_id, now, inmueble_id),
                             )
-                    except Exception:
-                        pass
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("_do_POST/inmuebles", _fallo_tragado)
                 conn.execute(
                     """
                     INSERT INTO captaciones (
@@ -83837,8 +83873,8 @@ class Handler(BaseHTTPRequestHandler):
                                 "UPDATE captaciones SET workspace_id = ?, updated_at = datetime(?) WHERE id = ?",
                                 (ws_id, now, captacion_id),
                             )
-                    except Exception:
-                        pass
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("_do_POST/captaciones", _fallo_tragado)
                 if created_by_value:
                     try:
                         ensure_column(conn, "inmuebles", "created_by", "created_by TEXT")
@@ -83850,15 +83886,15 @@ class Handler(BaseHTTPRequestHandler):
                             "UPDATE inmuebles SET created_by = COALESCE(NULLIF(created_by, ''), ?) WHERE id = ?",
                             (created_by_value, inmueble_id),
                         )
-                    except Exception:
-                        pass
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("_do_POST/inmuebles", _fallo_tragado)
                     try:
                         conn.execute(
                             "UPDATE captaciones SET created_by = COALESCE(NULLIF(created_by, ''), ?) WHERE id = ?",
                             (created_by_value, captacion_id),
                         )
-                    except Exception:
-                        pass
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("_do_POST/captaciones", _fallo_tragado)
                 try:
                     audit_event(
                         conn,
@@ -85448,8 +85484,8 @@ class Handler(BaseHTTPRequestHandler):
                     (inmueble_id,),
                 )
                 conn.execute("DELETE FROM inmueble_signature_requests WHERE inmueble_id = ?", (inmueble_id,))
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_do_POST/inmueble_signature_events", _fallo_tragado)
             conn.execute("DELETE FROM inmueble_docs WHERE inmueble_id = ?", (inmueble_id,))
             conn.execute("DELETE FROM inmueble_propietarios WHERE inmueble_id = ?", (inmueble_id,))
             conn.execute("DELETE FROM visitas WHERE inmueble_id = ?", (inmueble_id,))
@@ -86881,16 +86917,16 @@ class Handler(BaseHTTPRequestHandler):
                                 (nombre_resync, now, cliente_id),
                             )
                             resync_rows["acciones"] = int(getattr(cur, "rowcount", 0) or 0)
-                        except Exception:
-                            pass
+                        except Exception as _fallo_tragado:
+                            apunta_escritura_tragada("_do_POST/acciones", _fallo_tragado)
                         try:
                             cur = conn.execute(
                                 "UPDATE hipotecas SET cliente = ?, updated_at = datetime(?) WHERE cliente_id = ?",
                                 (nombre_resync, now, cliente_id),
                             )
                             resync_rows["hipotecas"] = int(getattr(cur, "rowcount", 0) or 0)
-                        except Exception:
-                            pass
+                        except Exception as _fallo_tragado:
+                            apunta_escritura_tragada("_do_POST/hipotecas", _fallo_tragado)
                     # Si el cliente ya tiene servicio seguros, reintentar autovinculación por nombre.
                     try:
                         rels = conn.execute(
@@ -99814,8 +99850,8 @@ class Handler(BaseHTTPRequestHandler):
                         """,
                         (asesor_value or None, created_by_value, now, new_id),
                     )
-            except Exception:
-                pass
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("handle_api/inmuebles", _fallo_tragado)
             try:
                 audit_event(
                     conn,
