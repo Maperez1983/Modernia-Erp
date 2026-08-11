@@ -145,10 +145,16 @@ class SeVeDondeEstaElFocoYCualEstaAbiertaTests(unittest.TestCase):
         self.assertIn("outline", bloque.group(1))
 
     def test_la_pestaña_abierta_se_anuncia(self):
-        i = APP.index("const setWorkspaceFincasTab")
-        cuerpo = APP[i: i + 1400]
-        self.assertIn('setAttribute("aria-current", "page")', cuerpo)
-        self.assertIn('removeAttribute("aria-current")', cuerpo)
+        """Con `role="tab"` el atributo correcto es `aria-selected`, no `aria-current`.
+
+        Lo pone `activarPatronDePestanas` para las nueve barras a la vez, escuchando la
+        clase `.active` que cada módulo ya mantiene. Quien lo comprueba de verdad, contra
+        un DOM y pulsando teclas, es `test_patron_de_pestanas.py`."""
+        i = APP.index("const activarPatronDePestanas")
+        cuerpo = APP[i: APP.index("\ndocument.addEventListener(", i)]
+        self.assertIn('setAttribute("role", "tab")', cuerpo)
+        self.assertIn('setAttribute("aria-selected"', cuerpo)
+        self.assertNotIn("aria-current", APP)
 
 
 if __name__ == "__main__":

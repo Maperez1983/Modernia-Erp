@@ -2860,6 +2860,164 @@ const closestFromEvent = (event, selector) => {
   return el.closest(sel);
 };
 
+/* El patrón de pestañas del W3C para todas las barras de módulo.
+ *
+ * Hasta ahora eran botones sueltos: cuál estaba abierta se decía solo con un borde
+ * dorado, así que con lector de pantalla se oían ocho botones iguales, y el tabulador
+ * obligaba a pasar por todos para llegar al contenido.
+ *
+ * Se aplica en tiempo de ejecución y no tocando el marcado de cada barra, por dos
+ * razones: hay nueve, no ocho —la de RRHH se genera desde JavaScript y no tiene id—,
+ * y cada módulo pinta la suya a su manera. Aquí solo se lee la clase `.active` que
+ * todas mantienen ya, y se traduce a lo que el navegador y el lector necesitan.
+ *
+ * `aria-controls` es opcional en la especificación y solo se pone donde el panel se
+ * puede resolver: fincas y seguros lo tienen por convención de atributo, los demás
+ * cambian de vista con manejadores delegados y no hay panel que señalar. Si algún día
+ * adoptan la convención, lo cogen sin tocar nada. */
+const ETIQUETA_DE_BARRA = {
+  workspaceViewTabs: "Vistas del espacio de trabajo",
+  workspaceTenantTabs: "Secciones del cliente",
+  workspaceFincasTabs: "Módulo de fincas",
+  viewTabs: "Secciones del CRM",
+  segurosTabs: "Módulo de seguros",
+  gestoriaModuleTabs: "Módulo de gestoría",
+  clienteOperativaTabs: "Operativa del cliente",
+  clienteDocsTabs: "Documentos del cliente",
+};
+
+let _contadorDePestanas = 0;
+
+/** El atributo con el que la barra identifica sus pestañas: cada módulo usa el suyo. */
+const atributoDePestana = (boton) => {
+  const encontrado = Array.from(boton?.attributes || []).find(
+    (a) => a.name.startsWith("data-") && /tab|module|view/.test(a.name),
+  );
+  return encontrado ? encontrado.name : "";
+};
+
+/** Escapa el valor para meterlo en un selector de atributo.
+ *
+ * `CSS.escape` no está en todas partes —falta en navegadores viejos y en jsdom—, y sin
+ * este respaldo la excepción tumbaba la función entera: la barra se quedaba sin roles
+ * y sin teclado, que es justo lo contrario de lo que se venía a arreglar. */
+const escapaParaSelector = (valor) => {
+  const texto = String(valor);
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") return CSS.escape(texto);
+  return texto.replace(/["\\]/g, "\\$&");
+};
+
+/** El panel que abre una pestaña, si se puede resolver. Devuelve null si no. */
+const panelDePestana = (barra, boton, atributo) => {
+  if (!atributo) return null;
+  const valor = boton.getAttribute(atributo);
+  if (!valor) return null;
+  const candidatos = [
+    atributo.endsWith("-btn") ? atributo.slice(0, -4) : null,
+    atributo,
+    atributo.replace("-tab", "-panel"),
+  ].filter(Boolean);
+  for (const nombre of candidatos) {
+    let posibles = [];
+    try {
+      posibles = Array.from(document.querySelectorAll(`[${nombre}="${escapaParaSelector(valor)}"]`));
+    } catch (e) {
+      continue;
+    }
+    const panel = posibles.find((el) => !barra.contains(el));
+    if (panel) return panel;
+  }
+  return null;
+};
+
+const activarPatronDePestanas = (raiz = document) => {
+  raiz.querySelectorAll?.(".tc-modulebar").forEach((barra) => {
+    const visibles = () =>
+      Array.from(barra.querySelectorAll(".tab.tc-module")).filter(
+        (b) => !b.classList.contains("hidden"),
+      );
+    if (!visibles().length) return;
+
+    const sincroniza = () => {
+      const pestanas = visibles();
+      const hayActiva = pestanas.some((b) => b.classList.contains("active"));
+      pestanas.forEach((boton, i) => {
+        const activa = boton.classList.contains("active");
+        boton.setAttribute("role", "tab");
+        boton.setAttribute("aria-selected", activa ? "true" : "false");
+        // Tabindex itinerante: la barra entera es UNA parada del tabulador, y dentro
+        // se anda con las flechas. Antes había que pasar por las nueve pestañas para
+        // llegar al contenido.
+        boton.tabIndex = activa || (!hayActiva && i === 0) ? 0 : -1;
+        const atributo = atributoDePestana(boton);
+        const panel = panelDePestana(barra, boton, atributo);
+        if (!panel) return;
+        if (!boton.id) boton.id = `pestana-${++_contadorDePestanas}`;
+        if (!panel.id) panel.id = `panel-${++_contadorDePestanas}`;
+        boton.setAttribute("aria-controls", panel.id);
+        panel.setAttribute("role", "tabpanel");
+        panel.setAttribute("aria-labelledby", boton.id);
+      });
+    };
+
+    if (barra.dataset.pestanasListas === "1") {
+      sincroniza();
+      return;
+    }
+    barra.dataset.pestanasListas = "1";
+    barra.setAttribute("role", "tablist");
+    if (!barra.getAttribute("aria-label")) {
+      barra.setAttribute("aria-label", ETIQUETA_DE_BARRA[barra.id] || "Secciones");
+    }
+
+    barra.addEventListener("keydown", (evento) => {
+      const orden = visibles();
+      const actual = orden.indexOf(document.activeElement);
+      if (actual < 0) return;
+      // Solo izquierda/derecha e inicio/fin: la barra es horizontal, y arriba/abajo
+      // en una que envuelve en dos filas significaría otra cosa.
+      const salto = { ArrowRight: 1, ArrowLeft: -1 }[evento.key];
+      let destino = -1;
+      if (salto) destino = (actual + salto + orden.length) % orden.length;
+      else if (evento.key === "Home") destino = 0;
+      else if (evento.key === "End") destino = orden.length - 1;
+      else return;
+      evento.preventDefault();
+      orden[destino].focus();
+      orden[destino].click();
+    });
+
+    // La clase `.active` la pone cada módulo por su cuenta; aquí solo se escucha.
+    try {
+      new MutationObserver(sincroniza).observe(barra, {
+        attributes: true,
+        attributeFilter: ["class"],
+        subtree: true,
+      });
+    } catch (e) {}
+    sincroniza();
+  });
+};
+
+// Las barras que se pintan más tarde —RRHH, y las secciones que se hidratan al
+// entrar— se enganchan la primera vez que alguien las toca.
+document.addEventListener(
+  "focusin",
+  (evento) => {
+    const barra = evento.target?.closest?.(".tc-modulebar");
+    if (barra && barra.dataset.pestanasListas !== "1") activarPatronDePestanas(barra.parentNode || document);
+  },
+  true,
+);
+document.addEventListener(
+  "pointerdown",
+  (evento) => {
+    const barra = evento.target?.closest?.(".tc-modulebar");
+    if (barra && barra.dataset.pestanasListas !== "1") activarPatronDePestanas(barra.parentNode || document);
+  },
+  true,
+);
+
 const initDensityToggle = () => {
   applyDensityMode(getStoredDensityMode());
   if (!densityToggle) return;
@@ -26678,12 +26836,9 @@ const setWorkspaceFincasTab = (tab = "dashboard") => {
   if (workspaceFincasTabs) {
     workspaceFincasTabs.querySelectorAll("[data-fincas-tab-btn]").forEach((button) => {
       const key = normalizeWorkspaceFincasTab(button.dataset.fincasTabBtn || "");
-      const esActiva = key === normalized;
-      button.classList.toggle("active", esActiva);
-      // Cuál está abierta se decía solo con un borde dorado. Quien navega con lector
-      // de pantalla oía ocho botones iguales, sin manera de saber en cuál está.
-      if (esActiva) button.setAttribute("aria-current", "page");
-      else button.removeAttribute("aria-current");
+      button.classList.toggle("active", key === normalized);
+      // El `aria-selected` y el tabindex los pone `activarPatronDePestanas`, que
+      // escucha esta misma clase para las nueve barras a la vez.
     });
   }
   document.querySelectorAll("[data-fincas-tab]").forEach((panel) => {
@@ -93422,6 +93577,7 @@ if (authActivateForm) {
 }
 
 initDensityToggle();
+activarPatronDePestanas();
 UI?.boot(state);
 // Pintamos al menos las tarjetas base del home aunque la carga de datos falle o tarde.
 renderCompanyCards();
