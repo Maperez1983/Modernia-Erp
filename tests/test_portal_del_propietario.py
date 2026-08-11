@@ -737,3 +737,113 @@ class ElCanalDeMensajesTests(unittest.TestCase):
         finally:
             os.environ.pop("SIGNATURE_WHATSAPP_WEBHOOK_URL", None)
             os.environ.pop("SIGNATURE_SMS_WEBHOOK_URL", None)
+
+
+class DondeEstaElContactoDelPropietarioTests(BasePortal):
+    """El teléfono y el correo no viven en un solo sitio.
+
+    Se escriben unas veces en la ficha del cliente y otras sueltos en la del
+    inmueble o en la captación, según por dónde entrara el dato. Mirando sólo
+    `clientes` llegué a afirmar que ninguno de los 13 propietarios de producción
+    tenía correo: había 6, en `inmuebles.propietario_email`. La comprobación estaba
+    mal, no el dato.
+    """
+
+    def test_lo_coge_de_la_ficha_del_cliente(self):
+        c = S.contacto_del_propietario(self.conn, "inm1", {"telefono": "+34600111222", "email": "a@b.test"})
+        self.assertEqual(c["telefono"], "+34600111222")
+        self.assertEqual(c["email"], "a@b.test")
+
+    def test_si_no_esta_ahi_lo_busca_en_la_ficha_del_inmueble(self):
+        self.conn.execute("UPDATE inmuebles SET propietario_email = 'duena@ejemplo.test' WHERE id='inm1'")
+        self.conn.commit()
+        c = S.contacto_del_propietario(self.conn, "inm1", {"telefono": "", "email": ""})
+        self.assertEqual(c["email"], "duena@ejemplo.test")
+
+    def test_y_si_no_en_la_captacion(self):
+        self.conn.execute("UPDATE captaciones SET propietario_telefono = '+34611222333' WHERE id='cap1'")
+        self.conn.commit()
+        c = S.contacto_del_propietario(self.conn, "inm1", {"telefono": "", "email": ""})
+        self.assertEqual(c["telefono"], "+34611222333")
+
+    def test_la_ficha_del_cliente_manda_sobre_las_demas(self):
+        self.conn.execute("UPDATE inmuebles SET propietario_email = 'vieja@ejemplo.test' WHERE id='inm1'")
+        self.conn.commit()
+        c = S.contacto_del_propietario(self.conn, "inm1", {"telefono": "", "email": "nueva@ejemplo.test"})
+        self.assertEqual(c["email"], "nueva@ejemplo.test")
+
+    def test_sin_nada_lo_dice(self):
+        c = S.contacto_del_propietario(self.conn, "inm1", {"telefono": "", "email": ""})
+        self.assertFalse(c["hay"])
+
+    def test_el_correo_encontrado_se_guarda_con_el_acceso(self):
+        self.conn.execute("UPDATE inmuebles SET propietario_email = 'duena@ejemplo.test' WHERE id='inm1'")
+        self.conn.commit()
+        self._abre_portal()
+        fila = self.conn.execute(
+            "SELECT email FROM inmueble_portal_accesos WHERE revocado=0").fetchone()
+        self.assertEqual(fila["email"], "duena@ejemplo.test")
+
+
+class AvisarCuandoNoHayPorDondeMandarloTests(BasePortal):
+    """Abrir un acceso que no se le puede hacer llegar es peor que no abrirlo: se
+    da por hecho que el propietario ya lo tiene y nadie vuelve a mirarlo."""
+
+    def _sin_contacto(self):
+        self.conn.execute("UPDATE clientes SET telefono = '', email = '' WHERE id='prop1'")
+        self.conn.execute("UPDATE inmuebles SET propietario_telefono = '', propietario_email = '' WHERE id='inm1'")
+        self.conn.execute("UPDATE captaciones SET propietario_telefono = '', propietario_email = '' WHERE id='cap1'")
+        self.conn.commit()
+
+    def test_lo_avisa_en_la_respuesta(self):
+        self._sin_contacto()
+        estado, d = self._post("/api/inmueble_portal_acceso", {"inmueble_id": "inm1", "avisar": False})
+        self.assertEqual(estado, 200, d)
+        self.assertTrue(d["sin_contacto"])
+
+    def test_pero_el_acceso_se_crea_igual(self):
+        """El asesor puede tener el número en su móvil: no se le bloquea el trabajo."""
+        self._sin_contacto()
+        d = self._post("/api/inmueble_portal_acceso", {"inmueble_id": "inm1", "avisar": False})[1]
+        self.assertIn("/portal-venta?token=", d["enlace"])
+
+    def test_con_contacto_no_avisa_de_nada(self):
+        estado, d = self._post("/api/inmueble_portal_acceso", {"inmueble_id": "inm1", "avisar": False})
+        self.assertEqual(estado, 200, d)
+        self.assertFalse(d["sin_contacto"])
+
+    def test_la_pantalla_lo_dice_con_palabras(self):
+        fuente = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("sin_contacto", fuente)
+        self.assertIn("no tiene teléfono ni correo", fuente)
+
+
+class ElEnlacePorCorreoTests(BasePortal):
+    def tearDown(self):
+        os.environ.pop("SMTP_HOST", None)
+        super().tearDown()
+
+    def test_sin_smtp_no_se_intenta(self):
+        self.conn.execute("UPDATE clientes SET telefono='', email='duena@ejemplo.test' WHERE id='prop1'")
+        self.conn.commit()
+        d = self._post("/api/inmueble_portal_acceso", {"inmueble_id": "inm1"})[1]
+        self.assertFalse(d["aviso"]["enviado"])
+
+    def test_el_correo_vuelve_enmascarado(self):
+        self.conn.execute("UPDATE clientes SET email='duenamuylarga@ejemplo.test' WHERE id='prop1'")
+        self.conn.commit()
+        d = self._post("/api/inmueble_portal_acceso", {"inmueble_id": "inm1", "avisar": False})[1]
+        self.assertNotIn("duenamuylarga", json.dumps(d))
+        self.assertIn("ejemplo.test", d["email"])
+
+    def test_el_mensaje_avisa_de_que_el_enlace_es_personal(self):
+        cuerpo = S.correo_con_el_enlace_del_portal(
+            agencia="Agencia Propia", direccion="Calle Portal 1", enlace="https://x.test/portal-venta?token=abc")
+        self.assertIn("No lo compartas", cuerpo)
+        self.assertIn("Calle Portal 1", cuerpo)
+
+    def test_y_escapa_lo_que_venga_de_la_base(self):
+        """Una dirección con un `<script>` dentro no puede acabar ejecutándose."""
+        cuerpo = S.correo_con_el_enlace_del_portal(
+            agencia="A", direccion="<script>alert(1)</script>", enlace="https://x.test/p")
+        self.assertNotIn("<script>", cuerpo)

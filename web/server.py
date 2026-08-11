@@ -30481,6 +30481,9 @@ def ensure_inmueble_portal_schema(conn):
     # Un documento del expediente sólo se ve desde fuera si alguien lo decide, salvo
     # los que el propietario ha subido él mismo o ha firmado.
     ensure_column(conn, "inmueble_docs", "visible_portal", "visible_portal INTEGER DEFAULT 0")
+    # El correo llegó después que el teléfono: `ensure_column` para las instalaciones
+    # que ya tienen la tabla creada.
+    ensure_column(conn, "inmueble_portal_accesos", "email", "email TEXT")
     # Y se confirma aquí. En Postgres el DDL es transaccional: si esto se llama desde
     # una petición de sólo lectura —que no confirma nada— las tablas se crean, la
     # consulta de después funciona porque va en la misma transacción, y al soltar la
@@ -30490,6 +30493,65 @@ def ensure_inmueble_portal_schema(conn):
         conn.commit()
     except Exception as _fallo_tragado:
         apunta_escritura_tragada("ensure_inmueble_portal_schema/commit", _fallo_tragado)
+
+
+def contacto_del_propietario(conn, inmueble_id, cliente):
+    """Dónde localizar al propietario, mirando los tres sitios donde acaba.
+
+    El teléfono y el correo se escriben unas veces en la ficha del cliente y otras
+    sueltos en la del inmueble o en la captación, según por dónde entrara el dato.
+    Mirando sólo `clientes` llegué a decir que ninguno de los 13 propietarios tenía
+    correo: había 6, en `inmuebles.propietario_email`.
+
+    Devuelve {"telefono", "email", "hay"} con lo primero que encuentre de cada uno.
+    """
+    telefono = str(row_value(cliente, "telefono", "") or "").strip()
+    email = str(row_value(cliente, "email", "") or "").strip()
+    if telefono and email:
+        return {"telefono": telefono, "email": email, "hay": True}
+    for tabla, condicion in (("inmuebles", "id = ?"), ("captaciones", "inmueble_id = ?")):
+        if telefono and email:
+            break
+        columnas = table_columns(conn, tabla) or set()
+        campos = [c for c in ("propietario_telefono", "propietario_email") if c in columnas]
+        if not campos:
+            continue
+        try:
+            fila = conn.execute(
+                f"SELECT {', '.join(campos)} FROM {tabla} WHERE {condicion} "
+                "ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 1"
+                if tabla == "captaciones" else
+                f"SELECT {', '.join(campos)} FROM {tabla} WHERE {condicion} LIMIT 1",
+                (str(inmueble_id or ""),),
+            ).fetchone()
+        except Exception:
+            _rollback_best_effort(conn)
+            continue
+        if not fila:
+            continue
+        telefono = telefono or str(row_value(fila, "propietario_telefono", "") or "").strip()
+        email = email or str(row_value(fila, "propietario_email", "") or "").strip()
+    return {"telefono": telefono, "email": email, "hay": bool(telefono or email)}
+
+
+def hay_correo_configurado():
+    return bool(str(os.environ.get("SMTP_HOST") or "").strip())
+
+
+def correo_con_el_enlace_del_portal(*, agencia, direccion, enlace):
+    """Sobrio y sin adornos: lo que importa es que se entienda de quién viene."""
+    return (
+        f'<div style="font:400 15px/1.6 Helvetica,Arial,sans-serif;color:#334155;max-width:520px">'
+        f'<p>Hola,</p>'
+        f'<p>Ya puedes seguir la venta de <strong>{html.escape(direccion or "tu inmueble")}</strong> '
+        f'desde tu propio enlace: visitas realizadas y previstas, en qué punto está y qué queda pendiente.</p>'
+        f'<p style="margin:22px 0"><a href="{html.escape(enlace)}" '
+        f'style="background:#15803D;color:#fff;padding:12px 20px;border-radius:8px;'
+        f'text-decoration:none;font-weight:600">Ver el seguimiento</a></p>'
+        f'<p style="font-size:13px;color:#64748b">Este enlace es personal. No lo compartas: '
+        f'quien lo tenga puede ver el seguimiento de tu venta.</p>'
+        f'<p style="font-size:13px;color:#64748b">{html.escape(agencia or "")}</p></div>'
+    )
 
 
 def hay_canal_para_avisar():
@@ -30535,7 +30597,7 @@ def url_del_portal_de_venta(token, base_url=""):
     return f"{str(base or '').rstrip('/')}/portal-venta?token={urllib.parse.quote(token)}"
 
 
-def crea_acceso_de_propietario(conn, *, inmueble, cliente, session=None, now=None, dias=None):
+def crea_acceso_de_propietario(conn, *, inmueble, cliente, session=None, now=None, dias=None, contacto=None):
     """Da de alta (o rota) el acceso de un propietario. El token en claro se
     devuelve una sola vez: en la base sólo queda su hash."""
     ensure_inmueble_portal_schema(conn)
@@ -30555,29 +30617,32 @@ def crea_acceso_de_propietario(conn, *, inmueble, cliente, session=None, now=Non
     except Exception as _fallo_tragado:
         apunta_escritura_tragada("crea_acceso_de_propietario/rotacion", _fallo_tragado)
     acceso_id = os.urandom(16).hex()
+    contacto = contacto or contacto_del_propietario(conn, inmueble_id, cliente)
+    fila = {
+        "id": acceso_id,
+        "workspace_id": str(row_value(inmueble, "workspace_id", "") or "") or None,
+        "empresa_id": str(row_value(inmueble, "empresa_id", "") or "") or None,
+        "inmueble_id": inmueble_id,
+        "cliente_id": cliente_id or None,
+        "nombre": str(row_value(cliente, "nombre", "") or ""),
+        "telefono": contacto.get("telefono") or "",
+        "email": contacto.get("email") or "",
+        "token_hash": hash_portal_token(token),
+        "expires_at": caduca,
+        "revocado": 0,
+        "accesos": 0,
+        "creado_por": str((session or {}).get("usuario") or "") or None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    columnas = table_columns(conn, "inmueble_portal_accesos") or set()
+    claves = [k for k in fila if k in columnas] or list(fila)
     conn.execute(
-        """
-        INSERT INTO inmueble_portal_accesos (
-          id, workspace_id, empresa_id, inmueble_id, cliente_id, nombre, telefono,
-          token_hash, expires_at, revocado, accesos, creado_por, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
-        """,
-        (
-            acceso_id,
-            str(row_value(inmueble, "workspace_id", "") or "") or None,
-            str(row_value(inmueble, "empresa_id", "") or "") or None,
-            inmueble_id,
-            cliente_id or None,
-            str(row_value(cliente, "nombre", "") or ""),
-            str(row_value(cliente, "telefono", "") or ""),
-            hash_portal_token(token),
-            caduca,
-            str((session or {}).get("usuario") or "") or None,
-            now,
-            now,
-        ),
+        f"INSERT INTO inmueble_portal_accesos ({', '.join(claves)}) "
+        f"VALUES ({', '.join(['?'] * len(claves))})",
+        [fila[k] for k in claves],
     )
-    return {"id": acceso_id, "token": token, "caduca": caduca}
+    return {"id": acceso_id, "token": token, "caduca": caduca, "contacto": contacto}
 
 
 def acceso_de_portal_por_token(conn, token):
@@ -84346,17 +84411,34 @@ class Handler(BaseHTTPRequestHandler):
             if not elegido:
                 json_response(self, {"error": "Ese propietario no está enlazado a este inmueble"}, status=400)
                 return
-            telefono = str(row_value(elegido, "telefono", "") or "").strip()
-            acceso = crea_acceso_de_propietario(conn, inmueble=inmueble, cliente=elegido, session=session, now=now)
+            # El teléfono y el correo se escriben unas veces en la ficha del cliente y
+            # otras sueltos en la del inmueble o en la captación: se miran los tres.
+            contacto = contacto_del_propietario(conn, inmueble_id, elegido)
+            telefono = contacto.get("telefono") or ""
+            email = contacto.get("email") or ""
+            acceso = crea_acceso_de_propietario(conn, inmueble=inmueble, cliente=elegido,
+                                                session=session, now=now, contacto=contacto)
             enlace = url_del_portal_de_venta(acceso["token"])
-            aviso = {"enviado": False, "motivo": "sin_canal"}
-            if telefono and hay_canal_para_avisar() and payload.get("avisar", True):
-                enviado, motivo = envia_mensaje_al_propietario(
-                    telefono,
-                    f"Ya puedes seguir la venta de {row_value(inmueble, 'direccion', '') or 'tu inmueble'} "
-                    f"desde aquí: {enlace}",
-                )
-                aviso = {"enviado": bool(enviado), "motivo": "" if enviado else motivo}
+            direccion = row_value(inmueble, "direccion", "") or "tu inmueble"
+            aviso = {"enviado": False, "motivo": "sin_canal", "por": ""}
+            if payload.get("avisar", True):
+                if telefono and hay_canal_para_avisar():
+                    enviado, motivo = envia_mensaje_al_propietario(
+                        telefono, f"Ya puedes seguir la venta de {direccion} desde aquí: {enlace}")
+                    aviso = {"enviado": bool(enviado), "motivo": "" if enviado else motivo,
+                             "por": "mensaje"}
+                elif email and hay_correo_configurado():
+                    empresa_row = conn.execute(
+                        "SELECT nombre FROM empresas WHERE id = ? LIMIT 1",
+                        (str(row_value(inmueble, "empresa_id", "") or ""),)).fetchone()
+                    agencia = str(row_value(empresa_row, "nombre", "") or "")
+                    res = send_email_smtp(
+                        f"Seguimiento de la venta de {direccion}", email,
+                        f"Ya puedes seguir la venta de {direccion} desde aquí: {enlace}",
+                        html_body=correo_con_el_enlace_del_portal(
+                            agencia=agencia, direccion=direccion, enlace=enlace))
+                    aviso = {"enviado": bool(res.get("ok")), "motivo": str(res.get("error") or ""),
+                             "por": "correo"}
             audit_event(conn, row_value(inmueble, "empresa_id", ""), "inmueble", inmueble_id,
                         "Abrir portal del propietario",
                         usuario=str((session or {}).get("usuario") or ""),
@@ -84370,7 +84452,11 @@ class Handler(BaseHTTPRequestHandler):
                 "caduca": acceso["caduca"],
                 "propietario": str(row_value(elegido, "nombre", "") or ""),
                 "telefono": _mask_phone(telefono),
+                "email": (email.split("@")[0][:2] + "…@" + email.split("@")[-1]) if "@" in email else "",
                 "aviso": aviso,
+                # Que la pantalla pueda decir «no tiene por dónde recibirlo» ANTES de
+                # que alguien dé por hecho que el propietario ya tiene su enlace.
+                "sin_contacto": not contacto.get("hay"),
                 # Si no hay canal, el enlace es el único factor. Que se sepa.
                 "segundo_factor": hay_canal_para_avisar(),
             })

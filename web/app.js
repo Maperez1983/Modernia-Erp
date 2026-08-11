@@ -26875,6 +26875,26 @@ const fincasImporteExtras = () => {
     .reduce((suma, item) => suma + (Number(item.precio || 0) || 0), 0);
 };
 
+/** La tarifa en uso, escrita en una línea. Se lee de `workspace_fincas_tarifas`,
+ *  así que si alguien cambia el precio por vivienda, aquí se ve cambiado. */
+const describeFincasTarifaVigente = () => {
+  const trozos = [];
+  let minimo = 0;
+  fincasTarifaActual.forEach((item) => {
+    if (!Number(item?.activo ?? 1)) return;
+    const precio = Number(item?.precio || 0) || 0;
+    if (item?.tipo === "minimo") {
+      minimo = Math.max(minimo, precio);
+      return;
+    }
+    if (!FINCAS_TARIFA_UNIDADES[item?.clave] || !precio) return;
+    trozos.push(`${euroFormatter.format(precio)}/${item.unidad || "unidad"}`);
+  });
+  if (minimo) trozos.push(`mínimo ${euroFormatter.format(minimo)}/mes`);
+  trozos.push(`IVA ${Math.round(FINCAS_IVA_PCT * 100)} %`);
+  return trozos.join(" · ");
+};
+
 const renderFincasTarifasFijas = () => {
   const caja = document.getElementById("workspaceFincasBudgetExtras");
   if (!caja) return;
@@ -27169,7 +27189,10 @@ const pintaPlantillaContrato = (clave) => {
 const cargarPlantillasDeContrato = async () => {
   if (!state.currentWorkspaceId || !plantillaContratoSelect) return;
   try {
-    const data = await apiGet(`/api/workspace_contrato_plantillas?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`);
+    // `apiGet` no existe en este bundle: el helper es `api`. Con el nombre malo, abrir
+    // el panel lanzaba un ReferenceError que el catch convertía en «apiGet is not
+    // defined» sobre el desplegable, y las plantillas no se cargaban nunca.
+    const data = await api(`/api/workspace_contrato_plantillas?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`);
     plantillasContrato = Array.isArray(data?.items) ? data.items : [];
     const previa = String(plantillaContratoSelect.value || "");
     plantillaContratoSelect.innerHTML = plantillasContrato
@@ -27251,7 +27274,9 @@ const leeEquipoFincas = () =>
 const cargarEquipoDeFincas = async () => {
   if (!state.currentWorkspaceId || !equipoFincasLista) return;
   try {
-    const data = await apiGet(`/api/workspace_fincas_equipo?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`);
+    // Mismo fallo que en las plantillas de contrato: el panel de Equipo se abría
+    // vacío y con el error del ReferenceError debajo.
+    const data = await api(`/api/workspace_fincas_equipo?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`);
     pintaEquipoFincas(data?.items || []);
   } catch (error) {
     if (equipoFincasStatus) equipoFincasStatus.textContent = error?.message || "No se pudo cargar el equipo.";
@@ -27391,12 +27416,15 @@ const syncWorkspaceFincasBudgetQuickComputed = (options = {}) => {
     subtotalInput.value = formatEurosCompact(subtotal);
   }
   if (workspaceFincasBudgetHero) {
+    // El pie decía «5 € por vivienda + 1 € por local/aparcamiento (mínimo 60 €)»:
+    // ni mencionaba los trasteros ni se enteraba de que los precios ya se editan
+    // desde la tarifa del workspace. Ahora se lee de la tarifa que está en uso.
     workspaceFincasBudgetHero.innerHTML = `
       <div class="workspace-home-detail-card" style="padding:16px;">
         <div class="section-head">
           <div>
             <h4>Resumen económico</h4>
-            <p class="muted">5 € por vivienda + 1 € por local/aparcamiento (mínimo 60 €) + IVA 21%.</p>
+            <p class="muted">${escapeHtml(describeFincasTarifaVigente())}</p>
           </div>
         </div>
         <div class="workspace-summary-kpis">
@@ -27406,6 +27434,7 @@ const syncWorkspaceFincasBudgetQuickComputed = (options = {}) => {
           <div class="workspace-mini-kpi"><span>Total anual</span><strong>${formatEurosCompact(total * 12)}</strong></div>
           <div class="workspace-mini-kpi"><span>Viviendas</span><strong>${numberFormatter.format(numVecinos)}</strong></div>
           <div class="workspace-mini-kpi"><span>Locales</span><strong>${numberFormatter.format(numLocales)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Trasteros</span><strong>${numberFormatter.format(numTrasteros)}</strong></div>
           <div class="workspace-mini-kpi"><span>Aparcamientos</span><strong>${numberFormatter.format(numAparcamientos)}</strong></div>
         </div>
       </div>
@@ -57976,8 +58005,16 @@ const refreshCurrentInmuebleProfile = () => {
           if (res?.error) throw new Error(res.error);
           const enlace = String(res?.enlace || "").trim();
           const partes = [];
-          if (res?.aviso?.enviado) partes.push(`Enlace enviado a ${res.telefono || "su teléfono"}`);
-          else partes.push("Enlace listo (copiado al portapapeles)");
+          if (res?.aviso?.enviado) {
+            const donde = res.aviso.por === "correo" ? (res.email || "su correo") : (res.telefono || "su teléfono");
+            partes.push(`Enlace enviado a ${donde}`);
+          } else if (res?.sin_contacto) {
+            // Lo que hay que decir ANTES de que alguien dé por hecho que el
+            // propietario ya tiene su enlace: no hay por dónde mandárselo.
+            partes.push("Este propietario no tiene teléfono ni correo en su ficha: el enlace está copiado, mándaselo tú");
+          } else {
+            partes.push("Enlace listo (copiado al portapapeles)");
+          }
           if (res?.caduca) partes.push(`caduca el ${res.caduca}`);
           // Sin canal de mensajes el enlace es el único factor. Que se sepa aquí,
           // que es donde alguien decide a quién se lo manda.
@@ -88762,9 +88799,14 @@ if (workspaceFincasBudgetQuickForm) {
       });
     });
   }
-	["num_vecinos", "num_locales", "num_aparcamientos"].forEach((name) => {
+	// La lista se saca del mapa de la tarifa en vez de escribirla a mano: aquí
+	  // faltaba `num_trasteros` —se añadió el campo al formulario pero no a esta
+	  // lista—, así que teclear trasteros no movía ni el resumen ni el precio.
+	  Object.values(FINCAS_TARIFA_UNIDADES).forEach((name) => {
 	    const input = workspaceFincasBudgetQuickForm.querySelector(`[name="${name}"]`);
-	    input?.addEventListener("input", () => syncWorkspaceFincasBudgetQuickComputed());
+	    ["input", "change"].forEach((evento) => {
+	      input?.addEventListener(evento, () => syncWorkspaceFincasBudgetQuickComputed());
+	    });
 	  });
 	  const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
 		  if (subtotalInput) {
@@ -88783,14 +88825,16 @@ if (workspaceFincasBudgetQuickForm) {
 		      }
 		      syncWorkspaceFincasBudgetQuickComputed();
 		    });
+		    // Solo se normaliza lo que se ha tecleado. Antes bastaba con pasar por el
+		    // campo: el `blur` lo marcaba como manual aunque el importe lo hubiera
+		    // escrito el propio cálculo, y desde ese momento el precio se quedaba
+		    // congelado. Tabulando por el formulario, las unidades que se escribieran
+		    // después ya no movían el total, pero sí el desglose, y el PDF acababa
+		    // cuadrando la diferencia con un «ajuste comercial» inventado.
 		    subtotalInput.addEventListener("blur", () => {
-		      if (String(subtotalInput.value || "").trim()) {
-		        subtotalInput.dataset.manual = "1";
-		        try {
-		          if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "subtotal";
-		        } catch (e) {}
-		        syncWorkspaceFincasBudgetQuickComputed({ normalizeSubtotal: true, normalizeTotal: true });
-		      }
+		      if (subtotalInput.dataset.manual !== "1") return;
+		      if (!String(subtotalInput.value || "").trim()) return;
+		      syncWorkspaceFincasBudgetQuickComputed({ normalizeSubtotal: true, normalizeTotal: true });
 		    });
 		  }
 	  const totalInput = workspaceFincasBudgetQuickForm.querySelector('[name="total"]');
@@ -88810,14 +88854,13 @@ if (workspaceFincasBudgetQuickForm) {
 	      }
 	      syncWorkspaceFincasBudgetQuickComputed();
 	    });
+	    // Igual que en el subtotal, y aquí importaba más: el total es `readonly`, así
+	    // que nunca puede haberlo escrito nadie. Marcarlo manual al salir del campo
+	    // era congelar el precio sin que hubiera forma de haberlo pedido.
 	    totalInput.addEventListener("blur", () => {
-	      if (String(totalInput.value || "").trim()) {
-	        totalInput.dataset.manual = "1";
-	        try {
-	          if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "total";
-	        } catch (e) {}
-	        syncWorkspaceFincasBudgetQuickComputed({ normalizeSubtotal: true, normalizeTotal: true });
-	      }
+	      if (totalInput.dataset.manual !== "1") return;
+	      if (!String(totalInput.value || "").trim()) return;
+	      syncWorkspaceFincasBudgetQuickComputed({ normalizeSubtotal: true, normalizeTotal: true });
 	    });
 	  }
 	  if (workspaceFincasBudgetBuildingPhoto) {

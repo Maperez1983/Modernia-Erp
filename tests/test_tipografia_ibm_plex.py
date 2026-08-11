@@ -104,15 +104,17 @@ class LosDocumentosGeneradosTests(unittest.TestCase):
         campo y el `except` de al lado lo escondía: el reconocimiento de honorarios
         salía sin un solo campo. Vive aislada en `_fuente_para_formulario`.
 
-        **El correo de firma.** Un correo no puede cargar webfonts —Gmail y Outlook
-        las descartan— ni fiarse de que IBM Plex esté instalada en el ordenador de
-        quien lo recibe. Lo que se ve igual en todos los clientes es la pila del
-        sistema, y ahí Helvetica/Arial es lo correcto. Vive en
-        `correo_de_firma_html`.
+        **Los correos.** Un correo no puede cargar webfonts —Gmail y Outlook las
+        descartan— ni fiarse de que IBM Plex esté instalada en el ordenador de quien
+        lo recibe. Lo que se ve igual en todos los clientes es la pila del sistema, y
+        ahí Helvetica/Arial es lo correcto. Viven en `correo_de_firma_html` y en
+        `correo_con_el_enlace_del_portal`, que manda al propietario el enlace de
+        seguimiento de su venta.
 
-        Fuera de esas dos funciones, Helvetica sigue prohibida.
+        Fuera de esas funciones, Helvetica sigue prohibida.
         """
-        aisladas = ("def _fuente_para_formulario", "def correo_de_firma_html")
+        aisladas = ("def _fuente_para_formulario", "def correo_de_firma_html",
+                    "def correo_con_el_enlace_del_portal")
         for fichero in ("server.py", "document_pdf.py"):
             texto = (RAIZ / "web" / fichero).read_text(encoding="utf-8")
             for marca in aisladas:
