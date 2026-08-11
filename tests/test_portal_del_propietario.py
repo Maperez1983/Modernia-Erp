@@ -691,3 +691,49 @@ class ElEsquemaSobreviveAUnaLecturaTests(BasePortal):
             "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'inmueble_portal%'")}
         self.assertIn("inmueble_portal_accesos", tablas)
         self.assertIn("inmueble_portal_avisos", tablas)
+
+
+class ElCanalDeMensajesTests(unittest.TestCase):
+    """El portal y la firma comparten webhook: tienen que compartir variables.
+
+    Llegué a escribir `SIGNATURE_WEBHOOK_TOKEN` en el portal cuando la firma usaba
+    `SIGNATURE_WEBHOOK_SECRET`. Dos nombres para lo mismo acaban siempre igual: uno
+    se queda sin configurar y nadie entiende por qué sale la mitad de los mensajes.
+    """
+
+    @staticmethod
+    def _fuente():
+        return (Path(__file__).resolve().parents[1] / "web" / "server.py").read_text(encoding="utf-8")
+
+    def test_un_solo_nombre_para_el_secreto(self):
+        fuente = self._fuente()
+        self.assertNotIn("SIGNATURE_WEBHOOK_TOKEN", fuente)
+        self.assertIn("SIGNATURE_WEBHOOK_SECRET", fuente)
+
+    def test_el_portal_manda_por_donde_manda_la_firma(self):
+        fuente = self._fuente()
+        i = fuente.index("def envia_mensaje_al_propietario")
+        bloque = fuente[i:i + 2000]
+        self.assertIn("SIGNATURE_WHATSAPP_WEBHOOK_URL", bloque)
+        self.assertIn("SIGNATURE_SMS_WEBHOOK_URL", bloque)
+
+    def test_sin_webhook_lo_dice_en_vez_de_fallar(self):
+        os.environ.pop("SIGNATURE_WHATSAPP_WEBHOOK_URL", None)
+        os.environ.pop("SIGNATURE_SMS_WEBHOOK_URL", None)
+        enviado, motivo = S.envia_mensaje_al_propietario("+34600111222", "hola")
+        self.assertFalse(enviado)
+        self.assertEqual(motivo, "webhook_no_configurado")
+
+    def test_sin_telefono_tampoco_revienta(self):
+        enviado, motivo = S.envia_mensaje_al_propietario("", "hola")
+        self.assertFalse(enviado)
+        self.assertEqual(motivo, "sin_telefono")
+
+    def test_whatsapp_gana_al_sms_si_estan_los_dos(self):
+        os.environ["SIGNATURE_WHATSAPP_WEBHOOK_URL"] = "https://x.invalido/w"
+        os.environ["SIGNATURE_SMS_WEBHOOK_URL"] = "https://x.invalido/s"
+        try:
+            self.assertEqual(S.canal_para_avisar(), "whatsapp")
+        finally:
+            os.environ.pop("SIGNATURE_WHATSAPP_WEBHOOK_URL", None)
+            os.environ.pop("SIGNATURE_SMS_WEBHOOK_URL", None)

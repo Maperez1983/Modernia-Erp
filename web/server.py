@@ -30516,9 +30516,12 @@ def envia_mensaje_al_propietario(telefono, texto):
         return False, "webhook_no_configurado"
     cuerpo = json.dumps({"to": telefono, "channel": canal, "message": texto}).encode("utf-8")
     cabeceras = {"Content-Type": "application/json", "User-Agent": "Verifika2CRM/1.0"}
-    ficha = str(os.environ.get("SIGNATURE_WEBHOOK_TOKEN") or "").strip()
-    if ficha:
-        cabeceras["Authorization"] = f"Bearer {ficha}"
+    # La MISMA variable que usa la firma electrónica. Es el mismo webhook y el mismo
+    # secreto: dos nombres para lo mismo se traduce en que uno de los dos se queda
+    # sin configurar y nadie entiende por qué la mitad de los mensajes no salen.
+    secreto = str(os.environ.get("SIGNATURE_WEBHOOK_SECRET") or "").strip()
+    if secreto:
+        cabeceras["Authorization"] = f"Bearer {secreto}"
     try:
         req = urllib.request.Request(url, data=cuerpo, headers=cabeceras, method="POST")
         with urllib.request.urlopen(req, timeout=12) as resp:
