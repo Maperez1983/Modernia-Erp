@@ -30782,8 +30782,13 @@ def build_portal_de_venta(conn, acceso, *, registrar=True):
         })
 
     visitas_hechas = visitas_previstas = 0
+    motivos = {}
+    ensure_visita_resultado_schema(conn)
+    vis_cols = table_columns(conn, "visitas") or set()
+    campos_v = "fecha, hora, estado" + (", resultado" if "resultado" in vis_cols else "") + \
+               (", comentario_propietario" if "comentario_propietario" in vis_cols else "")
     for visita in conn.execute(
-        "SELECT fecha, hora, estado FROM visitas WHERE inmueble_id = ? ORDER BY COALESCE(fecha,'') DESC LIMIT 80",
+        f"SELECT {campos_v} FROM visitas WHERE inmueble_id = ? ORDER BY COALESCE(fecha,'') DESC LIMIT 80",
         (inmueble_id,),
     ).fetchall():
         estado_v = normalize_lookup_text(row_value(visita, "estado", ""))
@@ -30792,11 +30797,17 @@ def build_portal_de_venta(conn, acceso, *, registrar=True):
             visitas_hechas += 1
         else:
             visitas_previstas += 1
+        clave = str(row_value(visita, "resultado", "") or "").strip()
+        if clave in RESULTADOS_DE_VISITA:
+            motivos[clave] = motivos.get(clave, 0) + 1
         cronologia.append({
             "fecha": _fecha_corta(row_value(visita, "fecha", "")),
             "tipo": "visita",
             "titulo": "Visita realizada" if hecha else "Visita agendada",
             "detalle": str(row_value(visita, "hora", "") or ""),
+            # Lo que el asesor haya querido contarle. Si no escribió nada, no hay
+            # nada que enseñar: el silencio es mejor que un relleno.
+            "comentario": str(row_value(visita, "comentario_propietario", "") or "").strip(),
         })
 
     contactos = 0
@@ -30987,6 +30998,20 @@ def build_portal_de_venta(conn, acceso, *, registrar=True):
         },
         "agenda": agenda,
         "agenda_es_pasado": agenda_es_pasado,
+        # El embudo cuenta una historia y se entiende con 3 visitas igual que con
+        # 300: dónde se atasca la venta. Un gráfico de evolución con tres puntos
+        # no comunica «poco movimiento», comunica abandono.
+        "embudo": [
+            {"etiqueta": "Contactos desde la web", "valor": contactos},
+            {"etiqueta": "Visitas realizadas", "valor": visitas_hechas},
+            {"etiqueta": "Interesados", "valor": int(row_value(interesados, "n", 0) or 0)},
+            {"etiqueta": "Ofertas", "valor": 1 if propuesta else 0},
+        ],
+        "motivos": [
+            {"clave": k, "etiqueta": RESULTADOS_DE_VISITA[k], "n": v}
+            for k, v in sorted(motivos.items(), key=lambda x: -x[1])
+        ] if sum(motivos.values()) >= 3 else [],
+        "evolucion": evolucion_de_la_venta(conn, inmueble_id),
         "anuncio": anuncio,
         "mensajes": hilo_del_propietario(conn, inmueble_id),
         "propietario": {"nombre": str(row_value(acceso, "nombre", "") or "")},
@@ -31003,6 +31028,108 @@ def build_portal_de_venta(conn, acceso, *, registrar=True):
         "firmas": firmas,
         "propuesta": propuesta,
     }
+
+
+# Lo que un vendedor pregunta después de una visita no es cuándo fue: es qué
+# dijeron. Una lista corta y cerrada, porque en texto libre no se puede contar
+# —y contar es lo que convierte cinco visitas en un argumento para ajustar el
+# precio, en vez de en una opinión del asesor—.
+RESULTADOS_DE_VISITA = {
+    "interesa": "Le interesa",
+    "precio": "Le gusta, pero el precio le frena",
+    "distribucion": "Descarta por la distribución",
+    "zona": "Descarta por la zona",
+    "estado": "Descarta por el estado del inmueble",
+    "no_apareció": "No se presentó",
+}
+
+
+def evolucion_de_la_venta(conn, inmueble_id, *, meses=8):
+    """Citas por mes, con los cambios de precio marcados encima.
+
+    **Por qué no son dos ejes.** La tentación era pintar el precio como una segunda
+    línea con su propia escala. Dos ejes en un gráfico dejan comparar lo que uno
+    quiera y hacen ver relaciones que no están: subiendo o bajando una escala se
+    demuestra cualquier cosa. Aquí las barras son una sola cosa —citas— y el precio
+    aparece como lo que es: un hecho puntual, anotado en el mes en que ocurrió.
+
+    Y así se lee la historia que de verdad importa: «bajamos 15.000 en junio y las
+    visitas pasaron de una a cuatro». O la contraria, que también hay que poder ver.
+
+    El histórico de precio sale de la bitácora, que guarda cada cambio con el
+    importe de antes y el de después. No hace falta una tabla nueva.
+    """
+    inmueble_id = str(inmueble_id or "")
+    ahora = datetime.now(timezone.utc).date()
+    claves = []
+    for atras in range(meses - 1, -1, -1):
+        y, m = divmod((ahora.year * 12 + ahora.month - 1) - atras, 12)
+        claves.append(f"{y:04d}-{m + 1:02d}")
+    cuenta = {c: 0 for c in claves}
+
+    def suma(fecha):
+        mes = str(fecha or "")[:7]
+        if mes in cuenta:
+            cuenta[mes] += 1
+
+    try:
+        for f in conn.execute("SELECT fecha FROM visitas WHERE inmueble_id = ?", (inmueble_id,)).fetchall():
+            suma(row_value(f, "fecha", ""))
+        for f in conn.execute(
+            "SELECT fecha, tipo FROM acciones WHERE inmueble_id = ?", (inmueble_id,)
+        ).fetchall():
+            if normalize_lookup_text(row_value(f, "tipo", "")) in ACCIONES_VISIBLES_AL_PROPIETARIO:
+                suma(row_value(f, "fecha", ""))
+    except Exception:
+        _rollback_best_effort(conn)
+
+    cambios = {}
+    try:
+        for f in conn.execute(
+            "SELECT detalles, created_at FROM auditoria WHERE entidad = 'inmueble' AND entidad_id = ? "
+            "ORDER BY created_at ASC LIMIT 200",
+            (inmueble_id,),
+        ).fetchall():
+            crudo = row_value(f, "detalles", "") or ""
+            if "precio" not in str(crudo).lower():
+                continue
+            try:
+                datos = json.loads(crudo) if isinstance(crudo, str) else dict(crudo)
+            except Exception:
+                continue
+            if not str(datos.get("campo") or "").startswith("precio"):
+                continue
+            antes = parse_money_value(datos.get("from")) or 0
+            despues = parse_money_value(datos.get("to")) or 0
+            if not despues or antes == despues:
+                continue
+            mes = str(row_value(f, "created_at", ""))[:7]
+            if mes in cuenta:
+                cambios[mes] = round(despues - antes, 2)
+    except Exception:
+        _rollback_best_effort(conn)
+
+    filas = [{"mes": c, "citas": cuenta[c], "cambio_precio": cambios.get(c, 0)} for c in claves]
+    # Un gráfico con un solo mes con actividad no informa: deprime. Se enseña cuando
+    # hay algo que comparar.
+    con_algo = sum(1 for f in filas if f["citas"] or f["cambio_precio"])
+    return filas if con_algo >= 2 else []
+
+
+def ensure_visita_resultado_schema(conn):
+    """Dos columnas, y la separación entre ellas es el punto.
+
+    `notas` ya existía y es interna: ahí el asesor escribe lo que necesite y no
+    sale de la agencia. `comentario_propietario` se escribe a propósito para que lo
+    lea el dueño. Mezclarlas sería la forma más rápida de que un comentario del
+    tipo «el vendedor está desesperado» acabara en su pantalla.
+    """
+    ensure_column(conn, "visitas", "resultado", "resultado TEXT")
+    ensure_column(conn, "visitas", "comentario_propietario", "comentario_propietario TEXT")
+    try:
+        conn.commit()
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_visita_resultado_schema/commit", _fallo_tragado)
 
 
 def ensure_inmueble_portal_mensajes_schema(conn):
@@ -64414,6 +64541,22 @@ class Handler(BaseHTTPRequestHandler):
     .aviso { padding: 12px 14px; border-radius: 12px; background: var(--ambar-claro); color: var(--ambar); margin: 16px; }
     .vacio { color: var(--suave); font-size: 14px; padding: 4px 0; }
     .pend { color: var(--ambar); }
+    .embudo div { margin-bottom: 10px; }
+    .embudo .fila { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
+    .embudo .fila b { font-family: var(--titulos); font-size: 15px; }
+    .embudo .barra-e { height: 10px; border-radius: 99px; background: var(--verde-claro); overflow: hidden; }
+    .embudo .barra-e i { display: block; height: 100%; background: var(--verde); }
+    .meses { display: flex; align-items: flex-end; gap: 6px; height: 108px; margin: 6px 0 4px; }
+    .mes { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 4px;
+           min-width: 0; }
+    .mes .col { width: 100%; background: var(--verde); border-radius: 6px 6px 0 0; min-height: 3px; }
+    .mes .col.cero { background: var(--linea); }
+    .mes .n { font-size: 12px; color: var(--suave); font-variant-numeric: tabular-nums; }
+    .mes .etq { font-size: 10px; color: var(--suave); text-transform: uppercase; }
+    .precios { display: flex; gap: 6px; }
+    .precios span { flex: 1; text-align: center; font-size: 10px; min-width: 0; }
+    .precios .baja { color: var(--verde); font-weight: 600; }
+    .precios .sube { color: var(--ambar); font-weight: 600; }
     /* Después de definir `.barra`, no antes: con la misma especificidad gana la
        última regla, y la de arriba no llegaba a aplicarse nunca. */
     @media (min-width: 940px) { .barra { display: none; } body { padding-bottom: 24px; } }
@@ -64557,6 +64700,41 @@ class Handler(BaseHTTPRequestHandler):
                            : `<span class="fecha">${esc(f.estado === "signed" ? "firmado" : f.estado)} · ${esc(fechaCorta(f.fecha))}</span>`}
          </li>`).join("");
 
+      const totalEmbudo = Math.max(...(d.embudo || []).map((x) => x.valor), 1);
+      const embudo = `<div class="tarjeta embudo"><h2>Cómo va el interés</h2>` +
+        (d.embudo || []).map((x) => `<div>
+            <div class="fila"><span>${esc(x.etiqueta)}</span><b>${x.valor}</b></div>
+            <div class="barra-e"><i style="width:${Math.round((x.valor / totalEmbudo) * 100)}%"></i></div>
+          </div>`).join("") + `</div>`;
+
+      const ev = d.evolucion || [];
+      const topeMes = Math.max(...ev.map((m) => m.citas), 1);
+      const evolucion = !ev.length ? "" : `
+        <div class="tarjeta">
+          <h2>Citas por mes</h2>
+          <div class="meses">${ev.map((m) => `
+            <div class="mes">
+              <span class="n">${m.citas || ""}</span>
+              <div class="col ${m.citas ? "" : "cero"}" style="height:${Math.round((m.citas / topeMes) * 74)}px"></div>
+              <span class="etq">${esc(MESES[Number(m.mes.slice(5, 7)) - 1] || "")}</span>
+            </div>`).join("")}</div>
+          <div class="precios">${ev.map((m) => m.cambio_precio
+            ? `<span class="${m.cambio_precio < 0 ? "baja" : "sube"}">${m.cambio_precio < 0 ? "▼" : "▲"} ${eur.format(Math.abs(m.cambio_precio))}</span>`
+            : "<span></span>").join("")}</div>
+          <p class="suave" style="margin:10px 0 0;font-size:13px">Los cambios de precio van marcados en el mes en que se hicieron.</p>
+        </div>`;
+
+      const totalMotivos = (d.motivos || []).reduce((a, b) => a + b.n, 0);
+      const motivos = !(d.motivos || []).length ? "" : `
+        <div class="tarjeta embudo">
+          <h2>Qué dicen las visitas</h2>
+          ${d.motivos.map((m) => `<div>
+            <div class="fila"><span>${esc(m.etiqueta)}</span><b>${m.n}</b></div>
+            <div class="barra-e"><i style="width:${Math.round((m.n / totalMotivos) * 100)}%"></i></div>
+          </div>`).join("")}
+          <p class="suave" style="margin:6px 0 0;font-size:13px">Resumen de las ${totalMotivos} visitas con respuesta. Sin nombres.</p>
+        </div>`;
+
       const galeria = i.fotos > 1
         ? `<div class="tarjeta"><h2>Fotos del anuncio</h2><div class="galeria">` +
           Array.from({ length: Math.min(i.fotos, 12) }, (_, n) =>
@@ -64579,7 +64757,8 @@ class Handler(BaseHTTPRequestHandler):
 
       const historia = d.cronologia || [];
       const linea = (n) => historia.slice(0, n).map((x) =>
-        `<li><span>${esc(x.titulo)}${x.detalle ? " · " + esc(x.detalle) : ""}</span>
+        `<li><span>${esc(x.titulo)}${x.detalle ? " · " + esc(x.detalle) : ""}${
+            x.comentario ? `<br><span class="suave" style="font-size:13px">${esc(x.comentario)}</span>` : ""}</span>
              <span class="fecha">${esc(fechaCorta(x.fecha))}</span></li>`).join("")
         || '<li class="vacio">Todavía no hay movimientos que mostrar.</li>';
 
@@ -64622,6 +64801,9 @@ class Handler(BaseHTTPRequestHandler):
                 ${agenda || '<p class="vacio">Todavía no hay ninguna cita. Cuando tu asesor concierte una visita, aparecerá aquí.</p>'}
                 ${d.agenda_es_pasado ? '<p class="suave" style="margin:12px 0 0;font-size:13px">No hay ninguna cita prevista ahora mismo.</p>' : ""}
               </div>
+              ${embudo}
+              ${evolucion}
+              ${motivos}
               ${anuncio}
               ${galeria}
               <div class="tarjeta">
@@ -65479,6 +65661,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_portal_acceso",
             "/api/inmueble_portal_mensaje",
             "/api/inmueble_doc_compartir",
+            "/api/visita_resultado",
             "/api/inmueble_portal_acceso_revoke",
             "/api/leads",
             "/api/portal_leads",
@@ -65602,6 +65785,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_portal_acceso",
             "/api/inmueble_portal_mensaje",
             "/api/inmueble_doc_compartir",
+            "/api/visita_resultado",
             "/api/inmueble_portal_acceso_revoke",
             "/api/portal_venta_codigo",
             "/api/portal_venta_doc",
@@ -65611,6 +65795,7 @@ class Handler(BaseHTTPRequestHandler):
     "/api/portal_venta_firma",
             "/api/inmueble_portal_mensaje",
             "/api/inmueble_doc_compartir",
+            "/api/visita_resultado",
             "/api/inmueble_renovar",
             "/api/renta_campaign_document",
             "/api/workspace_fincas_comunidad_delete",
@@ -65969,6 +66154,7 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/inmueble_portal_acceso": "inmobiliaria",
                         "/api/inmueble_portal_mensaje": "inmobiliaria",
                         "/api/inmueble_doc_compartir": "inmobiliaria",
+                        "/api/visita_resultado": "inmobiliaria",
                         "/api/inmueble_portal_acceso_revoke": "inmobiliaria",
                         "/api/leads": "inmobiliaria",
                         "/api/portal_leads": "inmobiliaria",
@@ -66332,6 +66518,7 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/inmueble_portal_acceso",
             "/api/inmueble_portal_mensaje",
             "/api/inmueble_doc_compartir",
+            "/api/visita_resultado",
                 "/api/inmueble_portal_acceso_revoke",
                 "/api/leads",
                 "/api/portal_leads",
@@ -66376,6 +66563,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_portal_acceso",
             "/api/inmueble_portal_mensaje",
             "/api/inmueble_doc_compartir",
+            "/api/visita_resultado",
             "/api/inmueble_portal_acceso_revoke",
             "/api/leads",
             "/api/portal_leads",
@@ -66484,9 +66672,11 @@ class Handler(BaseHTTPRequestHandler):
     "/api/portal_venta_firma",
             "/api/inmueble_portal_mensaje",
             "/api/inmueble_doc_compartir",
+            "/api/visita_resultado",
             "/api/inmueble_portal_acceso",
             "/api/inmueble_portal_mensaje",
             "/api/inmueble_doc_compartir",
+            "/api/visita_resultado",
             "/api/inmueble_portal_acceso_revoke",
         ):
             if not empresa_nombre:
@@ -85033,6 +85223,49 @@ class Handler(BaseHTTPRequestHandler):
                 # Si no hay canal, el enlace es el único factor. Que se sepa.
                 "segundo_factor": hay_canal_para_avisar(),
             })
+            return
+
+        elif parsed.path == "/api/visita_resultado":
+            # Qué dijeron en la visita. `resultado` es de lista cerrada porque en
+            # texto libre no se puede contar, y contar es lo que convierte cinco
+            # visitas en un argumento para ajustar el precio en vez de en una
+            # opinión del asesor.
+            visita_id = str(payload.get("visita_id") or payload.get("id") or "").strip()
+            if not visita_id:
+                json_response(self, {"error": "visita_id requerido"}, status=400)
+                return
+            fila = conn.execute("SELECT inmueble_id FROM visitas WHERE id = ? LIMIT 1", (visita_id,)).fetchone()
+            if not fila:
+                json_response(self, {"error": "Visita no encontrada"}, status=404)
+                return
+            inmueble_id = str(row_value(fila, "inmueble_id", "") or "")
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _f = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc},
+                              status=404 if "no encontrado" in str(err_acc) else 403)
+                return
+            resultado = str(payload.get("resultado") or "").strip()
+            if resultado and resultado not in RESULTADOS_DE_VISITA:
+                json_response(self, {"error": "resultado no válido",
+                                     "opciones": list(RESULTADOS_DE_VISITA)}, status=400)
+                return
+            ensure_visita_resultado_schema(conn)
+            # El comentario para el propietario es OTRO campo, no las notas: en las
+            # notas se escriben cosas que no puede leer el dueño.
+            comentario = str(payload.get("comentario_propietario") or "").strip()[:500]
+            conn.execute(
+                "UPDATE visitas SET resultado = ?, comentario_propietario = ?, estado = ?, updated_at = ? "
+                "WHERE id = ?",
+                (resultado or None, comentario or None,
+                 "Realizada" if resultado else str(payload.get("estado") or "Realizada"), now, visita_id))
+            conn.commit()
+            if comentario:
+                avisa_al_propietario(conn, inmueble_id, "visita_resultado",
+                                     "Tu asesor ha anotado cómo fue la última visita.",
+                                     referencia=visita_id, now=now)
+            json_response(self, {"ok": True, "resultado": resultado,
+                                 "etiqueta": RESULTADOS_DE_VISITA.get(resultado, "")})
             return
 
         elif parsed.path == "/api/inmueble_doc_compartir":
