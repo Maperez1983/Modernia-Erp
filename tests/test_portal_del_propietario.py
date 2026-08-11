@@ -1464,3 +1464,131 @@ class LaImagenDeLaPaginaTests(BasePortal):
         j = css.index(".galeria {")
         self.assertIn("overflow-x: auto", css[j:css.index("}", j)])
         self.assertIn("max-width: 100%", css[j:css.index("}", j)])
+
+
+class ElResultadoDeLaVisitaTests(BasePortal):
+    """Lo que un vendedor pregunta después de una visita no es cuándo fue: es qué
+    dijeron. Hasta ahora una visita era sólo una fecha."""
+
+    def test_el_asesor_anota_el_resultado(self):
+        estado, d = self._post("/api/visita_resultado",
+                               {"visita_id": "v1", "resultado": "precio",
+                                "comentario_propietario": "Les encantó, pero lo ven por encima de mercado."})
+        self.assertEqual(estado, 200, d)
+        fila = self.conn.execute("SELECT resultado, comentario_propietario, estado FROM visitas WHERE id='v1'").fetchone()
+        self.assertEqual(fila["resultado"], "precio")
+        self.assertEqual(fila["estado"], "Realizada")
+
+    def test_un_resultado_inventado_se_rechaza(self):
+        estado, d = self._post("/api/visita_resultado", {"visita_id": "v1", "resultado": "regular"})
+        self.assertEqual(estado, 400, d)
+        self.assertIn("opciones", d)
+
+    def test_el_comentario_llega_al_propietario(self):
+        self._post("/api/visita_resultado", {"visita_id": "v1", "resultado": "precio",
+                                             "comentario_propietario": "Lo ven caro para la zona."})
+        d = self._vista(self._token(self._abre_portal()["enlace"]))
+        comentarios = [x.get("comentario") for x in d["cronologia"] if x.get("comentario")]
+        self.assertIn("Lo ven caro para la zona.", comentarios)
+
+    def test_las_notas_internas_NO_llegan(self):
+        """Son otro campo a propósito: en `notas` se escriben cosas que el dueño no
+        puede leer."""
+        self.conn.execute("UPDATE visitas SET notas = 'El vendedor está desesperado, apretar' WHERE id='v1'")
+        self.conn.commit()
+        _, crudo = self._get(f"/api/portal_venta?token={self._token(self._abre_portal()['enlace'])}")
+        self.assertNotIn("desesperado", crudo)
+
+    def test_sin_comentario_no_se_enseña_nada(self):
+        self._post("/api/visita_resultado", {"visita_id": "v1", "resultado": "zona"})
+        d = self._vista(self._token(self._abre_portal()["enlace"]))
+        self.assertEqual([x for x in d["cronologia"] if x.get("comentario")], [])
+
+    def test_no_se_puede_anotar_en_una_visita_de_otra_agencia(self):
+        self._ins("visitas", {"id": "vAjena", "empresa_id": "empX", "inmueble_id": "inmX",
+                              "fecha": "2026-08-01", "estado": "Prevista",
+                              "created_at": AHORA, "updated_at": AHORA})
+        self._ins("usuarios", {"id": "u8", "nombre": "C", "usuario": "comercial8", "email": "c8@x.test",
+                               "rol": "Comercial", "servicio": "Inmobiliaria", "activo": 1,
+                               "password_hash": S.hash_password(CLAVE), "created_at": AHORA, "updated_at": AHORA})
+        self._ins("workspace_miembros", {"id": "wm8", "workspace_id": self.ws, "usuario_id": "u8",
+                                         "rol": "Miembro", "created_at": AHORA, "updated_at": AHORA})
+        req = urllib.request.Request(
+            self.base + "/api/login",
+            data=json.dumps({"usuario": "comercial8", "password": CLAVE}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as r:
+            cookie = r.headers.get("Set-Cookie").split(";")[0]
+        req = urllib.request.Request(
+            self.base + "/api/visita_resultado",
+            data=json.dumps({"visita_id": "vAjena", "resultado": "zona"}).encode(),
+            headers={"Content-Type": "application/json", "Cookie": cookie}, method="POST")
+        try:
+            with urllib.request.urlopen(req) as r:
+                self.fail("ha dejado anotar en una visita ajena")
+        except urllib.error.HTTPError as e:
+            self.assertIn(e.code, (403, 404))
+
+
+class LosGraficosTests(BasePortal):
+    def test_el_embudo_sale_siempre(self):
+        d = self._vista(self._token(self._abre_portal()["enlace"]))
+        self.assertEqual([x["etiqueta"] for x in d["embudo"]],
+                         ["Contactos desde la web", "Visitas realizadas", "Interesados", "Ofertas"])
+
+    def test_los_motivos_no_salen_con_menos_de_tres(self):
+        """Con una o dos respuestas, un desglose de motivos no informa: insinúa."""
+        self._post("/api/visita_resultado", {"visita_id": "v1", "resultado": "precio"})
+        self.assertEqual(self._vista(self._token(self._abre_portal()["enlace"]))["motivos"], [])
+
+    def test_con_tres_o_más_sí(self):
+        # La columna la crea `ensure_visita_resultado_schema`; sin esto el helper de
+        # siembra la descarta por no existir todavía y el test no probaría nada.
+        S.ensure_visita_resultado_schema(self.conn)
+        for n in range(3):
+            self._ins("visitas", {"id": f"vm{n}", "workspace_id": self.ws, "empresa_id": "emp1",
+                                  "inmueble_id": "inm1", "fecha": "2026-07-0%d" % (n + 1),
+                                  "estado": "Realizada", "resultado": "precio",
+                                  "created_at": AHORA, "updated_at": AHORA})
+        d = self._vista(self._token(self._abre_portal()["enlace"]))
+        self.assertEqual(d["motivos"][0]["clave"], "precio")
+        self.assertGreaterEqual(d["motivos"][0]["n"], 3)
+
+    def test_la_evolucion_no_sale_con_un_solo_mes(self):
+        """Un gráfico con un mes no comunica «poco movimiento»: comunica abandono."""
+        self.conn.execute("DELETE FROM visitas")
+        self.conn.execute("DELETE FROM acciones")
+        self.conn.commit()
+        self.assertEqual(self._vista(self._token(self._abre_portal()["enlace"]))["evolucion"], [])
+
+    def test_con_dos_meses_de_actividad_sí(self):
+        hoy = S.datetime.now(S.timezone.utc).date()
+        for n, atras in enumerate((0, 40)):
+            f = (hoy - S.timedelta(days=atras)).isoformat()
+            self._ins("visitas", {"id": f"ve{n}", "workspace_id": self.ws, "empresa_id": "emp1",
+                                  "inmueble_id": "inm1", "fecha": f, "estado": "Realizada",
+                                  "created_at": AHORA, "updated_at": AHORA})
+        ev = self._vista(self._token(self._abre_portal()["enlace"]))["evolucion"]
+        self.assertTrue(ev)
+        self.assertEqual(sum(m["citas"] for m in ev) > 0, True)
+
+    def test_el_cambio_de_precio_se_marca_en_su_mes(self):
+        hoy = S.datetime.now(S.timezone.utc).date()
+        self._ins("auditoria", {"id": "a1", "empresa_id": "emp1", "entidad": "inmueble",
+                                "entidad_id": "inm1", "accion": "Cambio campo",
+                                "detalles": json.dumps({"campo": "precio_objetivo", "from": 265000, "to": 250000}),
+                                "created_at": hoy.isoformat() + " 10:00:00"})
+        for n, atras in enumerate((0, 40)):
+            self._ins("visitas", {"id": f"vp{n}", "workspace_id": self.ws, "empresa_id": "emp1",
+                                  "inmueble_id": "inm1", "fecha": (hoy - S.timedelta(days=atras)).isoformat(),
+                                  "estado": "Realizada", "created_at": AHORA, "updated_at": AHORA})
+        ev = self._vista(self._token(self._abre_portal()["enlace"]))["evolucion"]
+        cambios = [m["cambio_precio"] for m in ev if m["cambio_precio"]]
+        self.assertEqual(cambios, [-15000.0])
+
+    def test_no_hay_dos_ejes_en_el_mismo_grafico(self):
+        """Dos escalas dejan demostrar cualquier relación moviendo una de ellas. El
+        precio va anotado en su mes, no como una segunda línea."""
+        _, html = self._get("/portal-venta")
+        self.assertIn("Los cambios de precio van marcados en el mes", html)
+        self.assertIn('class="meses"', html)
