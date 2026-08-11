@@ -926,3 +926,44 @@ class LaVistaPreviaDelAsesorTests(BasePortal):
         fuente = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
         self.assertIn("inmuebleOwnerPreviewBtn", fuente)
         self.assertIn("/portal-venta?preview=", fuente)
+
+
+class ElMensajeCuandoNoHaySesionTests(BasePortal):
+    """«No autorizado» no le dice a nadie qué hacer.
+
+    Pasó de verdad: el enlace de vista previa se abrió en un navegador sin sesión del
+    CRM y el mensaje no daba ninguna pista. El caso es casi siempre el mismo —otro
+    perfil, el navegador de dentro de una aplicación, o la sesión caducada— y la
+    respuesta debe decir el remedio, no el síntoma.
+    """
+
+    def test_sin_sesion_explica_que_hacer(self):
+        estado, cuerpo = self._get("/api/portal_venta?preview=inm1", con_sesion=False)
+        self.assertEqual(estado, 401, cuerpo)
+        self.assertIn("Entra primero en el CRM", cuerpo)
+
+    def test_con_sesion_sigue_funcionando(self):
+        estado, cuerpo = self._get("/api/portal_venta?preview=inm1", con_sesion=True)
+        self.assertEqual(estado, 200, cuerpo)
+
+    def test_una_ficha_ajena_sigue_denegando_sin_dar_pistas(self):
+        """Que no se confunda «no has entrado» con «esto no es tuyo»."""
+        self._ins("usuarios", {"id": "u9", "nombre": "Comercial", "usuario": "comercial9",
+                               "email": "c9@x.test", "rol": "Comercial", "servicio": "Inmobiliaria",
+                               "activo": 1, "password_hash": S.hash_password(CLAVE),
+                               "created_at": AHORA, "updated_at": AHORA})
+        self._ins("workspace_miembros", {"id": "wm9", "workspace_id": self.ws, "usuario_id": "u9",
+                                         "rol": "Miembro", "created_at": AHORA, "updated_at": AHORA})
+        req = urllib.request.Request(
+            self.base + "/api/login",
+            data=json.dumps({"usuario": "comercial9", "password": CLAVE}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as r:
+            cookie = r.headers.get("Set-Cookie").split(";")[0]
+        req = urllib.request.Request(self.base + "/api/portal_venta?preview=inmX", headers={"Cookie": cookie})
+        try:
+            with urllib.request.urlopen(req) as r:
+                self.fail("ha dejado ver una ficha ajena")
+        except urllib.error.HTTPError as e:
+            self.assertEqual(e.code, 403)
+            self.assertNotIn("Entra primero", e.read().decode())

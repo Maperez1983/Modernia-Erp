@@ -41830,6 +41830,12 @@ def ensure_workspace_product_tables(conn):
         apunta_escritura_tragada("ensure_workspace_product_tables/workspace_registro_personal", _fallo_tragado)
     # Limpieza: si por errores históricos hay más de una ficha vinculada al mismo usuario en un workspace,
     # conservamos la más reciente y desvinculamos el resto.
+    #
+    # `HAVING COUNT(*) > 1` y no `HAVING n > 1`: el alias del SELECT no se puede usar en
+    # el HAVING en Postgres —SQLite sí lo admite—, así que en producción esto reventaba
+    # con «column "n" does not exist», el `except` se lo tragaba y la limpieza no se ha
+    # ejecutado nunca. Se veía en el arranque del servidor, no en la suite: los tests
+    # corren sobre SQLite, donde la consulta es válida.
     try:
         dups = conn.execute(
             """
@@ -41837,7 +41843,7 @@ def ensure_workspace_product_tables(conn):
             FROM workspace_registro_personal
             WHERE COALESCE(usuario_id, '') != '' AND COALESCE(usuario_manual, 0) = 1
             GROUP BY workspace_id, usuario_id
-            HAVING n > 1
+            HAVING COUNT(*) > 1
             """
         ).fetchall()
         for ws_row in dups or []:
@@ -93088,6 +93094,15 @@ class Handler(BaseHTTPRequestHandler):
             previa = str(params.get("preview", [""])[0] or "").strip()
             if previa:
                 session = getattr(self, "auth_session", None) or self._current_session()
+                if not session:
+                    # «No autorizado» no le dice a nadie qué hacer. Casi siempre es
+                    # esto: el enlace se ha abierto en un navegador donde no hay
+                    # sesión del CRM —otro perfil, el navegador de dentro de una
+                    # aplicación, o la sesión caducada—.
+                    json_response(self, {
+                        "error": "Entra primero en el CRM en este mismo navegador y vuelve a abrir el enlace.",
+                    }, status=401)
+                    return
                 ok_acc, err_acc, inm = enforce_inmueble_access(conn, session, previa)
                 if not ok_acc:
                     json_response(self, {"error": err_acc},
