@@ -1179,6 +1179,10 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/workspace_portal_public",
     "/api/workspace_fincas_portal_public",
     "/portal-comunidad",
+    # Portal del propietario de un inmueble en venta. La llave es el token del
+    # enlace; no hay sesión del CRM detrás y no debe haberla.
+    "/api/portal_venta",
+    "/portal-venta",
     "/api/workspace_portal_s3_url",
     "/api/workspace_factura_pdf_public",
     "/api/workspace_portal_facturas_excel",
@@ -1195,6 +1199,9 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/portal_lead",
     "/api/inmueble_signature_sign",
     "/api/inmueble_signature_reject",
+    "/api/portal_venta_codigo",
+    "/api/portal_venta_doc",
+    "/api/portal_venta_propuesta",
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
     "/api/workspace_portal_public_request",
@@ -30344,6 +30351,517 @@ def get_inmueble_propietarios(conn, inmueble_id):
         (inmueble_id,),
     ).fetchall()
     return [dict(row) for row in rows]
+
+
+# ══════════════════ Portal del propietario: seguir su propia venta ══════════════════
+#
+# Un vendedor pregunta cuatro cosas, siempre las mismas: en qué punto va, cuánta
+# gente ha venido a verlo, qué falta por su parte y qué ha firmado. Todo eso ya
+# está en el expediente; lo único que faltaba era una puerta hacia fuera que no
+# enseñe de más.
+#
+# Dos decisiones que condicionan el resto, y salen de mirar los datos de verdad:
+#
+# 1. **El enlace no puede ir por correo.** De los 13 propietarios con ficha en venta,
+#    los 13 tienen teléfono y ninguno tiene email. Va por el mismo webhook de
+#    WhatsApp/SMS que ya usa la firma electrónica.
+# 2. **Lo abre el asesor, ficha a ficha.** Nada se publica solo. Y se cierra solo:
+#    al pasar a Vendido el acceso se revoca.
+
+INMO_PORTAL_DIAS = max(7, int(os.environ.get("INMO_PORTAL_DIAS", "120") or 120))
+INMO_PORTAL_CODIGO_MINUTOS = 15
+INMO_PORTAL_CODIGO_INTENTOS = 5
+INMO_PORTAL_SESION_DIAS = 30
+INMO_PORTAL_DOC_MAX_BYTES = max(1, int(os.environ.get("INMO_PORTAL_DOC_MAX_MB", "12") or 12)) * 1024 * 1024
+INMO_PORTAL_DOC_TIPOS = {".pdf", ".jpg", ".jpeg", ".png", ".webp", ".heic"}
+
+# Las etapas internas dichas como se las diría a un vendedor por teléfono. El paso
+# sirve para pintar una barra: dónde estoy de todo el camino.
+ETAPAS_DEL_PROPIETARIO = {
+    "ENCARGO": ("En venta", 1),
+    "PROPUESTA": ("Oferta recibida", 2),
+    "RESERVADO": ("Reservado", 3),
+    "CONTRATO DE ARRAS": ("Arras firmadas", 4),
+    "ARRAS": ("Arras firmadas", 4),
+    "COMPRAVENTA": ("Vendido", 5),
+    "VENDIDO": ("Vendido", 5),
+    "ALQUILER": ("Alquilado", 5),
+    "CERRADO NEGATIVAMENTE": ("Encargo cerrado", 0),
+}
+INMO_PORTAL_PASOS = ["En venta", "Oferta recibida", "Reservado", "Arras firmadas", "Vendido"]
+
+# Sólo estas acciones se le cuentan al propietario. El resto del expediente
+# —seguimientos internos, notas del asesor, gestiones con otras partes— no es suyo
+# y no aporta nada verlo.
+ACCIONES_VISIBLES_AL_PROPIETARIO = {
+    "VISITA": "Visita al inmueble",
+    "CITA DE VENTA/ALQUILER INTERESADA": "Visita de un interesado",
+    "CITA PROPUESTA": "Presentación de una oferta",
+    "CITA NOTARIA": "Cita en notaría",
+    "CITA ACEPTACION PROPIETARIOS": "Reunión contigo",
+    "LEAD PORTAL": "Contacto desde el portal",
+    "POST-ACEPTACION": "Trámites posteriores a la aceptación",
+}
+
+
+def ensure_inmueble_portal_schema(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS inmueble_portal_accesos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT,
+          empresa_id TEXT,
+          inmueble_id TEXT NOT NULL,
+          cliente_id TEXT,
+          nombre TEXT,
+          telefono TEXT,
+          token_hash TEXT NOT NULL,
+          codigo_hash TEXT,
+          codigo_expira TEXT,
+          codigo_intentos INTEGER NOT NULL DEFAULT 0,
+          sesion_hash TEXT,
+          sesion_expira TEXT,
+          expires_at TEXT,
+          revocado INTEGER NOT NULL DEFAULT 0,
+          revocado_motivo TEXT,
+          accesos INTEGER NOT NULL DEFAULT 0,
+          last_access_at TEXT,
+          creado_por TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS inmueble_portal_avisos (
+          id TEXT PRIMARY KEY,
+          acceso_id TEXT NOT NULL,
+          inmueble_id TEXT,
+          motivo TEXT,
+          referencia TEXT,
+          canal TEXT,
+          enviado INTEGER NOT NULL DEFAULT 0,
+          detalle TEXT,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
+    for sql in (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_inmueble_portal_token ON inmueble_portal_accesos (token_hash)",
+        "CREATE INDEX IF NOT EXISTS idx_inmueble_portal_inmueble ON inmueble_portal_accesos (inmueble_id)",
+        "CREATE INDEX IF NOT EXISTS idx_inmueble_portal_avisos ON inmueble_portal_avisos (acceso_id, motivo, referencia)",
+    ):
+        try:
+            conn.execute(sql)
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("ensure_inmueble_portal_schema/indices", _fallo_tragado)
+    # Un documento del expediente sólo se ve desde fuera si alguien lo decide, salvo
+    # los que el propietario ha subido él mismo o ha firmado.
+    ensure_column(conn, "inmueble_docs", "visible_portal", "visible_portal INTEGER DEFAULT 0")
+
+
+def hay_canal_para_avisar():
+    """¿Se puede mandar un mensaje al propietario? Decide si hay segundo factor."""
+    return bool(
+        str(os.environ.get("SIGNATURE_WHATSAPP_WEBHOOK_URL") or "").strip()
+        or str(os.environ.get("SIGNATURE_SMS_WEBHOOK_URL") or "").strip()
+    )
+
+
+def canal_para_avisar():
+    return "whatsapp" if str(os.environ.get("SIGNATURE_WHATSAPP_WEBHOOK_URL") or "").strip() else "sms"
+
+
+def envia_mensaje_al_propietario(telefono, texto):
+    """Manda por el mismo webhook que usa la firma. Devuelve (enviado, motivo)."""
+    telefono = str(telefono or "").strip()
+    if not telefono:
+        return False, "sin_telefono"
+    canal = canal_para_avisar()
+    url = str(os.environ.get(
+        "SIGNATURE_WHATSAPP_WEBHOOK_URL" if canal == "whatsapp" else "SIGNATURE_SMS_WEBHOOK_URL") or "").strip()
+    if not url:
+        return False, "webhook_no_configurado"
+    cuerpo = json.dumps({"to": telefono, "channel": canal, "message": texto}).encode("utf-8")
+    cabeceras = {"Content-Type": "application/json", "User-Agent": "Verifika2CRM/1.0"}
+    ficha = str(os.environ.get("SIGNATURE_WEBHOOK_TOKEN") or "").strip()
+    if ficha:
+        cabeceras["Authorization"] = f"Bearer {ficha}"
+    try:
+        req = urllib.request.Request(url, data=cuerpo, headers=cabeceras, method="POST")
+        with urllib.request.urlopen(req, timeout=12) as resp:
+            return (200 <= int(resp.status) < 300), f"http_{resp.status}"
+    except Exception as exc:
+        return False, f"{type(exc).__name__}"
+
+
+def url_del_portal_de_venta(token, base_url=""):
+    base = resolve_public_link_base_url(base_url)
+    return f"{str(base or '').rstrip('/')}/portal-venta?token={urllib.parse.quote(token)}"
+
+
+def crea_acceso_de_propietario(conn, *, inmueble, cliente, session=None, now=None, dias=None):
+    """Da de alta (o rota) el acceso de un propietario. El token en claro se
+    devuelve una sola vez: en la base sólo queda su hash."""
+    ensure_inmueble_portal_schema(conn)
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    inmueble_id = str(row_value(inmueble, "id", "") or "")
+    cliente_id = str(row_value(cliente, "id", "") or "")
+    token = make_portal_token()
+    caduca = (datetime.now(timezone.utc) + timedelta(days=int(dias or INMO_PORTAL_DIAS))).strftime("%Y-%m-%d")
+    # Rotar es revocar lo anterior: dos enlaces vivos para la misma persona es una
+    # llave de más rodando por WhatsApp.
+    try:
+        conn.execute(
+            "UPDATE inmueble_portal_accesos SET revocado = 1, revocado_motivo = 'rotado', updated_at = ? "
+            "WHERE inmueble_id = ? AND COALESCE(cliente_id,'') = ? AND revocado = 0",
+            (now, inmueble_id, cliente_id),
+        )
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("crea_acceso_de_propietario/rotacion", _fallo_tragado)
+    acceso_id = os.urandom(16).hex()
+    conn.execute(
+        """
+        INSERT INTO inmueble_portal_accesos (
+          id, workspace_id, empresa_id, inmueble_id, cliente_id, nombre, telefono,
+          token_hash, expires_at, revocado, accesos, creado_por, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
+        """,
+        (
+            acceso_id,
+            str(row_value(inmueble, "workspace_id", "") or "") or None,
+            str(row_value(inmueble, "empresa_id", "") or "") or None,
+            inmueble_id,
+            cliente_id or None,
+            str(row_value(cliente, "nombre", "") or ""),
+            str(row_value(cliente, "telefono", "") or ""),
+            hash_portal_token(token),
+            caduca,
+            str((session or {}).get("usuario") or "") or None,
+            now,
+            now,
+        ),
+    )
+    return {"id": acceso_id, "token": token, "caduca": caduca}
+
+
+def acceso_de_portal_por_token(conn, token):
+    """Busca el acceso y dice por qué no vale, si no vale."""
+    token = str(token or "").strip()
+    if not token:
+        return None, "sin_token"
+    try:
+        ensure_inmueble_portal_schema(conn)
+        fila = conn.execute(
+            "SELECT * FROM inmueble_portal_accesos WHERE token_hash = ? LIMIT 1",
+            (hash_portal_token(token),),
+        ).fetchone()
+    except Exception:
+        _rollback_best_effort(conn)
+        return None, "error"
+    if not fila:
+        return None, "desconocido"
+    if int(row_value(fila, "revocado", 0) or 0):
+        return None, "revocado"
+    caduca = str(row_value(fila, "expires_at", "") or "")[:10]
+    if caduca and caduca < datetime.now(timezone.utc).date().isoformat():
+        return None, "caducado"
+    return fila, ""
+
+
+def revoca_accesos_del_inmueble(conn, inmueble_id, motivo, now=None):
+    """Se llama al cerrar la venta: el enlace deja de valer solo."""
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        ensure_inmueble_portal_schema(conn)
+        cur = conn.execute(
+            "UPDATE inmueble_portal_accesos SET revocado = 1, revocado_motivo = ?, updated_at = ? "
+            "WHERE inmueble_id = ? AND revocado = 0",
+            (str(motivo or "cerrado"), now, str(inmueble_id or "")),
+        )
+        return int(getattr(cur, "rowcount", 0) or 0)
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("revoca_accesos_del_inmueble/inmueble_portal_accesos", _fallo_tragado)
+        return 0
+
+
+def _fecha_corta(valor):
+    texto = str(valor or "").strip().replace("T", " ")
+    return texto[:10] if len(texto) >= 10 else texto
+
+
+def build_portal_de_venta(conn, acceso, *, registrar=True):
+    """Lo que ve el propietario. Por lista blanca, campo a campo.
+
+    Lo que **no** sale de aquí, y no es un olvido:
+
+    - **Quién es el comprador.** Ni nombre, ni teléfono, ni de dónde salió. No ha
+      consentido que sus datos viajen al vendedor; que haya una oferta encima de su
+      casa no le da derecho a saber de quién. Se cuentan, no se nombran.
+    - **Los honorarios y el margen de la agencia.** Es su casa, no la contabilidad
+      de la inmobiliaria.
+    - **Las notas internas del asesor** ni las acciones de gestión: sólo las siete
+      cosas que le afectan a él.
+    - **Ningún identificador interno** (empresa, workspace, ids de ficha). Con el
+      enlace basta; los ids sólo servirían para probar suerte en otros endpoints.
+    - **Ningún documento** que no haya subido él, firmado él, o marcado a mano
+      alguien de la agencia.
+    """
+    inmueble_id = str(row_value(acceso, "inmueble_id", "") or "")
+    acceso_id = str(row_value(acceso, "id", "") or "")
+    inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+    if not inmueble:
+        return None
+    captacion = conn.execute(
+        "SELECT * FROM captaciones WHERE inmueble_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 1",
+        (inmueble_id,),
+    ).fetchone()
+
+    estado = str(row_value(inmueble, "estado", "") or "").strip()
+    titulo_etapa, paso = ETAPAS_DEL_PROPIETARIO.get(normalize_lookup_text(estado), (estado or "En preparación", 0))
+
+    # Desde cuándo está en venta: la fecha del encargo, que es la que el propietario
+    # tiene en la cabeza.
+    desde = ""
+    for evento in conn.execute(
+        "SELECT to_etapa, created_at FROM crm_stage_events WHERE inmueble_id = ? ORDER BY created_at ASC",
+        (inmueble_id,),
+    ).fetchall():
+        if normalize_lookup_text(row_value(evento, "to_etapa", "")) == "ENCARGO":
+            desde = _fecha_corta(row_value(evento, "created_at", ""))
+            break
+    if not desde:
+        desde = _fecha_corta(row_value(captacion, "created_at", "") or row_value(inmueble, "created_at", ""))
+    dias = ""
+    inicio = parse_iso_date(desde) if desde else None
+    if inicio:
+        try:
+            dias = max((datetime.now(timezone.utc).date() - inicio).days, 0)
+        except Exception:
+            dias = ""
+
+    cronologia = []
+
+    for evento in conn.execute(
+        "SELECT from_etapa, to_etapa, created_at FROM crm_stage_events WHERE inmueble_id = ? "
+        "ORDER BY created_at DESC LIMIT 60",
+        (inmueble_id,),
+    ).fetchall():
+        destino = str(row_value(evento, "to_etapa", "") or "")
+        legible = ETAPAS_DEL_PROPIETARIO.get(normalize_lookup_text(destino), (destino, 0))[0]
+        if not legible:
+            continue
+        cronologia.append({
+            "fecha": _fecha_corta(row_value(evento, "created_at", "")),
+            "tipo": "etapa",
+            "titulo": legible,
+        })
+
+    visitas_hechas = visitas_previstas = 0
+    for visita in conn.execute(
+        "SELECT fecha, hora, estado FROM visitas WHERE inmueble_id = ? ORDER BY COALESCE(fecha,'') DESC LIMIT 80",
+        (inmueble_id,),
+    ).fetchall():
+        estado_v = normalize_lookup_text(row_value(visita, "estado", ""))
+        hecha = estado_v in {"REALIZADA", "HECHA", "COMPLETADA", "CERRADA"}
+        if hecha:
+            visitas_hechas += 1
+        else:
+            visitas_previstas += 1
+        cronologia.append({
+            "fecha": _fecha_corta(row_value(visita, "fecha", "")),
+            "tipo": "visita",
+            "titulo": "Visita realizada" if hecha else "Visita agendada",
+            "detalle": str(row_value(visita, "hora", "") or ""),
+        })
+
+    contactos = 0
+    for accion in conn.execute(
+        "SELECT tipo, asunto, fecha, estado FROM acciones WHERE inmueble_id = ? "
+        "ORDER BY COALESCE(fecha,'') DESC LIMIT 120",
+        (inmueble_id,),
+    ).fetchall():
+        clave = normalize_lookup_text(row_value(accion, "tipo", ""))
+        legible = ACCIONES_VISIBLES_AL_PROPIETARIO.get(clave)
+        if not legible:
+            continue
+        if clave == "LEAD PORTAL":
+            contactos += 1
+        cronologia.append({
+            "fecha": _fecha_corta(row_value(accion, "fecha", "")),
+            "tipo": "accion",
+            "titulo": legible,
+        })
+
+    cronologia.sort(key=lambda x: str(x.get("fecha") or ""), reverse=True)
+
+    interesados = conn.execute(
+        "SELECT COUNT(*) AS n FROM inmueble_compradores WHERE inmueble_id = ?", (inmueble_id,)
+    ).fetchone()
+
+    # Lo que falta por su parte. `responsable` marca de quién es la tarea; si nadie
+    # lo dijo, se asume de la agencia y no se le enseña.
+    pendiente = [
+        {
+            "tarea": str(row_value(t, "tarea", "") or ""),
+            "estado": str(row_value(t, "estado", "") or ""),
+            "fecha_limite": _fecha_corta(row_value(t, "fecha_limite", "")),
+        }
+        for t in conn.execute(
+            "SELECT tarea, estado, fecha_limite, responsable FROM inmueble_checklist "
+            "WHERE inmueble_id = ? ORDER BY COALESCE(fecha_limite,'') ASC LIMIT 60",
+            (inmueble_id,),
+        ).fetchall()
+        if normalize_lookup_text(row_value(t, "responsable", "")) in {"PROPIETARIO", "VENDEDOR"}
+        and normalize_lookup_text(row_value(t, "estado", "")) not in {"HECHO", "COMPLETADA", "COMPLETADO"}
+    ]
+
+    docs_cols = table_columns(conn, "inmueble_docs") or set()
+    filtro_visible = "AND (COALESCE(visible_portal,0) = 1 OR COALESCE(origen_tipo,'') = 'propietario')" \
+        if "visible_portal" in docs_cols else "AND COALESCE(origen_tipo,'') = 'propietario'"
+    documentos = [
+        {
+            "nombre": str(row_value(d, "nombre", "") or ""),
+            "fecha": _fecha_corta(row_value(d, "created_at", "")),
+            "mio": normalize_lookup_text(row_value(d, "origen_tipo", "")) == "PROPIETARIO",
+        }
+        for d in conn.execute(
+            f"SELECT nombre, created_at, origen_tipo FROM inmueble_docs WHERE inmueble_id = ? {filtro_visible} "
+            "ORDER BY COALESCE(created_at,'') DESC LIMIT 40",
+            (inmueble_id,),
+        ).fetchall()
+    ]
+
+    firmas = []
+    try:
+        ensure_inmueble_signature_schema(conn)
+        telefono = str(row_value(acceso, "telefono", "") or "").strip()
+        for f in conn.execute(
+            "SELECT doc_nombre, status, signed_at, created_at FROM inmueble_signature_requests "
+            "WHERE inmueble_id = ? AND COALESCE(signer_telefono,'') = ? ORDER BY created_at DESC LIMIT 20",
+            (inmueble_id, telefono),
+        ).fetchall():
+            firmas.append({
+                "documento": str(row_value(f, "doc_nombre", "") or ""),
+                "estado": str(row_value(f, "status", "") or ""),
+                "fecha": _fecha_corta(row_value(f, "signed_at", "") or row_value(f, "created_at", "")),
+            })
+    except Exception:
+        _rollback_best_effort(conn)
+
+    if registrar:
+        try:
+            conn.execute(
+                "UPDATE inmueble_portal_accesos SET accesos = COALESCE(accesos,0) + 1, last_access_at = ? WHERE id = ?",
+                (datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), acceso_id),
+            )
+            conn.commit()
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("build_portal_de_venta/inmueble_portal_accesos", _fallo_tragado)
+
+    empresa = conn.execute(
+        "SELECT nombre FROM empresas WHERE id = ? LIMIT 1",
+        (str(row_value(inmueble, "empresa_id", "") or ""),),
+    ).fetchone()
+
+    return {
+        "inmueble": {
+            "direccion": str(row_value(inmueble, "direccion", "") or ""),
+            "poblacion": str(row_value(inmueble, "poblacion", "") or ""),
+            "tipo": str(row_value(inmueble, "tipo_inmueble", "") or ""),
+            "m2": row_value(inmueble, "m2", None),
+            "habitaciones": row_value(inmueble, "habitaciones", None),
+            "precio": round(parse_money_value(row_value(inmueble, "precio_objetivo", 0)) or 0, 2),
+            "publicado": bool(int(row_value(inmueble, "portal_publicado", 0) or 0)),
+        },
+        "agencia": {
+            "nombre": str(row_value(empresa, "nombre", "") or ""),
+            "asesor": str(row_value(inmueble, "asesor", "") or row_value(captacion, "asesor", "") or ""),
+        },
+        "propietario": {"nombre": str(row_value(acceso, "nombre", "") or "")},
+        "etapa": {"titulo": titulo_etapa, "paso": paso, "pasos": INMO_PORTAL_PASOS, "desde": desde, "dias": dias},
+        "resumen": {
+            "visitas_hechas": visitas_hechas,
+            "visitas_previstas": visitas_previstas,
+            "interesados": int(row_value(interesados, "n", 0) or 0),
+            "contactos_portal": contactos,
+        },
+        "cronologia": cronologia[:60],
+        "pendiente_de_ti": pendiente,
+        "documentos": documentos,
+        "firmas": firmas,
+    }
+
+
+def sesion_de_portal_valida(acceso, sesion):
+    """El enlace es la llave; el código abre una sesión de 30 días en ese aparato.
+
+    Cuando no hay canal configurado no hay segundo factor posible, y entonces el
+    enlace vale por sí solo. No es lo ideal, pero es honesto: se dice en la
+    respuesta y en la ficha, en vez de fingir una seguridad que no existe.
+    """
+    if not hay_canal_para_avisar():
+        return True
+    guardada = str(row_value(acceso, "sesion_hash", "") or "")
+    if not guardada or not str(sesion or "").strip():
+        return False
+    if not hmac.compare_digest(guardada, hash_portal_token(sesion)):
+        return False
+    caduca = str(row_value(acceso, "sesion_expira", "") or "")[:10]
+    return not caduca or caduca >= datetime.now(timezone.utc).date().isoformat()
+
+
+def manda_codigo_de_portal(conn, acceso, now=None):
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    codigo = f"{secrets.randbelow(1000000):06d}"
+    caduca = (datetime.now(timezone.utc) + timedelta(minutes=INMO_PORTAL_CODIGO_MINUTOS)).strftime("%Y-%m-%d %H:%M:%S")
+    conn.execute(
+        "UPDATE inmueble_portal_accesos SET codigo_hash = ?, codigo_expira = ?, codigo_intentos = 0, updated_at = ? "
+        "WHERE id = ?",
+        (hash_portal_token(codigo), caduca, now, str(row_value(acceso, "id", "") or "")),
+    )
+    conn.commit()
+    enviado, motivo = envia_mensaje_al_propietario(
+        row_value(acceso, "telefono", ""),
+        f"Tu código para ver el seguimiento de la venta: {codigo}. Caduca en {INMO_PORTAL_CODIGO_MINUTOS} minutos.",
+    )
+    return enviado, motivo
+
+
+def comprueba_codigo_de_portal(conn, acceso, codigo, now=None):
+    """Devuelve (sesion, error). Cuenta los intentos: seis mil combinaciones se
+    prueban solas si nadie lleva la cuenta."""
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    acceso_id = str(row_value(acceso, "id", "") or "")
+    guardado = str(row_value(acceso, "codigo_hash", "") or "")
+    if not guardado:
+        return "", "sin_codigo"
+    if int(row_value(acceso, "codigo_intentos", 0) or 0) >= INMO_PORTAL_CODIGO_INTENTOS:
+        return "", "demasiados_intentos"
+    caduca = str(row_value(acceso, "codigo_expira", "") or "")
+    if caduca and caduca < now:
+        return "", "caducado"
+    if not hmac.compare_digest(guardado, hash_portal_token(str(codigo or "").strip())):
+        conn.execute(
+            "UPDATE inmueble_portal_accesos SET codigo_intentos = COALESCE(codigo_intentos,0) + 1, updated_at = ? WHERE id = ?",
+            (now, acceso_id),
+        )
+        conn.commit()
+        return "", "codigo_incorrecto"
+    sesion = make_portal_token()
+    conn.execute(
+        "UPDATE inmueble_portal_accesos SET sesion_hash = ?, sesion_expira = ?, codigo_hash = NULL, "
+        "codigo_expira = NULL, codigo_intentos = 0, updated_at = ? WHERE id = ?",
+        (
+            hash_portal_token(sesion),
+            (datetime.now(timezone.utc) + timedelta(days=INMO_PORTAL_SESION_DIAS)).strftime("%Y-%m-%d"),
+            now,
+            acceso_id,
+        ),
+    )
+    conn.commit()
+    return sesion, ""
 
 
 def create_owner_portal_code(owner_name, owner_contact, listing_ids):
@@ -63269,6 +63787,175 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "API error", "detail": Handler._safe_exc_detail(exc)}, status=500)
             return
 
+        if parsed.path == "/portal-venta":
+            # Página suelta, sin cargar el CRM entero: quien entra aquí es el
+            # propietario de un inmueble, no un usuario de la aplicación. No conviene
+            # que el mismo JavaScript que sabe de honorarios llegue a su navegador.
+            page = """<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Mi venta</title>
+  <style>
+    :root { color-scheme: light dark; --tinta: #111827; --suave: #6b7280; --linea: #e5e7eb;
+            --fondo: #f8fafc; --tarjeta: #ffffff; --verde: #15803d; --ambar: #b45309; }
+    @media (prefers-color-scheme: dark) {
+      :root { --tinta: #f3f4f6; --suave: #9ca3af; --linea: #2a2f3a; --fondo: #0f1115; --tarjeta: #171a21;
+              --verde: #4ade80; --ambar: #fbbf24; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 20px 16px 56px; background: var(--fondo); color: var(--tinta);
+           font: 15px/1.55 "IBM Plex Sans", "Segoe UI", sans-serif; }
+    main { max-width: 720px; margin: 0 auto; display: grid; gap: 14px; }
+    h1 { font-size: 21px; margin: 0; letter-spacing: -0.01em; }
+    h2 { font-size: 15px; margin: 0 0 10px; }
+    .suave { color: var(--suave); }
+    .tarjeta { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 14px; padding: 16px; }
+    .cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+    .cifra { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 14px; padding: 12px 14px; }
+    .cifra span { display: block; font-size: 12px; color: var(--suave); }
+    .cifra strong { font-size: 22px; font-variant-numeric: tabular-nums; }
+    .pasos { display: flex; gap: 6px; margin: 12px 0 6px; }
+    .paso { flex: 1; height: 6px; border-radius: 99px; background: var(--linea); }
+    .paso.hecho { background: var(--verde); }
+    .etiquetas { display: flex; justify-content: space-between; font-size: 11px; color: var(--suave); gap: 4px; }
+    ul { list-style: none; margin: 0; padding: 0; }
+    li { padding: 9px 0; border-top: 1px solid var(--linea); display: flex; gap: 12px; justify-content: space-between; }
+    li:first-child { border-top: 0; }
+    .fecha { color: var(--suave); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .pend { color: var(--ambar); }
+    input, button { font: inherit; }
+    input { padding: 11px 12px; border: 1px solid var(--linea); border-radius: 10px; width: 100%;
+            background: var(--tarjeta); color: var(--tinta); }
+    button { padding: 11px 16px; border: 0; border-radius: 10px; background: var(--verde); color: #fff;
+             font-weight: 600; cursor: pointer; }
+    .aviso { padding: 12px 14px; border-radius: 12px; background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; }
+    .vacio { color: var(--suave); font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main id="app"><p class="suave">Cargando…</p></main>
+  <script>
+    const eur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
+    const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    const app = document.getElementById("app");
+    const token = new URLSearchParams(location.search).get("token") || "";
+    // El enlace lleva la llave dentro: se saca de la barra en cuanto la tenemos,
+    // para que no se quede en el historial ni salga en una captura de pantalla.
+    if (token) history.replaceState(null, "", location.pathname);
+    const clave = "venta:" + token.slice(0, 12);
+    const sesion = () => localStorage.getItem(clave) || "";
+
+    async function pide(ruta, cuerpo) {
+      const r = await fetch(ruta, cuerpo
+        ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo) }
+        : { headers: { "Accept": "application/json" } });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "No se pudo completar");
+      return d;
+    }
+
+    function pantallaCodigo(telefono) {
+      app.innerHTML = `
+        <h1>Confirma que eres tú</h1>
+        <div class="tarjeta">
+          <p class="suave" id="txt">Te mandamos un código al ${esc(telefono || "teléfono registrado")}.</p>
+          <div style="display:grid;gap:10px">
+            <button id="enviar">Enviar código</button>
+            <input id="codigo" inputmode="numeric" autocomplete="one-time-code" placeholder="Código de 6 cifras" />
+            <button id="entrar">Entrar</button>
+          </div>
+        </div>`;
+      const txt = document.getElementById("txt");
+      document.getElementById("enviar").onclick = async () => {
+        try { const d = await pide("/api/portal_venta_codigo", { token });
+              txt.textContent = "Código enviado al " + (d.telefono || "teléfono registrado") + "."; }
+        catch (e) { txt.textContent = e.message; }
+      };
+      document.getElementById("entrar").onclick = async () => {
+        try {
+          const d = await pide("/api/portal_venta_codigo", { token, codigo: document.getElementById("codigo").value });
+          localStorage.setItem(clave, d.sesion);
+          cargar();
+        } catch (e) { txt.textContent = e.message; }
+      };
+    }
+
+    function pinta(d) {
+      const i = d.inmueble, e = d.etapa, r = d.resumen;
+      const pasos = (e.pasos || []).map((p, n) =>
+        `<div class="paso ${n < e.paso ? "hecho" : ""}" title="${esc(p)}"></div>`).join("");
+      const etiquetas = (e.pasos || []).map((p) => `<span>${esc(p)}</span>`).join("");
+      const linea = (d.cronologia || []).map((x) =>
+        `<li><span>${esc(x.titulo)}${x.detalle ? " · " + esc(x.detalle) : ""}</span><span class="fecha">${esc(x.fecha)}</span></li>`).join("")
+        || '<li class="vacio">Todavía no hay movimientos que mostrar.</li>';
+      const tuyo = (d.pendiente_de_ti || []).map((x) =>
+        `<li><span class="pend">${esc(x.tarea)}</span><span class="fecha">${esc(x.fecha_limite || "")}</span></li>`).join("");
+      const docs = (d.documentos || []).map((x) =>
+        `<li><span>${esc(x.nombre)}${x.mio ? " · lo subiste tú" : ""}</span><span class="fecha">${esc(x.fecha)}</span></li>`).join("")
+        || '<li class="vacio">Aún no hay documentos compartidos.</li>';
+      const firmas = (d.firmas || []).map((x) =>
+        `<li><span>${esc(x.documento)}</span><span class="fecha">${esc(x.estado)} · ${esc(x.fecha)}</span></li>`).join("");
+
+      app.innerHTML = `
+        <div>
+          <h1>${esc(i.direccion)}</h1>
+          <p class="suave" style="margin:4px 0 0">${esc([i.poblacion, i.tipo, i.m2 ? i.m2 + " m²" : ""].filter(Boolean).join(" · "))}</p>
+        </div>
+        <div class="tarjeta">
+          <h2>${esc(e.titulo)}</h2>
+          <div class="pasos">${pasos}</div>
+          <div class="etiquetas">${etiquetas}</div>
+          <p class="suave" style="margin:12px 0 0">
+            ${e.desde ? "En venta desde el " + esc(e.desde) : ""}${e.dias !== "" ? " · " + esc(e.dias) + " días" : ""}
+            ${i.precio ? " · precio " + eur.format(i.precio) : ""}
+          </p>
+        </div>
+        <div class="cifras">
+          <div class="cifra"><span>Visitas hechas</span><strong>${r.visitas_hechas}</strong></div>
+          <div class="cifra"><span>Visitas previstas</span><strong>${r.visitas_previstas}</strong></div>
+          <div class="cifra"><span>Interesados</span><strong>${r.interesados}</strong></div>
+          <div class="cifra"><span>Contactos del portal</span><strong>${r.contactos_portal}</strong></div>
+        </div>
+        ${tuyo ? `<div class="tarjeta"><h2>Pendiente de ti</h2><ul>${tuyo}</ul></div>` : ""}
+        <div class="tarjeta"><h2>Qué ha pasado</h2><ul>${linea}</ul></div>
+        <div class="tarjeta"><h2>Documentos</h2><ul>${docs}</ul></div>
+        ${firmas ? `<div class="tarjeta"><h2>Firmas</h2><ul>${firmas}</ul></div>` : ""}
+        <p class="suave" style="text-align:center;font-size:12px">
+          ${esc(d.agencia.nombre || "")}${d.agencia.asesor ? " · tu asesor: " + esc(d.agencia.asesor) : ""}
+        </p>`;
+    }
+
+    async function cargar() {
+      if (!token) { app.innerHTML = '<div class="aviso">Falta el enlace de acceso. Pídelo a tu agencia.</div>'; return; }
+      try {
+        const d = await pide("/api/portal_venta?token=" + encodeURIComponent(token) + "&s=" + encodeURIComponent(sesion()));
+        if (d.estado === "codigo_requerido") { pantallaCodigo(d.telefono); return; }
+        pinta(d);
+      } catch (e) {
+        app.innerHTML = '<div class="aviso">' + esc(e.message) + '</div>';
+      }
+    }
+    cargar();
+    // Que al volver a la pestaña esté al día, sin machacar el servidor.
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) cargar(); });
+  </script>
+</body>
+</html>"""
+            body = page.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Robots-Tag", "noindex, nofollow")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if parsed.path == "/portal-comunidad":
             # Página suelta, sin cargar el CRM entero: quien entra aquí es un vecino
             # con su enlace, no un usuario de la aplicación. El token viaja en la
@@ -63974,6 +64661,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/compraventas",
             "/api/portal_publish_update",
             "/api/portal_owner_access_create",
+            "/api/inmueble_portal_acceso",
+            "/api/inmueble_portal_acceso_revoke",
             "/api/leads",
             "/api/portal_leads",
             "/api/portal_lead",
@@ -64093,6 +64782,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/hipotecas_export_pdf",
             "/api/hipotecas_listado_excel",
             "/api/inmueble_propietario_create",
+            "/api/inmueble_portal_acceso",
+            "/api/inmueble_portal_acceso_revoke",
+            "/api/portal_venta_codigo",
+            "/api/portal_venta_doc",
+            "/api/portal_venta_propuesta",
             "/api/inmueble_renovar",
             "/api/renta_campaign_document",
             "/api/workspace_fincas_comunidad_delete",
@@ -64448,6 +65142,8 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/compraventas": "inmobiliaria",
                         "/api/portal_publish_update": "inmobiliaria",
                         "/api/portal_owner_access_create": "inmobiliaria",
+                        "/api/inmueble_portal_acceso": "inmobiliaria",
+                        "/api/inmueble_portal_acceso_revoke": "inmobiliaria",
                         "/api/leads": "inmobiliaria",
                         "/api/portal_leads": "inmobiliaria",
                         "/api/portal_lead": "inmobiliaria",
@@ -64807,6 +65503,8 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/legal_radar_counts",
                 "/api/portal_publish_update",
                 "/api/portal_owner_access_create",
+                "/api/inmueble_portal_acceso",
+                "/api/inmueble_portal_acceso_revoke",
                 "/api/leads",
                 "/api/portal_leads",
                 "/api/portal_lead",
@@ -64847,6 +65545,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/compraventas",
             "/api/portal_publish_update",
             "/api/portal_owner_access_create",
+            "/api/inmueble_portal_acceso",
+            "/api/inmueble_portal_acceso_revoke",
             "/api/leads",
             "/api/portal_leads",
             "/api/portal_lead",
@@ -64943,6 +65643,14 @@ class Handler(BaseHTTPRequestHandler):
             "/api/empresa_update",
             "/api/empresa_create",
             "/api/empresa_delete",
+            # El portal del propietario va por token: quien entra no es un usuario
+            # del CRM y no tiene ninguna empresa que declarar. Y los del asesor se
+            # acotan por el inmueble, que ya dice de quién es.
+            "/api/portal_venta_codigo",
+            "/api/portal_venta_doc",
+            "/api/portal_venta_propuesta",
+            "/api/inmueble_portal_acceso",
+            "/api/inmueble_portal_acceso_revoke",
         ):
             if not empresa_nombre:
                 json_response(self, {"error": "empresa_nombre requerido"}, status=400)
@@ -64987,6 +65695,38 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, result, status=status)
             return
+        if parsed.path == "/api/portal_venta_codigo":
+            # Sin `codigo` manda uno nuevo; con `codigo` lo comprueba y abre sesión.
+            acceso, fallo = acceso_de_portal_por_token(conn, payload.get("token") or "")
+            if not acceso:
+                json_response(self, {"error": "Enlace no válido"}, status=404 if fallo != "revocado" else 403)
+                return
+            if not hay_canal_para_avisar():
+                # Sin canal no hay código posible. Se dice, no se finge.
+                json_response(self, {"error": "No hay canal de mensajes configurado"}, status=409)
+                return
+            codigo = str(payload.get("codigo") or "").strip()
+            if not codigo:
+                enviado, motivo = manda_codigo_de_portal(conn, acceso)
+                json_response(self, {
+                    "enviado": bool(enviado),
+                    "telefono": _mask_phone(row_value(acceso, "telefono", "")),
+                    "motivo": "" if enviado else motivo,
+                }, status=200 if enviado else 502)
+                return
+            sesion, err = comprueba_codigo_de_portal(conn, acceso, codigo)
+            if err:
+                textos = {
+                    "codigo_incorrecto": "El código no es correcto.",
+                    "caducado": "El código ha caducado. Pide uno nuevo.",
+                    "demasiados_intentos": "Demasiados intentos. Pide un código nuevo.",
+                    "sin_codigo": "Pide un código primero.",
+                }
+                json_response(self, {"error": textos.get(err, err)}, status=429 if err == "demasiados_intentos" else 400)
+                return
+            json_response(self, {"ok": True, "sesion": sesion})
+            return
+
         if parsed.path == "/api/inmueble_signature_reject":
             token = str(payload.get("token") or "").strip()
             row = _signature_request_row_by_token(conn, token)
@@ -83162,6 +83902,78 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "id": listing_id, "published": published, "visible": visible})
             return
+        elif parsed.path == "/api/inmueble_portal_acceso":
+            # El asesor abre el seguimiento de una ficha a un propietario concreto.
+            # Nada se publica solo: esto es siempre un acto deliberado.
+            inmueble_id = str(payload.get("inmueble_id") or payload.get("id") or "").strip()
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, inmueble = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if "no encontrado" in str(err_acc) else 403)
+                return
+            propietarios = get_inmueble_propietarios(conn, inmueble_id) or []
+            if not propietarios:
+                json_response(self, {"error": "El inmueble no tiene propietarios enlazados"}, status=400)
+                return
+            pedido = str(payload.get("cliente_id") or "").strip()
+            elegido = None
+            for p in propietarios:
+                if not pedido or str(row_value(p, "id", "") or "") == pedido:
+                    elegido = p
+                    break
+            if not elegido:
+                json_response(self, {"error": "Ese propietario no está enlazado a este inmueble"}, status=400)
+                return
+            telefono = str(row_value(elegido, "telefono", "") or "").strip()
+            acceso = crea_acceso_de_propietario(conn, inmueble=inmueble, cliente=elegido, session=session, now=now)
+            enlace = url_del_portal_de_venta(acceso["token"])
+            aviso = {"enviado": False, "motivo": "sin_canal"}
+            if telefono and hay_canal_para_avisar() and payload.get("avisar", True):
+                enviado, motivo = envia_mensaje_al_propietario(
+                    telefono,
+                    f"Ya puedes seguir la venta de {row_value(inmueble, 'direccion', '') or 'tu inmueble'} "
+                    f"desde aquí: {enlace}",
+                )
+                aviso = {"enviado": bool(enviado), "motivo": "" if enviado else motivo}
+            audit_event(conn, row_value(inmueble, "empresa_id", ""), "inmueble", inmueble_id,
+                        "Abrir portal del propietario",
+                        usuario=str((session or {}).get("usuario") or ""),
+                        detalles={"cliente_id": str(row_value(elegido, "id", "") or ""), "caduca": acceso["caduca"]},
+                        now=now)
+            conn.commit()
+            json_response(self, {
+                "ok": True,
+                # El token en claro se ve una sola vez: en la base sólo queda el hash.
+                "enlace": enlace,
+                "caduca": acceso["caduca"],
+                "propietario": str(row_value(elegido, "nombre", "") or ""),
+                "telefono": _mask_phone(telefono),
+                "aviso": aviso,
+                # Si no hay canal, el enlace es el único factor. Que se sepa.
+                "segundo_factor": hay_canal_para_avisar(),
+            })
+            return
+
+        elif parsed.path == "/api/inmueble_portal_acceso_revoke":
+            inmueble_id = str(payload.get("inmueble_id") or payload.get("id") or "").strip()
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _f = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if "no encontrado" in str(err_acc) else 403)
+                return
+            n = revoca_accesos_del_inmueble(conn, inmueble_id, str(payload.get("motivo") or "revocado"), now=now)
+            audit_event(conn, "", "inmueble", inmueble_id, "Cerrar portal del propietario",
+                        usuario=str((session or {}).get("usuario") or ""), detalles={"revocados": n}, now=now)
+            conn.commit()
+            json_response(self, {"ok": True, "revocados": n})
+            return
+
         elif parsed.path == "/api/portal_owner_access_create":
             listing_id = str(payload.get("listing_id") or payload.get("inmueble_id") or payload.get("id") or "").strip()
             if not listing_id:
@@ -91726,6 +92538,73 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Este enlace ha caducado. Pide uno nuevo a tu administrador."}, status=403)
                 return
             json_response(self, datos)
+            return
+
+        if path == "/api/portal_venta":
+            # Público a propósito: entra el propietario del inmueble con su enlace,
+            # sin sesión del CRM. Todo el control está en el token —256 bits, y en
+            # la base sólo su hash— y, si hay canal para mandar un código, en el
+            # segundo factor.
+            token = _request_token_param(self, params, "token")
+            if not token:
+                json_response(self, {"error": "token requerido"}, status=400)
+                return
+            acceso, fallo = acceso_de_portal_por_token(conn, token)
+            if fallo == "revocado":
+                json_response(self, {"error": "Este enlace ha sido anulado. Pide uno nuevo a tu agencia."}, status=403)
+                return
+            if fallo == "caducado":
+                json_response(self, {"error": "Este enlace ha caducado. Pide uno nuevo a tu agencia."}, status=403)
+                return
+            if not acceso:
+                json_response(self, {"error": "Enlace no válido"}, status=404)
+                return
+            if not sesion_de_portal_valida(acceso, params.get("s", [""])[0]):
+                json_response(self, {
+                    "estado": "codigo_requerido",
+                    "telefono": _mask_phone(row_value(acceso, "telefono", "")),
+                })
+                return
+            datos = build_portal_de_venta(conn, acceso)
+            if not datos:
+                json_response(self, {"error": "Enlace no válido"}, status=404)
+                return
+            datos["estado"] = "ok"
+            datos["segundo_factor"] = hay_canal_para_avisar()
+            json_response(self, datos)
+            return
+
+        if path == "/api/inmueble_portal_accesos":
+            # Para la ficha: a quién se le abrió, cuándo entró por última vez y si
+            # sigue vivo. Nunca el token, que no está ni en la base.
+            inmueble_id = params.get("inmueble_id", [""])[0]
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _f = enforce_inmueble_access(conn, session, inmueble_id)
+            if not ok_acc:
+                json_response(self, {"error": err_acc}, status=404 if "no encontrado" in str(err_acc) else 403)
+                return
+            ensure_inmueble_portal_schema(conn)
+            filas = conn.execute(
+                "SELECT nombre, telefono, expires_at, revocado, revocado_motivo, accesos, last_access_at, created_at "
+                "FROM inmueble_portal_accesos WHERE inmueble_id = ? ORDER BY created_at DESC LIMIT 40",
+                (inmueble_id,),
+            ).fetchall()
+            json_response(self, {
+                "rows": [{
+                    "propietario": str(row_value(f, "nombre", "") or ""),
+                    "telefono": _mask_phone(row_value(f, "telefono", "")),
+                    "caduca": str(row_value(f, "expires_at", "") or ""),
+                    "activo": not int(row_value(f, "revocado", 0) or 0),
+                    "motivo": str(row_value(f, "revocado_motivo", "") or ""),
+                    "visitas": int(row_value(f, "accesos", 0) or 0),
+                    "ultima_visita": str(row_value(f, "last_access_at", "") or ""),
+                    "creado": str(row_value(f, "created_at", "") or ""),
+                } for f in filas],
+                "segundo_factor": hay_canal_para_avisar(),
+            })
             return
 
         if path == "/api/workspace_fincas_comunidad_dashboard":
