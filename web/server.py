@@ -1182,6 +1182,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     # Portal del propietario de un inmueble en venta. La llave es el token del
     # enlace; no hay sesión del CRM detrás y no debe haberla.
     "/api/portal_venta",
+    "/api/portal_venta_foto",
     "/portal-venta",
     "/api/workspace_portal_s3_url",
     "/api/workspace_factura_pdf_public",
@@ -1202,6 +1203,7 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/portal_venta_codigo",
     "/api/portal_venta_doc",
     "/api/portal_venta_propuesta",
+    "/api/portal_venta_mensaje",
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
     "/api/workspace_portal_public_request",
@@ -30859,8 +30861,10 @@ def build_portal_de_venta(conn, acceso, *, registrar=True):
         except Exception as _fallo_tragado:
             apunta_escritura_tragada("build_portal_de_venta/inmueble_portal_accesos", _fallo_tragado)
 
+    cols_emp = table_columns(conn, "empresas") or set()
+    campos_emp = "nombre" + (", logo_url" if "logo_url" in cols_emp else "")
     empresa = conn.execute(
-        "SELECT nombre FROM empresas WHERE id = ? LIMIT 1",
+        f"SELECT {campos_emp} FROM empresas WHERE id = ? LIMIT 1",
         (str(row_value(inmueble, "empresa_id", "") or ""),),
     ).fetchone()
 
@@ -30890,6 +30894,24 @@ def build_portal_de_venta(conn, acceso, *, registrar=True):
             "decidida": str(row_value(ya, "decision", "") or "") if ya else "",
         }
 
+    # Lo que tiene por delante, que es distinto de lo que ya pasó: una agenda de
+    # citas, no una lista de historia.
+    hoy = datetime.now(timezone.utc).date().isoformat()
+    agenda = sorted(
+        [
+            {"fecha": x["fecha"], "hora": x.get("detalle", ""), "titulo": x["titulo"]}
+            for x in cronologia
+            if x.get("fecha") and x["fecha"] >= hoy and x["tipo"] in {"visita", "accion"}
+        ],
+        key=lambda x: (x["fecha"], x["hora"] or ""),
+    )[:12]
+
+    # El logo sólo si se puede servir sin sesión. Los que están en S3 llevan enlace
+    # firmado y desde aquí no hay quien lo firme: mejor sin logo que con un roto.
+    logo = str(row_value(empresa, "logo_url", "") or "").strip()
+    if not logo.startswith("/assets/"):
+        logo = ""
+
     return {
         "inmueble": {
             "direccion": str(row_value(inmueble, "direccion", "") or ""),
@@ -30899,11 +30921,15 @@ def build_portal_de_venta(conn, acceso, *, registrar=True):
             "habitaciones": row_value(inmueble, "habitaciones", None),
             "precio": round(parse_money_value(row_value(inmueble, "precio_objetivo", 0)) or 0, 2),
             "publicado": bool(int(row_value(inmueble, "portal_publicado", 0) or 0)),
+            "fotos": len(fotos_del_inmueble(conn, inmueble_id)),
         },
         "agencia": {
             "nombre": str(row_value(empresa, "nombre", "") or ""),
             "asesor": str(row_value(inmueble, "asesor", "") or row_value(captacion, "asesor", "") or ""),
+            "logo": logo,
         },
+        "agenda": agenda,
+        "mensajes": hilo_del_propietario(conn, inmueble_id),
         "propietario": {"nombre": str(row_value(acceso, "nombre", "") or "")},
         "etapa": {"titulo": titulo_etapa, "paso": paso, "pasos": INMO_PORTAL_PASOS, "desde": desde, "dias": dias},
         "resumen": {
@@ -30918,6 +30944,86 @@ def build_portal_de_venta(conn, acceso, *, registrar=True):
         "firmas": firmas,
         "propuesta": propuesta,
     }
+
+
+def ensure_inmueble_portal_mensajes_schema(conn):
+    """El hilo entre el propietario y su comercial.
+
+    Un portal donde sólo se lee deja al vendedor con la duda en la mano y le empuja
+    al teléfono, que es lo que se quería evitar. Y hacerlo aquí y no por WhatsApp
+    tiene una ventaja para la agencia: lo hablado queda en el expediente del
+    inmueble, no en el móvil de quien lo llevaba.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS inmueble_portal_mensajes (
+          id TEXT PRIMARY KEY,
+          inmueble_id TEXT NOT NULL,
+          acceso_id TEXT,
+          cliente_id TEXT,
+          autor TEXT NOT NULL,
+          autor_nombre TEXT,
+          texto TEXT NOT NULL,
+          leido INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_inmueble_portal_mensajes "
+            "ON inmueble_portal_mensajes (inmueble_id, created_at)"
+        )
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_inmueble_portal_mensajes_schema/indice", _fallo_tragado)
+    try:
+        conn.commit()
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_inmueble_portal_mensajes_schema/commit", _fallo_tragado)
+
+
+def hilo_del_propietario(conn, inmueble_id, *, limite=60):
+    try:
+        ensure_inmueble_portal_mensajes_schema(conn)
+        filas = conn.execute(
+            "SELECT autor, autor_nombre, texto, created_at FROM inmueble_portal_mensajes "
+            "WHERE inmueble_id = ? ORDER BY created_at ASC LIMIT ?",
+            (str(inmueble_id or ""), int(limite)),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return []
+    return [
+        {
+            "autor": str(row_value(f, "autor", "") or ""),
+            "nombre": str(row_value(f, "autor_nombre", "") or ""),
+            "texto": str(row_value(f, "texto", "") or ""),
+            "fecha": str(row_value(f, "created_at", "") or ""),
+        }
+        for f in filas or []
+    ]
+
+
+def fotos_del_inmueble(conn, inmueble_id, *, limite=12):
+    """Las fotos del expediente, en orden. Se sirven por endpoint con token: la
+    carpeta `/uploads` pide sesión y desde el portal no hay ninguna."""
+    try:
+        filas = conn.execute(
+            "SELECT url FROM inmueble_docs WHERE inmueble_id = ? "
+            "ORDER BY COALESCE(created_at, '') ASC LIMIT 200",
+            (str(inmueble_id or ""),),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return []
+    fotos = []
+    for f in filas or []:
+        url = str(row_value(f, "url", "") or "").strip()
+        if url.lower().rsplit(".", 1)[-1] in {"jpg", "jpeg", "png", "webp"} and url.startswith("/uploads/"):
+            fotos.append(url)
+        if len(fotos) >= limite:
+            break
+    return fotos
 
 
 def ensure_inmueble_portal_decisiones_schema(conn):
@@ -64114,7 +64220,7 @@ class Handler(BaseHTTPRequestHandler):
             # Página suelta, sin cargar el CRM entero: quien entra aquí es el
             # propietario de un inmueble, no un usuario de la aplicación. No conviene
             # que el mismo JavaScript que sabe de honorarios llegue a su navegador.
-            page = """<!doctype html>
+            page = r"""<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
@@ -64123,59 +64229,122 @@ class Handler(BaseHTTPRequestHandler):
   <meta name="robots" content="noindex,nofollow" />
   <title>Mi venta</title>
   <style>
-    :root { color-scheme: light dark; --tinta: #111827; --suave: #6b7280; --linea: #e5e7eb;
-            --fondo: #f8fafc; --tarjeta: #ffffff; --verde: #15803d; --ambar: #b45309; }
+    :root { color-scheme: light dark; --tinta: #0f172a; --suave: #64748b; --linea: #e2e8f0;
+            --fondo: #f6f7f9; --tarjeta: #ffffff; --verde: #15803D; --verde-claro: #dcfce7;
+            --ambar: #b45309; --ambar-claro: #fef3c7;
+            --oferta-fondo: #15803D; --oferta-tinta: #ffffff; --oferta-suave: rgba(255,255,255,.85);
+            /* Lo que se escribe ENCIMA del verde de acento. En oscuro ese verde es
+               claro, así que ahí la tinta tiene que ser oscura. */
+            --sobre-verde: #ffffff; }
     @media (prefers-color-scheme: dark) {
-      :root { --tinta: #f3f4f6; --suave: #9ca3af; --linea: #2a2f3a; --fondo: #0f1115; --tarjeta: #171a21;
-              --verde: #4ade80; --ambar: #fbbf24; }
+      :root { --tinta: #f1f5f9; --suave: #94a3b8; --linea: #262b36; --fondo: #0d0f13; --tarjeta: #161a21;
+              --verde: #4ade80; --verde-claro: #14301f; --ambar: #fbbf24; --ambar-claro: #2e2410;
+              /* En oscuro el verde de acento es claro: usarlo de fondo con texto
+                 blanco daba un contraste de 1,8:1 en la tarjeta donde se decide
+                 sobre una oferta. Aquí el fondo es oscuro y la tinta clara. */
+              --oferta-fondo: #06301f; --oferta-tinta: #eafff3; --oferta-suave: rgba(234,255,243,.78);
+              --sobre-verde: #06301f; }
     }
     * { box-sizing: border-box; }
-    body { margin: 0; padding: 20px 16px 56px; background: var(--fondo); color: var(--tinta);
-           font: 15px/1.55 "IBM Plex Sans", "Segoe UI", sans-serif; }
-    main { max-width: 720px; margin: 0 auto; display: grid; gap: 14px; }
-    h1 { font-size: 21px; margin: 0; letter-spacing: -0.01em; }
-    h2 { font-size: 15px; margin: 0 0 10px; }
+    body { margin: 0; background: var(--fondo); color: var(--tinta);
+           font: 15px/1.55 "IBM Plex Sans", "Segoe UI", sans-serif; padding-bottom: 84px; }
+    main { max-width: 640px; margin: 0 auto; }
+    .contenido { padding: 0 16px; display: grid; gap: 14px; }
+    h1 { font-size: 24px; margin: 0; letter-spacing: -0.02em; line-height: 1.2; }
+    h2 { font-size: 14px; margin: 0 0 12px; letter-spacing: 0.02em; text-transform: uppercase; color: var(--suave); }
     .suave { color: var(--suave); }
-    .tarjeta { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 14px; padding: 16px; }
-    .cifras { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
-    .cifra { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 14px; padding: 12px 14px; }
-    .cifra span { display: block; font-size: 12px; color: var(--suave); }
-    .cifra strong { font-size: 22px; font-variant-numeric: tabular-nums; }
-    .pasos { display: flex; gap: 6px; margin: 12px 0 6px; }
-    .paso { flex: 1; height: 6px; border-radius: 99px; background: var(--linea); }
-    .paso.hecho { background: var(--verde); }
-    .etiquetas { display: flex; justify-content: space-between; font-size: 11px; color: var(--suave); gap: 4px; }
+    .portada { position: relative; height: 240px; background: var(--verde); overflow: hidden; }
+    .portada img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .portada .velo { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.45) 0%, rgba(0,0,0,0) 38%, rgba(0,0,0,.72) 100%); }
+    .portada .texto { position: absolute; left: 16px; right: 16px; bottom: 14px; color: #fff; }
+    .portada .texto h1 { color: #fff; }
+    .portada .texto p { margin: 4px 0 0; opacity: .92; font-size: 13px; }
+    .marca { position: absolute; top: 14px; left: 16px; display: flex; align-items: center; gap: 8px; }
+    .marca img { height: 26px; width: auto; filter: drop-shadow(0 1px 3px rgba(0,0,0,.4)); }
+    .marca span { color: #fff; font-size: 13px; font-weight: 600; text-shadow: 0 1px 3px rgba(0,0,0,.5); }
+    .inicial { width: 100%; height: 100%; display: grid; place-items: center; font-size: 84px; font-weight: 700;
+               color: rgba(255,255,255,.28); }
+    .tarjeta { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 16px; padding: 18px; }
+    .titular { font-size: 21px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+    .hitos { display: grid; gap: 0; margin-top: 14px; }
+    .hito { display: grid; grid-template-columns: 22px 1fr auto; align-items: start; gap: 10px; position: relative; padding-bottom: 14px; }
+    .hito:last-child { padding-bottom: 0; }
+    .punto { width: 11px; height: 11px; border-radius: 99px; background: var(--linea); margin-top: 5px; }
+    .hito.hecho .punto { background: var(--verde); }
+    .hito.actual .punto { background: var(--verde); box-shadow: 0 0 0 4px var(--verde-claro); }
+    .hito:not(:last-child)::before { content: ""; position: absolute; left: 5px; top: 18px; bottom: 0; width: 1px; background: var(--linea); }
+    .hito.hecho:not(:last-child)::before { background: var(--verde); }
+    .hito .nombre { font-size: 15px; }
+    .hito:not(.hecho):not(.actual) .nombre { color: var(--suave); }
+    .hito.actual .nombre { font-weight: 600; }
+    .cifras { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+    .cifra { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 14px; padding: 14px 16px; }
+    .cifra span { display: block; font-size: 12px; color: var(--suave); margin-bottom: 2px; }
+    .cifra strong { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
     ul { list-style: none; margin: 0; padding: 0; }
-    li { padding: 9px 0; border-top: 1px solid var(--linea); display: flex; gap: 12px; justify-content: space-between; }
-    li:first-child { border-top: 0; }
-    .fecha { color: var(--suave); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-    .pend { color: var(--ambar); }
-    input, button { font: inherit; }
-    input { padding: 11px 12px; border: 1px solid var(--linea); border-radius: 10px; width: 100%;
-            background: var(--tarjeta); color: var(--tinta); }
-    button { padding: 11px 16px; border: 0; border-radius: 10px; background: var(--verde); color: #fff;
-             font-weight: 600; cursor: pointer; }
-    .aviso { padding: 12px 14px; border-radius: 12px; background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; }
-    .vacio { color: var(--suave); font-size: 14px; }
+    li { padding: 11px 0; border-top: 1px solid var(--linea); display: flex; gap: 12px; justify-content: space-between; align-items: center; }
+    li:first-child { border-top: 0; padding-top: 0; }
+    .fecha { color: var(--suave); font-size: 13px; white-space: nowrap; }
+    .cita { display: grid; grid-template-columns: 52px 1fr; gap: 12px; align-items: center; padding: 11px 0; border-top: 1px solid var(--linea); }
+    .cita:first-child { border-top: 0; padding-top: 0; }
+    .cita .dia { background: var(--verde-claro); color: var(--verde); border-radius: 10px; text-align: center; padding: 6px 0; }
+    .cita .dia b { display: block; font-size: 18px; line-height: 1.1; }
+    .cita .dia i { display: block; font-size: 11px; font-style: normal; text-transform: uppercase; }
+    .oferta { background: var(--oferta-fondo); color: var(--oferta-tinta); border: 0; }
+    .oferta h2, .oferta .suave { color: var(--oferta-suave); }
+    .oferta .importe { font-size: 34px; font-weight: 700; margin: 4px 0 10px; letter-spacing: -0.03em; }
+    input, textarea, button { font: inherit; }
+    textarea { width: 100%; min-height: 72px; padding: 11px 12px; border: 1px solid var(--linea);
+               border-radius: 12px; background: var(--fondo); color: var(--tinta); resize: vertical; }
+    button { padding: 11px 18px; border: 0; border-radius: 12px; background: var(--verde);
+             color: var(--sobre-verde); font-weight: 600; cursor: pointer; }
+    .oferta button { background: var(--oferta-tinta); color: var(--oferta-fondo); }
+    .fantasma { background: transparent; color: var(--tinta); border: 1px solid var(--linea); }
+    .oferta .fantasma { background: transparent; color: var(--oferta-tinta); border: 1px solid var(--oferta-suave); }
+    .globo { max-width: 82%; padding: 10px 14px; border-radius: 16px; margin-bottom: 8px; font-size: 14px; }
+    .globo.suyo { background: var(--verde); color: var(--sobre-verde); margin-left: auto; border-bottom-right-radius: 4px; }
+    .globo.nuestro { background: var(--fondo); border: 1px solid var(--linea); border-bottom-left-radius: 4px; }
+    .globo .quien { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
     .subir { color: var(--verde); font-weight: 600; cursor: pointer; white-space: nowrap; font-size: 14px; }
+    .barra { position: sticky; bottom: 0; background: var(--tarjeta); border-top: 1px solid var(--linea);
+             padding: 12px 16px; display: flex; gap: 10px; margin-top: 18px; }
+    .barra button { flex: 1; }
+    .aviso { padding: 12px 14px; border-radius: 12px; background: var(--ambar-claro); color: var(--ambar); margin: 16px; }
+    .vacio { color: var(--suave); font-size: 14px; padding: 4px 0; }
+    .pend { color: var(--ambar); }
   </style>
 </head>
 <body>
-  <main id="app"><p class="suave">Cargando…</p></main>
+  <main id="app"><p class="suave" style="padding:24px 16px">Cargando…</p></main>
   <script>
     const eur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
     const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    const MESES = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"];
     const app = document.getElementById("app");
     const parametros = new URLSearchParams(location.search);
-    // Vista previa del asesor: la misma página y la misma consulta, con su sesión
-    // del CRM en vez de un token, y sin contar como visita del propietario.
     const previa = parametros.get("preview") || "";
     const token = parametros.get("token") || "";
-    // El enlace lleva la llave dentro: se saca de la barra en cuanto la tenemos,
-    // para que no se quede en el historial ni salga en una captura de pantalla.
     if (token) history.replaceState(null, "", location.pathname);
     const clave = "venta:" + token.slice(0, 12);
     const sesion = () => localStorage.getItem(clave) || "";
+
+    const fechaCorta = (v) => {
+      const t = String(v || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;
+      const [a, m, d] = t.split("-");
+      return Number(d) + " " + MESES[Number(m) - 1] + (Number(a) !== new Date().getFullYear() ? " " + a : "");
+    };
+    const haceCuanto = (v) => {
+      const t = String(v || "").slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return "";
+      const dias = Math.round((new Date().setHours(0,0,0,0) - new Date(t + "T00:00:00").getTime()) / 86400000);
+      if (dias === 0) return "hoy";
+      if (dias === 1) return "ayer";
+      if (dias > 1 && dias < 30) return "hace " + dias + " días";
+      if (dias === -1) return "mañana";
+      if (dias < -1 && dias > -30) return "en " + Math.abs(dias) + " días";
+      return fechaCorta(v);
+    };
 
     async function pide(ruta, cuerpo) {
       const r = await fetch(ruta, cuerpo
@@ -64188,13 +64357,16 @@ class Handler(BaseHTTPRequestHandler):
 
     function pantallaCodigo(telefono) {
       app.innerHTML = `
-        <h1>Confirma que eres tú</h1>
-        <div class="tarjeta">
-          <p class="suave" id="txt">Te mandamos un código al ${esc(telefono || "teléfono registrado")}.</p>
-          <div style="display:grid;gap:10px">
-            <button id="enviar">Enviar código</button>
-            <input id="codigo" inputmode="numeric" autocomplete="one-time-code" placeholder="Código de 6 cifras" />
-            <button id="entrar">Entrar</button>
+        <div class="contenido" style="padding-top:32px">
+          <h1>Confirma que eres tú</h1>
+          <div class="tarjeta">
+            <p class="suave" id="txt">Te mandamos un código al ${esc(telefono || "teléfono registrado")}.</p>
+            <div style="display:grid;gap:10px">
+              <button id="enviar">Enviar código</button>
+              <textarea id="codigo" inputmode="numeric" autocomplete="one-time-code"
+                        placeholder="Código de 6 cifras" style="min-height:48px"></textarea>
+              <button id="entrar">Entrar</button>
+            </div>
           </div>
         </div>`;
       const txt = document.getElementById("txt");
@@ -64213,87 +64385,146 @@ class Handler(BaseHTTPRequestHandler):
     }
 
     function pinta(d) {
-      const i = d.inmueble, e = d.etapa, r = d.resumen;
-      const pasos = (e.pasos || []).map((p, n) =>
-        `<div class="paso ${n < e.paso ? "hecho" : ""}" title="${esc(p)}"></div>`).join("");
-      const etiquetas = (e.pasos || []).map((p) => `<span>${esc(p)}</span>`).join("");
-      const linea = (d.cronologia || []).map((x) =>
-        `<li><span>${esc(x.titulo)}${x.detalle ? " · " + esc(x.detalle) : ""}</span><span class="fecha">${esc(x.fecha)}</span></li>`).join("")
-        || '<li class="vacio">Todavía no hay movimientos que mostrar.</li>';
+      const i = d.inmueble, e = d.etapa, r = d.resumen, ag = d.agencia || {};
+      const foto = i.fotos
+        ? `<img src="/api/portal_venta_foto?token=${encodeURIComponent(token)}&s=${encodeURIComponent(sesion())}&n=0" alt="" />`
+        : `<div class="inicial">${esc((i.direccion || "?").trim().charAt(0).toUpperCase())}</div>`;
+      const marca = ag.logo
+        ? `<img src="${esc(ag.logo)}" alt="${esc(ag.nombre)}" />`
+        : `<span>${esc(ag.nombre || "")}</span>`;
+
+      const hitos = (e.pasos || []).map((p, n) => {
+        const clase = n + 1 < e.paso ? "hecho" : (n + 1 === e.paso ? "hecho actual" : "");
+        return `<div class="hito ${clase}"><div class="punto"></div><div class="nombre">${esc(p)}</div><div></div></div>`;
+      }).join("");
+
+      const agenda = (d.agenda || []).map((x) => {
+        const t = String(x.fecha || "").slice(0, 10).split("-");
+        return `<div class="cita">
+            <div class="dia"><b>${esc(t[2] || "")}</b><i>${esc(MESES[Number(t[1]) - 1] || "")}</i></div>
+            <div><div>${esc(x.titulo)}</div>
+                 <div class="suave" style="font-size:13px">${esc(x.hora ? x.hora + " · " : "")}${esc(haceCuanto(x.fecha))}</div></div>
+          </div>`;
+      }).join("");
+
       const tuyo = (d.pendiente_de_ti || []).map((x) =>
         `<li><span class="pend">${esc(x.tarea)}</span>
              <label class="subir">Subir<input type="file" data-tarea="${esc(x.tarea)}"
                     accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" hidden /></label></li>`).join("");
+
       const p = d.propuesta;
-      const propuesta = !p ? "" : `
-        <div class="tarjeta">
+      const oferta = !p ? "" : `
+        <div class="tarjeta oferta">
           <h2>Tienes una oferta</h2>
-          <p style="font-size:26px;margin:6px 0;font-variant-numeric:tabular-nums"><strong>${p.importe ? eur.format(p.importe) : "Pendiente de importe"}</strong></p>
+          <div class="importe">${p.importe ? eur.format(p.importe) : "Pendiente de importe"}</div>
           ${p.decidida
-            ? `<p class="suave">Ya respondiste: <strong>${p.decidida === "acepto" ? "aceptada" : "rechazada"}</strong>.
-                 Tu asesor sigue desde aquí.</p>`
-            : `<p class="suave">Tu respuesta queda registrada con fecha y hora. No cierra nada por sí sola:
-                 tu asesor se encarga del papeleo.</p>
-               <div style="display:flex;gap:8px;margin-top:10px">
+            ? `<p class="suave" style="margin:0">Ya respondiste: <strong>${p.decidida === "acepto" ? "aceptada" : "rechazada"}</strong>. Tu asesor sigue desde aquí.</p>`
+            : `<p class="suave" style="margin:0 0 14px">Tu respuesta queda registrada con fecha y hora. No cierra nada por sí sola: tu asesor se encarga del papeleo.</p>
+               <div style="display:flex;gap:8px">
                  <button id="acepto">Acepto</button>
-                 <button id="rechazo" style="background:transparent;color:var(--tinta);border:1px solid var(--linea)">No, gracias</button>
+                 <button id="rechazo" class="fantasma">No, gracias</button>
                </div>`}
         </div>`;
+
       const docs = (d.documentos || []).map((x) =>
-        `<li><span>${esc(x.nombre)}${x.mio ? " · lo subiste tú" : ""}</span><span class="fecha">${esc(x.fecha)}</span></li>`).join("")
-        || '<li class="vacio">Aún no hay documentos compartidos.</li>';
-      const firmas = (d.firmas || []).map((x) =>
-        `<li><span>${esc(x.documento)}</span><span class="fecha">${esc(x.estado)} · ${esc(x.fecha)}</span></li>`).join("");
+        `<li><span>${esc(x.nombre)}${x.mio ? ' <span class="suave">· lo subiste tú</span>' : ""}</span>
+             <span class="fecha">${esc(fechaCorta(x.fecha))}</span></li>`).join("")
+        || '<li class="vacio">Aquí aparecerán la nota simple, el certificado energético y lo que vayas aportando.</li>';
+
+      const hilo = (d.mensajes || []).map((m) =>
+        `<div class="globo ${m.autor === "propietario" ? "suyo" : "nuestro"}">
+           <span class="quien">${esc(m.autor === "propietario" ? "Tú" : (m.nombre || "Tu asesor"))} · ${esc(haceCuanto(m.fecha))}</span>
+           ${esc(m.texto)}
+         </div>`).join("") || '<p class="vacio">Escríbele lo que necesites. Te contesta por aquí.</p>';
+
+      const linea = (d.cronologia || []).map((x) =>
+        `<li><span>${esc(x.titulo)}${x.detalle ? " · " + esc(x.detalle) : ""}</span>
+             <span class="fecha">${esc(fechaCorta(x.fecha))}</span></li>`).join("")
+        || '<li class="vacio">Todavía no hay movimientos que mostrar.</li>';
 
       app.innerHTML = `
-        <div>
-          <h1>${esc(i.direccion)}</h1>
-          <p class="suave" style="margin:4px 0 0">${esc([i.poblacion, i.tipo, i.m2 ? i.m2 + " m²" : ""].filter(Boolean).join(" · "))}</p>
+        <div class="portada">
+          ${foto}<div class="velo"></div>
+          <div class="marca">${marca}</div>
+          <div class="texto">
+            <h1>${esc(i.direccion)}</h1>
+            <p>${esc([i.poblacion, i.tipo, i.m2 ? i.m2 + " m²" : ""].filter(Boolean).join(" · "))}</p>
+          </div>
         </div>
-        <div class="tarjeta">
-          <h2>${esc(e.titulo)}</h2>
-          <div class="pasos">${pasos}</div>
-          <div class="etiquetas">${etiquetas}</div>
-          <p class="suave" style="margin:12px 0 0">
-            ${e.desde ? "En venta desde el " + esc(e.desde) : ""}${e.dias !== "" ? " · " + esc(e.dias) + " días" : ""}
-            ${i.precio ? " · precio " + eur.format(i.precio) : ""}
+        <div class="contenido" style="padding-top:16px">
+          <div class="tarjeta">
+            <p class="titular">${esc(e.titulo)}</p>
+            <p class="suave" style="margin:6px 0 0;font-size:13px">
+              ${e.desde ? "En venta desde el " + esc(fechaCorta(e.desde)) : ""}${e.dias !== "" ? " · " + esc(e.dias) + " días" : ""}${i.precio ? " · " + eur.format(i.precio) : ""}
+            </p>
+            <div class="hitos">${hitos}</div>
+          </div>
+          ${oferta}
+          <div class="cifras">
+            <div class="cifra"><span>Visitas hechas</span><strong>${r.visitas_hechas}</strong></div>
+            <div class="cifra"><span>Visitas previstas</span><strong>${r.visitas_previstas}</strong></div>
+            <div class="cifra"><span>Contactos desde la web</span><strong>${r.contactos_portal}</strong></div>
+            <div class="cifra"><span>Interesados</span><strong>${r.interesados}</strong></div>
+          </div>
+          ${agenda ? `<div class="tarjeta"><h2>Próximas citas</h2>${agenda}</div>` : ""}
+          ${tuyo ? `<div class="tarjeta"><h2>Pendiente de ti</h2><ul>${tuyo}</ul>
+                     <p class="suave" id="subiendo" style="margin:10px 0 0;font-size:13px"></p></div>` : ""}
+          <div class="tarjeta">
+            <h2>Documentación del inmueble</h2>
+            <ul>${docs}</ul>
+            <label class="subir" style="display:inline-block;margin-top:12px">
+              + Añadir documento<input type="file" id="docLibre" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" hidden />
+            </label>
+            <p class="suave" id="subiendoLibre" style="margin:8px 0 0;font-size:13px"></p>
+          </div>
+          <div class="tarjeta">
+            <h2>Hablar con tu asesor</h2>
+            <div style="margin-bottom:12px">${hilo}</div>
+            <textarea id="mensaje" placeholder="¿Alguna duda sobre la venta?"></textarea>
+            <button id="enviarMensaje" style="margin-top:10px">Enviar</button>
+            <p class="suave" id="estadoMensaje" style="margin:8px 0 0;font-size:13px"></p>
+          </div>
+          <div class="tarjeta"><h2>Qué ha pasado</h2><ul>${linea}</ul></div>
+          <p class="suave" style="text-align:center;font-size:12px;margin:4px 0 0">
+            ${esc(ag.nombre || "")}${ag.asesor ? " · tu asesor: " + esc(ag.asesor) : ""}
           </p>
-        </div>
-        <div class="cifras">
-          <div class="cifra"><span>Visitas hechas</span><strong>${r.visitas_hechas}</strong></div>
-          <div class="cifra"><span>Visitas previstas</span><strong>${r.visitas_previstas}</strong></div>
-          <div class="cifra"><span>Interesados</span><strong>${r.interesados}</strong></div>
-          <div class="cifra"><span>Contactos del portal</span><strong>${r.contactos_portal}</strong></div>
-        </div>
-        ${propuesta}
-        ${tuyo ? `<div class="tarjeta"><h2>Pendiente de ti</h2><ul>${tuyo}</ul>
-                   <p class="suave" id="subiendo" style="margin:10px 0 0"></p></div>` : ""}
-        <div class="tarjeta"><h2>Qué ha pasado</h2><ul>${linea}</ul></div>
-        <div class="tarjeta"><h2>Documentos</h2><ul>${docs}</ul></div>
-        ${firmas ? `<div class="tarjeta"><h2>Firmas</h2><ul>${firmas}</ul></div>` : ""}
-        <p class="suave" style="text-align:center;font-size:12px">
-          ${esc(d.agencia.nombre || "")}${d.agencia.asesor ? " · tu asesor: " + esc(d.agencia.asesor) : ""}
-        </p>`;
+        </div>`;
 
-      const nota = document.getElementById("subiendo");
-      app.querySelectorAll('input[type="file"]').forEach((campo) => {
-        campo.onchange = async () => {
-          const f = campo.files && campo.files[0];
-          if (!f) return;
-          if (f.size > 12 * 1024 * 1024) { nota.textContent = "El archivo pasa de 12 MB."; return; }
-          nota.textContent = "Subiendo " + f.name + "…";
-          const lector = new FileReader();
-          lector.onload = async () => {
-            try {
-              await pide("/api/portal_venta_doc", { token, sesion: sesion(), nombre: f.name,
-                                                    tarea: campo.dataset.tarea, file_base64: lector.result });
-              nota.textContent = "Recibido, gracias.";
-              cargar();
-            } catch (e) { nota.textContent = e.message; }
-          };
-          lector.readAsDataURL(f);
+      const subeArchivo = async (campo, nota, tarea) => {
+        const f = campo.files && campo.files[0];
+        if (!f) return;
+        if (f.size > 6 * 1024 * 1024) { nota.textContent = "El archivo pasa de 6 MB."; return; }
+        nota.textContent = "Subiendo " + f.name + "…";
+        const lector = new FileReader();
+        lector.onload = async () => {
+          try {
+            await pide("/api/portal_venta_doc", { token, sesion: sesion(), nombre: f.name,
+                                                  tarea: tarea || "", file_base64: lector.result });
+            nota.textContent = "Recibido, gracias.";
+            cargar();
+          } catch (e) { nota.textContent = e.message; }
         };
+        lector.readAsDataURL(f);
+      };
+      const notaTareas = document.getElementById("subiendo");
+      app.querySelectorAll('input[type="file"][data-tarea]').forEach((campo) => {
+        campo.onchange = () => subeArchivo(campo, notaTareas, campo.dataset.tarea);
       });
+      const libre = document.getElementById("docLibre");
+      if (libre) libre.onchange = () => subeArchivo(libre, document.getElementById("subiendoLibre"), "");
+
+      const caja = document.getElementById("mensaje");
+      const estadoMensaje = document.getElementById("estadoMensaje");
+      const botonMensaje = document.getElementById("enviarMensaje");
+      if (botonMensaje) botonMensaje.onclick = async () => {
+        const texto = (caja.value || "").trim();
+        if (!texto) return;
+        botonMensaje.disabled = true;
+        try { await pide("/api/portal_venta_mensaje", { token, sesion: sesion(), texto });
+              caja.value = ""; estadoMensaje.textContent = "Enviado."; cargar(); }
+        catch (e) { estadoMensaje.textContent = e.message; }
+        finally { botonMensaje.disabled = false; }
+      };
       ["acepto", "rechazo"].forEach((cual) => {
         const b = document.getElementById(cual);
         if (!b) return;
@@ -64317,10 +64548,8 @@ class Handler(BaseHTTPRequestHandler):
         if (d.estado === "codigo_requerido") { pantallaCodigo(d.telefono); return; }
         pinta(d);
         if (d.vista_previa) {
-          // Que no quepa duda de qué se está mirando: esto no es el portal de nadie.
           const cinta = document.createElement("div");
           cinta.className = "aviso";
-          cinta.style.cssText = "position:sticky;bottom:12px;margin-top:16px";
           cinta.textContent = "Vista previa · esto es exactamente lo que ve el propietario. No cuenta como visita suya.";
           app.appendChild(cinta);
         }
@@ -64329,7 +64558,6 @@ class Handler(BaseHTTPRequestHandler):
       }
     }
     cargar();
-    // Que al volver a la pestaña esté al día, sin machacar el servidor.
     document.addEventListener("visibilitychange", () => { if (!document.hidden) cargar(); });
   </script>
 </body>
@@ -65051,6 +65279,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_publish_update",
             "/api/portal_owner_access_create",
             "/api/inmueble_portal_acceso",
+            "/api/inmueble_portal_mensaje",
             "/api/inmueble_portal_acceso_revoke",
             "/api/leads",
             "/api/portal_leads",
@@ -65172,10 +65401,13 @@ class Handler(BaseHTTPRequestHandler):
             "/api/hipotecas_listado_excel",
             "/api/inmueble_propietario_create",
             "/api/inmueble_portal_acceso",
+            "/api/inmueble_portal_mensaje",
             "/api/inmueble_portal_acceso_revoke",
             "/api/portal_venta_codigo",
             "/api/portal_venta_doc",
             "/api/portal_venta_propuesta",
+            "/api/portal_venta_mensaje",
+            "/api/inmueble_portal_mensaje",
             "/api/inmueble_renovar",
             "/api/renta_campaign_document",
             "/api/workspace_fincas_comunidad_delete",
@@ -65532,6 +65764,7 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/portal_publish_update": "inmobiliaria",
                         "/api/portal_owner_access_create": "inmobiliaria",
                         "/api/inmueble_portal_acceso": "inmobiliaria",
+                        "/api/inmueble_portal_mensaje": "inmobiliaria",
                         "/api/inmueble_portal_acceso_revoke": "inmobiliaria",
                         "/api/leads": "inmobiliaria",
                         "/api/portal_leads": "inmobiliaria",
@@ -65893,6 +66126,7 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/portal_publish_update",
                 "/api/portal_owner_access_create",
                 "/api/inmueble_portal_acceso",
+            "/api/inmueble_portal_mensaje",
                 "/api/inmueble_portal_acceso_revoke",
                 "/api/leads",
                 "/api/portal_leads",
@@ -65935,6 +66169,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_publish_update",
             "/api/portal_owner_access_create",
             "/api/inmueble_portal_acceso",
+            "/api/inmueble_portal_mensaje",
             "/api/inmueble_portal_acceso_revoke",
             "/api/leads",
             "/api/portal_leads",
@@ -66038,7 +66273,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_venta_codigo",
             "/api/portal_venta_doc",
             "/api/portal_venta_propuesta",
+            "/api/portal_venta_mensaje",
+            "/api/inmueble_portal_mensaje",
             "/api/inmueble_portal_acceso",
+            "/api/inmueble_portal_mensaje",
             "/api/inmueble_portal_acceso_revoke",
         ):
             if not empresa_nombre:
@@ -66116,7 +66354,35 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "sesion": sesion})
             return
 
-        if parsed.path in ("/api/portal_venta_doc", "/api/portal_venta_propuesta"):
+        if parsed.path == "/api/inmueble_portal_mensaje":
+            # La respuesta del comercial. Va al mismo hilo que ve el propietario.
+            inmueble_id = str(payload.get("inmueble_id") or "").strip()
+            texto = str(payload.get("texto") or "").strip()[:2000]
+            if not inmueble_id or not texto:
+                json_response(self, {"error": "inmueble_id y texto requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _f = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc},
+                              status=404 if "no encontrado" in str(err_acc) else 403)
+                return
+            ensure_inmueble_portal_mensajes_schema(conn)
+            sello = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute(
+                "INSERT INTO inmueble_portal_mensajes (id, inmueble_id, autor, autor_nombre, texto, leido, created_at) "
+                "VALUES (?, ?, 'agencia', ?, ?, 0, ?)",
+                (os.urandom(16).hex(), inmueble_id,
+                 str((session or {}).get("nombre") or (session or {}).get("usuario") or "Tu asesor"),
+                 texto, sello))
+            conn.commit()
+            avisa_al_propietario(conn, inmueble_id, "mensaje",
+                                 "Tu asesor te ha escrito en el seguimiento de tu venta.",
+                                 referencia=sello, now=sello)
+            json_response(self, {"ok": True})
+            return
+
+        if parsed.path in ("/api/portal_venta_doc", "/api/portal_venta_propuesta", "/api/portal_venta_mensaje"):
             acceso, fallo = acceso_de_portal_por_token(conn, payload.get("token") or "")
             if not acceso:
                 json_response(self, {"error": "Enlace no válido"}, status=403 if fallo in ("revocado", "caducado") else 404)
@@ -66126,6 +66392,49 @@ class Handler(BaseHTTPRequestHandler):
                 return
             inmueble_id = str(row_value(acceso, "inmueble_id", "") or "")
             ahora_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+            if parsed.path == "/api/portal_venta_mensaje":
+                texto = str(payload.get("texto") or "").strip()[:2000]
+                if not texto:
+                    json_response(self, {"error": "Escribe algo primero"}, status=400)
+                    return
+                ensure_inmueble_portal_mensajes_schema(conn)
+                conn.execute(
+                    "INSERT INTO inmueble_portal_mensajes (id, inmueble_id, acceso_id, cliente_id, autor, "
+                    "autor_nombre, texto, leido, created_at) VALUES (?, ?, ?, ?, 'propietario', ?, ?, 0, ?)",
+                    (os.urandom(16).hex(), inmueble_id, str(row_value(acceso, "id", "") or ""),
+                     str(row_value(acceso, "cliente_id", "") or ""),
+                     str(row_value(acceso, "nombre", "") or "El propietario"), texto, ahora_iso))
+                # Y una tarea para el comercial: un mensaje que nadie ve es peor que
+                # no tener mensajería, porque el propietario da por hecho que llegó.
+                try:
+                    acciones_cols = table_columns(conn, "acciones") or set()
+                    fila = {
+                        "id": os.urandom(16).hex(),
+                        "empresa_id": str(row_value(acceso, "empresa_id", "") or ""),
+                        "workspace_id": str(row_value(acceso, "workspace_id", "") or ""),
+                        "servicio": "inmobiliaria",
+                        "inmueble_id": inmueble_id,
+                        "cliente_id": str(row_value(acceso, "cliente_id", "") or ""),
+                        "cliente_nombre": str(row_value(acceso, "nombre", "") or ""),
+                        "fecha": ahora_iso[:10],
+                        "hora": "09:00",
+                        "tipo": "Seguimiento",
+                        "asunto": "El propietario te ha escrito desde el seguimiento",
+                        "estado": "Pendiente",
+                        "notas": texto[:500],
+                        "created_at": ahora_iso,
+                        "updated_at": ahora_iso,
+                    }
+                    claves = [k for k in fila if k in acciones_cols and fila[k] != ""]
+                    conn.execute(
+                        f"INSERT INTO acciones ({', '.join(claves)}) VALUES ({', '.join(['?'] * len(claves))})",
+                        [fila[k] for k in claves])
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("portal_venta_mensaje/acciones", _fallo_tragado)
+                conn.commit()
+                json_response(self, {"ok": True})
+                return
 
             if parsed.path == "/api/portal_venta_doc":
                 nombre = str(payload.get("nombre") or "").strip() or "documento"
@@ -93154,6 +93463,59 @@ class Handler(BaseHTTPRequestHandler):
             datos["estado"] = "ok"
             datos["segundo_factor"] = hay_canal_para_avisar()
             json_response(self, datos)
+            return
+
+        if path == "/api/portal_venta_foto":
+            # La carpeta `/uploads` pide sesión y en el portal no hay ninguna, así
+            # que la foto se sirve aquí: con el token del propietario, y sólo las de
+            # SU inmueble. El índice se acota contra la lista, de modo que no hay
+            # forma de pedir una ruta arbitraria.
+            token = _request_token_param(self, params, "token")
+            acceso, _fallo = acceso_de_portal_por_token(conn, token)
+            if not acceso:
+                json_response(self, {"error": "Enlace no válido"}, status=404)
+                return
+            if not sesion_de_portal_valida(acceso, params.get("s", [""])[0]):
+                json_response(self, {"error": "Confirma tu identidad con el código"}, status=401)
+                return
+            fotos = fotos_del_inmueble(conn, row_value(acceso, "inmueble_id", ""))
+            try:
+                indice = max(0, int(params.get("n", ["0"])[0] or 0))
+            except Exception:
+                indice = 0
+            if indice >= len(fotos):
+                json_response(self, {"error": "No hay foto"}, status=404)
+                return
+            ruta = _signature_url_to_local_path(fotos[indice])
+            if not ruta or not ruta.exists():
+                json_response(self, {"error": "No hay foto"}, status=404)
+                return
+            tipo = {"png": "image/png", "webp": "image/webp"}.get(
+                ruta.suffix.lower().lstrip("."), "image/jpeg")
+            binary_response(self, ruta.read_bytes(), content_type=tipo)
+            return
+
+        if path == "/api/inmueble_portal_mensajes":
+            # El hilo visto desde el CRM, para que el comercial conteste.
+            inmueble_id = params.get("inmueble_id", [""])[0]
+            if not inmueble_id:
+                json_response(self, {"error": "inmueble_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _f = enforce_inmueble_access(conn, session, inmueble_id)
+            if not ok_acc:
+                json_response(self, {"error": err_acc},
+                              status=404 if "no encontrado" in str(err_acc) else 403)
+                return
+            try:
+                ensure_inmueble_portal_mensajes_schema(conn)
+                conn.execute(
+                    "UPDATE inmueble_portal_mensajes SET leido = 1 WHERE inmueble_id = ? AND autor = 'propietario'",
+                    (inmueble_id,))
+                conn.commit()
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("inmueble_portal_mensajes/leido", _fallo_tragado)
+            json_response(self, {"rows": hilo_del_propietario(conn, inmueble_id)})
             return
 
         if path == "/api/inmueble_portal_accesos":

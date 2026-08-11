@@ -967,3 +967,221 @@ class ElMensajeCuandoNoHaySesionTests(BasePortal):
         except urllib.error.HTTPError as e:
             self.assertEqual(e.code, 403)
             self.assertNotIn("Entra primero", e.read().decode())
+
+
+class ElHiloConElComercialTests(BasePortal):
+    """Un portal donde sólo se lee deja al vendedor con la duda en la mano y le
+    empuja al teléfono, que es lo que se quería evitar. Y hacerlo aquí en vez de por
+    WhatsApp tiene una ventaja para la agencia: lo hablado queda en el expediente del
+    inmueble, no en el móvil de quien lo llevaba."""
+
+    def setUp(self):
+        super().setUp()
+        self.token = self._token(self._abre_portal()["enlace"])
+
+    def _escribe(self, texto):
+        return self._post("/api/portal_venta_mensaje",
+                          {"token": self.token, "texto": texto}, con_sesion=False)
+
+    def test_el_propietario_escribe(self):
+        estado, d = self._escribe("¿Hay novedades de la visita del jueves?")
+        self.assertEqual(estado, 200, d)
+        fila = self.conn.execute("SELECT autor, texto FROM inmueble_portal_mensajes").fetchone()
+        self.assertEqual(fila["autor"], "propietario")
+
+    def test_y_le_deja_tarea_al_comercial(self):
+        """Un mensaje que nadie ve es peor que no tener mensajería: el propietario
+        da por hecho que llegó."""
+        self._escribe("Quiero bajar el precio")
+        fila = self.conn.execute(
+            "SELECT asunto, estado FROM acciones WHERE asunto LIKE '%escrito%'").fetchone()
+        self.assertIsNotNone(fila)
+        self.assertEqual(fila["estado"], "Pendiente")
+
+    def test_el_comercial_contesta_y_el_propietario_lo_ve(self):
+        self._escribe("¿Cómo va?")
+        estado, d = self._post("/api/inmueble_portal_mensaje",
+                               {"inmueble_id": "inm1", "texto": "Vamos bien, el jueves hay visita."})
+        self.assertEqual(estado, 200, d)
+        vista = self._vista(self.token)
+        self.assertEqual([m["autor"] for m in vista["mensajes"]], ["propietario", "agencia"])
+        self.assertIn("el jueves hay visita", vista["mensajes"][1]["texto"])
+
+    def test_un_mensaje_vacio_se_rechaza(self):
+        self.assertEqual(self._escribe("   ")[0], 400)
+
+    def test_sin_enlace_valido_no_se_puede_escribir(self):
+        self._post("/api/inmueble_portal_acceso_revoke", {"inmueble_id": "inm1"})
+        self.assertEqual(self._escribe("hola")[0], 403)
+
+    def test_el_hilo_del_crm_pide_permiso(self):
+        self.assertIn(self._get("/api/inmueble_portal_mensajes?inmueble_id=inm1")[0], (401, 403))
+
+    def test_un_comercial_no_puede_escribir_en_una_ficha_ajena(self):
+        """Con Administrador no prueba nada: cruza workspaces a propósito."""
+        self._ins("usuarios", {"id": "u7", "nombre": "Comercial", "usuario": "comercial7",
+                               "email": "c7@x.test", "rol": "Comercial", "servicio": "Inmobiliaria",
+                               "activo": 1, "password_hash": S.hash_password(CLAVE),
+                               "created_at": AHORA, "updated_at": AHORA})
+        self._ins("workspace_miembros", {"id": "wm7", "workspace_id": self.ws, "usuario_id": "u7",
+                                         "rol": "Miembro", "created_at": AHORA, "updated_at": AHORA})
+        req = urllib.request.Request(
+            self.base + "/api/login",
+            data=json.dumps({"usuario": "comercial7", "password": CLAVE}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as r:
+            cookie = r.headers.get("Set-Cookie").split(";")[0]
+        req = urllib.request.Request(
+            self.base + "/api/inmueble_portal_mensaje",
+            data=json.dumps({"inmueble_id": "inmX", "texto": "hola"}).encode(),
+            headers={"Content-Type": "application/json", "Cookie": cookie}, method="POST")
+        try:
+            with urllib.request.urlopen(req) as r:
+                self.fail("ha dejado escribir en la ficha de otra agencia")
+        except urllib.error.HTTPError as e:
+            self.assertIn(e.code, (403, 404))
+
+
+class LaAgendaDeCitasTests(BasePortal):
+    """Lo que tiene por delante es otra cosa que lo que ya pasó."""
+
+    def setUp(self):
+        super().setUp()
+        hoy = S.datetime.now(S.timezone.utc).date()
+        self.manana = (hoy + S.timedelta(days=1)).isoformat()
+        self.ayer = (hoy - S.timedelta(days=1)).isoformat()
+        self._ins("visitas", {"id": "vFut", "workspace_id": self.ws, "empresa_id": "emp1",
+                              "inmueble_id": "inm1", "fecha": self.manana, "hora": "18:00",
+                              "estado": "Prevista", "created_at": AHORA, "updated_at": AHORA})
+        self._ins("visitas", {"id": "vPas", "workspace_id": self.ws, "empresa_id": "emp1",
+                              "inmueble_id": "inm1", "fecha": self.ayer, "hora": "10:00",
+                              "estado": "Realizada", "created_at": AHORA, "updated_at": AHORA})
+        self.conn.commit()
+        self.d = self._vista(self._token(self._abre_portal()["enlace"]))
+
+    def test_lo_que_viene_sale_en_la_agenda(self):
+        self.assertIn(self.manana, [c["fecha"] for c in self.d["agenda"]])
+
+    def test_lo_que_ya_pasó_no(self):
+        self.assertNotIn(self.ayer, [c["fecha"] for c in self.d["agenda"]])
+
+    def test_la_agenda_va_de_la_más_próxima_en_adelante(self):
+        fechas = [c["fecha"] for c in self.d["agenda"]]
+        self.assertEqual(fechas, sorted(fechas))
+
+    def test_y_la_cronología_sigue_teniendo_lo_pasado(self):
+        self.assertIn(self.ayer, [x["fecha"] for x in self.d["cronologia"]])
+
+
+class LasFotosYLaMarcaTests(BasePortal):
+    def setUp(self):
+        super().setUp()
+        carpeta = S.UPLOADS / "inmuebles" / "inm1" / "fotos"
+        carpeta.mkdir(parents=True, exist_ok=True)
+        self.foto = carpeta / "portada.jpg"
+        self.foto.write_bytes(b"\xff\xd8\xff\xe0 falsa pero suficiente")
+        self._ins("inmueble_docs", {"id": "foto1", "inmueble_id": "inm1", "empresa_id": "emp1",
+                                    "nombre": "Salón", "url": "/uploads/inmuebles/inm1/fotos/portada.jpg",
+                                    "created_at": AHORA, "updated_at": AHORA})
+        self.token = self._token(self._abre_portal()["enlace"])
+
+    def tearDown(self):
+        try:
+            self.foto.unlink()
+        except Exception:
+            pass
+        super().tearDown()
+
+    def test_la_ficha_dice_cuántas_fotos_hay(self):
+        self.assertEqual(self._vista(self.token)["inmueble"]["fotos"], 1)
+
+    def test_la_foto_se_sirve_con_el_token(self):
+        """`/uploads` pide sesión y en el portal no hay ninguna."""
+        req = urllib.request.Request(self.base + f"/api/portal_venta_foto?token={self.token}&n=0")
+        with urllib.request.urlopen(req) as r:
+            self.assertEqual(r.status, 200)
+            self.assertTrue(r.read())
+            self.assertTrue(r.headers.get("Content-Type", "").startswith("image/"))
+
+    def test_sin_token_no_se_sirve(self):
+        self.assertEqual(self._get("/api/portal_venta_foto?token=inventado&n=0")[0], 404)
+
+    def test_con_un_enlace_revocado_tampoco(self):
+        self._post("/api/inmueble_portal_acceso_revoke", {"inmueble_id": "inm1"})
+        self.assertEqual(self._get(f"/api/portal_venta_foto?token={self.token}&n=0")[0], 404)
+
+    def test_no_se_puede_pedir_una_foto_que_no_es_de_su_inmueble(self):
+        """El índice se acota contra la lista: no hay forma de pedir otra ruta."""
+        self.assertEqual(self._get(f"/api/portal_venta_foto?token={self.token}&n=99")[0], 404)
+
+    def test_un_logo_de_s3_no_se_intenta_pintar(self):
+        """Lleva enlace firmado y desde el portal no hay quien lo firme: mejor sin
+        logo que con un roto."""
+        self.conn.execute("UPDATE empresas SET logo_url='s3://logos/x.jpg' WHERE id='emp1'")
+        self.conn.commit()
+        self.assertEqual(self._vista(self.token)["agencia"]["logo"], "")
+
+    def test_un_logo_publico_si(self):
+        self.conn.execute("UPDATE empresas SET logo_url='/assets/logo.png' WHERE id='emp1'")
+        self.conn.commit()
+        self.assertEqual(self._vista(self.token)["agencia"]["logo"], "/assets/logo.png")
+
+
+class LaDocumentacionSeSubeSinTareaTests(BasePortal):
+    """Tiene que poder aportar documentación cuando quiera, no sólo contra una
+    tarea que alguien le haya puesto."""
+
+    def test_se_admite_una_subida_suelta(self):
+        import base64
+        token = self._token(self._abre_portal()["enlace"])
+        estado, d = self._post("/api/portal_venta_doc", {
+            "token": token, "nombre": "escritura.pdf",
+            "file_base64": "data:application/pdf;base64," + base64.b64encode(b"%PDF-1.4").decode(),
+        }, con_sesion=False)
+        self.assertEqual(estado, 200, d)
+        self.assertEqual(
+            self.conn.execute("SELECT nombre FROM inmueble_docs WHERE origen_tipo='propietario'").fetchone()["nombre"],
+            "escritura.pdf")
+
+    def test_la_pagina_ofrece_añadir_documento(self):
+        _, html = self._get("/portal-venta")
+        self.assertIn("Añadir documento", html)
+        self.assertIn("Documentación del inmueble", html)
+
+
+class ElBotonDeRechazarSeVeTests(BasePortal):
+    """Salió blanco sobre blanco: invisible.
+
+    `.oferta button` ganaba el fondo y `.oferta .fantasma` ganaba el color, así que
+    el botón de rechazar quedaba en blanco sobre blanco. Al propietario le aparecía
+    un rectángulo vacío al lado de «Acepto», que en una pantalla donde se decide
+    sobre una oferta de 238.000 € no es un detalle estético.
+    """
+
+    def test_el_fantasma_declara_su_propio_fondo(self):
+        _, html = self._get("/portal-venta")
+        i = html.index(".oferta .fantasma")
+        regla = html[i:html.index("}", i)]
+        self.assertIn("background: transparent", regla)
+        self.assertIn("border", regla)
+
+    def test_la_tarjeta_de_la_oferta_no_usa_el_verde_de_acento_de_fondo(self):
+        """En oscuro ese verde es claro: con texto blanco encima daba 1,8:1, en la
+        pantalla donde el propietario decide sobre el precio de su casa."""
+        _, html = self._get("/portal-venta")
+        i = html.index(".oferta {")
+        self.assertIn("var(--oferta-fondo)", html[i:html.index("}", i)])
+        j = html.index('--oferta-fondo: #06301f')
+        self.assertGreater(j, html.index("prefers-color-scheme: dark"))
+
+    def test_nada_escribe_blanco_fijo_sobre_el_verde_de_acento(self):
+        """El verde de acento cambia con el modo; el texto encima también tiene que
+        cambiar. Con `#fff` fijo, en oscuro quedaba a 1,7:1."""
+        _, html = self._get("/portal-venta")
+        css = html[html.index("<style>"):html.index("</style>")]
+        for regla in (".globo.suyo {", "button { padding"):
+            i = css.index(regla)
+            bloque = css[i:css.index("}", i)]
+            with self.subTest(regla):
+                self.assertIn("var(--sobre-verde)", bloque)
+                self.assertNotIn("color: #fff", bloque)
