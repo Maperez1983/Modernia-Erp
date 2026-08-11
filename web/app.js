@@ -58088,6 +58088,7 @@ const refreshCurrentInmuebleProfile = () => {
           <span class="muted inmueble-summary-portal-status" id="inmueblePortalToggleStatus">
             ${isVerified ? "" : "Aparece en portal cuando esté verificado."}
           </span>
+          <div id="inmueblePortalAccesos" style="flex-basis:100%;margin-top:6px"></div>
         </div>
       </div>
     `;
@@ -58123,6 +58124,47 @@ const refreshCurrentInmuebleProfile = () => {
         }
       };
     }
+    // A quién se le ha abierto el seguimiento, cuándo entró por última vez y si
+    // sigue vivo. Sin esta lista, con tres o cuatro fichas ya no se sabe a quién se
+    // le dio el enlace ni si lo ha llegado a abrir, y el dato existía sin verse.
+    const cajaAccesos = inmuebleSummaryCard.querySelector("#inmueblePortalAccesos");
+    const pintaAccesos = () => {
+      if (!cajaAccesos || !inmueble?.id) return;
+      api(`/api/inmueble_portal_accesos?inmueble_id=${encodeURIComponent(inmueble.id)}`)
+        .then((data) => {
+          const filas = (data?.rows || []).filter((f) => f.activo);
+          if (!filas.length) { cajaAccesos.innerHTML = ""; return; }
+          cajaAccesos.innerHTML = filas.map((f) => {
+            const visto = f.ultima_visita
+              ? `entró ${f.visitas === 1 ? "una vez" : f.visitas + " veces"}, la última el ${String(f.ultima_visita).slice(0, 10)}`
+              : "todavía no ha entrado";
+            return `<div class="muted" style="display:flex;gap:8px;align-items:center;font-size:12px;padding:3px 0">
+                <strong>${escapeHtml(f.propietario || "Propietario")}</strong>
+                <span>· ${escapeHtml(visto)}</span>
+                ${f.caduca ? `<span>· caduca el ${escapeHtml(String(f.caduca).slice(0, 10))}</span>` : ""}
+                <button type="button" class="secondary ghost button-inline" data-anular="1"
+                        style="padding:1px 8px;font-size:11px">Anular</button>
+              </div>`;
+          }).join("");
+          cajaAccesos.querySelectorAll("[data-anular]").forEach((b) => {
+            b.onclick = async () => {
+              b.disabled = true;
+              try {
+                const res = await apiPost("/api/inmueble_portal_acceso_revoke", { inmueble_id: inmueble.id });
+                if (res?.error) throw new Error(res.error);
+                if (portalStatus) portalStatus.textContent = "Acceso anulado. El enlace deja de funcionar.";
+                pintaAccesos();
+              } catch (err) {
+                b.disabled = false;
+                if (portalStatus) portalStatus.textContent = err?.message || "No se pudo anular.";
+              }
+            };
+          });
+        })
+        .catch(() => { cajaAccesos.innerHTML = ""; });
+    };
+    pintaAccesos();
+
     const ownerPreviewBtn = inmuebleSummaryCard.querySelector("#inmuebleOwnerPreviewBtn");
     if (ownerPreviewBtn) {
       ownerPreviewBtn.onclick = (event) => {
@@ -58177,6 +58219,7 @@ const refreshCurrentInmuebleProfile = () => {
           if (enlace) {
             try { await navigator.clipboard?.writeText(enlace); } catch (e) {}
           }
+          pintaAccesos();
         } catch (err) {
           if (portalStatus) portalStatus.textContent = err?.message || "No se pudo abrir el seguimiento.";
         } finally {
