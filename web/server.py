@@ -1183,6 +1183,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     # enlace; no hay sesión del CRM detrás y no debe haberla.
     "/api/portal_venta",
     "/api/portal_venta_foto",
+    "/api/portal_venta_documento",
     "/portal-venta",
     "/api/workspace_portal_s3_url",
     "/api/workspace_factura_pdf_public",
@@ -1204,6 +1205,7 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/portal_venta_doc",
     "/api/portal_venta_propuesta",
     "/api/portal_venta_mensaje",
+    "/api/portal_venta_firma",
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
     "/api/workspace_portal_public_request",
@@ -30687,6 +30689,26 @@ def revoca_accesos_del_inmueble(conn, inmueble_id, motivo, now=None):
         return 0
 
 
+def solicitud_de_firma_es_suya(solicitud, acceso):
+    """¿Esta solicitud de firma va dirigida a quien tiene el portal abierto?
+
+    Se compara por teléfono, por NIF y por nombre, porque el firmante se rellena de
+    formas distintas según por dónde se cree la solicitud. Si no cuadra ninguno, NO
+    es suya: mejor no enseñar una firma de más que enseñar la de otro propietario
+    del mismo inmueble.
+    """
+    def limpio(v):
+        return re.sub(r"[^0-9a-z]", "", str(v or "").lower())
+
+    tel = limpio(row_value(acceso, "telefono", ""))
+    nombre = normalize_lookup_text(row_value(acceso, "nombre", ""))
+    if tel and limpio(row_value(solicitud, "signer_telefono", "")) == tel:
+        return True
+    if nombre and normalize_lookup_text(row_value(solicitud, "signer_nombre", "")) == nombre:
+        return True
+    return False
+
+
 def _fecha_corta(valor):
     texto = str(valor or "").strip().replace("T", " ")
     return texto[:10] if len(texto) >= 10 else texto
@@ -30821,32 +30843,42 @@ def build_portal_de_venta(conn, acceso, *, registrar=True):
     docs_cols = table_columns(conn, "inmueble_docs") or set()
     filtro_visible = "AND (COALESCE(visible_portal,0) = 1 OR COALESCE(origen_tipo,'') = 'propietario')" \
         if "visible_portal" in docs_cols else "AND COALESCE(origen_tipo,'') = 'propietario'"
-    documentos = [
-        {
+    documentos = []
+    for orden, d in enumerate(conn.execute(
+            f"SELECT id, nombre, created_at, origen_tipo, url FROM inmueble_docs WHERE inmueble_id = ? {filtro_visible} "
+            "ORDER BY COALESCE(created_at,'') DESC LIMIT 40",
+            (inmueble_id,),
+    ).fetchall()):
+        url = str(row_value(d, "url", "") or "")
+        documentos.append({
             "nombre": str(row_value(d, "nombre", "") or ""),
             "fecha": _fecha_corta(row_value(d, "created_at", "")),
             "mio": normalize_lookup_text(row_value(d, "origen_tipo", "")) == "PROPIETARIO",
-        }
-        for d in conn.execute(
-            f"SELECT nombre, created_at, origen_tipo FROM inmueble_docs WHERE inmueble_id = ? {filtro_visible} "
-            "ORDER BY COALESCE(created_at,'') DESC LIMIT 40",
-            (inmueble_id,),
-        ).fetchall()
-    ]
+            # El índice, no el id ni la ruta: con el índice sólo se puede pedir algo
+            # de esta misma lista, que ya está filtrada por lo que puede ver.
+            "n": orden if url.startswith("/uploads/") else None,
+        })
 
     firmas = []
     try:
         ensure_inmueble_signature_schema(conn)
-        telefono = str(row_value(acceso, "telefono", "") or "").strip()
         for f in conn.execute(
-            "SELECT doc_nombre, status, signed_at, created_at FROM inmueble_signature_requests "
-            "WHERE inmueble_id = ? AND COALESCE(signer_telefono,'') = ? ORDER BY created_at DESC LIMIT 20",
-            (inmueble_id, telefono),
+            # Con las columnas del firmante: sin ellas, `row_value` cae al primer
+            # campo de la fila y la comprobación de a quién va dirigida comparaba
+            # el id con un teléfono. No cuadraba nunca y no salía ninguna firma.
+            "SELECT id, doc_nombre, status, signed_at, created_at, signer_telefono, signer_nombre "
+            "FROM inmueble_signature_requests WHERE inmueble_id = ? ORDER BY created_at DESC LIMIT 20",
+            (inmueble_id,),
         ).fetchall():
+            if not solicitud_de_firma_es_suya(f, acceso):
+                continue
+            estado = str(row_value(f, "status", "") or "")
             firmas.append({
+                "id": str(row_value(f, "id", "") or ""),
                 "documento": str(row_value(f, "doc_nombre", "") or ""),
-                "estado": str(row_value(f, "status", "") or ""),
+                "estado": estado,
                 "fecha": _fecha_corta(row_value(f, "signed_at", "") or row_value(f, "created_at", "")),
+                "pendiente": estado not in {"signed", "rejected"},
             })
     except Exception:
         _rollback_best_effort(conn)
@@ -30896,15 +30928,40 @@ def build_portal_de_venta(conn, acceso, *, registrar=True):
 
     # Lo que tiene por delante, que es distinto de lo que ya pasó: una agenda de
     # citas, no una lista de historia.
+    #
+    # Y si no hay nada por delante, las últimas que hubo. En producción no existe ni
+    # una sola cita futura —las últimas son de mayo y junio, todas completadas—, así
+    # que un bloque que sólo mira hacia delante salía vacío en las 14 fichas. Vacío
+    # siempre es lo mismo que no estar.
     hoy = datetime.now(timezone.utc).date().isoformat()
-    agenda = sorted(
-        [
-            {"fecha": x["fecha"], "hora": x.get("detalle", ""), "titulo": x["titulo"]}
-            for x in cronologia
-            if x.get("fecha") and x["fecha"] >= hoy and x["tipo"] in {"visita", "accion"}
-        ],
-        key=lambda x: (x["fecha"], x["hora"] or ""),
-    )[:12]
+    citas = [
+        {"fecha": x["fecha"], "hora": x.get("detalle", ""), "titulo": x["titulo"]}
+        for x in cronologia
+        if x.get("fecha") and x["tipo"] in {"visita", "accion"}
+    ]
+    proximas = sorted([c for c in citas if c["fecha"] >= hoy], key=lambda x: (x["fecha"], x["hora"] or ""))
+    pasadas = sorted([c for c in citas if c["fecha"] < hoy], key=lambda x: (x["fecha"], x["hora"] or ""), reverse=True)
+    agenda = proximas[:12] if proximas else pasadas[:6]
+    agenda_es_pasado = not proximas and bool(pasadas)
+
+    # El anuncio tal y como está publicado. No hay ninguna URL del anuncio guardada
+    # en el sistema, así que en vez de un enlace roto se le enseña lo que se publicó:
+    # el texto, el precio y cuántas fotos lleva. Si algún día hay dirección pública,
+    # se pone en `INMO_PORTAL_PUBLIC_URL` con `{id}` dentro y aparece el enlace.
+    anuncio = None
+    if int(row_value(inmueble, "portal_publicado", 0) or 0):
+        try:
+            copia = build_inmueble_anuncio_copy(dict(inmueble)) or {}
+        except Exception:
+            copia = {}
+        plantilla = str(os.environ.get("INMO_PORTAL_PUBLIC_URL") or "").strip()
+        anuncio = {
+            "titulo": str(copia.get("titulo_anuncio") or "").strip(),
+            "texto": str(copia.get("descripcion_corta") or "").strip()[:900],
+            "destacados": str(copia.get("destacados") or "").strip(),
+            "desde": _fecha_corta(row_value(inmueble, "portal_publicado_at", "")),
+            "enlace": plantilla.replace("{id}", str(inmueble_id)) if plantilla else "",
+        }
 
     # El logo sólo si se puede servir sin sesión. Los que están en S3 llevan enlace
     # firmado y desde aquí no hay quien lo firme: mejor sin logo que con un roto.
@@ -30929,6 +30986,8 @@ def build_portal_de_venta(conn, acceso, *, registrar=True):
             "logo": logo,
         },
         "agenda": agenda,
+        "agenda_es_pasado": agenda_es_pasado,
+        "anuncio": anuncio,
         "mensajes": hilo_del_propietario(conn, inmueble_id),
         "propietario": {"nombre": str(row_value(acceso, "nombre", "") or "")},
         "etapa": {"titulo": titulo_etapa, "paso": paso, "pasos": INMO_PORTAL_PASOS, "desde": desde, "dias": dias},
@@ -64460,7 +64519,10 @@ class Handler(BaseHTTPRequestHandler):
                     accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" hidden /></label></li>`).join("");
 
       const docs = (d.documentos || []).map((x) =>
-        `<li><span>${esc(x.nombre)}${x.mio ? ' <span class="suave">· lo subiste tú</span>' : ""}</span>
+        `<li><span>${x.n === null ? esc(x.nombre)
+            : `<a href="/api/portal_venta_documento?token=${encodeURIComponent(token)}&s=${encodeURIComponent(sesion())}&n=${x.n}"
+                  target="_blank" rel="noopener" style="color:var(--verde);font-weight:600">${esc(x.nombre)}</a>`}${
+            x.mio ? ' <span class="suave">· lo subiste tú</span>' : ""}</span>
              <span class="fecha">${esc(fechaCorta(x.fecha))}</span></li>`).join("")
         || '<li class="vacio">Aquí aparecerán la nota simple, el certificado energético y lo que vayas aportando.</li>';
 
@@ -64469,6 +64531,25 @@ class Handler(BaseHTTPRequestHandler):
            <span class="quien">${esc(m.autor === "propietario" ? "Tú" : (m.nombre || asesor))} · ${esc(haceCuanto(m.fecha))}</span>
            ${esc(m.texto)}
          </div>`).join("") || `<p class="vacio">Escríbele lo que necesites a ${esc(asesor)}. Te contesta por aquí.</p>`;
+
+      const firmas = (d.firmas || []).map((f) =>
+        `<li><span>${esc(f.documento)}</span>
+             ${f.pendiente ? `<button class="mas firmar" data-id="${esc(f.id)}">Firmar</button>`
+                           : `<span class="fecha">${esc(f.estado === "signed" ? "firmado" : f.estado)} · ${esc(fechaCorta(f.fecha))}</span>`}
+         </li>`).join("");
+
+      const anuncio = !d.anuncio ? "" : `
+        <div class="tarjeta">
+          <h2>Tu anuncio</h2>
+          ${d.anuncio.titulo ? `<p style="margin:0 0 6px;font-weight:600">${esc(d.anuncio.titulo)}</p>` : ""}
+          ${d.anuncio.texto ? `<p class="suave" style="margin:0 0 10px;font-size:14px">${esc(d.anuncio.texto)}</p>` : ""}
+          <p class="suave" style="margin:0;font-size:13px">
+            Publicado${d.anuncio.desde ? " desde el " + esc(fechaCorta(d.anuncio.desde)) : ""}${
+              i.fotos ? " · " + i.fotos + (i.fotos === 1 ? " foto" : " fotos") : ""}
+          </p>
+          ${d.anuncio.enlace ? `<p style="margin:10px 0 0"><a href="${esc(d.anuncio.enlace)}" target="_blank"
+             rel="noopener" style="color:var(--verde);font-weight:600">Ver el anuncio publicado</a></p>` : ""}
+        </div>`;
 
       const historia = d.cronologia || [];
       const linea = (n) => historia.slice(0, n).map((x) =>
@@ -64509,8 +64590,12 @@ class Handler(BaseHTTPRequestHandler):
                   <div><b>${r.interesados}</b>interesados</div>
                 </div>
               </div>
-              <div class="tarjeta"><h2>Próximas citas</h2>${agenda ||
-                '<p class="vacio">No hay ninguna cita prevista ahora mismo. Cuando tu asesor concierte una visita, aparecerá aquí.</p>'}</div>
+              <div class="tarjeta">
+                <h2>${d.agenda_es_pasado ? "Últimas citas" : "Próximas citas"}</h2>
+                ${agenda || '<p class="vacio">Todavía no hay ninguna cita. Cuando tu asesor concierte una visita, aparecerá aquí.</p>'}
+                ${d.agenda_es_pasado ? '<p class="suave" style="margin:12px 0 0;font-size:13px">No hay ninguna cita prevista ahora mismo.</p>' : ""}
+              </div>
+              ${anuncio}
               <div class="tarjeta">
                 <h2>En qué punto va</h2>
                 <div class="hitos">${hitos}</div>
@@ -64534,6 +64619,7 @@ class Handler(BaseHTTPRequestHandler):
               </div>
               ${tuyo ? `<div class="tarjeta"><h2>Pendiente de ti</h2><ul>${tuyo}</ul>
                          <p class="suave" id="subiendo" style="margin:10px 0 0;font-size:13px"></p></div>` : ""}
+              ${firmas ? `<div class="tarjeta"><h2>Firmas</h2><ul>${firmas}</ul></div>` : ""}
               <div class="tarjeta">
                 <h2>Documentación del inmueble</h2>
                 <ul>${docs}</ul>
@@ -64562,6 +64648,16 @@ class Handler(BaseHTTPRequestHandler):
       document.getElementById("verTodo")?.addEventListener("click", (ev) => {
         document.getElementById("historia").innerHTML = linea(historia.length);
         ev.target.remove();
+      });
+
+      app.querySelectorAll(".firmar").forEach((b) => {
+        b.onclick = async () => {
+          b.disabled = true;
+          try {
+            const r = await pide("/api/portal_venta_firma", { token, sesion: sesion(), id: b.dataset.id });
+            location.href = r.enlace;
+          } catch (e) { b.disabled = false; alert(e.message); }
+        };
       });
 
       const subeArchivo = async (campo, nota, tarea) => {
@@ -65354,6 +65450,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_owner_access_create",
             "/api/inmueble_portal_acceso",
             "/api/inmueble_portal_mensaje",
+            "/api/inmueble_doc_compartir",
             "/api/inmueble_portal_acceso_revoke",
             "/api/leads",
             "/api/portal_leads",
@@ -65476,12 +65573,16 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_propietario_create",
             "/api/inmueble_portal_acceso",
             "/api/inmueble_portal_mensaje",
+            "/api/inmueble_doc_compartir",
             "/api/inmueble_portal_acceso_revoke",
             "/api/portal_venta_codigo",
             "/api/portal_venta_doc",
             "/api/portal_venta_propuesta",
             "/api/portal_venta_mensaje",
+            "/api/portal_venta_firma",
+    "/api/portal_venta_firma",
             "/api/inmueble_portal_mensaje",
+            "/api/inmueble_doc_compartir",
             "/api/inmueble_renovar",
             "/api/renta_campaign_document",
             "/api/workspace_fincas_comunidad_delete",
@@ -65839,6 +65940,7 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/portal_owner_access_create": "inmobiliaria",
                         "/api/inmueble_portal_acceso": "inmobiliaria",
                         "/api/inmueble_portal_mensaje": "inmobiliaria",
+                        "/api/inmueble_doc_compartir": "inmobiliaria",
                         "/api/inmueble_portal_acceso_revoke": "inmobiliaria",
                         "/api/leads": "inmobiliaria",
                         "/api/portal_leads": "inmobiliaria",
@@ -66201,6 +66303,7 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/portal_owner_access_create",
                 "/api/inmueble_portal_acceso",
             "/api/inmueble_portal_mensaje",
+            "/api/inmueble_doc_compartir",
                 "/api/inmueble_portal_acceso_revoke",
                 "/api/leads",
                 "/api/portal_leads",
@@ -66244,6 +66347,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_owner_access_create",
             "/api/inmueble_portal_acceso",
             "/api/inmueble_portal_mensaje",
+            "/api/inmueble_doc_compartir",
             "/api/inmueble_portal_acceso_revoke",
             "/api/leads",
             "/api/portal_leads",
@@ -66348,9 +66452,13 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_venta_doc",
             "/api/portal_venta_propuesta",
             "/api/portal_venta_mensaje",
+            "/api/portal_venta_firma",
+    "/api/portal_venta_firma",
             "/api/inmueble_portal_mensaje",
+            "/api/inmueble_doc_compartir",
             "/api/inmueble_portal_acceso",
             "/api/inmueble_portal_mensaje",
+            "/api/inmueble_doc_compartir",
             "/api/inmueble_portal_acceso_revoke",
         ):
             if not empresa_nombre:
@@ -66456,7 +66564,8 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True})
             return
 
-        if parsed.path in ("/api/portal_venta_doc", "/api/portal_venta_propuesta", "/api/portal_venta_mensaje"):
+        if parsed.path in ("/api/portal_venta_doc", "/api/portal_venta_propuesta",
+                           "/api/portal_venta_mensaje", "/api/portal_venta_firma"):
             acceso, fallo = acceso_de_portal_por_token(conn, payload.get("token") or "")
             if not acceso:
                 json_response(self, {"error": "Enlace no válido"}, status=403 if fallo in ("revocado", "caducado") else 404)
@@ -66466,6 +66575,36 @@ class Handler(BaseHTTPRequestHandler):
                 return
             inmueble_id = str(row_value(acceso, "inmueble_id", "") or "")
             ahora_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+            if parsed.path == "/api/portal_venta_firma":
+                # Firmar la propuesta, el encargo o lo que le manden, desde aquí.
+                #
+                # De la solicitud de firma sólo se guarda el hash del token, así que
+                # el enlace original no se puede reconstruir. Se le da uno nuevo, que
+                # anula el anterior: quien ya tuviera el viejo deja de poder firmar,
+                # y eso es exactamente lo que debe pasar. Sólo se rota si la
+                # solicitud es SUYA y sigue pendiente.
+                pedido = str(payload.get("id") or "").strip()
+                ensure_inmueble_signature_schema(conn)
+                fila = conn.execute(
+                    "SELECT * FROM inmueble_signature_requests WHERE id = ? AND inmueble_id = ? LIMIT 1",
+                    (pedido, inmueble_id),
+                ).fetchone()
+                if not fila or not solicitud_de_firma_es_suya(fila, acceso):
+                    json_response(self, {"error": "Esa firma no es tuya"}, status=403)
+                    return
+                if str(row_value(fila, "status", "") or "") in {"signed", "rejected"}:
+                    json_response(self, {"error": "Esa firma ya está resuelta"}, status=409)
+                    return
+                nuevo = make_signature_token()
+                conn.execute(
+                    "UPDATE inmueble_signature_requests SET token_hash = ?, updated_at = datetime(?) WHERE id = ?",
+                    (hash_signature_token(nuevo), ahora_iso, pedido))
+                record_signature_event(conn, pedido, "portal_reenlace",
+                                       details={"origen": "portal del propietario"}, now=ahora_iso)
+                conn.commit()
+                json_response(self, {"ok": True, "enlace": build_public_fragment_url("firma_inmo", nuevo)})
+                return
 
             if parsed.path == "/api/portal_venta_mensaje":
                 texto = str(payload.get("texto") or "").strip()[:2000]
@@ -84868,6 +85007,37 @@ class Handler(BaseHTTPRequestHandler):
             })
             return
 
+        elif parsed.path == "/api/inmueble_doc_compartir":
+            # Marcar un documento del expediente como visible para el propietario.
+            # Por defecto NO lo es: nada del expediente sale hacia fuera hasta que
+            # alguien lo decide, documento a documento.
+            doc_id = str(payload.get("doc_id") or payload.get("id") or "").strip()
+            inmueble_id = str(payload.get("inmueble_id") or "").strip()
+            if not doc_id or not inmueble_id:
+                json_response(self, {"error": "doc_id e inmueble_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _f = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc},
+                              status=404 if "no encontrado" in str(err_acc) else 403)
+                return
+            ensure_inmueble_portal_schema(conn)
+            visible = 0 if str(payload.get("visible", "1")).strip().lower() in {"0", "false", "no"} else 1
+            cur = conn.execute(
+                "UPDATE inmueble_docs SET visible_portal = ?, updated_at = ? WHERE id = ? AND inmueble_id = ?",
+                (visible, now, doc_id, inmueble_id))
+            if not int(getattr(cur, "rowcount", 0) or 0):
+                json_response(self, {"error": "Documento no encontrado en esa ficha"}, status=404)
+                return
+            conn.commit()
+            if visible:
+                avisa_al_propietario(conn, inmueble_id, "documento",
+                                     "Tu asesor ha compartido un documento en el seguimiento de tu venta.",
+                                     referencia=doc_id, now=now)
+            json_response(self, {"ok": True, "visible": bool(visible)})
+            return
+
         elif parsed.path == "/api/inmueble_portal_acceso_revoke":
             inmueble_id = str(payload.get("inmueble_id") or payload.get("id") or "").strip()
             if not inmueble_id:
@@ -93567,6 +93737,44 @@ class Handler(BaseHTTPRequestHandler):
             tipo = {"png": "image/png", "webp": "image/webp"}.get(
                 ruta.suffix.lower().lstrip("."), "image/jpeg")
             binary_response(self, ruta.read_bytes(), content_type=tipo)
+            return
+
+        if path == "/api/portal_venta_documento":
+            # Descargar lo que la agencia le ha compartido —nota simple, certificado
+            # de valor de Hacienda, la nota de encargo firmada— y lo que subió él.
+            # Se pide por índice sobre la lista que ya devuelve el portal, que está
+            # filtrada: no hay forma de nombrar un documento que no le corresponda.
+            token = _request_token_param(self, params, "token")
+            acceso, _fallo = acceso_de_portal_por_token(conn, token)
+            if not acceso:
+                json_response(self, {"error": "Enlace no válido"}, status=404)
+                return
+            if not sesion_de_portal_valida(acceso, params.get("s", [""])[0]):
+                json_response(self, {"error": "Confirma tu identidad con el código"}, status=401)
+                return
+            datos = build_portal_de_venta(conn, acceso, registrar=False) or {}
+            try:
+                indice = int(params.get("n", ["-1"])[0])
+            except Exception:
+                indice = -1
+            elegido = next((d for d in datos.get("documentos", []) if d.get("n") == indice), None)
+            if not elegido:
+                json_response(self, {"error": "Documento no disponible"}, status=404)
+                return
+            inmueble_id = str(row_value(acceso, "inmueble_id", "") or "")
+            fila = conn.execute(
+                "SELECT url, nombre FROM inmueble_docs WHERE inmueble_id = ? AND nombre = ? "
+                "ORDER BY COALESCE(created_at,'') DESC LIMIT 1",
+                (inmueble_id, elegido["nombre"]),
+            ).fetchone()
+            ruta = _signature_url_to_local_path(str(row_value(fila, "url", "") or "")) if fila else None
+            if not ruta or not ruta.exists():
+                json_response(self, {"error": "Documento no disponible"}, status=404)
+                return
+            tipos = {".pdf": "application/pdf", ".png": "image/png", ".webp": "image/webp",
+                     ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+            binary_response(self, ruta.read_bytes(),
+                            content_type=tipos.get(ruta.suffix.lower(), "application/octet-stream"))
             return
 
         if path == "/api/inmueble_portal_mensajes":

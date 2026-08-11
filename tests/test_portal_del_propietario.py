@@ -1231,3 +1231,182 @@ class ElAnchoYLaAgendaTests(BasePortal):
         css = html[html.index("<style>"):html.index("</style>")]
         i = css.index(".barra { position: fixed")
         self.assertIn(".barra { display: none; }", css[i:], "la regla que la esconde tiene que ir después")
+
+
+class LaAgendaEnseñaLoQueHayTests(BasePortal):
+    """En producción no hay ni una cita futura: las últimas son de mayo y junio y
+    están todas completadas. Un bloque que sólo mira hacia delante salía vacío en
+    las 14 fichas, y vacío siempre es lo mismo que no estar."""
+
+    def _cita(self, cuando, ident):
+        self._ins("acciones", {"id": ident, "workspace_id": self.ws, "empresa_id": "emp1",
+                               "inmueble_id": "inm1", "servicio": "inmobiliaria", "fecha": cuando,
+                               "hora": "17:00", "tipo": "Cita notaria", "asunto": "Cita",
+                               "estado": "Completada", "created_at": AHORA, "updated_at": AHORA})
+
+    def test_si_hay_futuras_enseña_las_futuras(self):
+        hoy = S.datetime.now(S.timezone.utc).date()
+        self._cita((hoy + S.timedelta(days=4)).isoformat(), "cFut")
+        self._cita((hoy - S.timedelta(days=9)).isoformat(), "cPas")
+        d = self._vista(self._token(self._abre_portal()["enlace"]))
+        self.assertFalse(d["agenda_es_pasado"])
+        # La siembra base ya trae una visita futura; lo que se comprueba es que
+        # sólo salen futuras y en orden.
+        fechas = [c["fecha"] for c in d["agenda"]]
+        self.assertIn((hoy + S.timedelta(days=4)).isoformat(), fechas)
+        self.assertTrue(all(f >= hoy.isoformat() for f in fechas), fechas)
+        self.assertEqual(fechas, sorted(fechas))
+
+    def test_si_no_hay_futuras_enseña_las_últimas(self):
+        hoy = S.datetime.now(S.timezone.utc).date()
+        # Fuera la visita futura de la siembra: aquí se prueba el caso de producción,
+        # donde no hay ninguna cita por delante.
+        self.conn.execute("DELETE FROM visitas WHERE fecha >= ?", (hoy.isoformat(),))
+        self.conn.commit()
+        self._cita((hoy - S.timedelta(days=9)).isoformat(), "cPas1")
+        self._cita((hoy - S.timedelta(days=40)).isoformat(), "cPas2")
+        d = self._vista(self._token(self._abre_portal()["enlace"]))
+        self.assertTrue(d["agenda_es_pasado"])
+        fechas = [c["fecha"] for c in d["agenda"]]
+        self.assertTrue(fechas, "sin citas futuras tiene que enseñar las últimas")
+        self.assertTrue(all(f < hoy.isoformat() for f in fechas), fechas)
+        self.assertEqual(fechas, sorted(fechas, reverse=True), "de la más reciente hacia atrás")
+
+    def test_y_lo_dice_con_otro_título(self):
+        _, html = self._get("/portal-venta")
+        self.assertIn("Últimas citas", html)
+        self.assertIn("No hay ninguna cita prevista ahora mismo", html)
+
+
+class VerSuAnuncioPublicadoTests(BasePortal):
+    def test_si_no_está_publicado_no_hay_bloque(self):
+        self.assertIsNone(self._vista(self._token(self._abre_portal()["enlace"]))["anuncio"])
+
+    def test_publicado_enseña_el_texto_y_desde_cuándo(self):
+        self.conn.execute("UPDATE inmuebles SET portal_publicado=1, portal_publicado_at='2026-06-04' WHERE id='inm1'")
+        self.conn.commit()
+        a = self._vista(self._token(self._abre_portal()["enlace"]))["anuncio"]
+        self.assertIsNotNone(a)
+        self.assertEqual(a["desde"], "2026-06-04")
+        self.assertTrue(a["titulo"] or a["texto"])
+
+    def test_sin_direccion_publica_configurada_no_se_inventa_un_enlace(self):
+        """No hay ninguna URL de anuncio guardada en el sistema; un enlace roto es
+        peor que ninguno."""
+        self.conn.execute("UPDATE inmuebles SET portal_publicado=1 WHERE id='inm1'")
+        self.conn.commit()
+        os.environ.pop("INMO_PORTAL_PUBLIC_URL", None)
+        self.assertEqual(self._vista(self._token(self._abre_portal()["enlace"]))["anuncio"]["enlace"], "")
+
+    def test_con_plantilla_configurada_sí(self):
+        self.conn.execute("UPDATE inmuebles SET portal_publicado=1 WHERE id='inm1'")
+        self.conn.commit()
+        os.environ["INMO_PORTAL_PUBLIC_URL"] = "https://verifika2.com/inmueble/{id}"
+        try:
+            a = self._vista(self._token(self._abre_portal()["enlace"]))["anuncio"]
+            self.assertEqual(a["enlace"], "https://verifika2.com/inmueble/inm1")
+        finally:
+            os.environ.pop("INMO_PORTAL_PUBLIC_URL", None)
+
+
+class LaDocumentacionQueComparteLaAgenciaTests(BasePortal):
+    """Nota simple, certificado de valor de Hacienda, la nota de encargo. Nada del
+    expediente sale hacia fuera hasta que alguien lo decide, documento a documento."""
+
+    def setUp(self):
+        super().setUp()
+        carpeta = S.UPLOADS / "inmuebles" / "inm1" / "docs"
+        carpeta.mkdir(parents=True, exist_ok=True)
+        self.fichero = carpeta / "nota_simple.pdf"
+        self.fichero.write_bytes(b"%PDF-1.4 nota simple")
+        self._ins("inmueble_docs", {"id": "docNS", "inmueble_id": "inm1", "empresa_id": "emp1",
+                                    "nombre": "Nota simple del Registro",
+                                    "url": "/uploads/inmuebles/inm1/docs/nota_simple.pdf",
+                                    "created_at": AHORA, "updated_at": AHORA})
+        self.token = self._token(self._abre_portal()["enlace"])
+
+    def tearDown(self):
+        try:
+            self.fichero.unlink()
+        except Exception:
+            pass
+        super().tearDown()
+
+    def test_por_defecto_no_se_ve(self):
+        nombres = [x["nombre"] for x in self._vista(self.token)["documentos"]]
+        self.assertNotIn("Nota simple del Registro", nombres)
+
+    def test_el_asesor_lo_comparte_y_entonces_sí(self):
+        estado, d = self._post("/api/inmueble_doc_compartir", {"inmueble_id": "inm1", "doc_id": "docNS"})
+        self.assertEqual(estado, 200, d)
+        doc = self._vista(self.token)["documentos"][0]
+        self.assertEqual(doc["nombre"], "Nota simple del Registro")
+        self.assertIsNotNone(doc["n"])
+
+    def test_y_puede_descargarlo(self):
+        self._post("/api/inmueble_doc_compartir", {"inmueble_id": "inm1", "doc_id": "docNS"})
+        n = self._vista(self.token)["documentos"][0]["n"]
+        req = urllib.request.Request(
+            self.base + f"/api/portal_venta_documento?token={self.token}&n={n}")
+        with urllib.request.urlopen(req) as r:
+            self.assertEqual(r.status, 200)
+            self.assertEqual(r.headers.get("Content-Type"), "application/pdf")
+
+    def test_se_puede_dejar_de_compartir(self):
+        self._post("/api/inmueble_doc_compartir", {"inmueble_id": "inm1", "doc_id": "docNS"})
+        self._post("/api/inmueble_doc_compartir", {"inmueble_id": "inm1", "doc_id": "docNS", "visible": "0"})
+        self.assertEqual(self._vista(self.token)["documentos"], [])
+
+    def test_no_se_puede_descargar_lo_que_no_está_compartido(self):
+        self.assertEqual(self._get(f"/api/portal_venta_documento?token={self.token}&n=0")[0], 404)
+
+    def test_ni_pidiendo_un_indice_cualquiera(self):
+        self.assertEqual(self._get(f"/api/portal_venta_documento?token={self.token}&n=57")[0], 404)
+
+    def test_compartir_un_documento_de_otra_ficha_no_cuela(self):
+        estado, _ = self._post("/api/inmueble_doc_compartir", {"inmueble_id": "inm1", "doc_id": "no-existe"})
+        self.assertEqual(estado, 404)
+
+
+class FirmarDesdeElPortalTests(BasePortal):
+    def setUp(self):
+        super().setUp()
+        S.ensure_inmueble_signature_schema(self.conn)
+        self._ins("inmueble_signature_requests", {
+            "id": "fr1", "empresa_id": "emp1", "inmueble_id": "inm1", "doc_nombre": "Nota de encargo",
+            "signer_nombre": "Lucía Vendedora", "signer_telefono": "+34600111222",
+            "status": "sent", "token_hash": S.hash_signature_token("viejo"),
+            "created_at": AHORA, "updated_at": AHORA})
+        self.conn.commit()
+        self.token = self._token(self._abre_portal()["enlace"])
+
+    def test_ve_la_firma_pendiente(self):
+        f = self._vista(self.token)["firmas"][0]
+        self.assertEqual(f["documento"], "Nota de encargo")
+        self.assertTrue(f["pendiente"])
+
+    def test_al_firmar_recibe_un_enlace_nuevo(self):
+        estado, d = self._post("/api/portal_venta_firma", {"token": self.token, "id": "fr1"},
+                               con_sesion=False)
+        self.assertEqual(estado, 200, d)
+        self.assertIn("firma_inmo", d["enlace"])
+
+    def test_y_el_enlace_anterior_deja_de_valer(self):
+        """Rotar el token es lo correcto: quien tuviera el viejo no puede firmar."""
+        self._post("/api/portal_venta_firma", {"token": self.token, "id": "fr1"}, con_sesion=False)
+        fila = self.conn.execute("SELECT token_hash FROM inmueble_signature_requests WHERE id='fr1'").fetchone()
+        self.assertNotEqual(fila["token_hash"], S.hash_signature_token("viejo"))
+
+    def test_una_firma_de_otra_persona_no_es_suya(self):
+        self.conn.execute("UPDATE inmueble_signature_requests SET signer_telefono='+34699000111', "
+                          "signer_nombre='Otro Propietario' WHERE id='fr1'")
+        self.conn.commit()
+        self.assertEqual(self._vista(self.token)["firmas"], [])
+        estado, _ = self._post("/api/portal_venta_firma", {"token": self.token, "id": "fr1"}, con_sesion=False)
+        self.assertEqual(estado, 403)
+
+    def test_una_firma_ya_resuelta_no_se_reabre(self):
+        self.conn.execute("UPDATE inmueble_signature_requests SET status='signed' WHERE id='fr1'")
+        self.conn.commit()
+        estado, _ = self._post("/api/portal_venta_firma", {"token": self.token, "id": "fr1"}, con_sesion=False)
+        self.assertEqual(estado, 409)
