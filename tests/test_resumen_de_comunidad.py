@@ -258,10 +258,14 @@ class ElPresupuestoEnsenaElPrecioSinBajarTests(unittest.TestCase):
         ]
         self.assertNotIn('name="estado"', bloque_comunidad)
 
-    def test_el_texto_de_ayuda_dice_para_que_sirve_cada_importe(self):
+    def test_el_texto_de_ayuda_dice_para_que_sirve_el_precio(self):
+        """Eran cuatro campos con su explicación cada uno —«la calcula la tarifa, no
+        se edita»— y tres de ellos `readonly` repitiendo el resumen de arriba. Queda
+        el único que se toca, y tiene que decir qué pasa si se deja en blanco."""
         formulario = self._formulario()
-        self.assertIn("La calcula la tarifa. No se edita.", formulario)
-        self.assertIn("Solo si quieres cerrar otro precio.", formulario)
+        self.assertIn("Precio pactado", formulario)
+        self.assertIn("Vacío: manda la tarifa", formulario)
+        self.assertIn("Solo si se ha cerrado un importe distinto", formulario)
 
 
 class LoQueNoDecideElPrecioVaAlFinalPlegadoTests(unittest.TestCase):
@@ -296,9 +300,13 @@ class LoQueNoDecideElPrecioVaAlFinalPlegadoTests(unittest.TestCase):
                 self.assertIn("presu-plegable", formulario[max(0, i - 500): i])
         self.assertNotIn("Foto del edificio y carta de presentación", formulario)
 
-    def test_los_plegables_van_despues_de_los_importes(self):
+    def test_los_plegables_van_despues_del_precio(self):
+        """La sección se llamaba «Importes» cuando eran cuatro campos; ahora es uno."""
         formulario = self._formulario()
-        self.assertLess(formulario.index("Importes"), formulario.index("presu-plegable"))
+        self.assertLess(
+            formulario.index('<div class="form-grid-section">Precio</div>'),
+            formulario.index("presu-plegable"),
+        )
 
     def test_se_abre_solo_si_ya_tiene_datos(self):
         """Plegar sirve para acortar, no para esconder lo que ya está escrito."""

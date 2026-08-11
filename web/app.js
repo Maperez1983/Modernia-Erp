@@ -27424,9 +27424,10 @@ const applyWorkspaceFincasBudgetQuickCommunity = (communityId) => {
       workspaceFincasBudgetBuildingPhotoPreview.classList.toggle("hidden", !src);
     }
   }
+  // Se limpia el precio pactado: manda la tarifa salvo que se escriba otro.
   try {
     const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
-    if (subtotalInput) delete subtotalInput.dataset.manual;
+    if (subtotalInput) subtotalInput.value = "";
   } catch (e) {}
   syncWorkspaceFincasBudgetQuickComputed();
   syncWorkspaceFincasBudgetMap();
@@ -27469,9 +27470,23 @@ const applyWorkspaceFincasBudgetQuickBudget = (budgetId) => {
   try {
     syncWorkspaceFincasBudgetBranding();
   } catch (e) {}
+  // El precio pactado se recupera si lo había. Se compara contra la tarifa del día en
+  // que se guardó (`cuota_sugerida`), no contra la de hoy: que alguien haya subido el
+  // precio por vivienda desde entonces no convierte el presupuesto en un pacto. Y con
+  // trabajos puntuales de por medio no se toca, porque el subtotal los lleva sumados y
+  // no hay forma de distinguir el pacto del puntual. Antes se descartaba siempre: abrir
+  // uno cerrado en 140 € y volver a guardarlo lo devolvía al precio de tarifa.
   try {
     const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
-    if (subtotalInput) delete subtotalInput.dataset.manual;
+    if (subtotalInput) {
+      const guardado = Math.round(parseMoneyValue(budget.subtotal) * 100) / 100;
+      const tarifaEntonces = Math.round(parseMoneyValue(calc.cuota_sugerida) * 100) / 100;
+      const hayPuntuales = Array.isArray(calc.tarifas_fijas) && calc.tarifas_fijas.length > 0;
+      subtotalInput.value =
+        !hayPuntuales && guardado > 0 && tarifaEntonces > 0 && Math.abs(guardado - tarifaEntonces) >= 0.01
+          ? formatEurosCompact(guardado)
+          : "";
+    }
   } catch (e) {}
   syncWorkspaceFincasBudgetQuickComputed();
   syncWorkspaceFincasBudgetMap();
@@ -27525,9 +27540,10 @@ const resetWorkspaceFincasBudgetQuickForm = () => {
   set("num_aparcamientos", 0);
   set("edificio_foto_key", "");
   set("carta_presentacion", "");
+  // Se limpia el precio pactado: manda la tarifa salvo que se escriba otro.
   try {
     const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
-    if (subtotalInput) delete subtotalInput.dataset.manual;
+    if (subtotalInput) subtotalInput.value = "";
   } catch (e) {}
   if (workspaceFincasBudgetBuildingPhotoPreview) {
     workspaceFincasBudgetBuildingPhotoPreview.removeAttribute("src");
@@ -95653,8 +95669,11 @@ try {
         .filter(Boolean)
         .join("\n\n");
       alert(`Ficha suprimida.\n\n${detalle}`);
+      // `loadClientes` no existe: la función es `loadClientesList`. El `catch` se comía
+      // el ReferenceError, así que tras suprimir una ficha el listado se quedaba con la
+      // ficha borrada a la vista hasta recargar la página.
       try {
-        loadClientes();
+        loadClientesList();
       } catch (e) {}
       try {
         openClienteDetail(clienteId);

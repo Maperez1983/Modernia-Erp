@@ -203,48 +203,60 @@ class LasUnidadesMuevenElPrecioEnPantallaTests(unittest.TestCase):
         """Que no vuelva: la lista a mano fue exactamente el fallo."""
         self.assertNotIn('["num_vecinos", "num_locales", "num_aparcamientos"]', APP)
 
-    def test_el_resumen_cuenta_los_trasteros(self):
-        i = APP.index("workspaceFincasBudgetHero.innerHTML")
-        cuerpo = APP[i: i + 1800]
-        self.assertIn("<span>Trasteros</span>", cuerpo)
-
-    def test_el_pie_no_recita_precios_a_mano(self):
-        """Recitaba los precios de memoria —y sin los trasteros—, sin enterarse de que
-        la tarifa ya se edita desde la pantalla sin desplegar."""
-        i = APP.index("workspaceFincasBudgetHero.innerHTML")
-        cuerpo = APP[i: i + 1800]
-        self.assertNotIn("por vivienda +", cuerpo)
-        self.assertIn("describeFincasTarifaVigente()", cuerpo)
+    def test_la_tarifa_que_se_aplica_se_lee_en_pantalla(self):
+        """El pie recitaba los precios de memoria —y sin los trasteros—, sin enterarse
+        de que la tarifa ya se edita sin desplegar. Ahora sale de la que está en uso."""
+        self.assertIn("data-resumen-tarifa", HTML)
+        i = APP.index("const describeFincasTarifaVigente")
+        cuerpo = APP[i: APP.index("\nconst ", i + 10)]
+        self.assertIn("FINCAS_TARIFA_UNIDADES[item?.clave]", cuerpo)
+        self.assertIn("fincasTarifaActual", cuerpo)
 
 
-class PasarPorElCampoDePrecioNoLoCongelaTests(unittest.TestCase):
+class ElPrecioPactadoEsUnSoloCampoTests(unittest.TestCase):
     """Tabular por el formulario congelaba el precio, y el PDF lo disimulaba.
 
-    El `blur` del subtotal marcaba el campo como «precio pactado a mano» siempre que
-    tuviera algo escrito — y siempre lo tiene, porque lo rellena el propio cálculo—.
-    Bastaba con pasar por encima. A partir de ahí las unidades que se escribieran ya
-    no movían el importe, pero sí el desglose, así que el documento listaba los
-    trasteros y los aparcamientos y luego los borraba con un «ajuste comercial
-    acordado» que nadie había acordado.
+    Había cuatro campos de importe seguidos —base sugerida, subtotal, IVA y total— de
+    los que tres eran `readonly` y repetían la barra de resumen. El editable llevaba un
+    «déjalo vacío para usar la base» imposible de cumplir, porque lo rellenaba el propio
+    cálculo. Para saber si el importe lo había escrito una persona o el programa hacía
+    falta una máquina de estados (`dataset.manual`, `manualSource`), y el `blur` marcaba
+    el campo como escrito a mano solo con pasar por encima.
 
-    El del total era peor: es un campo `readonly`, nunca puede haberlo escrito nadie.
+    Desde ahí el precio se quedaba congelado: las unidades que se teclearan después
+    movían el desglose pero no el importe, y el PDF cuadraba la diferencia con un
+    «ajuste comercial acordado» que nadie había acordado. El del total era todavía
+    peor: `readonly`, así que nunca pudo haberlo escrito nadie.
+
+    Ahora es un campo y significa una cosa: vacío manda la tarifa.
     """
 
-    def _cuerpo_del_blur(self, campo):
-        i = APP.index(f'{campo}.addEventListener("blur"')
-        return APP[i: APP.index("});", i)]
+    def test_ya_no_hay_maquina_de_estados(self):
+        self.assertNotIn("dataset.manual =", APP)
+        self.assertNotIn("dataset.manualSource", APP)
 
-    def test_salir_del_campo_no_lo_marca_como_manual(self):
-        for campo in ("subtotalInput", "totalInput"):
-            with self.subTest(campo=campo):
-                cuerpo = self._cuerpo_del_blur(campo)
-                self.assertNotIn('dataset.manual = "1"', cuerpo)
-                self.assertIn('dataset.manual !== "1"', cuerpo)
+    def test_solo_queda_el_campo_del_precio_pactado(self):
+        i = HTML.index('id="workspaceFincasBudgetQuickForm"')
+        formulario = HTML[i: HTML.index("</form>", i)]
+        self.assertIn('name="subtotal"', formulario)
+        for muerto in ('name="subtotal_sugerido"', 'name="impuestos"', 'name="total"'):
+            with self.subTest(campo=muerto):
+                self.assertNotIn(muerto, formulario)
 
-    def test_teclear_un_precio_si_lo_marca(self):
-        """La otra mitad: pactar un precio distinto tiene que seguir funcionando."""
-        i = APP.index('subtotalInput.addEventListener("input"')
-        self.assertIn('subtotalInput.dataset.manual = "1"', APP[i: APP.index("});", i)])
+    def test_vacio_quiere_decir_tarifa(self):
+        i = APP.index('workspaceFincasBudgetQuickForm.addEventListener("submit"')
+        cuerpo = APP[i: i + 6000]
+        self.assertIn("const pactado = String(values.subtotal", cuerpo)
+        self.assertIn("pactado ? Math.max(0, parseMoneyValue(pactado)) : suggestedSubtotal", cuerpo)
+
+    def test_al_reabrir_un_presupuesto_se_recupera_el_precio_pactado(self):
+        """Antes se descartaba: abrir uno cerrado en 140 € y volver a guardarlo lo
+        devolvía al precio de tarifa."""
+        i = APP.index("const applyWorkspaceFincasBudgetQuickBudget")
+        cuerpo = APP[i: APP.index("const applyWorkspaceFincasBudgetQuickPrefill", i)]
+        self.assertIn("tarifaEntonces", cuerpo)
+        self.assertIn("calc.cuota_sugerida", cuerpo)
+        self.assertIn("hayPuntuales", cuerpo)
 
 
 class LosPanelesDelPresupuestoCarganTests(unittest.TestCase):
@@ -264,6 +276,73 @@ class LosPanelesDelPresupuestoCarganTests(unittest.TestCase):
             with self.subTest(funcion=funcion):
                 i = APP.index(f"const {funcion} = async")
                 self.assertIn("await api(", APP[i: i + 900])
+
+
+class LosAjustesTienenSuPropiaPestanaTests(unittest.TestCase):
+    """La pestaña de presupuestos hacía tres trabajos a la vez.
+
+    Dentro del mismo formulario con el que se hace un presupuesto vivían la tabla de
+    precios, la lista del equipo y el texto del contrato de administración —un
+    `textarea` de 18 renglones—. Nada de eso es de un presupuesto: se guarda para todo
+    el workspace, como decía la propia letra pequeña. Hacer un presupuesto obligaba a
+    pasar por delante de todo ello.
+    """
+
+    def _formulario(self):
+        i = HTML.index('id="workspaceFincasBudgetQuickForm"')
+        return HTML[i: HTML.index("</form>", i)]
+
+    def _pestana_de_ajustes(self):
+        i = HTML.index('data-fincas-tab="ajustes"')
+        return HTML[i: HTML.index("\n        <div class=", i)]
+
+    def test_la_pestana_existe_y_es_navegable(self):
+        self.assertIn('data-fincas-tab-btn="ajustes"', HTML)
+        i = APP.index("const normalizeWorkspaceFincasTab")
+        self.assertIn('"ajustes"', APP[i: i + 500])
+
+    def test_los_tres_paneles_se_han_mudado(self):
+        formulario = self._formulario()
+        ajustes = self._pestana_de_ajustes()
+        for panel in ("workspaceFincasTarifaPanel",
+                      "workspaceFincasBudgetEquipoPanel",
+                      "workspaceContratoPlantillasPanel"):
+            with self.subTest(panel=panel):
+                self.assertNotIn(panel, formulario)
+                self.assertIn(panel, ajustes)
+
+    def test_lo_que_si_es_del_presupuesto_se_queda(self):
+        """La carta y la foto sí son de este presupuesto: escriben en el formulario."""
+        formulario = self._formulario()
+        self.assertIn("workspaceFincasBudgetCartaPanel", formulario)
+        self.assertIn('name="carta_presentacion"', formulario)
+        self.assertIn("workspaceFincasBudgetBuildingPhoto", formulario)
+
+    def test_al_abrir_la_pestana_se_cargan_los_tres(self):
+        i = APP.index('if (normalized === "ajustes")')
+        cuerpo = APP[i: i + 700]
+        for carga in ("cargarFincasTarifas", "cargarEquipoDeFincas", "cargarPlantillasDeContrato"):
+            with self.subTest(carga=carga):
+                self.assertIn(carga, cuerpo)
+
+
+class ElResumenEconomicoSaleUnaSolaVezTests(unittest.TestCase):
+    """Salía dos veces y con nombres distintos para la misma cifra.
+
+    Arriba, una barra pegada con «Cuota mensual» y «Base mensual»; al final del
+    formulario, otra tarjeta llamada también «Resumen económico» con «Total» y
+    «Subtotal», que son esos mismos dos números con otro nombre. Queda la de arriba,
+    que es la que distingue lo mensual de lo puntual, y se le añade el coste anual.
+    """
+
+    def test_la_tarjeta_duplicada_ya_no_esta(self):
+        self.assertNotIn("workspaceFincasBudgetHero", APP)
+        self.assertNotIn("workspaceFincasBudgetHero", HTML)
+
+    def test_la_barra_de_arriba_dice_tambien_el_coste_anual(self):
+        i = HTML.index('id="workspaceFincasBudgetResumen"')
+        barra = HTML[i: HTML.index("</div>\n", i) + 400]
+        self.assertIn('data-resumen="anual"', barra)
 
 
 class ElPdfCobraTodasLasUnidadesTests(unittest.TestCase):

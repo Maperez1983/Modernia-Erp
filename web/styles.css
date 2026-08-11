@@ -15389,6 +15389,13 @@ samp {
 .presu-resumen span { display: block; font-size: 12px; opacity: 0.7; }
 .presu-resumen strong { font-size: 19px; }
 .presu-resumen div[hidden] { display: none; }
+/* La tarifa con la que sale la cifra, a pie de barra y a lo ancho. */
+.presu-resumen .presu-resumen-tarifa {
+  grid-column: 1 / -1;
+  font-size: 12px;
+  opacity: 0.65;
+}
+.presu-resumen .presu-resumen-tarifa:empty { display: none; }
 
 /* Modo edición: tiene que verse antes de tocar nada, porque cambia lo que hace
    el botón de guardar (actualizar el existente en vez de crear otro). */
