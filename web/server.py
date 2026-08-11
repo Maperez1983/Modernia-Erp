@@ -103554,9 +103554,18 @@ class Handler(BaseHTTPRequestHandler):
                 where.append("v.inmueble_id = ?")
                 values.append(inmueble_id)
             where_clause = " AND ".join(where)
+            # Las columnas del resultado de la visita se añadieron después: se piden
+            # sólo si existen, para no romper una base que aún no las tenga.
+            ensure_visita_resultado_schema(conn)
+            campos_resultado = "".join(
+                f"v.{campo}, "
+                for campo in ("resultado", "comentario_propietario")
+                if campo in (table_columns(conn, "visitas") or set())
+            )
             rows = conn.execute(
                 f"""
                 SELECT v.id, v.fecha, v.hora, v.estado, v.asesor, v.notas,
+                       {campos_resultado}
                        v.demanda_id,
                        v.inmueble_id,
                        i.direccion AS inmueble,

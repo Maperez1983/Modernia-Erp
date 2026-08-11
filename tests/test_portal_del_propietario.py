@@ -1592,3 +1592,43 @@ class LosGraficosTests(BasePortal):
         _, html = self._get("/portal-venta")
         self.assertIn("Los cambios de precio van marcados en el mes", html)
         self.assertIn('class="meses"', html)
+
+
+class ElControlEnLaFichaTests(BasePortal):
+    """Sin un sitio donde anotarlo, el resultado de la visita no lo rellena nadie y
+    los dos gráficos nuevos se quedan vacíos para siempre."""
+
+    @staticmethod
+    def _app():
+        return (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+
+    def test_la_tabla_de_visitas_tiene_las_dos_columnas(self):
+        app = self._app()
+        self.assertIn('"resultado", "qué contarle al propietario"', app)
+
+    def test_las_opciones_son_las_mismas_que_acepta_el_servidor(self):
+        app = self._app()
+        i = app.index("const VISITA_RESULTADOS")
+        bloque = app[i:i + 700]
+        for clave in S.RESULTADOS_DE_VISITA:
+            with self.subTest(clave):
+                self.assertIn(f'"{clave}"', bloque)
+
+    def test_el_campo_avisa_de_que_lo_lee_el_propietario(self):
+        """Es OTRO campo distinto de las notas internas, y esa diferencia hay que
+        verla al escribir, no leerla en un manual."""
+        self.assertIn("Lo verá el propietario en su seguimiento", self._app())
+
+    def test_guarda_contra_el_endpoint_correcto(self):
+        self.assertIn('apiPost("/api/visita_resultado"', self._app())
+
+    def test_el_listado_de_visitas_devuelve_lo_anotado(self):
+        S.ensure_visita_resultado_schema(self.conn)
+        self.conn.execute("UPDATE visitas SET resultado='precio', comentario_propietario='Lo ven caro' WHERE id='v1'")
+        self.conn.commit()
+        estado, cuerpo = self._get(
+            f"/api/visitas?workspace_id={self.ws}&inmueble_id=inm1", con_sesion=True)
+        self.assertEqual(estado, 200, cuerpo)
+        fila = next(r for r in json.loads(cuerpo)["rows"] if r["id"] == "v1")
+        self.assertEqual(fila["resultado"], "precio")
+        self.assertEqual(fila["comentario_propietario"], "Lo ven caro")

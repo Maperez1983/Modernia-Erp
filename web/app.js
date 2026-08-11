@@ -2079,6 +2079,18 @@ const RoutingModule = window.CRMAppRouting || null;
   });
 })();
 
+// Las mismas seis opciones que acepta el servidor (`RESULTADOS_DE_VISITA`). Lista
+// cerrada a propósito: en texto libre no se puede contar, y contar es lo que
+// convierte cinco visitas en un argumento para ajustar el precio.
+const VISITA_RESULTADOS = [
+  ["interesa", "Le interesa"],
+  ["precio", "Le gusta, pero el precio le frena"],
+  ["distribucion", "Descarta por la distribución"],
+  ["zona", "Descarta por la zona"],
+  ["estado", "Descarta por el estado del inmueble"],
+  ["no_apareció", "No se presentó"],
+];
+
 const state = {
   appInitialized: false,
   authUser: null,
@@ -63732,7 +63744,10 @@ const loadInmuebleVisitas = (inmuebleId, empresaId = "") => {
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
-    ["fecha", "hora", "estado", "cliente", "asesor"].forEach((col) => {
+    // «Resultado» y «Qué contarle al propietario» son columnas nuevas: hasta ahora
+    // una visita era sólo una fecha, y lo que pregunta un vendedor después no es
+    // cuándo fue, es qué dijeron.
+    ["fecha", "hora", "estado", "cliente", "asesor", "resultado", "qué contarle al propietario"].forEach((col) => {
       const th = document.createElement("th");
       th.textContent = formatHeader(col);
       trHead.appendChild(th);
@@ -63756,6 +63771,42 @@ const loadInmuebleVisitas = (inmuebleId, empresaId = "") => {
         td.textContent = formatted === null ? "" : formatted;
         tr.appendChild(td);
       });
+
+      const guarda = (extra) => {
+        const carga = { visita_id: row.id, resultado: selResultado.value,
+                        comentario_propietario: campoComentario.value, ...extra };
+        aviso.textContent = "Guardando…";
+        apiPost("/api/visita_resultado", carga)
+          .then((res) => { aviso.textContent = res?.error ? res.error : "Guardado"; })
+          .catch((err) => { aviso.textContent = err?.message || "No se pudo guardar"; });
+      };
+
+      const tdResultado = document.createElement("td");
+      const selResultado = document.createElement("select");
+      selResultado.innerHTML = '<option value="">— sin anotar —</option>' +
+        VISITA_RESULTADOS.map((r) => `<option value="${r[0]}">${r[1]}</option>`).join("");
+      selResultado.value = row.resultado || "";
+      tdResultado.appendChild(selResultado);
+      tr.appendChild(tdResultado);
+
+      const tdComentario = document.createElement("td");
+      const campoComentario = document.createElement("input");
+      campoComentario.type = "text";
+      campoComentario.maxLength = 500;
+      // El aviso deja claro a quién le llega: es OTRO campo distinto de las notas
+      // internas, y esa diferencia hay que verla al escribir, no leerla en un manual.
+      campoComentario.placeholder = "Lo verá el propietario en su seguimiento";
+      campoComentario.value = row.comentario_propietario || "";
+      const aviso = document.createElement("span");
+      aviso.className = "muted";
+      aviso.style.cssText = "display:block;font-size:11px;margin-top:2px";
+      tdComentario.appendChild(campoComentario);
+      tdComentario.appendChild(aviso);
+      tr.appendChild(tdComentario);
+
+      selResultado.onchange = () => guarda({});
+      campoComentario.onblur = () => { if (campoComentario.value !== (row.comentario_propietario || "")) guarda({}); };
+
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
