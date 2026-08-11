@@ -93920,6 +93920,44 @@ if (compraventaCerrarBtn) {
   });
 }
 
+// Apuntar qué busca alguien tenía 14 campos y el resultado estaba en los datos: de
+// 2.261 clientes había 3 demandas, y las 3 habían entrado solas desde la web.
+// Ninguna la escribió nadie. Esto pide lo que se sabe al colgar el teléfono.
+const demandaRapidaForm = document.getElementById("demandaRapidaForm");
+const demandaRapidaStatus = document.getElementById("demandaRapidaStatus");
+if (demandaRapidaForm) {
+  demandaRapidaForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const datos = Object.fromEntries(new FormData(demandaRapidaForm).entries());
+    if (!String(datos.cliente_nombre || "").trim()) {
+      if (demandaRapidaStatus) demandaRapidaStatus.textContent = "Falta el nombre.";
+      return;
+    }
+    const boton = demandaRapidaForm.querySelector('button[type="submit"]');
+    if (boton) boton.disabled = true;
+    if (demandaRapidaStatus) demandaRapidaStatus.textContent = "Guardando…";
+    // El servidor crea el cliente si no existe, así que no hace falta darlo de alta
+    // antes: ése era otro paso que sobraba.
+    datos.empresa_nombre = resolveCrmInmoEmpresaNombre() || state.currentWorkspaceCompanyName || DASHBOARD_COMPANY;
+    datos.estado = "Activa";
+    try {
+      const res = await apiPost("/api/demandas", datos);
+      if (res?.error) throw new Error(res.error);
+      if (demandaRapidaStatus) {
+        demandaRapidaStatus.textContent = `Apuntado. ${String(datos.cliente_nombre).trim()} busca ${datos.tipo || "algo"}${datos.zona ? " en " + datos.zona : ""}.`;
+      }
+      demandaRapidaForm.reset();
+      loadCrmDemandas();
+      const scope = resolveInmoScopeParams() || {};
+      loadDemandasList(scope?.empresa_id || resolveLegacyEmpresaId(resolveCrmInmoEmpresa()));
+    } catch (err) {
+      if (demandaRapidaStatus) demandaRapidaStatus.textContent = err?.message || "No se pudo guardar.";
+    } finally {
+      if (boton) boton.disabled = false;
+    }
+  });
+}
+
 if (demandaForm) {
   demandaForm.addEventListener("submit", (event) => {
     event.preventDefault();

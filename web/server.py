@@ -88313,6 +88313,14 @@ class Handler(BaseHTTPRequestHandler):
                 if cliente_access == "forbidden":
                     json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
                     return
+            if not cliente_id and not str(payload.get("cliente_nombre") or "").strip():
+                # Una demanda sin cliente no sirve para nada: no se puede llamar a
+                # nadie, no cruza con ningún inmueble y ensucia el listado. Se
+                # rechaza aquí y no sólo en el formulario, que es lo que evita que
+                # entre por otra puerta.
+                json_response(self, {"error": "Hace falta el cliente: elige uno o escribe su nombre"},
+                              status=400)
+                return
             if not cliente_id:
                 cliente_id = ensure_cliente_for_inmobiliaria(
                     conn,

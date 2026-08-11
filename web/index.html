@@ -8632,6 +8632,50 @@
             </div>
           </div>
           <div id="estudioAltaDemanda" class="hidden">
+            <!-- Apuntar qué busca alguien tenía 14 campos, y el resultado se veía en
+                 los datos: de 2.261 clientes había 3 demandas, y las 3 habían
+                 entrado solas desde la web. Ninguna la había escrito nadie. Esto son
+                 los tres datos que se saben nada más colgar el teléfono; el resto se
+                 completa luego en el formulario de abajo, si hace falta. -->
+            <div class="form-card">
+              <h3>Apuntar qué busca</h3>
+              <p class="muted">Lo mínimo, en diez segundos. Luego se completa si hace falta.</p>
+              <form id="demandaRapidaForm">
+                <div class="form-grid">
+                  <label>
+                    Quién
+                    <input name="cliente_nombre" placeholder="Nombre y apellidos" required />
+                  </label>
+                  <label>
+                    Teléfono
+                    <input name="cliente_telefono" placeholder="Para poder llamarle" />
+                  </label>
+                  <label>
+                    Qué busca
+                    <select name="tipo">
+                      <option value="Piso">Piso</option>
+                      <option value="Casa">Casa</option>
+                      <option value="Ático">Ático</option>
+                      <option value="Local">Local</option>
+                      <option value="Terreno">Terreno</option>
+                      <option value="Otro">Otro</option>
+                    </select>
+                  </label>
+                  <label>
+                    Zona
+                    <input name="zona" placeholder="Centro, El Palo…" />
+                  </label>
+                  <label>
+                    Hasta cuánto
+                    <input name="precio_max" type="number" inputmode="numeric" placeholder="200000" />
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button type="submit">Apuntar</button>
+                  <span class="muted" id="demandaRapidaStatus"></span>
+                </div>
+              </form>
+            </div>
             <div class="form-card">
               <h3>Alta Demanda · Estudio Velazquez 2012 SL</h3>
               <p class="muted">Registro de compradores e inquilinos.</p>
@@ -12095,7 +12139,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=894",
+              "app.js?v=895",
             ];
 
             const getParams = () => {
