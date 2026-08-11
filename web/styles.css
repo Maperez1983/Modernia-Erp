@@ -5866,8 +5866,13 @@ body.tc-resizing {
 /* Seguros tiene 11 pestañas: a 92px cada una no caben en una fila, y como la barra
    lleva overflow-x con la barra de scroll oculta, las últimas quedaban cortadas sin
    ninguna señal de que hubiera más. Aquí envuelven en dos filas: nada oculto y sin
-   necesidad de descubrir un scroll horizontal invisible. */
-#segurosTabs {
+   necesidad de descubrir un scroll horizontal invisible.
+
+   Fincas cayó en lo mismo. Es una barra `--compact`, de 104px por pestaña, y con la
+   de Ajustes son ocho: 8 × 104 + 7 × 8 = 888 px de ancho mínimo. Por debajo de eso
+   —un portátil con el panel lateral abierto— se perdían las últimas sin avisar. */
+#segurosTabs,
+#workspaceFincasTabs {
   flex-wrap: wrap;
   overflow-x: visible;
   row-gap: 8px;
