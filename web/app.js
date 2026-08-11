@@ -2646,7 +2646,6 @@ const workspaceFincasLedgerImportStatus = document.getElementById("workspaceFinc
 		const workspaceFincasBudgetCompanyLogo = document.getElementById("workspaceFincasBudgetCompanyLogo");
 const workspaceFincasBudgetColegioLogo = document.getElementById("workspaceFincasBudgetColegioLogo");
 const workspaceFincasBudgetServiciosIncluidos = document.getElementById("workspaceFincasBudgetServiciosIncluidos");
-const workspaceFincasBudgetHero = document.getElementById("workspaceFincasBudgetHero");
 const workspaceFincasBudgetMapActions = document.getElementById("workspaceFincasBudgetMapActions");
 const workspaceFincasBudgetMapLink = document.getElementById("workspaceFincasBudgetMapLink");
 const workspaceFincasBudgetMapWrap = document.getElementById("workspaceFincasBudgetMapWrap");
@@ -26486,7 +26485,7 @@ const renderWorkspaceFincasMeetingList = (rows = []) => {
 
 const normalizeWorkspaceFincasTab = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
-  if (["dashboard", "comunidades", "comunidad_ficha", "incidencias", "proveedores", "juntas", "contabilidad", "presupuestos"].includes(key)) return key;
+  if (["dashboard", "comunidades", "comunidad_ficha", "incidencias", "proveedores", "juntas", "contabilidad", "presupuestos", "ajustes"].includes(key)) return key;
   return "dashboard";
 };
 
@@ -26719,6 +26718,15 @@ const setWorkspaceFincasTab = (tab = "dashboard") => {
         })
         .catch(() => {});
     }
+  }
+
+  if (normalized === "ajustes") {
+    // Los tres se piden al abrir la pestaña. Antes cada panel se cargaba al
+    // desplegarse dentro del formulario de presupuesto, y dos de ellos ni eso:
+    // llamaban a un helper que no existe y se quedaban vacíos.
+    void cargarFincasTarifas();
+    void cargarEquipoDeFincas();
+    void cargarPlantillasDeContrato();
   }
 
   if (normalized === "comunidad_ficha") {
@@ -27339,11 +27347,7 @@ const syncWorkspaceFincasBudgetQuickComputed = (options = {}) => {
       num_trasteros: numTrasteros,
       num_aparcamientos: numAparcamientos,
     }) || 0) || 0) + fincasImporteExtras();
-  const suggestedInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal_sugerido"]');
   const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
-  const ivaInput = workspaceFincasBudgetQuickForm.querySelector('[name="impuestos"]');
-  const totalInput = workspaceFincasBudgetQuickForm.querySelector('[name="total"]');
-  if (suggestedInput) suggestedInput.value = formatEurosCompact(suggestedSubtotal);
 
   // El resumen pegado arriba: la cuota mensual y el pago único separados, que es
   // como se lee el presupuesto. Antes había que bajar hasta el final del
@@ -27354,91 +27358,39 @@ const syncWorkspaceFincasBudgetQuickComputed = (options = {}) => {
     const el = document.querySelector(`#workspaceFincasBudgetResumen [data-resumen="${clave}"]`);
     if (el) el.textContent = euroFormatter.format(valor);
   };
+  const mensualConIva = Math.round(baseMensual * (1 + FINCAS_IVA_PCT) * 100) / 100;
   pon("base", baseMensual);
-  pon("mensual", Math.round(baseMensual * (1 + FINCAS_IVA_PCT) * 100) / 100);
+  pon("mensual", mensualConIva);
+  pon("anual", Math.round(mensualConIva * 12 * 100) / 100);
   const cajaPuntual = document.querySelector("#workspaceFincasBudgetResumen [data-resumen-puntual]");
   if (cajaPuntual) {
     cajaPuntual.hidden = !extrasImporte;
     if (extrasImporte) pon("puntual", Math.round(extrasImporte * (1 + FINCAS_IVA_PCT) * 100) / 100);
   }
+  // La tarifa con la que sale esa cifra, debajo y en pequeño. El pie que había antes
+  // recitaba los precios de memoria —y sin los trasteros—, sin enterarse de que la
+  // tarifa ya se edita desde la pantalla de ajustes.
+  const cajaTarifa = document.querySelector("#workspaceFincasBudgetResumen [data-resumen-tarifa]");
+  if (cajaTarifa) cajaTarifa.textContent = describeFincasTarifaVigente();
 
-  const manualSource = String(workspaceFincasBudgetQuickForm?.dataset?.manualSource || "").trim();
-  const rawSubtotal = String(subtotalInput?.value || "").trim();
-  const rawTotal = String(totalInput?.value || "").trim();
-  let subtotal = suggestedSubtotal;
-
-  const subtotalManual = Boolean(subtotalInput?.dataset?.manual === "1" || manualSource === "subtotal");
-  const totalManual = Boolean(totalInput?.dataset?.manual === "1" || manualSource === "total");
-  const hasSubtotal = Boolean(rawSubtotal) && subtotalManual;
-  const hasTotal = Boolean(rawTotal) && totalManual;
-  const useManualTotal = !options.forceAuto && hasTotal;
-  const useManualSubtotal = !options.forceAuto && hasSubtotal && !useManualTotal;
-
-  if (options.forceAuto) {
-    try {
-      delete workspaceFincasBudgetQuickForm.dataset.manualSource;
-    } catch (e) {}
-    try {
-      if (subtotalInput) delete subtotalInput.dataset.manual;
-      if (totalInput) delete totalInput.dataset.manual;
-    } catch (e) {}
+  // El precio pactado: un campo, y vacío quiere decir vacío —manda la tarifa—. Aquí
+  // había una máquina de estados con `dataset.manual` y `manualSource` para adivinar
+  // si el importe lo había escrito una persona o el propio cálculo, precisamente
+  // porque el cálculo escribía en el campo. Con el campo en blanco por defecto no hay
+  // nada que adivinar, y de paso desaparece la forma de congelar el precio sin querer.
+  if (options.forceAuto && subtotalInput) subtotalInput.value = "";
+  const pactado = String(subtotalInput?.value || "").trim();
+  if (subtotalInput && pactado && options.normalizeSubtotal) {
+    subtotalInput.value = formatEurosCompact(Math.max(0, parseMoneyValue(pactado)));
   }
-
-  if (useManualTotal) {
-    subtotal = Math.max(0, parseMoneyValue(rawTotal) / (1 + FINCAS_IVA_PCT));
-    if (totalInput) totalInput.dataset.manual = "1";
-    if (subtotalInput) subtotalInput.dataset.manual = "1";
-    if (subtotalInput) subtotalInput.value = formatEurosCompact(subtotal);
-  } else if (useManualSubtotal) {
-    subtotal = Math.max(0, parseMoneyValue(rawSubtotal));
-    if (subtotalInput) subtotalInput.dataset.manual = "1";
-    if (totalInput) delete totalInput.dataset.manual;
-  } else {
-    if (subtotalInput) {
-      delete subtotalInput.dataset.manual;
-      subtotalInput.value = formatEurosCompact(suggestedSubtotal);
-    }
-    if (totalInput) delete totalInput.dataset.manual;
-    try {
-      delete workspaceFincasBudgetQuickForm.dataset.manualSource;
-    } catch (e) {}
-    subtotal = suggestedSubtotal;
-  }
-
-  const impuestos = Math.round(subtotal * FINCAS_IVA_PCT * 100) / 100;
-  const total = Math.round((subtotal + impuestos) * 100) / 100;
-  if (ivaInput) ivaInput.value = formatEurosCompact(impuestos);
-  if (totalInput) {
-    const keepRawTotal = useManualTotal && !options.normalizeTotal && !options.forceAuto;
-    if (!keepRawTotal || !rawTotal) totalInput.value = formatEurosCompact(total);
-  }
-  if (subtotalInput && (options.normalizeSubtotal || options.forceAuto) && String(subtotalInput.value || "").trim()) {
-    subtotalInput.value = formatEurosCompact(subtotal);
-  }
-  if (workspaceFincasBudgetHero) {
-    // El pie decía «5 € por vivienda + 1 € por local/aparcamiento (mínimo 60 €)»:
-    // ni mencionaba los trasteros ni se enteraba de que los precios ya se editan
-    // desde la tarifa del workspace. Ahora se lee de la tarifa que está en uso.
-    workspaceFincasBudgetHero.innerHTML = `
-      <div class="workspace-home-detail-card" style="padding:16px;">
-        <div class="section-head">
-          <div>
-            <h4>Resumen económico</h4>
-            <p class="muted">${escapeHtml(describeFincasTarifaVigente())}</p>
-          </div>
-        </div>
-        <div class="workspace-summary-kpis">
-          <div class="workspace-mini-kpi"><span>Subtotal</span><strong>${formatEurosCompact(subtotal)}</strong></div>
-          <div class="workspace-mini-kpi"><span>IVA (21%)</span><strong>${formatEurosCompact(impuestos)}</strong></div>
-          <div class="workspace-mini-kpi"><span>Total</span><strong>${formatEurosCompact(total)}</strong></div>
-          <div class="workspace-mini-kpi"><span>Total anual</span><strong>${formatEurosCompact(total * 12)}</strong></div>
-          <div class="workspace-mini-kpi"><span>Viviendas</span><strong>${numberFormatter.format(numVecinos)}</strong></div>
-          <div class="workspace-mini-kpi"><span>Locales</span><strong>${numberFormatter.format(numLocales)}</strong></div>
-          <div class="workspace-mini-kpi"><span>Trasteros</span><strong>${numberFormatter.format(numTrasteros)}</strong></div>
-          <div class="workspace-mini-kpi"><span>Aparcamientos</span><strong>${numberFormatter.format(numAparcamientos)}</strong></div>
-        </div>
-      </div>
-    `;
+  // Cuando hay precio pactado, la barra de arriba tiene que enseñar ese, no el de
+  // tarifa: es la cifra que se va a imprimir.
+  if (pactado) {
+    const pactadoMensual = Math.max(0, parseMoneyValue(pactado) - extrasImporte);
+    const pactadoConIva = Math.round(pactadoMensual * (1 + FINCAS_IVA_PCT) * 100) / 100;
+    pon("base", pactadoMensual);
+    pon("mensual", pactadoConIva);
+    pon("anual", Math.round(pactadoConIva * 12 * 100) / 100);
   }
 };
 
@@ -57942,6 +57894,9 @@ const refreshCurrentInmuebleProfile = () => {
           <button type="button" class="secondary ghost button-inline inmueble-summary-portal-btn" id="inmuebleOwnerAccessBtn">
             Acceso propietario
           </button>
+          <button type="button" class="secondary ghost button-inline inmueble-summary-portal-btn" id="inmuebleOwnerPreviewBtn">
+            Ver lo que ve
+          </button>
           <span class="muted inmueble-summary-portal-status" id="inmueblePortalToggleStatus">
             ${isVerified ? "" : "Aparece en portal cuando esté verificado."}
           </span>
@@ -57978,6 +57933,17 @@ const refreshCurrentInmuebleProfile = () => {
         } finally {
           portalBtn.disabled = false;
         }
+      };
+    }
+    const ownerPreviewBtn = inmuebleSummaryCard.querySelector("#inmuebleOwnerPreviewBtn");
+    if (ownerPreviewBtn) {
+      ownerPreviewBtn.onclick = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        // La MISMA página que ve el propietario, no una imitación: si algún día
+        // dejan de parecerse, la imitación mentiría justo cuando hace falta que no.
+        // No cuenta como visita suya ni necesita que haya un acceso abierto.
+        window.open(`/portal-venta?preview=${encodeURIComponent(inmueble.id)}`, "_blank", "noopener");
       };
     }
     const ownerAccessBtn = inmuebleSummaryCard.querySelector("#inmuebleOwnerAccessBtn");
@@ -88808,59 +88774,18 @@ if (workspaceFincasBudgetQuickForm) {
 	      input?.addEventListener(evento, () => syncWorkspaceFincasBudgetQuickComputed());
 	    });
 	  });
+	  // El precio pactado. Ya no hay que marcar nada: si tiene algo escrito es porque
+	  // lo ha escrito alguien, y si está vacío manda la tarifa. Antes el `blur`
+	  // marcaba el campo como manual con solo pasar por encima —siempre tenía valor,
+	  // lo rellenaba el cálculo—, y desde ahí el precio se quedaba congelado: las
+	  // unidades movían el desglose pero no el importe, y el PDF cuadraba la
+	  // diferencia con un «ajuste comercial» que nadie había pactado.
 	  const subtotalInput = workspaceFincasBudgetQuickForm.querySelector('[name="subtotal"]');
-		  if (subtotalInput) {
-		    subtotalInput.addEventListener("input", () => {
-		      const raw = String(subtotalInput.value || "").trim();
-		      if (!raw) {
-		        delete subtotalInput.dataset.manual;
-		        try {
-		          if (workspaceFincasBudgetQuickForm) delete workspaceFincasBudgetQuickForm.dataset.manualSource;
-		        } catch (e) {}
-		      } else {
-		        subtotalInput.dataset.manual = "1";
-		        try {
-		          if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "subtotal";
-		        } catch (e) {}
-		      }
-		      syncWorkspaceFincasBudgetQuickComputed();
-		    });
-		    // Solo se normaliza lo que se ha tecleado. Antes bastaba con pasar por el
-		    // campo: el `blur` lo marcaba como manual aunque el importe lo hubiera
-		    // escrito el propio cálculo, y desde ese momento el precio se quedaba
-		    // congelado. Tabulando por el formulario, las unidades que se escribieran
-		    // después ya no movían el total, pero sí el desglose, y el PDF acababa
-		    // cuadrando la diferencia con un «ajuste comercial» inventado.
-		    subtotalInput.addEventListener("blur", () => {
-		      if (subtotalInput.dataset.manual !== "1") return;
-		      if (!String(subtotalInput.value || "").trim()) return;
-		      syncWorkspaceFincasBudgetQuickComputed({ normalizeSubtotal: true, normalizeTotal: true });
-		    });
-		  }
-	  const totalInput = workspaceFincasBudgetQuickForm.querySelector('[name="total"]');
-	  if (totalInput) {
-	    totalInput.addEventListener("input", () => {
-	      const raw = String(totalInput.value || "").trim();
-	      if (!raw) {
-	        delete totalInput.dataset.manual;
-	        try {
-	          if (workspaceFincasBudgetQuickForm) delete workspaceFincasBudgetQuickForm.dataset.manualSource;
-	        } catch (e) {}
-	      } else {
-	        totalInput.dataset.manual = "1";
-	        try {
-	          if (workspaceFincasBudgetQuickForm) workspaceFincasBudgetQuickForm.dataset.manualSource = "total";
-	        } catch (e) {}
-	      }
-	      syncWorkspaceFincasBudgetQuickComputed();
-	    });
-	    // Igual que en el subtotal, y aquí importaba más: el total es `readonly`, así
-	    // que nunca puede haberlo escrito nadie. Marcarlo manual al salir del campo
-	    // era congelar el precio sin que hubiera forma de haberlo pedido.
-	    totalInput.addEventListener("blur", () => {
-	      if (totalInput.dataset.manual !== "1") return;
-	      if (!String(totalInput.value || "").trim()) return;
-	      syncWorkspaceFincasBudgetQuickComputed({ normalizeSubtotal: true, normalizeTotal: true });
+	  if (subtotalInput) {
+	    subtotalInput.addEventListener("input", () => syncWorkspaceFincasBudgetQuickComputed());
+	    subtotalInput.addEventListener("blur", () => {
+	      if (!String(subtotalInput.value || "").trim()) return;
+	      syncWorkspaceFincasBudgetQuickComputed({ normalizeSubtotal: true });
 	    });
 	  }
 	  if (workspaceFincasBudgetBuildingPhoto) {
@@ -88924,17 +88849,9 @@ if (workspaceFincasBudgetQuickForm) {
 	        num_trasteros: numTrasteros,
 	        num_aparcamientos: numAparcamientos,
 	      }) || 0) || 0) + fincasImporteExtras();
-	    const manualSource = String(workspaceFincasBudgetQuickForm?.dataset?.manualSource || "").trim();
-	    const rawSubtotal = String(values.subtotal || "").trim();
-	    const rawTotal = String(values.total || "").trim();
-	    let subtotal = suggestedSubtotal;
-	    if (manualSource === "total" && rawTotal) {
-	      subtotal = Math.max(0, parseMoneyValue(rawTotal) / (1 + FINCAS_IVA_PCT));
-	    } else if (rawSubtotal) {
-	      subtotal = Math.max(0, parseMoneyValue(rawSubtotal));
-	    } else if (rawTotal) {
-	      subtotal = Math.max(0, parseMoneyValue(rawTotal) / (1 + FINCAS_IVA_PCT));
-	    }
+	    // Precio pactado si lo hay; si no, el de la tarifa. Nada más que mirar.
+	    const pactado = String(values.subtotal || "").trim();
+	    const subtotal = pactado ? Math.max(0, parseMoneyValue(pactado)) : suggestedSubtotal;
 	    const impuestos = Math.round(subtotal * FINCAS_IVA_PCT * 100) / 100;
 	    const total = Math.round((subtotal + impuestos) * 100) / 100;
 	    const totals = { subtotal, impuestos, total };

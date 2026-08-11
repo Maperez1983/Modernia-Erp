@@ -174,5 +174,150 @@ class LaTarifaSeGuardaConPermisoTests(unittest.TestCase):
         self.assertLess(cuerpo.index("enforce_workspace_membership"), cuerpo.index("INSERT INTO"))
 
 
+class LasUnidadesMuevenElPrecioEnPantallaTests(unittest.TestCase):
+    """El campo estaba, pero nadie escuchaba cuando se escribía en él.
+
+    El 2026-08-11, revisando la pestaña: se teclean trasteros y aparcamientos y el
+    presupuesto sale sin ellos. La fórmula era correcta y el PDF también —lo que
+    fallaba estaba en medio—. La lista de campos que disparan el recálculo se
+    escribió a mano como `["num_vecinos", "num_locales", "num_aparcamientos"]`, y al
+    añadir el campo de trasteros nadie la tocó: el resumen, la base sugerida, el IVA
+    y el total se quedaban con la cifra anterior.
+
+    Ahora la lista se deriva de `FINCAS_TARIFA_UNIDADES`, que es el mismo mapa que usa
+    el cálculo. Un concepto no puede entrar en el precio y quedarse fuera del recálculo.
+    """
+
+    def test_recalculan_las_cuatro_unidades(self):
+        i = APP.index("const FINCAS_TARIFA_UNIDADES")
+        mapa = APP[i: APP.index("};", i)]
+        for campo in ("num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos"):
+            with self.subTest(campo=campo):
+                self.assertIn(campo, mapa)
+
+    def test_el_recalculo_se_engancha_desde_el_mapa(self):
+        i = APP.index("Object.values(FINCAS_TARIFA_UNIDADES).forEach")
+        self.assertIn("syncWorkspaceFincasBudgetQuickComputed", APP[i: i + 400])
+
+    def test_ya_no_queda_la_lista_escrita_a_mano(self):
+        """Que no vuelva: la lista a mano fue exactamente el fallo."""
+        self.assertNotIn('["num_vecinos", "num_locales", "num_aparcamientos"]', APP)
+
+    def test_el_resumen_cuenta_los_trasteros(self):
+        i = APP.index("workspaceFincasBudgetHero.innerHTML")
+        cuerpo = APP[i: i + 1800]
+        self.assertIn("<span>Trasteros</span>", cuerpo)
+
+    def test_el_pie_no_recita_precios_a_mano(self):
+        """Recitaba los precios de memoria —y sin los trasteros—, sin enterarse de que
+        la tarifa ya se edita desde la pantalla sin desplegar."""
+        i = APP.index("workspaceFincasBudgetHero.innerHTML")
+        cuerpo = APP[i: i + 1800]
+        self.assertNotIn("por vivienda +", cuerpo)
+        self.assertIn("describeFincasTarifaVigente()", cuerpo)
+
+
+class PasarPorElCampoDePrecioNoLoCongelaTests(unittest.TestCase):
+    """Tabular por el formulario congelaba el precio, y el PDF lo disimulaba.
+
+    El `blur` del subtotal marcaba el campo como «precio pactado a mano» siempre que
+    tuviera algo escrito — y siempre lo tiene, porque lo rellena el propio cálculo—.
+    Bastaba con pasar por encima. A partir de ahí las unidades que se escribieran ya
+    no movían el importe, pero sí el desglose, así que el documento listaba los
+    trasteros y los aparcamientos y luego los borraba con un «ajuste comercial
+    acordado» que nadie había acordado.
+
+    El del total era peor: es un campo `readonly`, nunca puede haberlo escrito nadie.
+    """
+
+    def _cuerpo_del_blur(self, campo):
+        i = APP.index(f'{campo}.addEventListener("blur"')
+        return APP[i: APP.index("});", i)]
+
+    def test_salir_del_campo_no_lo_marca_como_manual(self):
+        for campo in ("subtotalInput", "totalInput"):
+            with self.subTest(campo=campo):
+                cuerpo = self._cuerpo_del_blur(campo)
+                self.assertNotIn('dataset.manual = "1"', cuerpo)
+                self.assertIn('dataset.manual !== "1"', cuerpo)
+
+    def test_teclear_un_precio_si_lo_marca(self):
+        """La otra mitad: pactar un precio distinto tiene que seguir funcionando."""
+        i = APP.index('subtotalInput.addEventListener("input"')
+        self.assertIn('subtotalInput.dataset.manual = "1"', APP[i: APP.index("});", i)])
+
+
+class LosPanelesDelPresupuestoCarganTests(unittest.TestCase):
+    """«Plantillas de contrato» y «Equipo» llamaban a un helper que no existe.
+
+    `apiGet` no está definido en el bundle —el helper se llama `api`—, así que abrir
+    cualquiera de los dos desplegables lanzaba un ReferenceError que el `catch`
+    convertía en el mensaje «apiGet is not defined» debajo del título. Los dos paneles
+    llevaban vacíos desde que se escribieron.
+    """
+
+    def test_no_se_llama_a_un_helper_inexistente(self):
+        self.assertNotIn("apiGet(", APP)
+
+    def test_los_dos_paneles_usan_el_helper_de_verdad(self):
+        for funcion in ("cargarPlantillasDeContrato", "cargarEquipoDeFincas"):
+            with self.subTest(funcion=funcion):
+                i = APP.index(f"const {funcion} = async")
+                self.assertIn("await api(", APP[i: i + 900])
+
+
+class ElPdfCobraTodasLasUnidadesTests(unittest.TestCase):
+    """La otra punta del circuito: con los datos delante, el documento los cobra."""
+
+    def _texto_del_pdf(self, lineas, subtotal):
+        import json
+        from io import BytesIO
+
+        from pypdf import PdfReader
+
+        calc = {
+            "num_vecinos": 20, "num_locales": 2, "num_trasteros": 10, "num_aparcamientos": 15,
+            "comunidad_denominacion": "C.P. de prueba", "cuota_sugerida": 127.0,
+        }
+        budget = {
+            "id": "b1", "servicio": "fincas", "titulo": "Prueba", "fecha": "2026-08-11",
+            "subtotal": subtotal, "impuestos": round(subtotal * 0.21, 2),
+            "total": round(subtotal * 1.21, 2), "calculo_json": json.dumps(calc),
+        }
+        pdf = server.build_workspace_budget_pdf(
+            budget, {"nombre": "Modernia"}, {"nombre": "Fincas Velazquez"},
+            {"nombre": "C.P. de prueba"}, lineas,
+        )
+        return "\n".join(p.extract_text() for p in PdfReader(BytesIO(pdf)).pages)
+
+    def _lineas(self):
+        return [
+            {"categoria": "Edificio", "concepto": "Por vivienda", "cantidad": 20,
+             "unidad": "vivienda", "precio_unitario": 5, "total_linea": 100.0},
+            {"categoria": "Edificio", "concepto": "Por local", "cantidad": 2,
+             "unidad": "local", "precio_unitario": 1, "total_linea": 2.0},
+            {"categoria": "Edificio", "concepto": "Por trastero", "cantidad": 10,
+             "unidad": "trastero", "precio_unitario": 1, "total_linea": 10.0},
+            {"categoria": "Edificio", "concepto": "Por aparcamiento", "cantidad": 15,
+             "unidad": "plaza", "precio_unitario": 1, "total_linea": 15.0},
+        ]
+
+    def test_salen_en_las_unidades_del_edificio(self):
+        texto = self._texto_del_pdf(self._lineas(), 127.0)
+        self.assertIn("Trasteros: 10", texto)
+        self.assertIn("Aparcamientos: 15", texto)
+
+    def test_se_cobran_y_el_total_los_incluye(self):
+        texto = self._texto_del_pdf(self._lineas(), 127.0)
+        self.assertIn("Por trastero", texto)
+        self.assertIn("Por aparcamiento", texto)
+        self.assertIn("127,00 €", texto)
+
+    def test_sin_precio_congelado_no_aparece_ningun_ajuste(self):
+        """El «ajuste comercial» es para un precio pactado de verdad, no para tapar
+        un subtotal que se quedó atrás."""
+        self.assertNotIn("Ajuste comercial", self._texto_del_pdf(self._lineas(), 127.0))
+
+
 if __name__ == "__main__":
     unittest.main()

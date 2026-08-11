@@ -2334,6 +2334,12 @@
 	              </span>
 	              <span class="tc-mod-label">Presup.</span>
 	            </button>
+	            <button class="tab tc-module" type="button" data-fincas-tab-btn="ajustes" title="Ajustes de fincas">
+	              <span class="tc-mod-ico" aria-hidden="true">
+	                <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2v.2a2 2 0 1 1-4 0V21a1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 15H2.8a2 2 0 1 1 0-4H3a1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10 3.1V3a2 2 0 1 1 4 0v.2a1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 21 11h.2a2 2 0 1 1 0 4H21a1.7 1.7 0 0 0-1.6 1Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
+	              </span>
+	              <span class="tc-mod-label">Ajustes</span>
+	            </button>
 	            <button class="tab tc-module hidden" type="button" data-fincas-tab-btn="comunidad_ficha" title="Ficha comunidad">
 	              <span class="tc-mod-ico" aria-hidden="true">
 	                <svg viewBox="0 0 24 24" fill="none"><path d="M4 4h16v16H4z" stroke="currentColor" stroke-width="2"/><path d="M8 8h8M8 12h8M8 16h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -2429,7 +2435,9 @@
 		            <div class="presu-resumen" id="workspaceFincasBudgetResumen" aria-live="polite">
 		              <div><span>Cuota mensual (IVA incl.)</span><strong data-resumen="mensual">—</strong></div>
 		              <div><span>Base mensual (sin IVA)</span><strong data-resumen="base">—</strong></div>
+		              <div><span>Al año (IVA incl.)</span><strong data-resumen="anual">—</strong></div>
 		              <div data-resumen-puntual hidden><span>Pago único (IVA incl.)</span><strong data-resumen="puntual">—</strong></div>
+		              <div class="presu-resumen-tarifa" data-resumen-tarifa></div>
 		            </div>
 		            <div class="presu-editando span-all" id="workspaceFincasBudgetEditando" hidden aria-live="polite">
 		              <div>
@@ -2497,24 +2505,15 @@
               <input name="num_aparcamientos" type="number" min="0" step="1" value="0" />
             </label>
 	            <div class="span-2" id="workspaceFincasBudgetExtras"></div>
-	            <div class="form-grid-section">Importes</div>
-	            <label>
-	              Base sugerida (sin IVA)
-	              <input name="subtotal_sugerido" type="text" inputmode="decimal" readonly />
-	              <span class="muted">La calcula la tarifa. No se edita.</span>
-	            </label>
-	            <label>
-	              Subtotal (sin IVA)
-	              <input name="subtotal" type="text" inputmode="decimal" placeholder="Déjalo vacío para usar la base" />
-	              <span class="muted">Solo si quieres cerrar otro precio.</span>
-	            </label>
-	            <label>
-	              IVA (21%)
-	              <input name="impuestos" type="text" inputmode="decimal" readonly />
-	            </label>
-	            <label>
-	              Total (con IVA)
-	              <input name="total" type="text" inputmode="decimal" readonly />
+	            <!-- Un solo campo. Antes había cuatro seguidos —base sugerida, subtotal, IVA
+	                 y total— de los que tres eran `readonly` y repetían la barra de arriba, y
+	                 el editable llevaba un «déjalo vacío» imposible de cumplir porque lo
+	                 rellenaba el propio cálculo. Ahora vacío significa vacío: manda la tarifa. -->
+	            <div class="form-grid-section">Precio</div>
+	            <label class="span-2">
+	              Precio pactado, sin IVA <span class="muted">— opcional</span>
+	              <input name="subtotal" type="text" inputmode="decimal" placeholder="Vacío: manda la tarifa" />
+	              <span class="muted">Solo si se ha cerrado un importe distinto del que sale de la tarifa. El PDF lo enseña como una línea de ajuste, no lo disimula.</span>
 	            </label>
 	            <div class="form-grid-section">El presupuesto</div>
             <label>
@@ -2557,53 +2556,6 @@
             </label>
               </div>
             </details>
-            <details class="presu-plegable span-2" id="workspaceContratoPlantillasPanel">
-              <summary>Plantillas de contrato <span class="muted">(contrato de administración y anexo RGPD)</span></summary>
-              <div class="form-grid">
-                <label class="span-2">
-                  Plantilla
-                  <select id="workspaceContratoPlantillaSelect"></select>
-                </label>
-                <label class="span-2">
-                  Título del documento
-                  <input id="workspaceContratoPlantillaTitulo" placeholder="Contrato de administración de fincas · Comunidad de propietarios" />
-                </label>
-                <label class="span-2">
-                  Cuerpo
-                  <textarea id="workspaceContratoPlantillaCuerpo" rows="18" spellcheck="true"></textarea>
-                </label>
-                <div class="muted span-2">
-                  Los apartados se marcan con <code>## </code> al principio de la línea. El resto de líneas son párrafos.
-                </div>
-                <label class="span-2">
-                  Pie (una línea por renglón)
-                  <textarea id="workspaceContratoPlantillaPie" rows="3"></textarea>
-                </label>
-                <div class="form-actions span-2">
-                  <button type="button" id="workspaceContratoPlantillaGuardar" class="secondary">Guardar plantilla</button>
-                  <button type="button" id="workspaceContratoPlantillaRestaurar" class="secondary ghost">Restaurar la de origen</button>
-                  <span class="muted" id="workspaceContratoPlantillaStatus"></span>
-                </div>
-                <div class="muted span-2">
-                  Los contratos ya generados no cambian: cada uno guarda el texto con el que se creó.
-                </div>
-              </div>
-            </details>
-            <details class="presu-plegable span-2" id="workspaceFincasBudgetEquipoPanel">
-              <summary>Equipo <span class="muted">(sale en la carta, bajo «Quién va a llevar su comunidad»)</span></summary>
-              <div class="form-grid">
-                <div class="span-2" id="workspaceFincasBudgetEquipoLista"></div>
-                <div class="form-actions span-2">
-                  <button type="button" id="workspaceFincasBudgetEquipoAnadir" class="secondary ghost">Añadir persona</button>
-                  <button type="button" id="workspaceFincasBudgetEquipoGuardar" class="secondary">Guardar equipo</button>
-                  <span class="muted" id="workspaceFincasBudgetEquipoStatus"></span>
-                </div>
-                <div class="muted span-2">
-                  Se guarda para todo el workspace, no para este presupuesto. Cada presupuesto se queda con
-                  el equipo que hubiera el día que se generó, para que un PDF ya enviado no cambie solo.
-                </div>
-              </div>
-            </details>
             <details class="presu-plegable span-2" id="workspaceFincasBudgetCartaPanel">
               <summary>Carta de presentación <span class="muted">(va en la primera página del PDF)</span></summary>
               <div class="form-grid">
@@ -2636,7 +2588,6 @@
 
               </div>
             </details>
-            <div class="span-2" id="workspaceFincasBudgetHero"></div>
 	            <div class="form-actions span-2">
 	              <button type="submit" id="workspaceFincasBudgetSubmit">Crear presupuesto + PDF</button>
 	              <button type="button" id="workspaceFincasBudgetOpenEngine" class="secondary ghost">Abrir motor de presupuestos</button>
@@ -2644,32 +2595,6 @@
 	              <span id="workspaceFincasBudgetQuickStatus" class="muted"></span>
 	            </div>
           </form>
-          <details id="workspaceFincasTarifaPanel" class="fincas-tarifa-panel">
-            <summary>Tarifa de administración</summary>
-            <p class="muted">
-              Los precios por unidad y la cuota mínima con los que se calcula la base sugerida.
-              Los conceptos de tipo <em>puntual</em> no entran en la cuota mensual: aparecen arriba
-              como casillas y, al marcarlos, se suman al presupuesto como línea aparte.
-            </p>
-            <table class="table fincas-tarifa-tabla">
-              <thead>
-                <tr>
-                  <th>Concepto</th>
-                  <th>Tipo</th>
-                  <th>Unidad</th>
-                  <th>Precio (€)</th>
-                  <th>Activo</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody id="workspaceFincasTarifaBody"></tbody>
-            </table>
-            <div class="form-actions">
-              <button type="button" id="workspaceFincasTarifaAddBtn" class="secondary ghost">Añadir concepto</button>
-              <button type="button" id="workspaceFincasTarifaSaveBtn">Guardar tarifa</button>
-              <span id="workspaceFincasTarifaStatus" class="muted"></span>
-            </div>
-          </details>
         </div>
 
         <div class="form-card crm-workspace-view" data-workspace-view="fincas" data-fincas-tab="presupuestos">
@@ -2693,6 +2618,95 @@
           <div class="presu-kpis" id="workspaceFincasBudgetsKpis"></div>
           <div id="workspaceFincasBudgetsTable"></div>
           <div class="footer" id="workspaceFincasBudgetsInfo"></div>
+        </div>
+
+        <!-- Ajustes del módulo. Vivían dentro del formulario de presupuesto, y no son
+             de un presupuesto: la tarifa, el equipo y las plantillas se guardan para
+             todo el workspace. Mezclados ahí, hacer un presupuesto obligaba a pasar por
+             delante de una tabla de precios y de un texto de contrato de 18 renglones. -->
+        <div class="form-card crm-workspace-view hidden" data-workspace-view="fincas" data-fincas-tab="ajustes">
+          <div class="section-head">
+            <div>
+              <h3>Ajustes de fincas</h3>
+              <p class="muted">Se guardan para todo el workspace, no para un presupuesto concreto.</p>
+            </div>
+          </div>
+
+          <details class="presu-plegable" id="workspaceFincasTarifaPanel" open>
+            <summary>Tarifa de administración <span class="muted">(manda sobre la base sugerida de cada presupuesto)</span></summary>
+            <p class="muted">
+              Los precios por unidad y la cuota mínima con los que se calcula la base sugerida.
+              Los conceptos de tipo <em>puntual</em> no entran en la cuota mensual: aparecen en el
+              presupuesto como casillas y, al marcarlos, se suman como línea aparte.
+            </p>
+            <table class="table fincas-tarifa-tabla">
+              <thead>
+                <tr>
+                  <th>Concepto</th>
+                  <th>Tipo</th>
+                  <th>Unidad</th>
+                  <th>Precio (€)</th>
+                  <th>Activo</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="workspaceFincasTarifaBody"></tbody>
+            </table>
+            <div class="form-actions">
+              <button type="button" id="workspaceFincasTarifaAddBtn" class="secondary ghost">Añadir concepto</button>
+              <button type="button" id="workspaceFincasTarifaSaveBtn">Guardar tarifa</button>
+              <span id="workspaceFincasTarifaStatus" class="muted"></span>
+            </div>
+          </details>
+
+          <details class="presu-plegable" id="workspaceFincasBudgetEquipoPanel">
+            <summary>Equipo <span class="muted">(sale en la carta, bajo «Quién va a llevar su comunidad»)</span></summary>
+            <div class="form-grid">
+              <div class="span-2" id="workspaceFincasBudgetEquipoLista"></div>
+              <div class="form-actions span-2">
+                <button type="button" id="workspaceFincasBudgetEquipoAnadir" class="secondary ghost">Añadir persona</button>
+                <button type="button" id="workspaceFincasBudgetEquipoGuardar" class="secondary">Guardar equipo</button>
+                <span class="muted" id="workspaceFincasBudgetEquipoStatus"></span>
+              </div>
+              <div class="muted span-2">
+                Cada presupuesto se queda con el equipo que hubiera el día que se generó, para que
+                un PDF ya enviado no cambie solo.
+              </div>
+            </div>
+          </details>
+
+          <details class="presu-plegable" id="workspaceContratoPlantillasPanel">
+            <summary>Plantillas de contrato <span class="muted">(contrato de administración y anexo RGPD)</span></summary>
+            <div class="form-grid">
+              <label class="span-2">
+                Plantilla
+                <select id="workspaceContratoPlantillaSelect"></select>
+              </label>
+              <label class="span-2">
+                Título del documento
+                <input id="workspaceContratoPlantillaTitulo" placeholder="Contrato de administración de fincas · Comunidad de propietarios" />
+              </label>
+              <label class="span-2">
+                Cuerpo
+                <textarea id="workspaceContratoPlantillaCuerpo" rows="18" spellcheck="true"></textarea>
+              </label>
+              <div class="muted span-2">
+                Los apartados se marcan con <code>## </code> al principio de la línea. El resto de líneas son párrafos.
+              </div>
+              <label class="span-2">
+                Pie (una línea por renglón)
+                <textarea id="workspaceContratoPlantillaPie" rows="3"></textarea>
+              </label>
+              <div class="form-actions span-2">
+                <button type="button" id="workspaceContratoPlantillaGuardar" class="secondary">Guardar plantilla</button>
+                <button type="button" id="workspaceContratoPlantillaRestaurar" class="secondary ghost">Restaurar la de origen</button>
+                <span class="muted" id="workspaceContratoPlantillaStatus"></span>
+              </div>
+              <div class="muted span-2">
+                Los contratos ya generados no cambian: cada uno guarda el texto con el que se creó.
+              </div>
+            </div>
+          </details>
         </div>
 
 	        <div class="workspace-central-layout crm-workspace-view" data-workspace-view="fincas" data-fincas-tab="comunidades">
@@ -12081,7 +12095,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=891",
+              "app.js?v=892",
             ];
 
             const getParams = () => {

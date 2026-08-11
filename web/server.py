@@ -64160,7 +64160,11 @@ class Handler(BaseHTTPRequestHandler):
     const eur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
     const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
     const app = document.getElementById("app");
-    const token = new URLSearchParams(location.search).get("token") || "";
+    const parametros = new URLSearchParams(location.search);
+    // Vista previa del asesor: la misma página y la misma consulta, con su sesión
+    // del CRM en vez de un token, y sin contar como visita del propietario.
+    const previa = parametros.get("preview") || "";
+    const token = parametros.get("token") || "";
     // El enlace lleva la llave dentro: se saca de la barra en cuanto la tenemos,
     // para que no se quede en el historial ni salga en una captura de pantalla.
     if (token) history.replaceState(null, "", location.pathname);
@@ -64296,11 +64300,24 @@ class Handler(BaseHTTPRequestHandler):
     }
 
     async function cargar() {
-      if (!token) { app.innerHTML = '<div class="aviso">Falta el enlace de acceso. Pídelo a tu agencia.</div>'; return; }
+      if (!token && !previa) {
+        app.innerHTML = '<div class="aviso">Falta el enlace de acceso. Pídelo a tu agencia.</div>'; return;
+      }
       try {
-        const d = await pide("/api/portal_venta?token=" + encodeURIComponent(token) + "&s=" + encodeURIComponent(sesion()));
+        const ruta = previa
+          ? "/api/portal_venta?preview=" + encodeURIComponent(previa)
+          : "/api/portal_venta?token=" + encodeURIComponent(token) + "&s=" + encodeURIComponent(sesion());
+        const d = await pide(ruta);
         if (d.estado === "codigo_requerido") { pantallaCodigo(d.telefono); return; }
         pinta(d);
+        if (d.vista_previa) {
+          // Que no quepa duda de qué se está mirando: esto no es el portal de nadie.
+          const cinta = document.createElement("div");
+          cinta.className = "aviso";
+          cinta.style.cssText = "position:sticky;bottom:12px;margin-top:16px";
+          cinta.textContent = "Vista previa · esto es exactamente lo que ve el propietario. No cuenta como visita suya.";
+          app.appendChild(cinta);
+        }
       } catch (e) {
         app.innerHTML = '<div class="aviso">' + esc(e.message) + '</div>';
       }
@@ -93064,6 +93081,37 @@ class Handler(BaseHTTPRequestHandler):
             # sin sesión del CRM. Todo el control está en el token —256 bits, y en
             # la base sólo su hash— y, si hay canal para mandar un código, en el
             # segundo factor.
+            # Vista previa para el asesor: la MISMA vista, con su sesión del CRM en
+            # vez de un token. Existe porque la alternativa era abrir el enlace del
+            # propietario para mirarlo, y eso le contaba una visita suya y falseaba
+            # el «última vez que entró», que es justo el dato por el que se mira.
+            previa = str(params.get("preview", [""])[0] or "").strip()
+            if previa:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok_acc, err_acc, inm = enforce_inmueble_access(conn, session, previa)
+                if not ok_acc:
+                    json_response(self, {"error": err_acc},
+                                  status=404 if "no encontrado" in str(err_acc) else 403)
+                    return
+                propietarios = get_inmueble_propietarios(conn, previa) or []
+                primero = propietarios[0] if propietarios else {}
+                datos = build_portal_de_venta(conn, {
+                    "id": "",
+                    "inmueble_id": previa,
+                    "empresa_id": row_value(inm, "empresa_id", ""),
+                    "cliente_id": row_value(primero, "id", ""),
+                    "nombre": row_value(primero, "nombre", ""),
+                    "telefono": row_value(primero, "telefono", ""),
+                }, registrar=False)
+                if not datos:
+                    json_response(self, {"error": "Inmueble no encontrado"}, status=404)
+                    return
+                datos["estado"] = "ok"
+                datos["vista_previa"] = True
+                datos["segundo_factor"] = hay_canal_para_avisar()
+                json_response(self, datos)
+                return
+
             token = _request_token_param(self, params, "token")
             if not token:
                 json_response(self, {"error": "token requerido"}, status=400)

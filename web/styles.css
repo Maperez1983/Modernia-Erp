@@ -10298,7 +10298,6 @@ body.crm-context-inmo .crm-resumen-compact-note {
 }
 
 .form-grid.fincas-budget-grid #workspaceFincasBudgetServiciosIncluidos,
-.form-grid.fincas-budget-grid #workspaceFincasBudgetHero,
 .form-grid.fincas-budget-grid .form-actions {
   grid-column: 1 / -1;
 }

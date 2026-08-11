@@ -847,3 +847,82 @@ class ElEnlacePorCorreoTests(BasePortal):
         cuerpo = S.correo_con_el_enlace_del_portal(
             agencia="A", direccion="<script>alert(1)</script>", enlace="https://x.test/p")
         self.assertNotIn("<script>", cuerpo)
+
+
+class LaVistaPreviaDelAsesorTests(BasePortal):
+    """«¿Cómo sé lo que ve el propietario?»
+
+    La alternativa era abrir su enlace y mirarlo. Pero eso le cuenta una visita y
+    falsea el «última vez que entró», que es justo el dato por el que se mira. Así
+    que la vista previa va con la sesión del CRM, sobre la misma página y la misma
+    consulta: si algún día dejaran de parecerse, la imitación mentiría justo cuando
+    hace falta que no.
+    """
+
+    def _previa(self, inmueble_id="inm1", con_sesion=True):
+        return self._get(f"/api/portal_venta?preview={inmueble_id}", con_sesion=con_sesion)
+
+    def test_el_asesor_ve_lo_mismo_que_el_propietario(self):
+        propietario = self._vista(self._token(self._abre_portal()["enlace"]))
+        estado, cuerpo = self._previa()
+        self.assertEqual(estado, 200, cuerpo)
+        previa = json.loads(cuerpo)
+        for clave in ("inmueble", "etapa", "resumen", "cronologia", "pendiente_de_ti", "documentos"):
+            with self.subTest(clave):
+                self.assertEqual(previa[clave], propietario[clave])
+
+    def test_y_se_ve_que_es_una_vista_previa(self):
+        self.assertTrue(json.loads(self._previa()[1])["vista_previa"])
+
+    def test_no_le_cuenta_una_visita_al_propietario(self):
+        self._abre_portal()
+        for _ in range(3):
+            self._previa()
+        fila = self.conn.execute(
+            "SELECT accesos, last_access_at FROM inmueble_portal_accesos WHERE revocado=0").fetchone()
+        self.assertEqual(fila["accesos"], 0)
+        self.assertIsNone(fila["last_access_at"])
+
+    def test_funciona_aunque_no_haya_acceso_abierto(self):
+        """Sirve para mirar antes de decidir si se lo mandas."""
+        estado, cuerpo = self._previa()
+        self.assertEqual(estado, 200, cuerpo)
+        self.assertEqual(
+            self.conn.execute("SELECT COUNT(*) c FROM inmueble_portal_accesos").fetchone()["c"], 0)
+
+    def test_sin_sesion_no_hay_vista_previa(self):
+        """Si no, sería una puerta abierta a cualquier ficha con sólo saber su id."""
+        estado, _ = self._previa(con_sesion=False)
+        self.assertIn(estado, (401, 403))
+
+    def test_ni_de_una_ficha_de_otra_agencia(self):
+        self._ins("usuarios", {"id": "u3", "nombre": "Comercial", "usuario": "comercial2",
+                               "email": "c2@x.test", "rol": "Comercial", "servicio": "Inmobiliaria",
+                               "activo": 1, "password_hash": S.hash_password(CLAVE),
+                               "created_at": AHORA, "updated_at": AHORA})
+        self._ins("workspace_miembros", {"id": "wm3", "workspace_id": self.ws, "usuario_id": "u3",
+                                         "rol": "Miembro", "created_at": AHORA, "updated_at": AHORA})
+        req = urllib.request.Request(
+            self.base + "/api/login",
+            data=json.dumps({"usuario": "comercial2", "password": CLAVE}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as r:
+            cookie = r.headers.get("Set-Cookie").split(";")[0]
+        req = urllib.request.Request(self.base + "/api/portal_venta?preview=inmX", headers={"Cookie": cookie})
+        try:
+            with urllib.request.urlopen(req) as r:
+                self.fail(f"ha dejado ver la ficha de otra agencia: {r.read()[:200]}")
+        except urllib.error.HTTPError as e:
+            self.assertIn(e.code, (403, 404))
+
+    def test_tampoco_enseña_de_mas_por_ser_una_previa(self):
+        """Lo que no sale para el propietario tampoco sale aquí: es la misma vista."""
+        _, cuerpo = self._previa()
+        for secreto in ("Comprador Secreto", "699888777", "7500", "aprieta el precio"):
+            with self.subTest(secreto):
+                self.assertNotIn(secreto, cuerpo)
+
+    def test_el_boton_esta_en_la_ficha(self):
+        fuente = (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("inmuebleOwnerPreviewBtn", fuente)
+        self.assertIn("/portal-venta?preview=", fuente)
