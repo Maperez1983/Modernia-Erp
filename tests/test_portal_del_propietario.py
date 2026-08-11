@@ -443,3 +443,217 @@ class LaPaginaTests(BasePortal):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LosAvisosTests(BasePortal):
+    """Un portal que hay que visitar no lo visita nadie: el producto es el aviso.
+
+    El mensaje no lleva el enlace dentro, y es a propósito: del token sólo se guarda
+    el hash, así que desde el aviso no se puede reconstruir. Guardarlo en claro para
+    poder pegarlo en cada mensaje dejaría el hasheo en un adorno.
+    """
+
+    def setUp(self):
+        super().setUp()
+        os.environ["SIGNATURE_SMS_WEBHOOK_URL"] = "https://ejemplo.invalido/sms"
+        self._abre_portal()
+
+    def _avisos(self):
+        return self.conn.execute(
+            "SELECT motivo, referencia, enviado FROM inmueble_portal_avisos ORDER BY created_at").fetchall()
+
+    def test_una_visita_nueva_avisa(self):
+        estado, d = self._post("/api/visitas", {
+            "empresa_nombre": "Agencia Propia", "inmueble_id": "inm1",
+            "fecha": "2026-09-01", "hora": "18:00", "estado": "Prevista"})
+        self.assertEqual(estado, 200, d)
+        motivos = [r["motivo"] for r in self._avisos()]
+        self.assertIn("visita", motivos)
+
+    def test_la_misma_visita_no_avisa_dos_veces(self):
+        for _ in range(2):
+            self._post("/api/visitas", {"empresa_nombre": "Agencia Propia", "inmueble_id": "inm1",
+                                        "fecha": "2026-09-01", "hora": "18:00", "estado": "Prevista"})
+        self.assertEqual(len([r for r in self._avisos() if r["motivo"] == "visita"]), 1)
+
+    def test_un_interesado_nuevo_avisa(self):
+        estado, d = self._post("/api/inmueble_compradores", {
+            "empresa_nombre": "Agencia Propia", "inmueble_id": "inm1",
+            "demanda_id": "dem1", "cliente_id": "comp1", "estado": "Interesado"})
+        self.assertEqual(estado, 200, d)
+        self.assertIn("interesado", [r["motivo"] for r in self._avisos()])
+
+    def test_el_aviso_no_lleva_el_token(self):
+        self._post("/api/visitas", {"empresa_nombre": "Agencia Propia", "inmueble_id": "inm1",
+                                    "fecha": "2026-09-02", "estado": "Prevista"})
+        self.assertTrue(self._avisos())
+
+    def test_un_acceso_revocado_ya_no_recibe(self):
+        self._post("/api/inmueble_portal_acceso_revoke", {"inmueble_id": "inm1"})
+        self._post("/api/visitas", {"empresa_nombre": "Agencia Propia", "inmueble_id": "inm1",
+                                    "fecha": "2026-09-03", "estado": "Prevista"})
+        self.assertEqual(self._avisos(), [])
+
+    def test_sin_canal_no_se_intenta_nada(self):
+        os.environ.pop("SIGNATURE_SMS_WEBHOOK_URL", None)
+        self._post("/api/visitas", {"empresa_nombre": "Agencia Propia", "inmueble_id": "inm1",
+                                    "fecha": "2026-09-04", "estado": "Prevista"})
+        self.assertEqual(self._avisos(), [])
+
+    def test_cerrar_la_venta_avisa_y_cierra_el_enlace(self):
+        token = self._token(self._abre_portal()["enlace"])
+        S.log_crm_stage_event(self.conn, "emp1", "inm1", "cap1", "Vendido",
+                              now="2026-09-05 10:00:00")
+        self.conn.commit()
+        self.assertIn("etapa", [r["motivo"] for r in self._avisos()])
+        self.assertEqual(self._get(f"/api/portal_venta?token={token}")[0], 403)
+
+
+class SubirDocumentosTests(BasePortal):
+    def setUp(self):
+        super().setUp()
+        self.token = self._token(self._abre_portal()["enlace"])
+
+    def _sube(self, nombre, contenido=b"%PDF-1.4 hola", tarea="Traer la nota simple"):
+        import base64
+        return self._post("/api/portal_venta_doc", {
+            "token": self.token, "nombre": nombre, "tarea": tarea,
+            "file_base64": "data:application/pdf;base64," + base64.b64encode(contenido).decode(),
+        }, con_sesion=False)
+
+    def test_se_guarda_en_el_expediente(self):
+        estado, d = self._sube("nota-simple.pdf")
+        self.assertEqual(estado, 200, d)
+        fila = self.conn.execute(
+            "SELECT nombre, origen_tipo, visible_portal FROM inmueble_docs WHERE origen_tipo='propietario'").fetchone()
+        self.assertEqual(fila["nombre"], "nota-simple.pdf")
+        self.assertEqual(fila["visible_portal"], 1)
+
+    def test_da_por_hecha_la_tarea(self):
+        self._sube("nota-simple.pdf")
+        fila = self.conn.execute("SELECT estado FROM inmueble_checklist WHERE id='c1'").fetchone()
+        self.assertEqual(fila["estado"], "Hecho")
+
+    def test_y_luego_lo_ve_en_su_portal(self):
+        self._sube("nota-simple.pdf")
+        d = self._vista(self.token)
+        self.assertEqual([x["nombre"] for x in d["documentos"]], ["nota-simple.pdf"])
+        self.assertTrue(d["documentos"][0]["mio"])
+
+    def test_un_ejecutable_se_rechaza(self):
+        """Sube ficheros alguien de fuera y no hay nadie revisando lo que entra."""
+        self.assertEqual(self._sube("virus.exe")[0], 415)
+
+    def test_un_html_tambien(self):
+        self.assertEqual(self._sube("pagina.html")[0], 415)
+
+    def test_uno_demasiado_grande_se_rechaza(self):
+        """El límite del portal (8 MB) tiene que caber por debajo del tope de POST
+        del servidor (10 MB). Si se pusiera por encima nunca llegaría a aplicarse:
+        el cliente se comería un corte de conexión en vez de un error claro."""
+        # base64 engorda un tercio: el fichero más grande que se admita, ya
+        # codificado, tiene que seguir cabiendo en el POST.
+        self.assertLess(S.INMO_PORTAL_DOC_MAX_BYTES * 4 / 3, 10 * 1024 * 1024)
+        self.assertEqual(self._sube("enorme.pdf", b"x" * (S.INMO_PORTAL_DOC_MAX_BYTES + 1))[0], 413)
+
+    def test_uno_vacio_se_rechaza(self):
+        self.assertEqual(self._sube("vacio.pdf", b"")[0], 400)
+
+    def test_el_nombre_del_fichero_lo_pone_el_servidor(self):
+        """Que el nombre de origen no se use para escribir en disco."""
+        estado, _ = self._sube("../../../etc/passwd.pdf")
+        self.assertEqual(estado, 200)
+        fila = self.conn.execute("SELECT url FROM inmueble_docs WHERE origen_tipo='propietario'").fetchone()
+        self.assertNotIn("..", fila["url"])
+        self.assertIn("/uploads/inmuebles/", fila["url"])
+
+    def test_con_un_enlace_revocado_no_se_puede_subir(self):
+        self._post("/api/inmueble_portal_acceso_revoke", {"inmueble_id": "inm1"})
+        self.assertEqual(self._sube("nota.pdf")[0], 403)
+
+    def test_sin_token_no_se_puede_subir(self):
+        estado, _ = self._post("/api/portal_venta_doc", {"nombre": "x.pdf", "file_base64": "aGk="},
+                               con_sesion=False)
+        self.assertEqual(estado, 404)
+
+
+class DecidirLaPropuestaTests(BasePortal):
+    def setUp(self):
+        super().setUp()
+        self.conn.execute("UPDATE inmuebles SET estado = 'Propuesta' WHERE id='inm1'")
+        self._ins("operaciones_inmobiliarias", {
+            "id": "op1", "workspace_id": self.ws, "empresa_id": "emp1", "inmueble_id": "inm1",
+            "direccion": "Calle Portal 1", "tipo_operacion": "compraventa",
+            "precio_propuesta": 238000, "fecha_propuesta": "2026-08-09",
+            "created_at": AHORA, "updated_at": AHORA})
+        self.conn.commit()
+        self.token = self._token(self._abre_portal()["enlace"])
+
+    def _decide(self, decision):
+        return self._post("/api/portal_venta_propuesta",
+                          {"token": self.token, "decision": decision}, con_sesion=False)
+
+    def test_ve_el_importe_de_la_oferta(self):
+        d = self._vista(self.token)
+        self.assertEqual(d["propuesta"]["importe"], 238000)
+
+    def test_pero_no_quien_la_hace(self):
+        _, crudo = self._get(f"/api/portal_venta?token={self.token}")
+        self.assertNotIn("Comprador Secreto", crudo)
+
+    def test_aceptar_queda_registrado(self):
+        estado, d = self._decide("acepto")
+        self.assertEqual(estado, 200, d)
+        fila = self.conn.execute("SELECT * FROM inmueble_portal_decisiones").fetchone()
+        self.assertEqual(fila["decision"], "acepto")
+        self.assertEqual(float(fila["importe"]), 238000.0)
+
+    def test_y_deja_tarea_al_asesor(self):
+        self._decide("acepto")
+        fila = self.conn.execute(
+            "SELECT asunto, estado FROM acciones WHERE asunto LIKE '%ACEPTA%'").fetchone()
+        self.assertIsNotNone(fila)
+        self.assertEqual(fila["estado"], "Pendiente")
+
+    def test_pero_no_mueve_la_ficha_de_etapa(self):
+        """Cerrar una venta lo hace la agencia con el papeleo delante."""
+        self._decide("acepto")
+        estado = self.conn.execute("SELECT estado FROM inmuebles WHERE id='inm1'").fetchone()["estado"]
+        self.assertEqual(estado, "Propuesta")
+
+    def test_rechazar_tambien_queda(self):
+        self.assertEqual(self._decide("rechazo")[0], 200)
+        self.assertEqual(
+            self.conn.execute("SELECT decision FROM inmueble_portal_decisiones").fetchone()["decision"], "rechazo")
+
+    def test_una_decision_inventada_se_rechaza(self):
+        self.assertEqual(self._decide("quiza")[0], 400)
+
+    def test_la_decision_va_encadenada(self):
+        self._decide("acepto")
+        self._decide("rechazo")
+        r = S.verifica_decisiones_del_propietario(self.conn, "inm1")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(r["checked"], 2)
+
+    def test_y_tocarla_despues_se_nota(self):
+        """Que el propietario diga que nunca aceptó ese precio es el escenario."""
+        self._decide("acepto")
+        self.conn.execute("UPDATE inmueble_portal_decisiones SET importe = '150000'")
+        self.conn.commit()
+        self.assertFalse(S.verifica_decisiones_del_propietario(self.conn, "inm1")["ok"])
+
+    def test_borrar_una_de_en_medio_tambien(self):
+        self._decide("acepto")
+        self._decide("rechazo")
+        primera = self.conn.execute(
+            "SELECT id FROM inmueble_portal_decisiones ORDER BY created_at LIMIT 1").fetchone()["id"]
+        self.conn.execute("DELETE FROM inmueble_portal_decisiones WHERE id = ?", (primera,))
+        self.conn.commit()
+        self.assertFalse(S.verifica_decisiones_del_propietario(self.conn, "inm1")["ok"])
+
+    def test_queda_constancia_de_desde_donde(self):
+        self._decide("acepto")
+        fila = self.conn.execute("SELECT ip, agente, created_at FROM inmueble_portal_decisiones").fetchone()
+        self.assertTrue(fila["ip"])
+        self.assertTrue(fila["created_at"])

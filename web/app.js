@@ -57963,25 +57963,31 @@ const refreshCurrentInmuebleProfile = () => {
         ownerAccessBtn.disabled = true;
         const oldLabel = ownerAccessBtn.textContent;
         ownerAccessBtn.textContent = "Creando...";
-        if (portalStatus) portalStatus.textContent = "Generando acceso propietario...";
+        if (portalStatus) portalStatus.textContent = "Abriendo el seguimiento del propietario...";
         try {
+          // Antes esto llamaba a un servicio externo (`LEAD_HUB_URL`) que no está
+          // configurado: el botón existía y no funcionaba. Ahora abre el portal de
+          // seguimiento que vive en el propio CRM.
           const owner = Array.isArray(propietarios) ? propietarios[0] || {} : {};
-          const res = await apiPost("/api/portal_owner_access_create", {
-            listing_id: inmueble.id,
-            name: owner.nombre || ownerPrimary || "",
-            contact: owner.email || owner.telefono || "",
+          const res = await apiPost("/api/inmueble_portal_acceso", {
+            inmueble_id: inmueble.id,
+            cliente_id: owner.id || "",
           });
           if (res?.error) throw new Error(res.error);
-          const code = String(res?.code || "").trim();
-          const message = code
-            ? `Código propietario: ${code} · Acceso: /owner`
-            : "Acceso propietario creado.";
-          if (portalStatus) portalStatus.textContent = message;
-          if (code) {
-            try { await navigator.clipboard?.writeText(`Acceso propietario Verifika2: /owner · Código: ${code}`); } catch (e) {}
+          const enlace = String(res?.enlace || "").trim();
+          const partes = [];
+          if (res?.aviso?.enviado) partes.push(`Enlace enviado a ${res.telefono || "su teléfono"}`);
+          else partes.push("Enlace listo (copiado al portapapeles)");
+          if (res?.caduca) partes.push(`caduca el ${res.caduca}`);
+          // Sin canal de mensajes el enlace es el único factor. Que se sepa aquí,
+          // que es donde alguien decide a quién se lo manda.
+          if (res?.segundo_factor === false) partes.push("sin código de confirmación: configura el canal de WhatsApp/SMS");
+          if (portalStatus) portalStatus.textContent = partes.join(" · ");
+          if (enlace) {
+            try { await navigator.clipboard?.writeText(enlace); } catch (e) {}
           }
         } catch (err) {
-          if (portalStatus) portalStatus.textContent = err?.message || "No se pudo crear el acceso propietario.";
+          if (portalStatus) portalStatus.textContent = err?.message || "No se pudo abrir el seguimiento.";
         } finally {
           ownerAccessBtn.disabled = false;
           ownerAccessBtn.textContent = oldLabel || "Acceso propietario";

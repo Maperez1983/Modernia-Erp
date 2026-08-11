@@ -1488,6 +1488,23 @@ def log_crm_stage_event(
             now,
         ),
     )
+    # Y si esa ficha tiene el portal abierto, su dueño se entera. Aquí, que es por
+    # donde pasan TODOS los cambios de etapa, y no en cada handler que los provoca.
+    inm = str(inmueble_id or "").strip()
+    if inm:
+        clave = normalize_lookup_text(to_value)
+        legible = ETAPAS_DEL_PROPIETARIO.get(clave, (to_value, 0))[0]
+        if clave in {"VENDIDO", "COMPRAVENTA", "ALQUILER", "CERRADO NEGATIVAMENTE"}:
+            # La venta ha terminado: el enlace deja de valer. Se avisa antes de cerrar.
+            avisa_al_propietario(
+                conn, inm, "etapa", f"Tu inmueble pasa a: {legible}. Gracias por confiar en nosotros.",
+                referencia=clave, now=now if now != "now" else None)
+            revoca_accesos_del_inmueble(conn, inm, "venta cerrada",
+                                        now=now if now != "now" else None)
+        else:
+            avisa_al_propietario(
+                conn, inm, "etapa", f"Novedad en la venta de tu inmueble: {legible}.",
+                referencia=clave, now=now if now != "now" else None)
 
 
 def open_auth_store_conn(with_row_factory=True):
@@ -30372,7 +30389,12 @@ INMO_PORTAL_DIAS = max(7, int(os.environ.get("INMO_PORTAL_DIAS", "120") or 120))
 INMO_PORTAL_CODIGO_MINUTOS = 15
 INMO_PORTAL_CODIGO_INTENTOS = 5
 INMO_PORTAL_SESION_DIAS = 30
-INMO_PORTAL_DOC_MAX_BYTES = max(1, int(os.environ.get("INMO_PORTAL_DOC_MAX_MB", "12") or 12)) * 1024 * 1024
+# 6 MB, y el número no es al azar: el servidor corta cualquier POST a 10 MB
+# (`APP_MAX_POST_BYTES`) y el fichero viaja en base64, que engorda un tercio. Un
+# límite por encima de ~7,5 MB no llegaría a aplicarse nunca —el navegador se
+# comería un corte de conexión en vez de un error que explique qué pasa—, así que
+# se queda con margen por debajo.
+INMO_PORTAL_DOC_MAX_BYTES = max(1, int(os.environ.get("INMO_PORTAL_DOC_MAX_MB", "6") or 6)) * 1024 * 1024
 INMO_PORTAL_DOC_TIPOS = {".pdf", ".jpg", ".jpeg", ".png", ".webp", ".heic"}
 
 # Las etapas internas dichas como se las diría a un vendedor por teléfono. El paso
@@ -30765,6 +30787,32 @@ def build_portal_de_venta(conn, acceso, *, registrar=True):
         (str(row_value(inmueble, "empresa_id", "") or ""),),
     ).fetchone()
 
+    # Si hay una oferta encima de la mesa, el importe sí es suyo: es su casa. Quien
+    # la hace, no.
+    propuesta = None
+    if normalize_lookup_text(estado) == "PROPUESTA":
+        operacion = conn.execute(
+            "SELECT precio_propuesta, fecha_propuesta FROM operaciones_inmobiliarias "
+            "WHERE inmueble_id = ? ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 1",
+            (inmueble_id,),
+        ).fetchone()
+        importe = round(parse_money_value(row_value(operacion, "precio_propuesta", 0)) or 0, 2)
+        ya = None
+        try:
+            ensure_inmueble_portal_decisiones_schema(conn)
+            ya = conn.execute(
+                "SELECT decision, created_at FROM inmueble_portal_decisiones WHERE inmueble_id = ? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+        except Exception:
+            _rollback_best_effort(conn)
+        propuesta = {
+            "importe": importe,
+            "fecha": _fecha_corta(row_value(operacion, "fecha_propuesta", "")) if operacion else "",
+            "decidida": str(row_value(ya, "decision", "") or "") if ya else "",
+        }
+
     return {
         "inmueble": {
             "direccion": str(row_value(inmueble, "direccion", "") or ""),
@@ -30791,7 +30839,187 @@ def build_portal_de_venta(conn, acceso, *, registrar=True):
         "pendiente_de_ti": pendiente,
         "documentos": documentos,
         "firmas": firmas,
+        "propuesta": propuesta,
     }
+
+
+def ensure_inmueble_portal_decisiones_schema(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS inmueble_portal_decisiones (
+          id TEXT PRIMARY KEY,
+          acceso_id TEXT NOT NULL,
+          inmueble_id TEXT NOT NULL,
+          cliente_id TEXT,
+          decision TEXT NOT NULL,
+          importe TEXT,
+          comentario TEXT,
+          ip TEXT,
+          agente TEXT,
+          created_at TEXT NOT NULL,
+          prev_hash TEXT,
+          integrity_hash TEXT
+        )
+        """
+    )
+
+
+def _payload_de_decision(fila, prev_hash):
+    """El texto que se firma. Uno solo, para escribir y para verificar."""
+    return "|".join([
+        str(prev_hash or ""),
+        str(row_value(fila, "id", "") or ""),
+        str(row_value(fila, "inmueble_id", "") or ""),
+        str(row_value(fila, "cliente_id", "") or ""),
+        str(row_value(fila, "decision", "") or ""),
+        str(row_value(fila, "importe", "") or ""),
+        str(row_value(fila, "comentario", "") or ""),
+        str(row_value(fila, "created_at", "") or ""),
+    ])
+
+
+def guarda_decision_del_propietario(conn, acceso, decision, *, importe="", comentario="", ip="", agente="", now=None):
+    """Aceptar o rechazar una oferta es un acto con consecuencias.
+
+    Va encadenada como la auditoría del registro horario —cada línea lleva el hash
+    de la anterior— para que dentro de seis meses se pueda demostrar qué se aceptó,
+    cuándo y desde dónde, y que nadie lo tocó después. Que el propietario diga que
+    nunca aceptó ese precio es exactamente el escenario para el que sirve.
+    """
+    ensure_inmueble_portal_decisiones_schema(conn)
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    inmueble_id = str(row_value(acceso, "inmueble_id", "") or "")
+    prev_hash = ""
+    try:
+        fila = conn.execute(
+            "SELECT a.integrity_hash FROM inmueble_portal_decisiones a "
+            "WHERE a.inmueble_id = ? AND COALESCE(a.integrity_hash,'') <> '' "
+            "AND NOT EXISTS (SELECT 1 FROM inmueble_portal_decisiones b "
+            "                WHERE b.inmueble_id = a.inmueble_id AND COALESCE(b.prev_hash,'') = a.integrity_hash) "
+            "ORDER BY a.created_at DESC, a.id DESC LIMIT 1",
+            (inmueble_id,),
+        ).fetchone()
+        if fila:
+            prev_hash = str(row_value(fila, "integrity_hash", "") or "")
+    except Exception:
+        _rollback_best_effort(conn)
+        prev_hash = ""
+    registro = {
+        "id": os.urandom(16).hex(),
+        "acceso_id": str(row_value(acceso, "id", "") or ""),
+        "inmueble_id": inmueble_id,
+        "cliente_id": str(row_value(acceso, "cliente_id", "") or ""),
+        "decision": str(decision or ""),
+        "importe": str(importe or ""),
+        "comentario": str(comentario or ""),
+        "ip": str(ip or ""),
+        "agente": str(agente or "")[:200],
+        "created_at": now,
+    }
+    integridad = hashlib.sha256(_payload_de_decision(registro, prev_hash).encode("utf-8")).hexdigest()
+    conn.execute(
+        "INSERT INTO inmueble_portal_decisiones (id, acceso_id, inmueble_id, cliente_id, decision, importe, "
+        "comentario, ip, agente, created_at, prev_hash, integrity_hash) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        (registro["id"], registro["acceso_id"], registro["inmueble_id"], registro["cliente_id"],
+         registro["decision"], registro["importe"], registro["comentario"], registro["ip"],
+         registro["agente"], now, prev_hash, integridad),
+    )
+    return registro["id"]
+
+
+def verifica_decisiones_del_propietario(conn, inmueble_id):
+    """Mismo criterio que la del registro horario: se comprueba el hash de cada
+    línea contra su contenido y que nadie apunte a una que ya no está. Sin
+    recorrer por fechas, que fue lo que hizo saltar aquella en falso."""
+    try:
+        ensure_inmueble_portal_decisiones_schema(conn)
+        filas = conn.execute(
+            "SELECT * FROM inmueble_portal_decisiones WHERE inmueble_id = ? ORDER BY id ASC",
+            (str(inmueble_id or ""),),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return {"ok": False, "checked": 0, "error": "no se pudo leer"}
+    firmadas = [f for f in filas or [] if str(row_value(f, "integrity_hash", "") or "")]
+    por_hash = {str(row_value(f, "integrity_hash", "") or ""): f for f in firmadas}
+    manipuladas, huecos = [], []
+    for f in firmadas:
+        anterior = str(row_value(f, "prev_hash", "") or "")
+        calculado = hashlib.sha256(_payload_de_decision(f, anterior).encode("utf-8")).hexdigest()
+        if calculado != str(row_value(f, "integrity_hash", "") or ""):
+            manipuladas.append(row_value(f, "id", None))
+        elif anterior and anterior not in por_hash:
+            huecos.append(row_value(f, "id", None))
+    return {"ok": not manipuladas and not huecos, "checked": len(firmadas),
+            "manipuladas": manipuladas, "huecos": huecos}
+
+
+def avisa_al_propietario(conn, inmueble_id, motivo, texto, *, referencia="", now=None):
+    """Avisa por WhatsApp/SMS de algo que le importa al propietario.
+
+    **Un portal que hay que visitar no lo visita nadie.** El producto no es la
+    página: es el mensaje que llega cuando pasa algo, con la página detrás.
+
+    Sobre por qué el mensaje no lleva el enlace dentro: del token no se guarda más
+    que el hash, a propósito, así que desde aquí no se puede reconstruir. Guardarlo
+    en claro para poder pegarlo en cada aviso dejaría el hasheo en un adorno. El
+    enlace se manda una vez, al abrir el acceso, y desde la ficha se puede reenviar
+    —lo que rota el token y anula el anterior, que es justo lo que debe pasar
+    cuando alguien dice que lo ha perdido—.
+
+    No lanza nunca: que falle un aviso no puede tumbar la operación que lo provoca.
+    """
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    inmueble_id = str(inmueble_id or "").strip()
+    if not inmueble_id or not hay_canal_para_avisar():
+        return 0
+    enviados = 0
+    try:
+        ensure_inmueble_portal_schema(conn)
+        accesos = conn.execute(
+            "SELECT id, telefono FROM inmueble_portal_accesos WHERE inmueble_id = ? AND revocado = 0",
+            (inmueble_id,),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return 0
+    for acceso in accesos or []:
+        acceso_id = str(row_value(acceso, "id", "") or "")
+        telefono = str(row_value(acceso, "telefono", "") or "")
+        if not telefono:
+            continue
+        try:
+            # Que un mismo hecho no se avise dos veces si el handler se repite.
+            ya = conn.execute(
+                "SELECT COUNT(*) AS n FROM inmueble_portal_avisos "
+                "WHERE acceso_id = ? AND motivo = ? AND COALESCE(referencia,'') = ?",
+                (acceso_id, str(motivo or ""), str(referencia or "")),
+            ).fetchone()
+            if int(row_value(ya, "n", 0) or 0):
+                continue
+        except Exception:
+            _rollback_best_effort(conn)
+            continue
+        enviado, detalle = envia_mensaje_al_propietario(telefono, texto)
+        try:
+            conn.execute(
+                "INSERT INTO inmueble_portal_avisos (id, acceso_id, inmueble_id, motivo, referencia, canal, "
+                "enviado, detalle, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (os.urandom(16).hex(), acceso_id, inmueble_id, str(motivo or ""), str(referencia or ""),
+                 canal_para_avisar(), 1 if enviado else 0, str(detalle or ""), now),
+            )
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("avisa_al_propietario/inmueble_portal_avisos", _fallo_tragado)
+        if enviado:
+            enviados += 1
+    # Se confirma aquí: hay ganchos que llaman DESPUÉS del commit del handler, y sin
+    # esto el apunte se quedaba en el aire. Sin apunte no hay memoria de lo enviado,
+    # y sin memoria el mismo hecho se avisa una y otra vez.
+    try:
+        conn.commit()
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("avisa_al_propietario/commit", _fallo_tragado)
+    return enviados
 
 
 def sesion_de_portal_valida(acceso, sesion):
@@ -33152,6 +33380,12 @@ def create_portal_inmueble_lead(conn, payload, now):
     # Persistimos el lead antes de crear acciones auxiliares. En Postgres, si una
     # acción opcional falla, el wrapper hace rollback de la transacción activa.
     conn.commit()
+    # Alguien ha preguntado por su casa. Se le dice cuántos van, nunca quién es:
+    # el interesado no ha consentido que sus datos lleguen al vendedor.
+    avisa_al_propietario(
+        conn, listing_id, "interesado",
+        "Alguien ha preguntado por tu inmueble desde el portal. Ya puedes verlo en tu seguimiento.",
+        referencia=str(demanda_id or cliente_id or ""), now=now)
     try:
         conn.execute(
             """
@@ -63834,6 +64068,7 @@ class Handler(BaseHTTPRequestHandler):
              font-weight: 600; cursor: pointer; }
     .aviso { padding: 12px 14px; border-radius: 12px; background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; }
     .vacio { color: var(--suave); font-size: 14px; }
+    .subir { color: var(--verde); font-weight: 600; cursor: pointer; white-space: nowrap; font-size: 14px; }
   </style>
 </head>
 <body>
@@ -63893,7 +64128,24 @@ class Handler(BaseHTTPRequestHandler):
         `<li><span>${esc(x.titulo)}${x.detalle ? " · " + esc(x.detalle) : ""}</span><span class="fecha">${esc(x.fecha)}</span></li>`).join("")
         || '<li class="vacio">Todavía no hay movimientos que mostrar.</li>';
       const tuyo = (d.pendiente_de_ti || []).map((x) =>
-        `<li><span class="pend">${esc(x.tarea)}</span><span class="fecha">${esc(x.fecha_limite || "")}</span></li>`).join("");
+        `<li><span class="pend">${esc(x.tarea)}</span>
+             <label class="subir">Subir<input type="file" data-tarea="${esc(x.tarea)}"
+                    accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" hidden /></label></li>`).join("");
+      const p = d.propuesta;
+      const propuesta = !p ? "" : `
+        <div class="tarjeta">
+          <h2>Tienes una oferta</h2>
+          <p style="font-size:26px;margin:6px 0;font-variant-numeric:tabular-nums"><strong>${p.importe ? eur.format(p.importe) : "Pendiente de importe"}</strong></p>
+          ${p.decidida
+            ? `<p class="suave">Ya respondiste: <strong>${p.decidida === "acepto" ? "aceptada" : "rechazada"}</strong>.
+                 Tu asesor sigue desde aquí.</p>`
+            : `<p class="suave">Tu respuesta queda registrada con fecha y hora. No cierra nada por sí sola:
+                 tu asesor se encarga del papeleo.</p>
+               <div style="display:flex;gap:8px;margin-top:10px">
+                 <button id="acepto">Acepto</button>
+                 <button id="rechazo" style="background:transparent;color:var(--tinta);border:1px solid var(--linea)">No, gracias</button>
+               </div>`}
+        </div>`;
       const docs = (d.documentos || []).map((x) =>
         `<li><span>${esc(x.nombre)}${x.mio ? " · lo subiste tú" : ""}</span><span class="fecha">${esc(x.fecha)}</span></li>`).join("")
         || '<li class="vacio">Aún no hay documentos compartidos.</li>';
@@ -63920,13 +64172,44 @@ class Handler(BaseHTTPRequestHandler):
           <div class="cifra"><span>Interesados</span><strong>${r.interesados}</strong></div>
           <div class="cifra"><span>Contactos del portal</span><strong>${r.contactos_portal}</strong></div>
         </div>
-        ${tuyo ? `<div class="tarjeta"><h2>Pendiente de ti</h2><ul>${tuyo}</ul></div>` : ""}
+        ${propuesta}
+        ${tuyo ? `<div class="tarjeta"><h2>Pendiente de ti</h2><ul>${tuyo}</ul>
+                   <p class="suave" id="subiendo" style="margin:10px 0 0"></p></div>` : ""}
         <div class="tarjeta"><h2>Qué ha pasado</h2><ul>${linea}</ul></div>
         <div class="tarjeta"><h2>Documentos</h2><ul>${docs}</ul></div>
         ${firmas ? `<div class="tarjeta"><h2>Firmas</h2><ul>${firmas}</ul></div>` : ""}
         <p class="suave" style="text-align:center;font-size:12px">
           ${esc(d.agencia.nombre || "")}${d.agencia.asesor ? " · tu asesor: " + esc(d.agencia.asesor) : ""}
         </p>`;
+
+      const nota = document.getElementById("subiendo");
+      app.querySelectorAll('input[type="file"]').forEach((campo) => {
+        campo.onchange = async () => {
+          const f = campo.files && campo.files[0];
+          if (!f) return;
+          if (f.size > 12 * 1024 * 1024) { nota.textContent = "El archivo pasa de 12 MB."; return; }
+          nota.textContent = "Subiendo " + f.name + "…";
+          const lector = new FileReader();
+          lector.onload = async () => {
+            try {
+              await pide("/api/portal_venta_doc", { token, sesion: sesion(), nombre: f.name,
+                                                    tarea: campo.dataset.tarea, file_base64: lector.result });
+              nota.textContent = "Recibido, gracias.";
+              cargar();
+            } catch (e) { nota.textContent = e.message; }
+          };
+          lector.readAsDataURL(f);
+        };
+      });
+      ["acepto", "rechazo"].forEach((cual) => {
+        const b = document.getElementById(cual);
+        if (!b) return;
+        b.onclick = async () => {
+          b.disabled = true;
+          try { await pide("/api/portal_venta_propuesta", { token, sesion: sesion(), decision: cual }); cargar(); }
+          catch (e) { b.disabled = false; alert(e.message); }
+        };
+      });
     }
 
     async function cargar() {
@@ -65725,6 +66008,124 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": textos.get(err, err)}, status=429 if err == "demasiados_intentos" else 400)
                 return
             json_response(self, {"ok": True, "sesion": sesion})
+            return
+
+        if parsed.path in ("/api/portal_venta_doc", "/api/portal_venta_propuesta"):
+            acceso, fallo = acceso_de_portal_por_token(conn, payload.get("token") or "")
+            if not acceso:
+                json_response(self, {"error": "Enlace no válido"}, status=403 if fallo in ("revocado", "caducado") else 404)
+                return
+            if not sesion_de_portal_valida(acceso, payload.get("sesion") or ""):
+                json_response(self, {"error": "Confirma tu identidad con el código"}, status=401)
+                return
+            inmueble_id = str(row_value(acceso, "inmueble_id", "") or "")
+            ahora_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+            if parsed.path == "/api/portal_venta_doc":
+                nombre = str(payload.get("nombre") or "").strip() or "documento"
+                crudo = payload.get("file_base64") or payload.get("data") or ""
+                if "," in crudo:
+                    crudo = crudo.split(",", 1)[1]
+                try:
+                    contenido = base64.b64decode(crudo, validate=True)
+                except Exception:
+                    json_response(self, {"error": "El archivo no se ha podido leer"}, status=400)
+                    return
+                if not contenido:
+                    json_response(self, {"error": "El archivo está vacío"}, status=400)
+                    return
+                if len(contenido) > INMO_PORTAL_DOC_MAX_BYTES:
+                    json_response(self, {"error": f"El archivo pasa de {INMO_PORTAL_DOC_MAX_BYTES // (1024*1024)} MB"}, status=413)
+                    return
+                ext = ("." + nombre.rsplit(".", 1)[-1].lower()) if "." in nombre else ""
+                if ext not in INMO_PORTAL_DOC_TIPOS:
+                    # Lista blanca, no lista negra: aquí sube ficheros alguien de
+                    # fuera y no hay nadie revisando lo que entra.
+                    json_response(self, {"error": "Sólo se admiten PDF o fotos"}, status=415)
+                    return
+                carpeta_id = re.sub(r"[^A-Za-z0-9_-]+", "_", inmueble_id).strip("_") or "inmueble"
+                carpeta = UPLOADS / "inmuebles" / carpeta_id / "docs"
+                carpeta.mkdir(parents=True, exist_ok=True)
+                doc_id = os.urandom(16).hex()
+                # El nombre del fichero lo pone el servidor: el de origen sólo se
+                # guarda como etiqueta.
+                destino = carpeta / f"propietario_{doc_id}{ext}"
+                destino.write_bytes(contenido)
+                url = f"/uploads/inmuebles/{carpeta_id}/docs/{destino.name}"
+                docs_cols = table_columns(conn, "inmueble_docs") or set()
+                fila = {"id": doc_id, "inmueble_id": inmueble_id, "nombre": nombre[:180], "url": url,
+                        "tipo": "Aportado por el propietario", "estado": "Recibido",
+                        "origen_tipo": "propietario", "origen_id": str(row_value(acceso, "id", "") or ""),
+                        "visible_portal": 1, "created_at": ahora_iso, "updated_at": ahora_iso}
+                claves = [k for k in fila if k in docs_cols]
+                conn.execute(
+                    f"INSERT INTO inmueble_docs ({', '.join(claves)}) VALUES ({', '.join(['?'] * len(claves))})",
+                    [fila[k] for k in claves])
+                # Si venía a cuenta de una tarea del checklist, se da por hecha.
+                tarea = str(payload.get("tarea") or "").strip()
+                if tarea:
+                    conn.execute(
+                        "UPDATE inmueble_checklist SET estado = 'Hecho', updated_at = ? "
+                        "WHERE inmueble_id = ? AND tarea = ?",
+                        (ahora_iso, inmueble_id, tarea))
+                audit_event(conn, str(row_value(acceso, "empresa_id", "") or ""), "inmueble", inmueble_id,
+                            "Documento aportado por el propietario",
+                            usuario=str(row_value(acceso, "nombre", "") or "propietario"),
+                            detalles={"nombre": nombre[:180], "tarea": tarea}, now=ahora_iso)
+                conn.commit()
+                json_response(self, {"ok": True, "nombre": nombre[:180]})
+                return
+
+            decision = normalize_lookup_text(payload.get("decision") or "")
+            if decision not in {"ACEPTO", "RECHAZO"}:
+                json_response(self, {"error": "decision debe ser acepto o rechazo"}, status=400)
+                return
+            operacion = conn.execute(
+                "SELECT id, precio_propuesta FROM operaciones_inmobiliarias WHERE inmueble_id = ? "
+                "ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 1",
+                (inmueble_id,),
+            ).fetchone()
+            importe = row_value(operacion, "precio_propuesta", "") if operacion else ""
+            decision_id = guarda_decision_del_propietario(
+                conn, acceso, "acepto" if decision == "ACEPTO" else "rechazo",
+                importe=importe, comentario=str(payload.get("comentario") or "")[:500],
+                ip=str(self.client_address[0] if getattr(self, "client_address", None) else ""),
+                agente=str(self.headers.get("User-Agent") or ""), now=ahora_iso)
+            # La decisión NO mueve la ficha de etapa: eso lo hace la agencia con el
+            # papeleo delante. Lo que sí deja es una tarea para que nadie se entere
+            # tarde.
+            try:
+                acciones_cols = table_columns(conn, "acciones") or set()
+                fila = {
+                    "id": os.urandom(16).hex(),
+                    "empresa_id": str(row_value(acceso, "empresa_id", "") or ""),
+                    "workspace_id": str(row_value(acceso, "workspace_id", "") or ""),
+                    "servicio": "inmobiliaria",
+                    "inmueble_id": inmueble_id,
+                    "cliente_id": str(row_value(acceso, "cliente_id", "") or ""),
+                    "cliente_nombre": str(row_value(acceso, "nombre", "") or ""),
+                    "fecha": ahora_iso[:10],
+                    "hora": "09:00",
+                    "tipo": "Post-aceptación" if decision == "ACEPTO" else "Seguimiento",
+                    "asunto": ("El propietario ACEPTA la propuesta" if decision == "ACEPTO"
+                               else "El propietario RECHAZA la propuesta"),
+                    "estado": "Pendiente",
+                    "notas": str(payload.get("comentario") or "")[:500],
+                    "created_at": ahora_iso,
+                    "updated_at": ahora_iso,
+                }
+                claves = [k for k in fila if k in acciones_cols and fila[k] != ""]
+                conn.execute(
+                    f"INSERT INTO acciones ({', '.join(claves)}) VALUES ({', '.join(['?'] * len(claves))})",
+                    [fila[k] for k in claves])
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("portal_venta_propuesta/acciones", _fallo_tragado)
+            audit_event(conn, str(row_value(acceso, "empresa_id", "") or ""), "inmueble", inmueble_id,
+                        "Decisión del propietario sobre la propuesta",
+                        usuario=str(row_value(acceso, "nombre", "") or "propietario"),
+                        detalles={"decision": decision.lower(), "id": decision_id}, now=ahora_iso)
+            conn.commit()
+            json_response(self, {"ok": True, "decision": decision.lower()})
             return
 
         if parsed.path == "/api/inmueble_signature_reject":
@@ -86876,6 +87277,10 @@ class Handler(BaseHTTPRequestHandler):
                     ),
                 )
             conn.commit()
+            avisa_al_propietario(
+                conn, inmueble_id, "interesado",
+                "Hay un nuevo interesado en tu inmueble. Ya puedes verlo en tu seguimiento.",
+                referencia=record_id, now=now)
             json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/inmueble_docs":
@@ -87307,6 +87712,16 @@ class Handler(BaseHTTPRequestHandler):
                 f"INSERT INTO visitas ({', '.join(cols)}) VALUES ({placeholders})",
                 values,
             )
+            # Lo que más quiere saber un vendedor: que alguien viene a ver su casa.
+            if inmueble_id:
+                fecha_visita = str(payload.get("fecha") or "").strip()
+                hora_visita = str(payload.get("hora") or "").strip()
+                avisa_al_propietario(
+                    conn, inmueble_id, "visita",
+                    "Hay una visita a tu inmueble"
+                    + (f" el {fecha_visita}" if fecha_visita else "")
+                    + (f" a las {hora_visita}" if hora_visita else "") + ".",
+                    referencia=f"{fecha_visita}|{hora_visita}", now=now)
         elif parsed.path == "/api/clientes":
             if not empresa:
                 try:
