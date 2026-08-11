@@ -21,6 +21,7 @@ termina.
 
 import json
 import os
+import re
 import tempfile
 import threading
 import unittest
@@ -1195,10 +1196,13 @@ class ElAnchoYLaAgendaTests(BasePortal):
     existe."""
 
     def test_hay_dos_columnas_en_pantalla_grande(self):
+        """Sin fijar el punto de corte exacto: lo que importa es que exista uno y
+        que a partir de ahí el contenido se reparta en columnas."""
         _, html = self._get("/portal-venta")
-        self.assertIn("@media (min-width: 900px)", html)
-        i = html.index("@media (min-width: 900px)")
-        self.assertIn("grid-template-columns", html[i:i + 400])
+        m = re.search(r"@media \(min-width: (\d+)px\)\s*\{(.{0,600})", html, re.S)
+        self.assertIsNotNone(m, "no hay ningún punto de corte para pantalla grande")
+        self.assertGreaterEqual(int(m.group(1)), 700)
+        self.assertIn("grid-template-columns", m.group(2))
 
     def test_la_pagina_puede_ensancharse(self):
         _, html = self._get("/portal-venta")
@@ -1218,3 +1222,12 @@ class ElAnchoYLaAgendaTests(BasePortal):
         self.conn.commit()
         d = self._vista(self._token(self._abre_portal()["enlace"]))
         self.assertIn(manana, [c["fecha"] for c in d["agenda"]])
+
+    def test_la_barra_de_movil_se_esconde_en_escritorio(self):
+        """La regla estaba ANTES de definir `.barra`: con la misma especificidad
+        gana la última, así que no se aplicaba nunca y la barra fija salía también
+        en el monitor, tapando contenido."""
+        _, html = self._get("/portal-venta")
+        css = html[html.index("<style>"):html.index("</style>")]
+        i = css.index(".barra { position: fixed")
+        self.assertIn(".barra { display: none; }", css[i:], "la regla que la esconde tiene que ir después")

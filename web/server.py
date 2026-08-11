@@ -64233,94 +64233,112 @@ class Handler(BaseHTTPRequestHandler):
             --fondo: #f6f7f9; --tarjeta: #ffffff; --verde: #15803D; --verde-claro: #dcfce7;
             --ambar: #b45309; --ambar-claro: #fef3c7;
             --oferta-fondo: #15803D; --oferta-tinta: #ffffff; --oferta-suave: rgba(255,255,255,.85);
-            /* Lo que se escribe ENCIMA del verde de acento. En oscuro ese verde es
-               claro, así que ahí la tinta tiene que ser oscura. */
             --sobre-verde: #ffffff; }
     @media (prefers-color-scheme: dark) {
       :root { --tinta: #f1f5f9; --suave: #94a3b8; --linea: #262b36; --fondo: #0d0f13; --tarjeta: #161a21;
               --verde: #4ade80; --verde-claro: #14301f; --ambar: #fbbf24; --ambar-claro: #2e2410;
-              /* En oscuro el verde de acento es claro: usarlo de fondo con texto
-                 blanco daba un contraste de 1,8:1 en la tarjeta donde se decide
-                 sobre una oferta. Aquí el fondo es oscuro y la tinta clara. */
               --oferta-fondo: #06301f; --oferta-tinta: #eafff3; --oferta-suave: rgba(234,255,243,.78);
               --sobre-verde: #06301f; }
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--fondo); color: var(--tinta);
-           font: 15px/1.55 "IBM Plex Sans", "Segoe UI", sans-serif; padding-bottom: 84px; }
-    main { max-width: 1080px; margin: 0 auto; }
+           font: 15px/1.55 "IBM Plex Sans", "Segoe UI", sans-serif; padding-bottom: 92px; }
+    main { max-width: 1180px; margin: 0 auto; }
     .contenido { padding: 0 16px; display: grid; gap: 14px; }
+    h1 { font-size: 26px; margin: 0; letter-spacing: -0.02em; line-height: 1.15; }
+    h2 { font-size: 13px; margin: 0 0 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--suave); }
+    .suave { color: var(--suave); }
+    .portada { position: relative; min-height: 300px; background: var(--verde); overflow: hidden; display: flex; }
+    .portada img.fondo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .portada .velo { position: absolute; inset: 0;
+      background: linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,.15) 40%, rgba(0,0,0,.82) 100%); }
+    .portada .interior { position: relative; width: 100%; max-width: 1180px; margin: 0 auto;
+      padding: 16px; display: flex; flex-direction: column; justify-content: space-between; color: #fff; }
+    .alto { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .marca img { height: 30px; width: auto; filter: drop-shadow(0 1px 4px rgba(0,0,0,.5)); }
+    .marca span { font-size: 14px; font-weight: 600; text-shadow: 0 1px 4px rgba(0,0,0,.6); }
+    .asesor { display: flex; align-items: center; gap: 9px; background: rgba(255,255,255,.16);
+      backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,.28); border-radius: 99px;
+      padding: 5px 12px 5px 5px; cursor: pointer; }
+    .asesor .cara { width: 30px; height: 30px; border-radius: 99px; background: #fff; color: var(--verde);
+      display: grid; place-items: center; font-weight: 700; font-size: 13px; }
+    .asesor b { font-size: 13px; font-weight: 600; display: block; line-height: 1.2; }
+    .asesor i { font-size: 11px; font-style: normal; opacity: .85; }
+    .bajo h1 { color: #fff; }
+    .bajo .donde { margin: 3px 0 0; font-size: 13px; opacity: .9; }
+    .titular { margin: 14px 0 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+    .titular .dato { opacity: .88; font-weight: 400; }
+    .inicial { position: absolute; inset: 0; display: grid; place-items: center;
+      font-size: 120px; font-weight: 700; color: rgba(255,255,255,.22); }
+    .tarjeta { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 16px; padding: 18px; }
     .columnas { display: grid; gap: 14px; }
     .columna { display: grid; gap: 14px; align-content: start; }
-    /* En pantalla grande, dos columnas. Con una sola, el portal era una tira
-       estrecha con 1.800 px de scroll y media pantalla vacía a los lados. */
-    @media (min-width: 900px) {
-      .columnas { grid-template-columns: 1.05fr 1fr; align-items: start; }
-      .portada { height: 320px; }
-      .portada .texto h1 { font-size: 30px; }
+    @media (min-width: 940px) {
+      .columnas { grid-template-columns: 1.35fr 1fr; align-items: start; }
+      .portada { min-height: 340px; }
+      .bajo h1 { font-size: 34px; }
+      .actua { position: sticky; top: 14px; }
     }
-    h1 { font-size: 24px; margin: 0; letter-spacing: -0.02em; line-height: 1.2; }
-    h2 { font-size: 14px; margin: 0 0 12px; letter-spacing: 0.02em; text-transform: uppercase; color: var(--suave); }
-    .suave { color: var(--suave); }
-    .portada { position: relative; height: 240px; background: var(--verde); overflow: hidden; }
-    .portada img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .portada .velo { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(0,0,0,.45) 0%, rgba(0,0,0,0) 38%, rgba(0,0,0,.72) 100%); }
-    .portada .texto { position: absolute; left: 16px; right: 16px; bottom: 14px; color: #fff; }
-    .portada .texto h1 { color: #fff; }
-    .portada .texto p { margin: 4px 0 0; opacity: .92; font-size: 13px; }
-    .marca { position: absolute; top: 14px; left: 16px; display: flex; align-items: center; gap: 8px; }
-    .marca img { height: 26px; width: auto; filter: drop-shadow(0 1px 3px rgba(0,0,0,.4)); }
-    .marca span { color: #fff; font-size: 13px; font-weight: 600; text-shadow: 0 1px 3px rgba(0,0,0,.5); }
-    .inicial { width: 100%; height: 100%; display: grid; place-items: center; font-size: 84px; font-weight: 700;
-               color: rgba(255,255,255,.28); }
-    .tarjeta { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 16px; padding: 18px; }
-    .titular { font-size: 21px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
-    .hitos { display: grid; gap: 0; margin-top: 14px; }
-    .hito { display: grid; grid-template-columns: 22px 1fr auto; align-items: start; gap: 10px; position: relative; padding-bottom: 14px; }
+    .grande { display: flex; align-items: baseline; gap: 12px; }
+    .grande strong { font-size: 46px; font-weight: 700; letter-spacing: -0.03em; line-height: 1;
+      font-variant-numeric: tabular-nums; }
+    .grande span { font-size: 14px; color: var(--suave); }
+    .menudas { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 14px; padding-top: 14px;
+      border-top: 1px solid var(--linea); }
+    .menudas div { font-size: 13px; color: var(--suave); }
+    .menudas b { display: block; font-size: 19px; color: var(--tinta); font-weight: 600;
+      font-variant-numeric: tabular-nums; }
+    .hitos { display: grid; margin-top: 4px; }
+    .hito { display: grid; grid-template-columns: 22px 1fr; align-items: start; gap: 10px;
+      position: relative; padding-bottom: 13px; }
     .hito:last-child { padding-bottom: 0; }
     .punto { width: 11px; height: 11px; border-radius: 99px; background: var(--linea); margin-top: 5px; }
     .hito.hecho .punto { background: var(--verde); }
-    .hito.actual .punto { background: var(--verde); box-shadow: 0 0 0 4px var(--verde-claro); }
-    .hito:not(:last-child)::before { content: ""; position: absolute; left: 5px; top: 18px; bottom: 0; width: 1px; background: var(--linea); }
+    .hito.actual .punto { box-shadow: 0 0 0 4px var(--verde-claro); }
+    .hito:not(:last-child)::before { content: ""; position: absolute; left: 5px; top: 18px; bottom: 0;
+      width: 1px; background: var(--linea); }
     .hito.hecho:not(:last-child)::before { background: var(--verde); }
-    .hito .nombre { font-size: 15px; }
-    .hito:not(.hecho):not(.actual) .nombre { color: var(--suave); }
+    .hito:not(.hecho) .nombre { color: var(--suave); }
     .hito.actual .nombre { font-weight: 600; }
-    .cifras { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
-    .cifra { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 14px; padding: 14px 16px; }
-    .cifra span { display: block; font-size: 12px; color: var(--suave); margin-bottom: 2px; }
-    .cifra strong { font-size: 26px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
     ul { list-style: none; margin: 0; padding: 0; }
-    li { padding: 11px 0; border-top: 1px solid var(--linea); display: flex; gap: 12px; justify-content: space-between; align-items: center; }
+    li { padding: 11px 0; border-top: 1px solid var(--linea); display: flex; gap: 12px;
+      justify-content: space-between; align-items: center; }
     li:first-child { border-top: 0; padding-top: 0; }
     .fecha { color: var(--suave); font-size: 13px; white-space: nowrap; }
-    .cita { display: grid; grid-template-columns: 52px 1fr; gap: 12px; align-items: center; padding: 11px 0; border-top: 1px solid var(--linea); }
+    .cita { display: grid; grid-template-columns: 52px 1fr; gap: 12px; align-items: center;
+      padding: 11px 0; border-top: 1px solid var(--linea); }
     .cita:first-child { border-top: 0; padding-top: 0; }
-    .cita .dia { background: var(--verde-claro); color: var(--verde); border-radius: 10px; text-align: center; padding: 6px 0; }
+    .cita .dia { background: var(--verde-claro); color: var(--verde); border-radius: 10px;
+      text-align: center; padding: 6px 0; }
     .cita .dia b { display: block; font-size: 18px; line-height: 1.1; }
     .cita .dia i { display: block; font-size: 11px; font-style: normal; text-transform: uppercase; }
     .oferta { background: var(--oferta-fondo); color: var(--oferta-tinta); border: 0; }
     .oferta h2, .oferta .suave { color: var(--oferta-suave); }
-    .oferta .importe { font-size: 34px; font-weight: 700; margin: 4px 0 10px; letter-spacing: -0.03em; }
+    .oferta .importe { font-size: 40px; font-weight: 700; margin: 2px 0 10px; letter-spacing: -0.03em; }
     input, textarea, button { font: inherit; }
-    textarea { width: 100%; min-height: 72px; padding: 11px 12px; border: 1px solid var(--linea);
-               border-radius: 12px; background: var(--fondo); color: var(--tinta); resize: vertical; }
+    textarea { width: 100%; min-height: 76px; padding: 11px 12px; border: 1px solid var(--linea);
+      border-radius: 12px; background: var(--fondo); color: var(--tinta); resize: vertical; }
     button { padding: 11px 18px; border: 0; border-radius: 12px; background: var(--verde);
-             color: var(--sobre-verde); font-weight: 600; cursor: pointer; }
+      color: var(--sobre-verde); font-weight: 600; cursor: pointer; }
     .oferta button { background: var(--oferta-tinta); color: var(--oferta-fondo); }
     .fantasma { background: transparent; color: var(--tinta); border: 1px solid var(--linea); }
     .oferta .fantasma { background: transparent; color: var(--oferta-tinta); border: 1px solid var(--oferta-suave); }
-    .globo { max-width: 82%; padding: 10px 14px; border-radius: 16px; margin-bottom: 8px; font-size: 14px; }
+    .globo { max-width: 86%; padding: 10px 14px; border-radius: 16px; margin-bottom: 8px; font-size: 14px; }
     .globo.suyo { background: var(--verde); color: var(--sobre-verde); margin-left: auto; border-bottom-right-radius: 4px; }
     .globo.nuestro { background: var(--fondo); border: 1px solid var(--linea); border-bottom-left-radius: 4px; }
-    .globo .quien { display: block; font-size: 11px; opacity: .7; margin-bottom: 2px; }
+    .globo .quien { display: block; font-size: 11px; opacity: .75; margin-bottom: 2px; }
     .subir { color: var(--verde); font-weight: 600; cursor: pointer; white-space: nowrap; font-size: 14px; }
-    .barra { position: sticky; bottom: 0; background: var(--tarjeta); border-top: 1px solid var(--linea);
-             padding: 12px 16px; display: flex; gap: 10px; margin-top: 18px; }
+    .mas { background: none; border: 0; color: var(--verde); font-weight: 600; padding: 10px 0 0; cursor: pointer; }
+    .barra { position: fixed; left: 0; right: 0; bottom: 0; background: var(--tarjeta);
+      border-top: 1px solid var(--linea); padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+      display: flex; gap: 10px; z-index: 9; }
     .barra button { flex: 1; }
     .aviso { padding: 12px 14px; border-radius: 12px; background: var(--ambar-claro); color: var(--ambar); margin: 16px; }
     .vacio { color: var(--suave); font-size: 14px; padding: 4px 0; }
     .pend { color: var(--ambar); }
+    /* Después de definir `.barra`, no antes: con la misma especificidad gana la
+       última regla, y la de arriba no llegaba a aplicarse nunca. */
+    @media (min-width: 940px) { .barra { display: none; } body { padding-bottom: 24px; } }
   </style>
 </head>
 <body>
@@ -64354,6 +64372,7 @@ class Handler(BaseHTTPRequestHandler):
       if (dias < -1 && dias > -30) return "en " + Math.abs(dias) + " días";
       return fechaCorta(v);
     };
+    const iniciales = (n) => String(n || "").trim().split(/\s+/).slice(0, 2).map((p) => p[0] || "").join("").toUpperCase() || "?";
 
     async function pide(ruta, cuerpo) {
       const r = await fetch(ruta, cuerpo
@@ -64366,7 +64385,7 @@ class Handler(BaseHTTPRequestHandler):
 
     function pantallaCodigo(telefono) {
       app.innerHTML = `
-        <div class="contenido" style="padding-top:32px">
+        <div class="contenido" style="padding-top:32px;max-width:420px;margin:0 auto">
           <h1>Confirma que eres tú</h1>
           <div class="tarjeta">
             <p class="suave" id="txt">Te mandamos un código al ${esc(telefono || "teléfono registrado")}.</p>
@@ -64394,17 +64413,36 @@ class Handler(BaseHTTPRequestHandler):
     }
 
     function pinta(d) {
-      const i = d.inmueble, e = d.etapa, r = d.resumen, ag = d.agencia || {};
-      const foto = i.fotos
-        ? `<img src="/api/portal_venta_foto?token=${encodeURIComponent(token)}&s=${encodeURIComponent(sesion())}&n=0" alt="" />`
-        : `<div class="inicial">${esc((i.direccion || "?").trim().charAt(0).toUpperCase())}</div>`;
-      const marca = ag.logo
-        ? `<img src="${esc(ag.logo)}" alt="${esc(ag.nombre)}" />`
-        : `<span>${esc(ag.nombre || "")}</span>`;
+      const i = d.inmueble, e = d.etapa, r = d.resumen, ag = d.agencia || {}, p = d.propuesta;
+      const asesor = ag.asesor || "Tu asesor";
 
-      const hitos = (e.pasos || []).map((p, n) => {
+      // El titular de la portada: la respuesta a por qué ha entrado.
+      let titular = esc(e.titulo), dato = "";
+      if (p && !p.decidida) { titular = "Tienes una oferta"; dato = p.importe ? eur.format(p.importe) : ""; }
+      else if (r.visitas_previstas) dato = r.visitas_previstas + (r.visitas_previstas === 1 ? " visita prevista" : " visitas previstas");
+      else if (r.visitas_hechas) dato = r.visitas_hechas + (r.visitas_hechas === 1 ? " visita" : " visitas") + " hasta ahora";
+      else if (e.dias !== "") dato = e.dias + " días en venta";
+
+      const fondo = i.fotos
+        ? `<img class="fondo" src="/api/portal_venta_foto?token=${encodeURIComponent(token)}&s=${encodeURIComponent(sesion())}&n=0" alt="" />`
+        : `<div class="inicial">${esc((i.direccion || "?").trim().charAt(0).toUpperCase())}</div>`;
+
+      const oferta = !p ? "" : `
+        <div class="tarjeta oferta">
+          <h2>${p.decidida ? "La oferta" : "Tienes una oferta"}</h2>
+          <div class="importe">${p.importe ? eur.format(p.importe) : "Pendiente de importe"}</div>
+          ${p.decidida
+            ? `<p class="suave" style="margin:0">Ya respondiste: <strong>${p.decidida === "acepto" ? "aceptada" : "rechazada"}</strong>. ${esc(asesor)} sigue desde aquí.</p>`
+            : `<p class="suave" style="margin:0 0 14px">Tu respuesta queda registrada con fecha y hora. No cierra nada por sí sola: ${esc(asesor)} se encarga del papeleo.</p>
+               <div style="display:flex;gap:8px">
+                 <button id="acepto">Acepto</button>
+                 <button id="rechazo" class="fantasma">No, gracias</button>
+               </div>`}
+        </div>`;
+
+      const hitos = (e.pasos || []).map((x, n) => {
         const clase = n + 1 < e.paso ? "hecho" : (n + 1 === e.paso ? "hecho actual" : "");
-        return `<div class="hito ${clase}"><div class="punto"></div><div class="nombre">${esc(p)}</div><div></div></div>`;
+        return `<div class="hito ${clase}"><div class="punto"></div><div class="nombre">${esc(x)}</div></div>`;
       }).join("");
 
       const agenda = (d.agenda || []).map((x) => {
@@ -64421,20 +64459,6 @@ class Handler(BaseHTTPRequestHandler):
              <label class="subir">Subir<input type="file" data-tarea="${esc(x.tarea)}"
                     accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" hidden /></label></li>`).join("");
 
-      const p = d.propuesta;
-      const oferta = !p ? "" : `
-        <div class="tarjeta oferta">
-          <h2>Tienes una oferta</h2>
-          <div class="importe">${p.importe ? eur.format(p.importe) : "Pendiente de importe"}</div>
-          ${p.decidida
-            ? `<p class="suave" style="margin:0">Ya respondiste: <strong>${p.decidida === "acepto" ? "aceptada" : "rechazada"}</strong>. Tu asesor sigue desde aquí.</p>`
-            : `<p class="suave" style="margin:0 0 14px">Tu respuesta queda registrada con fecha y hora. No cierra nada por sí sola: tu asesor se encarga del papeleo.</p>
-               <div style="display:flex;gap:8px">
-                 <button id="acepto">Acepto</button>
-                 <button id="rechazo" class="fantasma">No, gracias</button>
-               </div>`}
-        </div>`;
-
       const docs = (d.documentos || []).map((x) =>
         `<li><span>${esc(x.nombre)}${x.mio ? ' <span class="suave">· lo subiste tú</span>' : ""}</span>
              <span class="fecha">${esc(fechaCorta(x.fecha))}</span></li>`).join("")
@@ -64442,69 +64466,103 @@ class Handler(BaseHTTPRequestHandler):
 
       const hilo = (d.mensajes || []).map((m) =>
         `<div class="globo ${m.autor === "propietario" ? "suyo" : "nuestro"}">
-           <span class="quien">${esc(m.autor === "propietario" ? "Tú" : (m.nombre || "Tu asesor"))} · ${esc(haceCuanto(m.fecha))}</span>
+           <span class="quien">${esc(m.autor === "propietario" ? "Tú" : (m.nombre || asesor))} · ${esc(haceCuanto(m.fecha))}</span>
            ${esc(m.texto)}
-         </div>`).join("") || '<p class="vacio">Escríbele lo que necesites. Te contesta por aquí.</p>';
+         </div>`).join("") || `<p class="vacio">Escríbele lo que necesites a ${esc(asesor)}. Te contesta por aquí.</p>`;
 
-      const linea = (d.cronologia || []).map((x) =>
+      const historia = d.cronologia || [];
+      const linea = (n) => historia.slice(0, n).map((x) =>
         `<li><span>${esc(x.titulo)}${x.detalle ? " · " + esc(x.detalle) : ""}</span>
              <span class="fecha">${esc(fechaCorta(x.fecha))}</span></li>`).join("")
         || '<li class="vacio">Todavía no hay movimientos que mostrar.</li>';
 
       app.innerHTML = `
         <div class="portada">
-          ${foto}<div class="velo"></div>
-          <div class="marca">${marca}</div>
-          <div class="texto">
-            <h1>${esc(i.direccion)}</h1>
-            <p>${esc([i.poblacion, i.tipo, i.m2 ? i.m2 + " m²" : ""].filter(Boolean).join(" · "))}</p>
+          ${fondo}<div class="velo"></div>
+          <div class="interior">
+            <div class="alto">
+              <div class="marca">${ag.logo ? `<img src="${esc(ag.logo)}" alt="${esc(ag.nombre)}" />`
+                                           : `<span>${esc(ag.nombre || "")}</span>`}</div>
+              <div class="asesor" id="irAlChat">
+                <span class="cara">${esc(iniciales(asesor))}</span>
+                <span><b>${esc(asesor)}</b><i>escríbele</i></span>
+              </div>
+            </div>
+            <div class="bajo">
+              <h1>${esc(i.direccion)}</h1>
+              <p class="donde">${esc([i.poblacion, i.tipo, i.m2 ? i.m2 + " m²" : ""].filter(Boolean).join(" · "))}</p>
+              <p class="titular">${titular}${dato ? ` <span class="dato">· ${esc(dato)}</span>` : ""}</p>
+            </div>
           </div>
         </div>
         <div class="contenido" style="padding-top:16px">
-          <div class="tarjeta">
-            <p class="titular">${esc(e.titulo)}</p>
-            <p class="suave" style="margin:6px 0 0;font-size:13px">
-              ${e.desde ? "En venta desde el " + esc(fechaCorta(e.desde)) : ""}${e.dias !== "" ? " · " + esc(e.dias) + " días" : ""}${i.precio ? " · " + eur.format(i.precio) : ""}
-            </p>
-            <div class="hitos">${hitos}</div>
-          </div>
           ${oferta}
-          <div class="cifras">
-            <div class="cifra"><span>Visitas hechas</span><strong>${r.visitas_hechas}</strong></div>
-            <div class="cifra"><span>Visitas previstas</span><strong>${r.visitas_previstas}</strong></div>
-            <div class="cifra"><span>Contactos desde la web</span><strong>${r.contactos_portal}</strong></div>
-            <div class="cifra"><span>Interesados</span><strong>${r.interesados}</strong></div>
-          </div>
           <div class="columnas">
-          <div class="columna">
-          <div class="tarjeta"><h2>Próximas citas</h2>${agenda ||
-            '<p class="vacio">No hay ninguna cita prevista ahora mismo. Cuando tu asesor concierte una visita, aparecerá aquí.</p>'}</div>
-          ${tuyo ? `<div class="tarjeta"><h2>Pendiente de ti</h2><ul>${tuyo}</ul>
-                     <p class="suave" id="subiendo" style="margin:10px 0 0;font-size:13px"></p></div>` : ""}
-          <div class="tarjeta">
-            <h2>Documentación del inmueble</h2>
-            <ul>${docs}</ul>
-            <label class="subir" style="display:inline-block;margin-top:12px">
-              + Añadir documento<input type="file" id="docLibre" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" hidden />
-            </label>
-            <p class="suave" id="subiendoLibre" style="margin:8px 0 0;font-size:13px"></p>
+            <div class="columna">
+              <div class="tarjeta">
+                <h2>Movimiento</h2>
+                <div class="grande"><strong>${r.visitas_hechas}</strong>
+                  <span>${r.visitas_hechas === 1 ? "visita realizada" : "visitas realizadas"}</span></div>
+                <div class="menudas">
+                  <div><b>${r.visitas_previstas}</b>previstas</div>
+                  <div><b>${r.contactos_portal}</b>contactos desde la web</div>
+                  <div><b>${r.interesados}</b>interesados</div>
+                </div>
+              </div>
+              <div class="tarjeta"><h2>Próximas citas</h2>${agenda ||
+                '<p class="vacio">No hay ninguna cita prevista ahora mismo. Cuando tu asesor concierte una visita, aparecerá aquí.</p>'}</div>
+              <div class="tarjeta">
+                <h2>En qué punto va</h2>
+                <div class="hitos">${hitos}</div>
+                <p class="suave" style="margin:12px 0 0;font-size:13px">
+                  ${e.desde ? "En venta desde el " + esc(fechaCorta(e.desde)) : ""}${i.precio ? " · " + eur.format(i.precio) : ""}
+                </p>
+              </div>
+              <div class="tarjeta">
+                <h2>Qué ha pasado</h2>
+                <ul id="historia">${linea(5)}</ul>
+                ${historia.length > 5 ? '<button class="mas" id="verTodo">Ver todo</button>' : ""}
+              </div>
+            </div>
+            <div class="columna actua">
+              <div class="tarjeta" id="chat">
+                <h2>Hablar con ${esc(asesor)}</h2>
+                <div style="margin-bottom:12px">${hilo}</div>
+                <textarea id="mensaje" placeholder="¿Alguna duda sobre la venta?"></textarea>
+                <button id="enviarMensaje" style="margin-top:10px">Enviar</button>
+                <p class="suave" id="estadoMensaje" style="margin:8px 0 0;font-size:13px"></p>
+              </div>
+              ${tuyo ? `<div class="tarjeta"><h2>Pendiente de ti</h2><ul>${tuyo}</ul>
+                         <p class="suave" id="subiendo" style="margin:10px 0 0;font-size:13px"></p></div>` : ""}
+              <div class="tarjeta">
+                <h2>Documentación del inmueble</h2>
+                <ul>${docs}</ul>
+                <label class="subir" style="display:inline-block;margin-top:12px">
+                  + Añadir documento<input type="file" id="docLibre" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" hidden />
+                </label>
+                <p class="suave" id="subiendoLibre" style="margin:8px 0 0;font-size:13px"></p>
+              </div>
+            </div>
           </div>
-          </div>
-          <div class="columna">
-          <div class="tarjeta">
-            <h2>Hablar con tu asesor</h2>
-            <div style="margin-bottom:12px">${hilo}</div>
-            <textarea id="mensaje" placeholder="¿Alguna duda sobre la venta?"></textarea>
-            <button id="enviarMensaje" style="margin-top:10px">Enviar</button>
-            <p class="suave" id="estadoMensaje" style="margin:8px 0 0;font-size:13px"></p>
-          </div>
-          <div class="tarjeta"><h2>Qué ha pasado</h2><ul>${linea}</ul></div>
-          </div>
-          </div>
-          <p class="suave" style="text-align:center;font-size:12px;margin:4px 0 0">
-            ${esc(ag.nombre || "")}${ag.asesor ? " · tu asesor: " + esc(ag.asesor) : ""}
-          </p>
+          <p class="suave" style="text-align:center;font-size:12px;margin:4px 0 0">${esc(ag.nombre || "")}</p>
+        </div>
+        <div class="barra">
+          ${p && !p.decidida ? '<button id="irOferta">Responder a la oferta</button>'
+                             : `<button id="irChat2">Escribir a ${esc(asesor)}</button>`}
         </div>`;
+
+      const alChat = () => {
+        document.getElementById("chat").scrollIntoView({ behavior: "smooth", block: "start" });
+        setTimeout(() => document.getElementById("mensaje")?.focus(), 400);
+      };
+      document.getElementById("irAlChat")?.addEventListener("click", alChat);
+      document.getElementById("irChat2")?.addEventListener("click", alChat);
+      document.getElementById("irOferta")?.addEventListener("click", () =>
+        document.querySelector(".oferta")?.scrollIntoView({ behavior: "smooth", block: "center" }));
+      document.getElementById("verTodo")?.addEventListener("click", (ev) => {
+        document.getElementById("historia").innerHTML = linea(historia.length);
+        ev.target.remove();
+      });
 
       const subeArchivo = async (campo, nota, tarea) => {
         const f = campo.files && campo.files[0];
