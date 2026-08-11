@@ -30481,6 +30481,15 @@ def ensure_inmueble_portal_schema(conn):
     # Un documento del expediente sólo se ve desde fuera si alguien lo decide, salvo
     # los que el propietario ha subido él mismo o ha firmado.
     ensure_column(conn, "inmueble_docs", "visible_portal", "visible_portal INTEGER DEFAULT 0")
+    # Y se confirma aquí. En Postgres el DDL es transaccional: si esto se llama desde
+    # una petición de sólo lectura —que no confirma nada— las tablas se crean, la
+    # consulta de después funciona porque va en la misma transacción, y al soltar la
+    # conexión al pool el rollback se las lleva. Se comprobó en producción: tras
+    # responder 200, las tres tablas seguían sin existir.
+    try:
+        conn.commit()
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_inmueble_portal_schema/commit", _fallo_tragado)
 
 
 def hay_canal_para_avisar():
@@ -30862,6 +30871,12 @@ def ensure_inmueble_portal_decisiones_schema(conn):
         )
         """
     )
+    # Mismo motivo que en el esquema del portal: sin confirmar, un GET se lleva la
+    # tabla por delante al soltar la conexión.
+    try:
+        conn.commit()
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_inmueble_portal_decisiones_schema/commit", _fallo_tragado)
 
 
 def _payload_de_decision(fila, prev_hash):

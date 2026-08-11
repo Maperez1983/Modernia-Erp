@@ -657,3 +657,37 @@ class DecidirLaPropuestaTests(BasePortal):
         fila = self.conn.execute("SELECT ip, agente, created_at FROM inmueble_portal_decisiones").fetchone()
         self.assertTrue(fila["ip"])
         self.assertTrue(fila["created_at"])
+
+
+class ElEsquemaSobreviveAUnaLecturaTests(BasePortal):
+    """En Postgres el DDL es transaccional.
+
+    `ensure_inmueble_portal_schema` se llama también desde peticiones de sólo
+    lectura, que no confirman nada. Las tablas se creaban, la consulta siguiente
+    funcionaba porque iba en la misma transacción, y al devolver la conexión al pool
+    el rollback se las llevaba. Comprobado contra producción: tras responder 200, las
+    tres tablas seguían sin existir, así que el portal no habría llegado a funcionar.
+
+    En SQLite no se ve —cada sentencia va suelta—, que es por lo que ni la suite ni
+    los tests del portal lo cazaron. Este comprueba la forma: que se confirma.
+    """
+
+    def test_el_esquema_del_portal_se_confirma(self):
+        fuente = (Path(__file__).resolve().parents[1] / "web" / "server.py").read_text(encoding="utf-8")
+        i = fuente.index("def ensure_inmueble_portal_schema")
+        self.assertIn("conn.commit()", fuente[i:i + 4000])
+
+    def test_el_de_las_decisiones_tambien(self):
+        fuente = (Path(__file__).resolve().parents[1] / "web" / "server.py").read_text(encoding="utf-8")
+        i = fuente.index("def ensure_inmueble_portal_decisiones_schema")
+        self.assertIn("conn.commit()", fuente[i:i + 2000])
+
+    def test_una_lectura_deja_las_tablas_puestas(self):
+        """Sobre SQLite no prueba el rollback, pero sí que la lectura las crea."""
+        self.conn.execute("DROP TABLE IF EXISTS inmueble_portal_avisos")
+        self.conn.commit()
+        self._get("/api/inmueble_portal_accesos?inmueble_id=inm1", con_sesion=True)
+        tablas = {r[0] for r in self.conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'inmueble_portal%'")}
+        self.assertIn("inmueble_portal_accesos", tablas)
+        self.assertIn("inmueble_portal_avisos", tablas)
