@@ -26666,7 +26666,12 @@ const setWorkspaceFincasTab = (tab = "dashboard") => {
   if (workspaceFincasTabs) {
     workspaceFincasTabs.querySelectorAll("[data-fincas-tab-btn]").forEach((button) => {
       const key = normalizeWorkspaceFincasTab(button.dataset.fincasTabBtn || "");
-      button.classList.toggle("active", key === normalized);
+      const esActiva = key === normalized;
+      button.classList.toggle("active", esActiva);
+      // Cuál está abierta se decía solo con un borde dorado. Quien navega con lector
+      // de pantalla oía ocho botones iguales, sin manera de saber en cuál está.
+      if (esActiva) button.setAttribute("aria-current", "page");
+      else button.removeAttribute("aria-current");
     });
   }
   document.querySelectorAll("[data-fincas-tab]").forEach((panel) => {

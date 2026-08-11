@@ -5921,6 +5921,18 @@ body.tc-resizing {
   outline-offset: 2px;
 }
 
+/* El foco de teclado pesaba menos que el estado activo —`button:focus` es 0-1-1 y
+   `.tc-modulebar .tab.tc-module.active` es 0-4-0—, así que al tabular hasta la
+   pestaña ya seleccionada no cambiaba nada en pantalla y no había forma de saber
+   dónde estabas. Encima el anillo general va al 22 % de opacidad, que sobre el fondo
+   dorado de la pestaña apenas se distingue. Este gana por peso y por contraste, y va
+   en `:focus-visible` para que no se quede pegado al hacer clic con el ratón. */
+.tc-modulebar .tab.tc-module:focus-visible,
+.tc-modulebar .tab.tc-module.active:focus-visible {
+  outline:3px solid rgba(var(--ink-rgb), 0.85);
+  outline-offset: 3px;
+}
+
 .tc-modulebar .tc-notify-badge {
   position: absolute;
   top: 8px;
