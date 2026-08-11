@@ -1185,3 +1185,36 @@ class ElBotonDeRechazarSeVeTests(BasePortal):
             with self.subTest(regla):
                 self.assertIn("var(--sobre-verde)", bloque)
                 self.assertNotIn("color: #fff", bloque)
+
+
+class ElAnchoYLaAgendaTests(BasePortal):
+    """En pantalla grande el portal era una tira de 640 px con 1.800 de scroll y
+    media pantalla vacía a los lados. Y la agenda no se veía nunca: se escondía
+    entera cuando no había citas, que con los datos de hoy es siempre. Una sección
+    que desaparece no es una sección discreta, es una sección que nadie sabe que
+    existe."""
+
+    def test_hay_dos_columnas_en_pantalla_grande(self):
+        _, html = self._get("/portal-venta")
+        self.assertIn("@media (min-width: 900px)", html)
+        i = html.index("@media (min-width: 900px)")
+        self.assertIn("grid-template-columns", html[i:i + 400])
+
+    def test_la_pagina_puede_ensancharse(self):
+        _, html = self._get("/portal-venta")
+        i = html.index("main { max-width:")
+        self.assertNotIn("640px", html[i:i + 60])
+
+    def test_la_agenda_sale_aunque_no_haya_citas(self):
+        _, html = self._get("/portal-venta")
+        self.assertIn("Próximas citas", html)
+        self.assertIn("No hay ninguna cita prevista", html)
+
+    def test_y_con_citas_sale_la_lista(self):
+        manana = (S.datetime.now(S.timezone.utc).date() + S.timedelta(days=3)).isoformat()
+        self._ins("visitas", {"id": "vX", "workspace_id": self.ws, "empresa_id": "emp1",
+                              "inmueble_id": "inm1", "fecha": manana, "hora": "17:00",
+                              "estado": "Prevista", "created_at": AHORA, "updated_at": AHORA})
+        self.conn.commit()
+        d = self._vista(self._token(self._abre_portal()["enlace"]))
+        self.assertIn(manana, [c["fecha"] for c in d["agenda"]])

@@ -64248,8 +64248,17 @@ class Handler(BaseHTTPRequestHandler):
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--fondo); color: var(--tinta);
            font: 15px/1.55 "IBM Plex Sans", "Segoe UI", sans-serif; padding-bottom: 84px; }
-    main { max-width: 640px; margin: 0 auto; }
+    main { max-width: 1080px; margin: 0 auto; }
     .contenido { padding: 0 16px; display: grid; gap: 14px; }
+    .columnas { display: grid; gap: 14px; }
+    .columna { display: grid; gap: 14px; align-content: start; }
+    /* En pantalla grande, dos columnas. Con una sola, el portal era una tira
+       estrecha con 1.800 px de scroll y media pantalla vacía a los lados. */
+    @media (min-width: 900px) {
+      .columnas { grid-template-columns: 1.05fr 1fr; align-items: start; }
+      .portada { height: 320px; }
+      .portada .texto h1 { font-size: 30px; }
+    }
     h1 { font-size: 24px; margin: 0; letter-spacing: -0.02em; line-height: 1.2; }
     h2 { font-size: 14px; margin: 0 0 12px; letter-spacing: 0.02em; text-transform: uppercase; color: var(--suave); }
     .suave { color: var(--suave); }
@@ -64466,7 +64475,10 @@ class Handler(BaseHTTPRequestHandler):
             <div class="cifra"><span>Contactos desde la web</span><strong>${r.contactos_portal}</strong></div>
             <div class="cifra"><span>Interesados</span><strong>${r.interesados}</strong></div>
           </div>
-          ${agenda ? `<div class="tarjeta"><h2>Próximas citas</h2>${agenda}</div>` : ""}
+          <div class="columnas">
+          <div class="columna">
+          <div class="tarjeta"><h2>Próximas citas</h2>${agenda ||
+            '<p class="vacio">No hay ninguna cita prevista ahora mismo. Cuando tu asesor concierte una visita, aparecerá aquí.</p>'}</div>
           ${tuyo ? `<div class="tarjeta"><h2>Pendiente de ti</h2><ul>${tuyo}</ul>
                      <p class="suave" id="subiendo" style="margin:10px 0 0;font-size:13px"></p></div>` : ""}
           <div class="tarjeta">
@@ -64477,6 +64489,8 @@ class Handler(BaseHTTPRequestHandler):
             </label>
             <p class="suave" id="subiendoLibre" style="margin:8px 0 0;font-size:13px"></p>
           </div>
+          </div>
+          <div class="columna">
           <div class="tarjeta">
             <h2>Hablar con tu asesor</h2>
             <div style="margin-bottom:12px">${hilo}</div>
@@ -64485,6 +64499,8 @@ class Handler(BaseHTTPRequestHandler):
             <p class="suave" id="estadoMensaje" style="margin:8px 0 0;font-size:13px"></p>
           </div>
           <div class="tarjeta"><h2>Qué ha pasado</h2><ul>${linea}</ul></div>
+          </div>
+          </div>
           <p class="suave" style="text-align:center;font-size:12px;margin:4px 0 0">
             ${esc(ag.nombre || "")}${ag.asesor ? " · tu asesor: " + esc(ag.asesor) : ""}
           </p>
