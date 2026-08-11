@@ -64287,12 +64287,19 @@ class Handler(BaseHTTPRequestHandler):
   <meta name="referrer" content="no-referrer" />
   <meta name="robots" content="noindex,nofollow" />
   <title>Mi venta</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:wght@500;600;700&display=swap" />
   <style>
     :root { color-scheme: light dark; --tinta: #0f172a; --suave: #64748b; --linea: #e2e8f0;
             --fondo: #f6f7f9; --tarjeta: #ffffff; --verde: #15803D; --verde-claro: #dcfce7;
             --ambar: #b45309; --ambar-claro: #fef3c7;
             --oferta-fondo: #15803D; --oferta-tinta: #ffffff; --oferta-suave: rgba(255,255,255,.85);
-            --sobre-verde: #ffffff; }
+            --sobre-verde: #ffffff;
+            /* Las mismas dos familias que el CRM. Sin esto la página caía a la
+               tipografía del sistema y no parecía de nadie. */
+            --texto: "IBM Plex Sans", "Segoe UI", sans-serif;
+            --titulos: "IBM Plex Serif", Georgia, serif; }
     @media (prefers-color-scheme: dark) {
       :root { --tinta: #f1f5f9; --suave: #94a3b8; --linea: #262b36; --fondo: #0d0f13; --tarjeta: #161a21;
               --verde: #4ade80; --verde-claro: #14301f; --ambar: #fbbf24; --ambar-claro: #2e2410;
@@ -64301,10 +64308,11 @@ class Handler(BaseHTTPRequestHandler):
     }
     * { box-sizing: border-box; }
     body { margin: 0; background: var(--fondo); color: var(--tinta);
-           font: 15px/1.55 "IBM Plex Sans", "Segoe UI", sans-serif; padding-bottom: 92px; }
+           font: 15px/1.6 var(--texto); padding-bottom: 92px; -webkit-font-smoothing: antialiased; }
     main { max-width: 1180px; margin: 0 auto; }
     .contenido { padding: 0 16px; display: grid; gap: 14px; }
-    h1 { font-size: 26px; margin: 0; letter-spacing: -0.02em; line-height: 1.15; }
+    h1 { font-family: var(--titulos); font-size: 30px; font-weight: 600; margin: 0;
+         letter-spacing: -0.01em; line-height: 1.1; }
     h2 { font-size: 13px; margin: 0 0 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--suave); }
     .suave { color: var(--suave); }
     .portada { position: relative; min-height: 300px; background: var(--verde); overflow: hidden; display: flex; }
@@ -64325,13 +64333,24 @@ class Handler(BaseHTTPRequestHandler):
     .asesor i { font-size: 11px; font-style: normal; opacity: .85; }
     .bajo h1 { color: #fff; }
     .bajo .donde { margin: 3px 0 0; font-size: 13px; opacity: .9; }
-    .titular { margin: 14px 0 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+    .sello { display: inline-block; background: rgba(255,255,255,.16); backdrop-filter: blur(6px);
+      border: 1px solid rgba(255,255,255,.3); border-radius: 99px; padding: 5px 14px;
+      font-family: var(--titulos); font-size: 17px; font-weight: 600; margin-top: 12px; }
+    .galeria { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 4px; scrollbar-width: thin;
+      max-width: 100%; -webkit-overflow-scrolling: touch; }
+    .galeria img { width: 116px; height: 84px; object-fit: cover; border-radius: 10px; flex: 0 0 auto;
+      border: 1px solid var(--linea); }
+    .titular { font-family: var(--titulos); margin: 12px 0 0; font-size: 21px; font-weight: 600; }
     .titular .dato { opacity: .88; font-weight: 400; }
     .inicial { position: absolute; inset: 0; display: grid; place-items: center;
       font-size: 120px; font-weight: 700; color: rgba(255,255,255,.22); }
     .tarjeta { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 16px; padding: 18px; }
     .columnas { display: grid; gap: 14px; }
-    .columna { display: grid; gap: 14px; align-content: start; }
+    /* `min-width: 0` no es un adorno: en una rejilla, los hijos valen por defecto
+       `min-width: auto` y cualquier cosa ancha dentro —la tira de fotos— estira la
+       columna y saca scroll lateral a toda la página. */
+    .columna { display: grid; gap: 14px; align-content: start; min-width: 0; }
+    .columna > * { min-width: 0; }
     @media (min-width: 940px) {
       .columnas { grid-template-columns: 1.35fr 1fr; align-items: start; }
       .portada { min-height: 340px; }
@@ -64339,14 +64358,14 @@ class Handler(BaseHTTPRequestHandler):
       .actua { position: sticky; top: 14px; }
     }
     .grande { display: flex; align-items: baseline; gap: 12px; }
-    .grande strong { font-size: 46px; font-weight: 700; letter-spacing: -0.03em; line-height: 1;
+    .grande strong { font-family: var(--titulos); font-size: 48px; font-weight: 600; line-height: 1;
       font-variant-numeric: tabular-nums; }
     .grande span { font-size: 14px; color: var(--suave); }
     .menudas { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 14px; padding-top: 14px;
       border-top: 1px solid var(--linea); }
     .menudas div { font-size: 13px; color: var(--suave); }
-    .menudas b { display: block; font-size: 19px; color: var(--tinta); font-weight: 600;
-      font-variant-numeric: tabular-nums; }
+    .menudas b { display: block; font-family: var(--titulos); font-size: 21px; color: var(--tinta);
+      font-weight: 600; font-variant-numeric: tabular-nums; }
     .hitos { display: grid; margin-top: 4px; }
     .hito { display: grid; grid-template-columns: 22px 1fr; align-items: start; gap: 10px;
       position: relative; padding-bottom: 13px; }
@@ -64369,11 +64388,11 @@ class Handler(BaseHTTPRequestHandler):
     .cita:first-child { border-top: 0; padding-top: 0; }
     .cita .dia { background: var(--verde-claro); color: var(--verde); border-radius: 10px;
       text-align: center; padding: 6px 0; }
-    .cita .dia b { display: block; font-size: 18px; line-height: 1.1; }
+    .cita .dia b { display: block; font-family: var(--titulos); font-size: 19px; line-height: 1.1; }
     .cita .dia i { display: block; font-size: 11px; font-style: normal; text-transform: uppercase; }
     .oferta { background: var(--oferta-fondo); color: var(--oferta-tinta); border: 0; }
     .oferta h2, .oferta .suave { color: var(--oferta-suave); }
-    .oferta .importe { font-size: 40px; font-weight: 700; margin: 2px 0 10px; letter-spacing: -0.03em; }
+    .oferta .importe { font-family: var(--titulos); font-size: 44px; font-weight: 600; margin: 2px 0 10px; }
     input, textarea, button { font: inherit; }
     textarea { width: 100%; min-height: 76px; padding: 11px 12px; border: 1px solid var(--linea);
       border-radius: 12px; background: var(--fondo); color: var(--tinta); resize: vertical; }
@@ -64538,6 +64557,13 @@ class Handler(BaseHTTPRequestHandler):
                            : `<span class="fecha">${esc(f.estado === "signed" ? "firmado" : f.estado)} · ${esc(fechaCorta(f.fecha))}</span>`}
          </li>`).join("");
 
+      const galeria = i.fotos > 1
+        ? `<div class="tarjeta"><h2>Fotos del anuncio</h2><div class="galeria">` +
+          Array.from({ length: Math.min(i.fotos, 12) }, (_, n) =>
+            `<img loading="lazy" alt="" src="/api/portal_venta_foto?token=${encodeURIComponent(token)}&s=${encodeURIComponent(sesion())}&n=${n}" />`).join("") +
+          `</div></div>`
+        : "";
+
       const anuncio = !d.anuncio ? "" : `
         <div class="tarjeta">
           <h2>Tu anuncio</h2>
@@ -64573,6 +64599,7 @@ class Handler(BaseHTTPRequestHandler):
               <h1>${esc(i.direccion)}</h1>
               <p class="donde">${esc([i.poblacion, i.tipo, i.m2 ? i.m2 + " m²" : ""].filter(Boolean).join(" · "))}</p>
               <p class="titular">${titular}${dato ? ` <span class="dato">· ${esc(dato)}</span>` : ""}</p>
+              ${i.precio ? `<div class="sello">${eur.format(i.precio)}</div>` : ""}
             </div>
           </div>
         </div>
@@ -64596,6 +64623,7 @@ class Handler(BaseHTTPRequestHandler):
                 ${d.agenda_es_pasado ? '<p class="suave" style="margin:12px 0 0;font-size:13px">No hay ninguna cita prevista ahora mismo.</p>' : ""}
               </div>
               ${anuncio}
+              ${galeria}
               <div class="tarjeta">
                 <h2>En qué punto va</h2>
                 <div class="hitos">${hitos}</div>

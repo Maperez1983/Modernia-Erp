@@ -90,9 +90,17 @@ class LasVistasDeImpresionYLosCorreosTests(unittest.TestCase):
         if "def correo_de_firma_html" in texto:
             i = texto.index("def correo_de_firma_html")
             texto = texto[:i] + texto[texto.index("\ndef ", i + 10):]
+        # Las declaraciones por variable se resuelven antes: el portal del
+        # propietario define `--titulos` y `--texto` como las dos familias de la
+        # casa, y comprobar el literal daría un falso positivo por la forma de
+        # escribirlo, no por la fuente.
+        variables = dict(re.findall(r"--(titulos|texto|font-[a-z]+):\s*([^;]+);", texto))
         for decl in re.findall(r"font-family:\s*([^;}]+)", texto):
+            resuelta = decl
+            for nombre, valor in variables.items():
+                resuelta = resuelta.replace(f"var(--{nombre})", valor)
             with self.subTest(decl=decl.strip()[:40]):
-                self.assertIn("IBM Plex", decl)
+                self.assertIn("IBM Plex", resuelta)
 
 
 class LosDocumentosGeneradosTests(unittest.TestCase):

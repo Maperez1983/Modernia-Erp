@@ -1410,3 +1410,57 @@ class FirmarDesdeElPortalTests(BasePortal):
         self.conn.commit()
         estado, _ = self._post("/api/portal_venta_firma", {"token": self.token, "id": "fr1"}, con_sesion=False)
         self.assertEqual(estado, 409)
+
+
+class LaImagenDeLaPaginaTests(BasePortal):
+    """Se veía floja y el motivo de fondo era simple: no cargaba ninguna tipografía.
+
+    El CRM usa IBM Plex Serif para los titulares e IBM Plex Sans para el texto. El
+    portal declaraba la sans pero no la cargaba, así que caía a la del sistema y la
+    página no parecía de nadie. Es lo primero que hace que algo se vea barato, mucho
+    antes que los colores o el espaciado.
+    """
+
+    def test_carga_las_tipografias_de_la_casa(self):
+        _, html = self._get("/portal-venta")
+        self.assertIn("fonts.googleapis.com", html)
+        self.assertIn("IBM+Plex+Serif", html)
+        self.assertIn("IBM+Plex+Sans", html)
+
+    def test_los_titulares_van_en_la_serif(self):
+        _, html = self._get("/portal-venta")
+        css = html[html.index("<style>"):html.index("</style>")]
+        self.assertIn('--titulos: "IBM Plex Serif"', css)
+        for regla in ("h1 {", ".titular {", ".oferta .importe {", ".grande strong {"):
+            i = css.index(regla)
+            with self.subTest(regla):
+                self.assertIn("var(--titulos)", css[i:css.index("}", i)])
+
+    def test_las_mismas_familias_que_el_crm(self):
+        """Si el CRM cambia de tipografía y el portal no, se notaría enseguida."""
+        estilos = (Path(__file__).resolve().parents[1] / "web" / "styles.css").read_text(encoding="utf-8")
+        for familia in ("IBM Plex Serif", "IBM Plex Sans"):
+            with self.subTest(familia):
+                self.assertIn(familia, estilos)
+
+    def test_hay_galeria_cuando_hay_varias_fotos(self):
+        _, html = self._get("/portal-venta")
+        self.assertIn("Fotos del anuncio", html)
+        self.assertIn("class=\"galeria\"", html)
+
+    def test_el_precio_sale_en_la_portada(self):
+        _, html = self._get("/portal-venta")
+        self.assertIn('class="sello"', html)
+
+    def test_la_galeria_no_estira_la_pagina(self):
+        """La tira de fotos metió justo el scroll lateral del que se quejaba el
+        usuario: en una rejilla los hijos valen `min-width: auto` y cualquier cosa
+        ancha dentro estira la columna. Medido: en móvil la página pasaba a 1.286 px
+        de ancho."""
+        _, html = self._get("/portal-venta")
+        css = html[html.index("<style>"):html.index("</style>")]
+        i = css.index(".columna {")
+        self.assertIn("min-width: 0", css[i:css.index("}", i)])
+        j = css.index(".galeria {")
+        self.assertIn("overflow-x: auto", css[j:css.index("}", j)])
+        self.assertIn("max-width: 100%", css[j:css.index("}", j)])
