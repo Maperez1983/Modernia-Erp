@@ -1019,3 +1019,16 @@ class LaPaletaQueSaleDeUnSoloColorTests(unittest.TestCase):
             with self.subTest(color):
                 p = S.paleta_de_marca(color)
                 self.assertEqual(canal_dominante(p["acento_oscuro"]), canal_dominante(color))
+
+
+class ElLogoSobreElColorTests(BaseComprador):
+    def test_el_logo_va_sobre_pastilla_blanca(self):
+        """La mitad de los logos vienen con su propio fondo blanco: encima de un
+        color corporativo se ven como un recorte pegado. Puesta a propósito se lee
+        como parte del diseño, y con un PNG transparente funciona igual."""
+        _, html = self._get("/portal-busqueda")
+        css = html[html.index("<style>"):html.index("</style>")]
+        i = css.index(".cabecera .marca img {")
+        regla = css[i:css.index("}", i)]
+        self.assertIn("background: #fff", regla)
+        self.assertIn("border-radius", regla)
