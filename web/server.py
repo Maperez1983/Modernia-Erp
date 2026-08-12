@@ -63335,6 +63335,10 @@ def send_file(handler, path, filename=None, force_download=False, force_attachme
         content_type = "application/pdf"
     elif path.suffix == ".svg":
         content_type = "image/svg+xml"
+    elif path.suffix in (".woff2", ".woff"):
+        # Con `text/plain` hay navegadores que descartan la fuente y vuelven a la del
+        # sistema; la página se ve como si no se hubiera cargado nada.
+        content_type = f"font/{path.suffix.lstrip('.')}"
 
     if force_download:
         # Nunca servir contenido subido como HTML/SVG ejecutable: se fuerza descarga.
@@ -63366,7 +63370,7 @@ def send_file(handler, path, filename=None, force_download=False, force_attachme
             else:
                 handler.send_header("Cache-Control", "no-store")
                 handler.send_header("Pragma", "no-cache")
-        elif path.suffix in {".svg", ".png", ".jpg", ".jpeg", ".gif"}:
+        elif path.suffix in {".svg", ".png", ".jpg", ".jpeg", ".gif", ".woff2", ".woff"}:
             handler.send_header("Cache-Control", "public, max-age=31536000, immutable")
 
         # Compresión local controlada por entorno:
