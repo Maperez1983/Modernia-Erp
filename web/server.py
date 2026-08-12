@@ -53174,7 +53174,7 @@ def build_mandato_sepa_pdf(vecino, comunidad, workspace=None, company=None):
     )
 
 
-def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None):
+def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None, primeros=None):
     """Fichero de adeudos directos SEPA (pain.008.001.02).
 
     Se genera con el esquema estándar, pero **cada banco pide lo suyo**: hay quien
@@ -53182,10 +53182,15 @@ def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None):
     identificador de acreedor con un sufijo concreto. Antes de usarlo en producción
     hay que validar un fichero de prueba con la entidad.
 
-    Todos los recibos van como `RCUR` (recurrente). El primer adeudo de un mandato
-    nuevo debería ir como `FRST`, pero eso exige llevar la cuenta de qué mandatos ya
-    han cobrado alguna vez, y hoy el CRM no la lleva: se documenta aquí para no dar
-    por hecho que está resuelto.
+    El primer adeudo de un mandato va como `FRST` y los siguientes como `RCUR`. Cuáles
+    son los primeros lo decide quien llama —lo sabe la base de datos, no este
+    generador— y llegan en `primeros`, un conjunto de referencias de mandato. Sin ese
+    argumento todo sale `RCUR`, que es como estaba.
+
+    Los dos grupos van en **bloques `PmtInf` separados**, uno por secuencia. El
+    `SeqTp` vive a nivel de bloque, así que mezclar primeros y recurrentes en el mismo
+    obligaría a repetirlo por operación y hay entidades que no lo admiten. Separarlos
+    es lo que aceptan todas.
     """
     from xml.sax.saxutils import escape as _esc
 
@@ -53196,12 +53201,11 @@ def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None):
     referencia = _sepa_texto(row_value(remesa, "referencia", ""), 35)
     fecha_cobro = str(row_value(remesa, "fecha_cobro", "") or ahora.date().isoformat())[:10]
 
-    lineas_recibos = []
-    total = 0.0
-    for numero, recibo in enumerate(recibos, start=1):
+    primeros = {str(r).strip() for r in (primeros or ()) if str(r or "").strip()}
+
+    def linea_de(numero, recibo):
         importe = round(parse_money_value(row_value(recibo, "importe", 0)), 2)
-        total += importe
-        lineas_recibos.append(
+        return importe, (
             "      <DrctDbtTxInf>\n"
             f"        <PmtId><EndToEndId>{_esc(_sepa_texto(f'{referencia}-{numero:04d}', 35))}</EndToEndId></PmtId>\n"
             f'        <InstdAmt Ccy="EUR">{importe:.2f}</InstdAmt>\n'
@@ -53217,7 +53221,42 @@ def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None):
             f"        <RmtInf><Ustrd>{_esc(_sepa_texto(row_value(recibo, 'concepto', ''), 140))}</Ustrd></RmtInf>\n"
             "      </DrctDbtTxInf>"
         )
-    total = round(total, 2)
+
+    # Un grupo por secuencia, conservando el orden de entrada dentro de cada uno.
+    grupos = {"FRST": {"lineas": [], "total": 0.0}, "RCUR": {"lineas": [], "total": 0.0}}
+    for numero, recibo in enumerate(recibos, start=1):
+        secuencia = "FRST" if referencia_mandato(recibo) in primeros else "RCUR"
+        importe, linea = linea_de(numero, recibo)
+        grupos[secuencia]["lineas"].append(linea)
+        grupos[secuencia]["total"] = round(grupos[secuencia]["total"] + importe, 2)
+    total = round(sum(g["total"] for g in grupos.values()), 2)
+
+    def bloque(secuencia, datos):
+        n = len(datos["lineas"])
+        # El PmtInfId lleva el sufijo de la secuencia: dos bloques en el mismo fichero
+        # no pueden compartir identificador.
+        pmt_id = _sepa_texto(f"{referencia}-{secuencia}", 35) if len(
+            [g for g in grupos.values() if g["lineas"]]) > 1 else _sepa_texto(referencia, 35)
+        return (
+            "    <PmtInf>\n"
+            f"      <PmtInfId>{_esc(pmt_id)}</PmtInfId>\n"
+            "      <PmtMtd>DD</PmtMtd>\n"
+            f"      <NbOfTxs>{n}</NbOfTxs>\n"
+            f"      <CtrlSum>{datos['total']:.2f}</CtrlSum>\n"
+            "      <PmtTpInf><SvcLvl><Cd>SEPA</Cd></SvcLvl><LclInstrm><Cd>CORE</Cd></LclInstrm>"
+            f"<SeqTp>{secuencia}</SeqTp></PmtTpInf>\n"
+            f"      <ReqdColltnDt>{_esc(fecha_cobro)}</ReqdColltnDt>\n"
+            f"      <Cdtr><Nm>{_esc(acreedor)}</Nm></Cdtr>\n"
+            f"      <CdtrAcct><Id><IBAN>{_esc(iban_comunidad)}</IBAN></Id></CdtrAcct>\n"
+            "      <CdtrAgt><FinInstnId><Othr><Id>NOTPROVIDED</Id></Othr></FinInstnId></CdtrAgt>\n"
+            "      <ChrgBr>SLEV</ChrgBr>\n"
+            "      <CdtrSchmeId><Id><PrvtId><Othr>\n"
+            f"        <Id>{_esc(acreedor_id)}</Id><SchmeNm><Prtry>SEPA</Prtry></SchmeNm>\n"
+            "      </Othr></PrvtId></Id></CdtrSchmeId>\n"
+            + "\n".join(datos["lineas"])
+            + "\n    </PmtInf>\n"
+        )
+
     cabecera = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.008.001.02">\n'
@@ -53229,23 +53268,11 @@ def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None):
         f"      <CtrlSum>{total:.2f}</CtrlSum>\n"
         f"      <InitgPty><Nm>{_esc(acreedor)}</Nm></InitgPty>\n"
         "    </GrpHdr>\n"
-        "    <PmtInf>\n"
-        f"      <PmtInfId>{_esc(_sepa_texto(referencia, 35))}</PmtInfId>\n"
-        "      <PmtMtd>DD</PmtMtd>\n"
-        f"      <NbOfTxs>{len(recibos)}</NbOfTxs>\n"
-        f"      <CtrlSum>{total:.2f}</CtrlSum>\n"
-        "      <PmtTpInf><SvcLvl><Cd>SEPA</Cd></SvcLvl><LclInstrm><Cd>CORE</Cd></LclInstrm>"
-        "<SeqTp>RCUR</SeqTp></PmtTpInf>\n"
-        f"      <ReqdColltnDt>{_esc(fecha_cobro)}</ReqdColltnDt>\n"
-        f"      <Cdtr><Nm>{_esc(acreedor)}</Nm></Cdtr>\n"
-        f"      <CdtrAcct><Id><IBAN>{_esc(iban_comunidad)}</IBAN></Id></CdtrAcct>\n"
-        "      <CdtrAgt><FinInstnId><Othr><Id>NOTPROVIDED</Id></Othr></FinInstnId></CdtrAgt>\n"
-        "      <ChrgBr>SLEV</ChrgBr>\n"
-        "      <CdtrSchmeId><Id><PrvtId><Othr>\n"
-        f"        <Id>{_esc(acreedor_id)}</Id><SchmeNm><Prtry>SEPA</Prtry></SchmeNm>\n"
-        "      </Othr></PrvtId></Id></CdtrSchmeId>\n"
     )
-    return (cabecera + "\n".join(lineas_recibos) + "\n    </PmtInf>\n  </CstmrDrctDbtInitn>\n</Document>\n").encode("utf-8")
+    # Primero los FRST: si el banco procesa por orden, el primer adeudo del mandato va
+    # antes que cualquier recurrente suyo.
+    bloques = "".join(bloque(sec, grupos[sec]) for sec in ("FRST", "RCUR") if grupos[sec]["lineas"])
+    return (cabecera + bloques + "  </CstmrDrctDbtInitn>\n</Document>\n").encode("utf-8")
 
 
 def fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo="", limit=800):
@@ -96076,7 +96103,28 @@ class Handler(BaseHTTPRequestHandler):
                 "WHERE r.remesa_id = ? AND r.workspace_id = ? ORDER BY v.piso, v.nombre",
                 (remesa_id, workspace_id),
             ).fetchall()
-            xml = build_remesa_sepa_xml(remesa, comunidad or {}, recibos)
+            # Cuáles van como FRST: los mandatos que no han cobrado nunca, y los que
+            # se firmaron DESPUÉS del último cobro —eso es un mandato nuevo del mismo
+            # propietario, y su secuencia vuelve a empezar—. Lo sabe la base, no el
+            # generador del fichero.
+            ultimo_cobro = {
+                row_value(f, "vecino_id", ""): str(row_value(f, "ultimo", "") or "")[:10]
+                for f in conn.execute(
+                    "SELECT r.vecino_id, MAX(rm.fecha_cobro) AS ultimo "
+                    "FROM workspace_fincas_recibos r "
+                    "JOIN workspace_fincas_remesas rm ON rm.id = r.remesa_id "
+                    "WHERE r.workspace_id = ? AND r.comunidad_id = ? AND r.remesa_id IS NOT NULL "
+                    "AND r.remesa_id != ? GROUP BY r.vecino_id",
+                    (workspace_id, row_value(remesa, "comunidad_id", ""), remesa_id),
+                ).fetchall()
+            }
+            primeros = set()
+            for recibo in recibos:
+                anterior = ultimo_cobro.get(row_value(recibo, "vecino_id", ""), "")
+                firma = str(row_value(recibo, "mandato_fecha", "") or "")[:10]
+                if not anterior or (firma and firma > anterior):
+                    primeros.add(referencia_mandato(recibo))
+            xml = build_remesa_sepa_xml(remesa, comunidad or {}, recibos, primeros=primeros)
             binary_response(
                 self, xml, content_type="application/xml",
                 filename=f"remesa_{row_value(remesa, 'referencia', remesa_id)}.xml",
