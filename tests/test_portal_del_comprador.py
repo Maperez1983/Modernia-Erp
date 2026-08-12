@@ -634,3 +634,246 @@ class ElEsquemaSobreviveAUnaLecturaTests(BaseComprador):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ElSeguimientoDelEstadoTests(BaseComprador):
+    """Un comprador vuelve al portal a preguntar dos cosas: si ha bajado de precio
+    y si todavía está libre. Las dos estaban guardadas y nadie se las contaba."""
+
+    def _apunte(self, inmueble_id, campo, antes, despues, cuando):
+        self._ins("auditoria", {"id": os.urandom(8).hex(), "empresa_id": "emp1",
+                                "entidad": "inmueble", "entidad_id": inmueble_id,
+                                "accion": "Cambio", "usuario": "ana",
+                                "detalles": json.dumps({"campo": campo, "from": antes, "to": despues}),
+                                "created_at": cuando})
+
+    def _etapa(self, inmueble_id, desde, hasta, cuando):
+        self._ins("crm_stage_events", {"id": os.urandom(8).hex(), "empresa_id": "emp1",
+                                       "inmueble_id": inmueble_id, "from_etapa": desde,
+                                       "to_etapa": hasta, "usuario": "ana", "created_at": cuando})
+
+    def test_una_bajada_de_precio_se_le_cuenta(self):
+        self._apunte("inm1", "precio_objetivo", 260000, 249000, "2026-08-10 10:00:00")
+        x = self._vista(self._abre())["inmuebles"][self._posicion(self._abre(), "Calle Uno 1")]
+        textos = [n["texto"] for n in x["novedades"]]
+        self.assertTrue(any("bajado" in t for t in textos), textos)
+        self.assertTrue(any("249.000" in t for t in textos), textos)
+
+    def test_una_subida_tambien_se_le_cuenta(self):
+        """Enseñar sólo las bajadas convierte el portal en un folleto."""
+        self._apunte("inm1", "precio_objetivo", 240000, 255000, "2026-08-10 10:00:00")
+        token = self._abre()
+        x = self._vista(token)["inmuebles"][self._posicion(token, "Calle Uno 1")]
+        self.assertTrue(any("subido" in n["texto"] for n in x["novedades"]))
+
+    def test_poner_el_precio_por_primera_vez_no_es_una_bajada(self):
+        """En la bitácora eso es `from: null`, y en producción hay 153 apuntes así.
+        Contarlo como bajada sería mentir con buena letra."""
+        self._apunte("inm1", "precio_encargo", None, 249000, "2026-08-10 10:00:00")
+        token = self._abre()
+        x = self._vista(token)["inmuebles"][self._posicion(token, "Calle Uno 1")]
+        self.assertEqual(x["novedades"], [])
+
+    def test_reservarse_y_volver_al_mercado(self):
+        self._etapa("inm1", "Encargo", "Reservado", "2026-08-09 10:00:00")
+        self._etapa("inm1", "Reservado", "Encargo", "2026-08-11 10:00:00")
+        token = self._abre()
+        textos = [n["texto"] for n in self._vista(token)["inmuebles"][self._posicion(token, "Calle Uno 1")]["novedades"]]
+        self.assertIn("Se ha reservado", textos)
+        self.assertIn("Vuelve a estar disponible", textos)
+
+    def test_el_encargo_del_principio_no_es_una_novedad(self):
+        """Si no venía de estar cerrado, «vuelve a estar disponible» es falso."""
+        self._etapa("inm1", "", "Encargo", "2026-08-01 10:00:00")
+        token = self._abre()
+        self.assertEqual(self._vista(token)["inmuebles"][self._posicion(token, "Calle Uno 1")]["novedades"], [])
+
+    def test_que_hay_una_oferta_no_se_le_cuenta(self):
+        """Es una palanca de venta. Por escrito y con fecha es una promesa que luego
+        hay que sostener."""
+        self._etapa("inm1", "Encargo", "Propuesta", "2026-08-10 10:00:00")
+        token = self._abre()
+        self.assertEqual(self._vista(token)["inmuebles"][self._posicion(token, "Calle Uno 1")]["novedades"], [])
+
+    def test_lo_posterior_a_su_ultima_entrada_va_marcado(self):
+        token = self._abre()
+        self._vista(token)          # primera entrada: queda el sello
+        self._apunte("inm1", "precio_objetivo", 260000, 249000, "2099-01-01 10:00:00")
+        d = self._vista(token)
+        x = d["inmuebles"][self._posicion(token, "Calle Uno 1")]
+        self.assertTrue(x["novedades"][0]["nuevo"])
+        self.assertEqual(d["resumen"]["novedades"], 1)
+
+    def test_lo_que_ya_habia_visto_no_lo_esta(self):
+        self._apunte("inm1", "precio_objetivo", 260000, 249000, "2026-08-01 10:00:00")
+        token = self._abre()
+        self._vista(token)
+        d = self._vista(token)
+        self.assertFalse(d["inmuebles"][self._posicion(token, "Calle Uno 1")]["novedades"][0]["nuevo"])
+        self.assertEqual(d["resumen"]["novedades"], 0)
+
+    def test_las_novedades_de_otro_inmueble_no_se_mezclan(self):
+        self._apunte("inm1", "precio_objetivo", 260000, 249000, "2026-08-10 10:00:00")
+        token = self._abre()
+        self.assertEqual(self._vista(token)["inmuebles"][self._posicion(token, "Calle Dos 2")]["novedades"], [])
+
+
+class PedirVisitaDesdeElPortalTests(BaseComprador):
+    def _pide(self, token, direccion="Calle Uno 1", **extra):
+        cuerpo = {"token": token, "i": self._posicion(token, direccion),
+                  "fecha": "2099-03-04", "franja": "mañana"}
+        cuerpo.update(extra)
+        return self._post("/api/portal_busqueda_visita", cuerpo, con_sesion=False)
+
+    def test_entra_como_cita_solicitada_en_la_agenda(self):
+        token = self._abre()
+        estado, d = self._pide(token)
+        self.assertEqual(estado, 200, d)
+        fila = self.conn.execute(
+            "SELECT inmueble_id, demanda_id, fecha, estado, notas FROM visitas").fetchone()
+        self.assertEqual(fila["inmueble_id"], "inm1")
+        self.assertEqual(fila["demanda_id"], "dem1")
+        self.assertEqual(fila["fecha"], "2099-03-04")
+        self.assertEqual(fila["estado"], "Solicitada")
+        self.assertIn("mañana", fila["notas"])
+
+    def test_no_se_da_por_confirmada(self):
+        """Ponerla como prevista en su agenda sería prometer en nombre del asesor."""
+        token = self._abre()
+        self._pide(token)
+        x = self._vista(token)["inmuebles"][self._posicion(token, "Calle Uno 1")]
+        self.assertEqual(x["cita"]["estado"], "Solicitada")
+
+    def test_le_deja_tarea_al_asesor(self):
+        token = self._abre()
+        self._pide(token)
+        fila = self.conn.execute(
+            "SELECT asunto, estado FROM acciones ORDER BY created_at DESC LIMIT 1").fetchone()
+        self.assertIn("Pide visita", fila["asunto"])
+        self.assertIn("mañana", fila["asunto"])
+        self.assertEqual(fila["estado"], "Pendiente")
+
+    def test_pedirla_cuenta_como_querer_verlo(self):
+        token = self._abre()
+        self._pide(token)
+        self.assertEqual(self._vista(token)["inmuebles"][self._posicion(token, "Calle Uno 1")]["opinion"],
+                         "verlo")
+
+    def test_no_pisa_lo_que_ya_habia_dicho(self):
+        token = self._abre()
+        self._post("/api/portal_busqueda_opinion",
+                   {"token": token, "i": self._posicion(token, "Calle Uno 1"), "valoracion": "dudas"},
+                   con_sesion=False)
+        self._pide(token)
+        self.assertEqual(self._vista(token)["inmuebles"][self._posicion(token, "Calle Uno 1")]["opinion"],
+                         "dudas")
+
+    def test_pulsar_dos_veces_no_duplica_la_cita(self):
+        token = self._abre()
+        self._pide(token)
+        self._pide(token)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) c FROM visitas").fetchone()["c"], 1)
+
+    def test_un_dia_pasado_no_se_admite(self):
+        token = self._abre()
+        estado, d = self._pide(token, fecha="2020-01-01")
+        self.assertEqual(estado, 400, d)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) c FROM visitas").fetchone()["c"], 0)
+
+    def test_ni_un_dia_con_cualquier_forma(self):
+        token = self._abre()
+        for malo in ("mañana", "04/03/2099", "", "2099-13-40x"):
+            with self.subTest(malo):
+                self.assertEqual(self._pide(token, fecha=malo)[0], 400)
+
+    def test_no_se_pide_visita_de_algo_ya_vendido(self):
+        self.conn.execute("UPDATE inmuebles SET estado = 'Vendido' WHERE id = 'inm1'")
+        self.conn.commit()
+        token = self._abre()
+        estado, d = self._pide(token)
+        self.assertEqual(estado, 409, d)
+
+    def test_ni_de_algo_que_no_esta_en_su_seleccion(self):
+        token = self._abre()
+        estado, _ = self._post("/api/portal_busqueda_visita",
+                               {"token": token, "i": 9, "fecha": "2099-03-04"}, con_sesion=False)
+        self.assertEqual(estado, 404)
+
+
+class LaHojaDeVisitaSeHaceSolaTests(BaseComprador):
+    def _pide(self, token):
+        return self._post("/api/portal_busqueda_visita",
+                          {"token": token, "i": self._posicion(token, "Calle Uno 1"),
+                           "fecha": "2099-03-04", "franja": "tarde"}, con_sesion=False)
+
+    def setUp(self):
+        super().setUp()
+        # La hoja de visita sólo existe con encargo vivo, igual que la manual.
+        self._ins("captaciones", {"id": "cap1", "empresa_id": "emp1", "workspace_id": self.ws,
+                                  "inmueble_id": "inm1", "direccion": "Calle Uno 1",
+                                  "etapa": "Encargo", "situacion_comercial": "Encargo",
+                                  "precio_objetivo": 240000,
+                                  "created_at": AHORA, "updated_at": AHORA})
+
+    def test_al_concertar_la_visita_se_genera(self):
+        token = self._abre()
+        estado, d = self._pide(token)
+        self.assertEqual(estado, 200, d)
+        self.assertTrue(d["hoja"], "no se ha generado la hoja de visita")
+        fila = self.conn.execute(
+            "SELECT nombre, tipo, url, origen_tipo, origen_id FROM inmueble_docs "
+            "WHERE tipo = 'Hoja de visita'").fetchone()
+        self.assertIsNotNone(fila)
+        self.assertEqual(fila["origen_tipo"], "portal_hoja_visita")
+        self.assertEqual(fila["origen_id"], "dem1")
+
+    def test_le_llega_a_el_en_su_ficha(self):
+        token = self._abre()
+        self._pide(token)
+        x = self._vista(token)["inmuebles"][self._posicion(token, "Calle Uno 1")]
+        self.assertTrue(any("Hoja de visita" in doc["nombre"] for doc in x["documentos"]),
+                        [doc["nombre"] for doc in x["documentos"]])
+
+    def test_lleva_el_precio_del_inmueble_que_va_a_ver(self):
+        """Es el punto del documento: qué precio le hemos dicho, y cuándo."""
+        token = self._abre()
+        self._pide(token)
+        i = self._posicion(token, "Calle Uno 1")
+        docs = self._vista(token)["inmuebles"][i]["documentos"]
+        n = next(d["n"] for d in docs if "Hoja de visita" in d["nombre"])
+        with urllib.request.urlopen(
+                self.base + f"/api/portal_busqueda_documento?token={token}&i={i}&n={n}") as r:
+            crudo = r.read()
+        self.assertTrue(crudo.startswith(b"%PDF"))
+        # El texto de un PDF va comprimido: buscarlo en los bytes no prueba nada.
+        import io
+        from pypdf import PdfReader
+        texto = "\n".join(p.extract_text() or "" for p in PdfReader(io.BytesIO(crudo)).pages)
+        self.assertIn("240.000", texto.replace("\u202f", " "))
+        self.assertIn("Calle Uno 1".upper(), texto.upper())
+
+    def test_la_hoja_de_otro_comprador_no_se_ve(self):
+        """Lleva su nombre y su teléfono: si fuera por el interruptor general, la
+        vería cualquier otro interesado en la misma casa."""
+        self._ins("demandas", {"id": "dem2", "empresa_id": "emp1", "workspace_id": self.ws,
+                               "cliente_id": "cli2", "tipo": "Piso", "estado": "Activa",
+                               "created_at": AHORA, "updated_at": AHORA})
+        self._ins("inmueble_compradores", {"id": "ic9", "empresa_id": "emp1", "inmueble_id": "inm1",
+                                           "demanda_id": "dem2", "cliente_id": "cli2",
+                                           "estado": "Interesado",
+                                           "created_at": AHORA, "updated_at": AHORA})
+        self._pide(self._abre("dem1"))
+        token2 = self._abre("dem2")
+        x = self._vista(token2)["inmuebles"][self._posicion(token2, "Calle Uno 1")]
+        self.assertEqual([doc["nombre"] for doc in x["documentos"]], [])
+
+    def test_sin_encargo_vivo_no_se_genera_pero_la_visita_se_pide_igual(self):
+        """Un documento de visita de un inmueble que ya no llevamos no lo firma
+        nadie. Lo que no puede es cargarse la petición de cita."""
+        self.conn.execute("UPDATE captaciones SET situacion_comercial = 'Noticia' WHERE id = 'cap1'")
+        self.conn.commit()
+        token = self._abre()
+        estado, d = self._pide(token)
+        self.assertEqual(estado, 200, d)
+        self.assertFalse(d["hoja"])
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) c FROM visitas").fetchone()["c"], 1)
