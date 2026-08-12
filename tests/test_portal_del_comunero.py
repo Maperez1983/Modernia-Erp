@@ -352,5 +352,79 @@ class ElCertificadoDiceLoQueCertificaTests(unittest.TestCase):
         self.assertIn("Fdo.: El secretario administrador", self._texto([]))
 
 
+class SuCoeficienteYLoQueLeVieneTests(BaseDePruebaTests):
+    def test_ve_su_coeficiente(self):
+        """Es su cuota de participación: lo que paga de cada gasto y lo que pesa su
+        voto. Tiene derecho a conocerla (art. 20 LPH)."""
+        self.conn.execute("UPDATE workspace_fincas_vecinos SET coeficiente = 2.13 WHERE id = 'v1'")
+        self.conn.commit()
+        datos = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))
+        self.assertEqual(datos["propietario"]["coeficiente"], 2.13)
+
+    def test_sin_coeficiente_va_a_cero_y_la_pantalla_no_lo_pinta(self):
+        """Mejor no enseñarlo que enseñar «0,0000 %» a quien todavía no lo tiene."""
+        datos = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))
+        self.assertEqual(datos["propietario"]["coeficiente"], 0)
+        i = SERVER.index("d.propietario.coeficiente ?")
+        self.assertIn("coeficiente", SERVER[i: i + 120])
+
+    def test_los_recibos_futuros_ya_emitidos_salen_como_ciertos(self):
+        for periodo, estado in (("2099-01", "Pendiente"), ("2099-02", "Cobrado")):
+            self.conn.execute(
+                "INSERT INTO workspace_fincas_recibos (id, workspace_id, comunidad_id, vecino_id, periodo, "
+                "concepto, importe, estado, created_at, updated_at) VALUES (?, ?, 'c1', 'v1', ?, 'Cuota', 60, ?, ?, ?)",
+                (server.os.urandom(8).hex(), WS, periodo, estado, "2026-08-12", "2026-08-12"))
+        self.conn.commit()
+        avance = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))["avance"]
+        self.assertEqual([r["periodo"] for r in avance["emitidos"]], ["2099-01"])   # el cobrado no
+
+    def test_sin_recibos_futuros_estima_con_la_cuota_y_su_coeficiente(self):
+        self.conn.execute("UPDATE workspace_fincas_vecinos SET coeficiente = 2.5 WHERE id = 'v1'")
+        self.conn.execute("UPDATE workspace_fincas_comunidades SET cuota_mensual = 400 WHERE id = 'c1'")
+        self.conn.commit()
+        avance = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))["avance"]
+        self.assertEqual(avance["emitidos"], [])
+        self.assertEqual(avance["estimacion"], 10.0)     # 400 × 2,5 %
+
+    def test_la_estimacion_se_dice_que_lo_es(self):
+        """Dar una cifra como si fuera un recibo emitido es la forma de que alguien la
+        dé por buena y luego reclame."""
+        i = SERVER.index("Es una estimación, no un recibo emitido")
+        self.assertIn("puede cambiar si la junta aprueba otra cuota", SERVER[i: i + 200])
+
+    def test_sin_cuota_o_sin_coeficiente_no_se_inventa_una_cifra(self):
+        avance = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))["avance"]
+        self.assertEqual(avance["estimacion"], 0.0)
+
+
+class ElBalanceEsDeLaComunidadYNoSeñalaANadieTests(BaseDePruebaTests):
+    """Las cuentas de la comunidad son las que se leen en la junta y el propietario
+    tiene derecho a conocerlas. Lo que no puede salir es nada que identifique a un
+    vecino concreto."""
+
+    def test_trae_las_cifras_del_ejercicio(self):
+        balance = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))["balance"]
+        for clave in ("ejercicio", "presupuestado", "gastado", "ingresado",
+                      "pendiente_cobro", "fondo_reserva"):
+            with self.subTest(clave=clave):
+                self.assertIn(clave, balance)
+
+    def test_no_dice_cuantos_deudores_hay(self):
+        """En una comunidad de tres vecinos, saber que hay un deudor y que no eres tú
+        deja dos nombres. El importe agregado no señala a nadie; el recuento sí."""
+        balance = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))["balance"]
+        self.assertNotIn("deudores", balance)
+        self.assertIn("pendiente_cobro", balance)
+
+    def test_el_fondo_sin_fijar_se_dice_y_no_se_pinta_un_cero(self):
+        balance = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))["balance"]
+        self.assertTrue(balance["fondo_sin_configurar"])
+        i = SERVER.index("d.balance.fondo_sin_configurar")
+        self.assertIn("sin fijar", SERVER[i: i + 120])
+
+    def test_la_pantalla_avisa_de_que_no_son_sus_cuentas(self):
+        self.assertIn("Son las cuentas de toda la comunidad, no las tuyas.", SERVER)
+
+
 if __name__ == "__main__":
     unittest.main()

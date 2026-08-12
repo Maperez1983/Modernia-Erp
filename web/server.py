@@ -54801,7 +54801,7 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
     if not token:
         return None
     fila = conn.execute(
-        "SELECT a.*, v.nombre, v.piso, v.nif, v.iban, c.nombre AS comunidad_nombre, "
+        "SELECT a.*, v.nombre, v.piso, v.nif, v.iban, v.coeficiente, c.nombre AS comunidad_nombre, "
         "       c.direccion AS comunidad_direccion "
         "FROM workspace_fincas_portal_accesos a "
         "JOIN workspace_fincas_vecinos v ON v.id = a.vecino_id "
@@ -54820,6 +54820,10 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
     workspace_id = row_value(fila, "workspace_id", "")
     vecino_id = row_value(fila, "vecino_id", "")
     comunidad_id = row_value(fila, "comunidad_id", "")
+    comunidad_fila = conn.execute(
+        "SELECT cuota_mensual FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+        (comunidad_id, workspace_id),
+    ).fetchone()
 
     recibos = []
     deuda = 0.0
@@ -54875,6 +54879,48 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
             (workspace_id, comunidad_id, vecino_id),
         ).fetchall()
     ]
+
+    # El estado financiero de la comunidad. Son cifras agregadas —presupuesto, gasto,
+    # cobrado, fondo de reserva—, las mismas que se leen en la junta, y el propietario
+    # tiene derecho a conocerlas (art. 20 LPH). Va el importe pendiente de cobro pero
+    # **no cuántos deudores hay**: en una comunidad de tres vecinos, un número así con
+    # saber que no eres tú señala a alguien.
+    ejercicio = datetime.now().strftime("%Y")
+    cuentas = fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio)["resumen"]
+    balance = {
+        "ejercicio": ejercicio,
+        "presupuestado": round(float(cuentas.get("presupuestado") or 0), 2),
+        "gastado": round(float(cuentas.get("gastado") or 0), 2),
+        "ingresado": round(float(cuentas.get("ingresado") or 0), 2),
+        "pendiente_cobro": round(float(cuentas.get("recibos_pendientes") or 0), 2),
+        "fondo_reserva": round(float(cuentas.get("fondo_reserva") or 0), 2),
+        "fondo_sin_configurar": bool(cuentas.get("fondo_reserva_sin_configurar")),
+    }
+
+    # Lo que le viene a él. Primero lo cierto —recibos ya emitidos de periodos que aún
+    # no han llegado—; y si no hay ninguno, una estimación con la cuota vigente y su
+    # coeficiente, dicha como estimación. Emitir una cifra como si fuera un recibo que
+    # no existe es la forma de que alguien la dé por buena.
+    hoy_periodo = datetime.now().strftime("%Y-%m")
+    proximos = [
+        {
+            "periodo": row_value(r, "periodo", ""),
+            "concepto": row_value(r, "concepto", ""),
+            "importe": round(parse_money_value(row_value(r, "importe", 0)), 2),
+        }
+        for r in conn.execute(
+            "SELECT periodo, concepto, importe FROM workspace_fincas_recibos "
+            "WHERE workspace_id = ? AND vecino_id = ? AND COALESCE(periodo, '') > ? "
+            "AND estado NOT IN ('Cobrado') ORDER BY periodo LIMIT 12",
+            (workspace_id, vecino_id, hoy_periodo),
+        ).fetchall()
+    ]
+    coef_vecino = float(row_value(fila, "coeficiente", 0) or 0)
+    cuota_comunidad = round(parse_money_value(row_value(comunidad_fila, "cuota_mensual", 0)), 2) if comunidad_fila else 0.0
+    avance = {
+        "emitidos": proximos,
+        "estimacion": round(cuota_comunidad * coef_vecino / 100.0, 2) if (cuota_comunidad and coef_vecino) else 0.0,
+    }
 
     # El certificado del art. 9.1.e: se cobra siempre, así que el vecino ve el precio
     # antes de pedirlo y solo puede descargarlo cuando la administración confirma el
@@ -54938,12 +54984,19 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
             "nombre": row_value(fila, "nombre", ""),
             "piso": row_value(fila, "piso", "") or "",
             "cuenta": f"····{iban[-4:]}" if iban else "",
+            # Su cuota de participación: es lo que determina lo que paga de cada gasto
+            # y lo que pesa su voto en la junta. Es suya y tiene derecho a conocerla
+            # (art. 20 LPH). Va 0 cuando la comunidad todavía no las tiene cargadas, y
+            # entonces la pantalla no la enseña en vez de decir «0,0000 %».
+            "coeficiente": round(float(row_value(fila, "coeficiente", 0) or 0), 4),
         },
         "recibos": recibos,
         "deuda": round(deuda, 2),
         "documentos": documentos,
         "juntas": juntas,
         "incidencias": incidencias,
+        "balance": balance,
+        "avance": avance,
         "certificado": certificado,
         "caduca": caduca,
     }
@@ -67437,6 +67490,7 @@ class Handler(BaseHTTPRequestHandler):
   <div id="app"><p class="muted">Cargando…</p></div>
   <script>
     const eur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
+    const pct = new Intl.NumberFormat("es-ES", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
     const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
     const app = document.getElementById("app");
     const token = new URLSearchParams(location.search).get("token") || "";
@@ -67457,12 +67511,35 @@ class Handler(BaseHTTPRequestHandler):
             <p class="muted">${esc(d.comunidad.direccion || "")}</p>
             <div class="card">
               <strong>${esc(d.propietario.nombre)}</strong>
-              <div class="muted">${esc(d.propietario.piso || "")}${d.propietario.cuenta ? " · cuenta " + esc(d.propietario.cuenta) : ""}</div>
+              <div class="muted">${esc(d.propietario.piso || "")}${d.propietario.cuenta ? " · cuenta " + esc(d.propietario.cuenta) : ""}${d.propietario.coeficiente ? " · coeficiente " + pct.format(d.propietario.coeficiente) + " %" : ""}</div>
             </div>
             <div class="kpis">
               <div class="kpi"><span>Pendiente de pago</span><strong>${eur.format(d.deuda || 0)}</strong></div>
               <div class="kpi"><span>Recibos sin cobrar</span><strong>${pendientes}</strong></div>
               <div class="kpi"><span>Recibos en total</span><strong>${(d.recibos || []).length}</strong></div>
+            </div>
+            <div class="card">
+              <h2 style="font-size:16px;margin:0 0 8px;">Cuentas de la comunidad · ${esc(d.balance.ejercicio)}</h2>
+              <div class="kpis">
+                <div class="kpi"><span>Presupuesto</span><strong>${eur.format(d.balance.presupuestado)}</strong></div>
+                <div class="kpi"><span>Gastado</span><strong>${eur.format(d.balance.gastado)}</strong></div>
+                <div class="kpi"><span>Ingresado</span><strong>${eur.format(d.balance.ingresado)}</strong></div>
+                <div class="kpi"><span>Pendiente de cobro</span><strong>${eur.format(d.balance.pendiente_cobro)}</strong></div>
+                <div class="kpi"><span>Fondo de reserva</span><strong>${d.balance.fondo_sin_configurar ? "sin fijar" : eur.format(d.balance.fondo_reserva)}</strong></div>
+              </div>
+              <p class="muted" style="margin-top:10px;">Son las cuentas de toda la comunidad, no las tuyas.</p>
+            </div>
+            <div class="card">
+              <h2 style="font-size:16px;margin:0 0 8px;">Lo que te viene</h2>
+              ${(d.avance.emitidos || []).length ? `<table>
+                <thead><tr><th>Periodo</th><th>Concepto</th><th class="num">Importe</th></tr></thead>
+                <tbody>${d.avance.emitidos.map((x) => `<tr><td>${esc(x.periodo)}</td><td>${esc(x.concepto)}</td>
+                  <td class="num">${eur.format(x.importe || 0)}</td></tr>`).join("")}</tbody></table>`
+                : d.avance.estimacion
+                ? `<p>Con la cuota vigente y tu coeficiente, tu recibo mensual sería de aproximadamente
+                   <strong>${eur.format(d.avance.estimacion)}</strong>.</p>
+                   <p class="muted">Es una estimación, no un recibo emitido: puede cambiar si la junta aprueba otra cuota o hay derramas.</p>`
+                : '<p class="muted">No hay recibos pendientes de periodos futuros.</p>'}
             </div>
             <div class="card">
               <h2 style="font-size:16px;margin:0 0 8px;">Mis recibos</h2>
