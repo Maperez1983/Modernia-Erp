@@ -31797,13 +31797,19 @@ def comprueba_codigo_de_portal(conn, acceso, codigo, now=None, tabla="inmueble_p
 VALORACIONES_DEL_COMPRADOR = {
     "encaja": "Me encaja",
     "verlo": "Quiero visitarlo",
-    "dudas": "Me gusta, pero tengo dudas",
+    "dudas": "Tengo dudas",
+    "descarta": "No me encaja",
     "descarta_precio": "Se me va de precio",
     "descarta_zona": "No es la zona que busco",
-    "descarta": "No me encaja",
 }
-# Las dos primeras son interés; las demás, descarte. El asesor necesita ver esa
-# línea sin leerse los seis textos.
+# Seis pastillas por ficha son veinticuatro en una pantalla de cuatro inmuebles, y
+# la ficha deja de leerse. A la vista van las cuatro respuestas; los motivos del
+# descarte se abren sólo cuando ya ha dicho que no, que es cuando significan algo.
+# La lista sigue siendo cerrada: en texto libre no se puede contar.
+VALORACIONES_PRINCIPALES = ("encaja", "verlo", "dudas", "descarta")
+VALORACIONES_MOTIVOS = ("descarta_precio", "descarta_zona")
+# Las tres primeras son interés; las que empiezan por «descarta», descarte. El
+# asesor necesita ver esa línea sin leerse los seis textos.
 VALORACIONES_POSITIVAS = {"encaja", "verlo", "dudas"}
 
 
@@ -32336,7 +32342,12 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
         "agenda_es_pasado": not proximas and bool(agenda_vista),
         "mensajes": hilo_del_comprador(conn, demanda_id),
         "firmas": firmas,
-        "valoraciones": [{"clave": k, "etiqueta": v} for k, v in VALORACIONES_DEL_COMPRADOR.items()],
+        "valoraciones": {
+            "principales": [{"clave": k, "etiqueta": VALORACIONES_DEL_COMPRADOR[k]}
+                            for k in VALORACIONES_PRINCIPALES],
+            "motivos": [{"clave": k, "etiqueta": VALORACIONES_DEL_COMPRADOR[k]}
+                        for k in VALORACIONES_MOTIVOS],
+        },
         "resumen": {
             "seleccionados": len(inmuebles),
             "valorados": vistos,
@@ -66294,10 +66305,18 @@ class Handler(BaseHTTPRequestHandler):
     .miniaturas { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; max-width: 100%; }
     .miniaturas img { width: 74px; height: 54px; object-fit: cover; border-radius: 8px; flex: 0 0 auto;
                       border: 1px solid var(--linea); cursor: pointer; }
-    .opinar { display: flex; gap: 6px; flex-wrap: wrap; }
-    .opinar button { border: 1px solid var(--linea); background: var(--tarjeta); color: var(--tinta);
-      border-radius: 99px; padding: 6px 12px; font: 600 12.5px var(--texto); cursor: pointer; }
+    .opinar, .motivos { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+    /* Vacía no ocupa: si no, el `gap` de la ficha deja un hueco donde no hay nada. */
+    .motivos:empty { display: none; }
+    .motivos .suave { font-size: 12.5px; }
+    .opinar button, .motivos button { border: 1px solid var(--linea); background: var(--tarjeta);
+      color: var(--tinta); border-radius: 99px; padding: 6px 12px; font: 600 12.5px var(--texto);
+      cursor: pointer; }
+    /* Los motivos son una matización, no una respuesta: van un peldaño por debajo. */
+    .motivos button { padding: 4px 10px; font-weight: 500; font-size: 12px; color: var(--suave); }
     .opinar button[aria-pressed="true"] { background: var(--verde); border-color: var(--verde); color: #fff; }
+    .motivos button[aria-pressed="true"] { border-color: var(--verde); color: var(--verde);
+      background: var(--verde-claro); }
     .boton { background: var(--verde); color: #fff; border: 0; border-radius: 10px; padding: 11px 16px;
              font: 600 14px var(--texto); cursor: pointer; }
     .boton.plano { background: transparent; color: var(--verde); border: 1px solid var(--verde); }
@@ -66429,7 +66448,9 @@ class Handler(BaseHTTPRequestHandler):
       };
     }
 
-    function tarjetaInmueble(x, valoraciones) {
+    const esDescarte = (v) => String(v || "").indexOf("descarta") === 0;
+
+    function tarjetaInmueble(x) {
       const q = "token=" + encodeURIComponent(token) + "&s=" + encodeURIComponent(sesion());
       const foto = x.fotos
         ? `<img loading="lazy" alt="" src="/api/portal_busqueda_foto?${q}&i=${x.i}&n=0" />`
@@ -66450,7 +66471,7 @@ class Handler(BaseHTTPRequestHandler):
         `<a href="/api/portal_busqueda_documento?${q}&i=${x.i}&n=${d.n}" target="_blank"
             rel="noopener">${esc(d.nombre)}</a>`).join(" · ");
       return `
-        <article class="ficha" data-i="${x.i}">
+        <article class="ficha" data-i="${x.i}" data-opinion="${esc(x.opinion || "")}">
           <div class="foto">${foto}</div>
           <div class="cuerpo">
             <h3>${esc(x.direccion || "Inmueble")}</h3>
@@ -66462,10 +66483,8 @@ class Handler(BaseHTTPRequestHandler):
             ${minis.length ? `<div class="miniaturas">${minis.join("")}</div>` : ""}
             ${x.descripcion ? `<p class="texto">${esc(x.descripcion)}</p>` : ""}
             ${docs ? `<div class="suave" style="font-size:13px">Documentos: ${docs}</div>` : ""}
-            <div class="opinar">
-              ${valoraciones.map((v) => `<button data-v="${esc(v.clave)}"
-                  aria-pressed="${x.opinion === v.clave}">${esc(v.etiqueta)}</button>`).join("")}
-            </div>
+            <div class="opinar"></div>
+            <div class="motivos"></div>
             <input type="text" class="comentario" placeholder="¿Quieres contarnos algo de este inmueble?"
                    value="${esc(x.comentario || "")}" />
           </div>
@@ -66534,7 +66553,7 @@ class Handler(BaseHTTPRequestHandler):
         rejilla.innerHTML = `<div class="tarjeta suave">Tu asesor todavía no ha seleccionado inmuebles.
           En cuanto lo haga, los verás aquí.</div>`;
       } else {
-        rejilla.innerHTML = d.inmuebles.map((x) => tarjetaInmueble(x, d.valoraciones || [])).join("");
+        rejilla.innerHTML = d.inmuebles.map((x) => tarjetaInmueble(x)).join("");
       }
 
       const agenda = document.getElementById("agenda");
@@ -66562,10 +66581,16 @@ class Handler(BaseHTTPRequestHandler):
              <button class="boton plano firmar" data-id="${esc(f.id)}">Firmar</button></div>`).join("");
       }
 
-      // Opinar sobre un inmueble: el botón se pinta al momento y se manda detrás.
+      // Opinar sobre un inmueble: se pinta al momento y se manda detrás.
+      const principales = (d.valoraciones || {}).principales || [];
+      const motivosPosibles = (d.valoraciones || {}).motivos || [];
       rejilla.querySelectorAll(".ficha").forEach((ficha) => {
         const i = Number(ficha.dataset.i);
         const comentario = ficha.querySelector(".comentario");
+        const caja = ficha.querySelector(".opinar");
+        const motivos = ficha.querySelector(".motivos");
+        let actual = ficha.dataset.opinion || "";
+
         const manda = async (valoracion) => {
           try {
             await pide("/api/portal_busqueda_opinion", {
@@ -66573,19 +66598,38 @@ class Handler(BaseHTTPRequestHandler):
             });
           } catch (e) { alert(e.message); }
         };
-        ficha.querySelectorAll(".opinar button").forEach((b) => {
-          b.onclick = () => {
-            const activo = b.getAttribute("aria-pressed") === "true";
-            ficha.querySelectorAll(".opinar button").forEach((o) =>
-              o.setAttribute("aria-pressed", "false"));
-            b.setAttribute("aria-pressed", activo ? "false" : "true");
-            manda(activo ? "" : b.dataset.v);
-          };
-        });
-        comentario.onchange = () => {
-          const elegido = ficha.querySelector('.opinar button[aria-pressed="true"]');
-          manda(elegido ? elegido.dataset.v : "");
-        };
+
+        const chip = (v, marcado) =>
+          `<button data-v="${esc(v.clave)}" aria-pressed="${marcado}">${esc(v.etiqueta)}</button>`;
+
+        function pintaOpinion(valor, mandar) {
+          actual = valor;
+          ficha.dataset.opinion = actual;   // que el atributo no mienta si alguien lo lee
+          // «No me encaja» se queda marcado aunque haya elegido un motivo: el
+          // motivo lo matiza, no lo sustituye.
+          caja.innerHTML = principales.map((v) =>
+            chip(v, v.clave === actual || (v.clave === "descarta" && esDescarte(actual)))).join("");
+          motivos.innerHTML = esDescarte(actual)
+            ? '<span class="suave">¿Por qué?</span>' +
+              motivosPosibles.map((v) => chip(v, v.clave === actual)).join("")
+            : "";
+          caja.querySelectorAll("button").forEach((b) => {
+            b.onclick = () => {
+              const v = b.dataset.v;
+              const yaPuesto = v === "descarta" ? esDescarte(actual) : v === actual;
+              pintaOpinion(yaPuesto ? "" : v, true);
+            };
+          });
+          motivos.querySelectorAll("button").forEach((b) => {
+            // Quitar el motivo no deshace el descarte: vuelve a «no me encaja».
+            b.onclick = () => pintaOpinion(
+              b.getAttribute("aria-pressed") === "true" ? "descarta" : b.dataset.v, true);
+          });
+          if (mandar) manda(actual);
+        }
+
+        pintaOpinion(actual, false);
+        comentario.onchange = () => manda(actual);
       });
 
       // Las fotos, a tamaño grande.
