@@ -401,6 +401,29 @@ class OpinarSobreCadaInmuebleTests(BaseComprador):
             "SELECT COUNT(*) c FROM demanda_portal_opiniones WHERE inmueble_id='inm1'").fetchone()["c"], 1)
         self.assertEqual(self._vista(token)["inmuebles"][i]["opinion"], "descarta_precio")
 
+    def test_a_la_vista_van_cuatro_y_los_motivos_se_abren_al_descartar(self):
+        """Seis pastillas por ficha eran veinticuatro en una pantalla de cuatro
+        inmuebles y la ficha dejaba de leerse. Los motivos del descarte sólo
+        significan algo cuando ya ha dicho que no."""
+        v = self._vista(self._abre())["valoraciones"]
+        self.assertEqual([x["clave"] for x in v["principales"]],
+                         ["encaja", "verlo", "dudas", "descarta"])
+        self.assertEqual([x["clave"] for x in v["motivos"]],
+                         ["descarta_precio", "descarta_zona"])
+
+    def test_los_seis_valores_se_siguen_admitiendo(self):
+        """Repartirlos en dos filas es cosa de la pantalla; lo que se guarda no
+        cambia, y una opinión vieja tiene que seguir valiendo."""
+        token = self._abre()
+        i = self._posicion(token, "Calle Uno 1")
+        for clave in S.VALORACIONES_DEL_COMPRADOR:
+            with self.subTest(clave):
+                estado, d = self._post("/api/portal_busqueda_opinion",
+                                       {"token": token, "i": i, "valoracion": clave},
+                                       con_sesion=False)
+                self.assertEqual(estado, 200, d)
+                self.assertEqual(self._vista(token)["inmuebles"][i]["opinion"], clave)
+
     def test_querer_verlo_le_deja_una_tarea_al_asesor(self):
         """Una petición de visita que nadie ve es peor que no preguntar: él ya
         cuenta con que ha pedido cita."""
