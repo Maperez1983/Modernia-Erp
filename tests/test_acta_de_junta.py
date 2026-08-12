@@ -106,7 +106,7 @@ class LasSeisLetrasDelArticulo19Tests(unittest.TestCase):
         self.assertIn("Presidente", texto)          # cargo deducido de la ficha
         self.assertIn("Secretario", texto)
         self.assertIn("Su hijo Manuel", texto)      # representado
-        self.assertIn("2.1300 %", texto)            # cuota de participación
+        self.assertIn("2,1300 %", texto)            # cuota, con coma decimal
 
     def test_e_orden_del_dia(self):
         texto = texto_de()
@@ -116,9 +116,18 @@ class LasSeisLetrasDelArticulo19Tests(unittest.TestCase):
     def test_f_los_nombres_de_quien_voto_y_su_cuota(self):
         texto = texto_de()
         self.assertIn("Votaron a favor:", texto)
-        self.assertIn("ANTONIO LOBATO BARRAGAN (4 A, 2.1300 %)", texto)
+        self.assertIn("ANTONIO LOBATO BARRAGAN (4 A, 2,1300 %)", texto)
         self.assertIn("Votaron en contra:", texto)
-        self.assertIn("CARMEN TORRES TORRES (8 D, 2.1300 %)", texto)
+        self.assertIn("CARMEN TORRES TORRES (8 D, 2,1300 %)", texto)
+
+    def test_los_porcentajes_llevan_coma_y_no_punto(self):
+        """En un acta el punto es el separador de millares: «2.1300 %» se puede leer
+        como dos mil ciento treinta, y la cuota de participación reparte el gasto."""
+        import re as _re
+        texto = texto_de()
+        con_punto = _re.findall(r"\d+\.\d+\s*%", texto)
+        self.assertEqual(con_punto, [], f"porcentajes con punto decimal: {con_punto}")
+        self.assertIn("6,25 %", texto)
 
     def test_el_plazo_de_firma_de_los_diez_dias(self):
         self.assertEqual(server.FINCAS_DIAS_CIERRE_ACTA, 10)

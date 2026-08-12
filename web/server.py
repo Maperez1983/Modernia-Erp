@@ -54506,8 +54506,8 @@ def build_convocatoria_junta_pdf(junta, comunidad, acuerdos, morosos, workspace=
     if puntos:
         sections.append(("Orden del día", [
             linea for punto in puntos for linea in (
-                f"{punto.get('orden', 0)}. {limpio(punto.get('titulo'))}",
-                *( [f"      {limpio(punto.get('descripcion'))}"] if limpio(punto.get("descripcion")) else [] ),
+                f"{punto.get('orden', 0)}. {limpio(punto.get('titulo'))}"
+                + (f" — {limpio(punto.get('descripcion'))}" if limpio(punto.get("descripcion")) else ""),
             )
         ]))
     else:
@@ -54632,8 +54632,8 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
         ]),
         ("Asistencia", {"kind": "kpi_cards", "columns": 3, "items": [
             {"label": "Asistentes", "value": f"{asistencia.get('asistentes', 0)} de {asistencia.get('propietarios_total', 0)}", "accent": 1},
-            {"label": "Sobre propietarios", "value": f"{asistencia.get('asistentes_pct_propietarios', 0):.2f} %"},
-            {"label": "Sobre coeficiente", "value": f"{asistencia.get('asistentes_pct_coeficiente', 0):.2f} %"},
+            {"label": "Sobre propietarios", "value": format_pct(asistencia.get('asistentes_pct_propietarios', 0))},
+            {"label": "Sobre coeficiente", "value": format_pct(asistencia.get('asistentes_pct_coeficiente', 0))},
         ]}),
         ("", [f"De ellos, {asistencia.get('presentes', 0)} presentes y "
               f"{asistencia.get('representados', 0)} representados."]),
@@ -54674,14 +54674,14 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
             ],
             "rows": [[p.get("piso", ""), p.get("nombre", ""), cargo_de(p.get("nombre")) or "—",
                       p.get("representado_por", "") or "—",
-                      f"{float(p.get('coeficiente') or 0):.4f} %"] for p in asistentes],
+                      format_pct(p.get('coeficiente'), 4)] for p in asistentes],
         }))
 
     def nominal(acuerdo, sentido):
         """«Fulano (3º B, 2,1300 %)», que es como lo pide el art. 19.1.f."""
         gente = (acuerdo.get("votos_nominales") or {}).get(sentido) or []
         return ", ".join(
-            f"{v.get('nombre', '')} ({v.get('piso') or 'sin piso'}, {float(v.get('coeficiente') or 0):.4f} %)"
+            f"{v.get('nombre', '')} ({v.get('piso') or 'sin piso'}, {format_pct(v.get('coeficiente'), 4)})"
             for v in gente
         )
 
@@ -54702,8 +54702,8 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
                 + (f" ({acuerdo['articulo']})." if acuerdo.get("articulo") else "."),
                 f"A favor: {acuerdo.get('favor', 0)} · En contra: {acuerdo.get('contra', 0)} · "
                 f"Abstenciones: {acuerdo.get('abstencion', 0)}.",
-                f"El voto a favor representa el {acuerdo.get('favor_propietarios', 0):.2f} % de los propietarios "
-                f"y el {acuerdo.get('favor_coeficiente', 0):.2f} % de los coeficientes, sobre "
+                f"El voto a favor representa el {format_pct(acuerdo.get('favor_propietarios', 0))} de los propietarios "
+                f"y el {format_pct(acuerdo.get('favor_coeficiente', 0))} de los coeficientes, sobre "
                 f"{acuerdo.get('sobre', 'toda la comunidad')}.",
                 f"Votaron a favor: {a_favor}." if a_favor else "",
                 f"Votaron en contra: {en_contra}." if en_contra else "",
@@ -56692,6 +56692,17 @@ def binary_response(handler, data, content_type="application/octet-stream", file
 
 def _pdf_escape(value):
     return runtime_pdf_utils._pdf_escape(value)
+
+
+def format_pct(value, decimales=2):
+    """Un porcentaje con la coma decimal española.
+
+    Los importes ya salían bien —`format_eur` cambia el separador— pero los
+    porcentajes se escribían con f-string y salían con punto: «2.1300 %». En un acta,
+    donde el punto es el separador de millares, un coeficiente así se puede leer como
+    dos mil ciento treinta. Y la cuota de participación es lo que reparte el gasto.
+    """
+    return f"{float(value or 0.0):.{decimales}f}".replace(".", ",") + " %"
 
 
 def format_eur(value):
