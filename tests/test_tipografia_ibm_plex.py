@@ -115,14 +115,14 @@ class LosDocumentosGeneradosTests(unittest.TestCase):
         **Los correos.** Un correo no puede cargar webfonts —Gmail y Outlook las
         descartan— ni fiarse de que IBM Plex esté instalada en el ordenador de quien
         lo recibe. Lo que se ve igual en todos los clientes es la pila del sistema, y
-        ahí Helvetica/Arial es lo correcto. Viven en `correo_de_firma_html` y en
-        `correo_con_el_enlace_del_portal`, que manda al propietario el enlace de
-        seguimiento de su venta.
+        ahí Helvetica/Arial es lo correcto. Viven en `correo_de_firma_html`, en
+        `correo_con_el_enlace_del_portal` —el enlace de seguimiento que se manda al
+        propietario— y en `correo_con_la_seleccion`, el del comprador.
 
         Fuera de esas funciones, Helvetica sigue prohibida.
         """
         aisladas = ("def _fuente_para_formulario", "def correo_de_firma_html",
-                    "def correo_con_el_enlace_del_portal")
+                    "def correo_con_el_enlace_del_portal", "def correo_con_la_seleccion")
         for fichero in ("server.py", "document_pdf.py"):
             texto = (RAIZ / "web" / fichero).read_text(encoding="utf-8")
             for marca in aisladas:
