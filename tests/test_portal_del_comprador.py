@@ -571,6 +571,11 @@ class LaPaginaTests(BaseComprador):
                 self.assertIn(f"/assets/fuentes/{f}", html)
                 self.assertTrue((S.ASSETS / "fuentes" / f).exists())
 
+    def test_un_bano_no_son_banos(self):
+        """Salía «1 baños» en la mitad de las fichas de la muestra."""
+        _, html = self._get("/portal-busqueda")
+        self.assertIn('Number(x.banos) === 1 ? " baño"', html)
+
     def test_el_token_no_se_queda_en_la_barra(self):
         _, html = self._get("/portal-busqueda")
         self.assertIn("history.replaceState", html)

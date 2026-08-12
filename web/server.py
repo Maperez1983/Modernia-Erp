@@ -66452,7 +66452,7 @@ class Handler(BaseHTTPRequestHandler):
       }
       const rasgos = [
         x.tipo, x.m2 ? x.m2 + " m²" : "", x.habitaciones ? x.habitaciones + " hab." : "",
-        x.banos ? x.banos + " baños" : "",
+        x.banos ? x.banos + (Number(x.banos) === 1 ? " baño" : " baños") : "",
       ].filter(Boolean).map((r) => `<span>${esc(r)}</span>`).join("");
       const cita = x.cita && x.cita.futura
         ? `<div class="etiqueta">Visita el ${esc(x.cita.fecha)}${x.cita.hora ? " a las " + esc(x.cita.hora) : ""}</div>`
