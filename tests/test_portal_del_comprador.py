@@ -19,6 +19,7 @@ duela que lea un desconocido:
   que no te han enseñado. Eso es lo que comprueba `NoSePuedeSalirDeLaSeleccion`.
 """
 
+import base64
 import json
 import os
 import tempfile
@@ -1055,3 +1056,261 @@ class ElLogoSobreElColorTests(BaseComprador):
         regla = css[i:css.index("}", i)]
         self.assertIn("background: #fff", regla)
         self.assertIn("border-radius", regla)
+
+
+class DeLaOfertaALaReservaTests(BaseComprador):
+    """El camino entero, que es donde se gana o se pierde la operación: ofrece,
+    le contestan, acepta, ingresa la señal y sube el justificante."""
+
+    def setUp(self):
+        super().setUp()
+        S.ensure_ofertas_schema(self.conn)
+        self.conn.execute("UPDATE empresas SET iban = 'ES91 2100 0418 4502 0005 1332' WHERE id = 'emp1'")
+        self.conn.commit()
+        self.token = self._abre()
+        self.i = self._posicion(self.token, "Calle Uno 1")
+
+    def _oferta(self, **extra):
+        cuerpo = {"token": self.token, "i": self.i, "importe": 230000,
+                  "plazo_escritura": 60, "vigencia": "2099-01-01"}
+        cuerpo.update(extra)
+        return self._post("/api/portal_busqueda_oferta", cuerpo, con_sesion=False)
+
+    def _id_de_la_oferta(self):
+        return self.conn.execute(
+            "SELECT id FROM inmueble_ofertas ORDER BY created_at DESC LIMIT 1").fetchone()["id"]
+
+    def _ficha(self):
+        return self._vista(self.token)["inmuebles"][self.i]
+
+    def test_presentar_una_oferta(self):
+        estado, d = self._oferta(financiacion=True, comentario="Sujeto a que me den la hipoteca")
+        self.assertEqual(estado, 200, d)
+        o = self._ficha()["oferta"]
+        self.assertEqual(o["estado"], "presentada")
+        self.assertEqual(o["importe"], 230000)
+        self.assertTrue(o["financiacion"])
+        self.assertEqual(o["plazo_escritura"], 60)
+        self.assertTrue(o["puede_retirar"])
+
+    def test_le_deja_tarea_al_asesor(self):
+        self._oferta()
+        fila = self.conn.execute(
+            "SELECT asunto FROM acciones ORDER BY created_at DESC LIMIT 1").fetchone()
+        self.assertIn("Oferta de", fila["asunto"])
+        self.assertIn("230.000", fila["asunto"])
+
+    def test_sin_importe_no_hay_oferta(self):
+        self.assertEqual(self._oferta(importe=0)[0], 400)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) c FROM inmueble_ofertas").fetchone()["c"], 0)
+
+    def test_una_fecha_de_vigencia_que_no_existe(self):
+        self.assertEqual(self._oferta(vigencia="2099-02-31")[0], 400)
+
+    def test_no_se_oferta_dos_veces_a_la_vez(self):
+        self._oferta()
+        estado, d = self._oferta(importe=235000)
+        self.assertEqual(estado, 409, d)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) c FROM inmueble_ofertas").fetchone()["c"], 1)
+
+    def test_no_se_oferta_por_lo_que_ya_esta_vendido(self):
+        self.conn.execute("UPDATE inmuebles SET estado = 'Vendido' WHERE id = 'inm1'")
+        self.conn.commit()
+        self.assertEqual(self._oferta()[0], 409)
+
+    def test_retirarla_mientras_no_han_contestado(self):
+        self._oferta()
+        estado, d = self._post("/api/portal_busqueda_oferta_decision",
+                               {"token": self.token, "i": self.i, "decision": "retirar"},
+                               con_sesion=False)
+        self.assertEqual(estado, 200, d)
+        o = self._ficha()["oferta"]
+        self.assertEqual(o["estado"], "retirada")
+        self.assertTrue(o["puede_ofertar"], "tras retirarla tiene que poder hacer otra")
+
+    def test_la_contraoferta_y_su_respuesta(self):
+        self._oferta()
+        estado, d = self._post("/api/inmueble_oferta_responder",
+                               {"oferta_id": self._id_de_la_oferta(), "decision": "contraoferta",
+                                "importe": 240000, "nota": "Es lo mínimo que acepta la propiedad"})
+        self.assertEqual(estado, 200, d)
+        o = self._ficha()["oferta"]
+        self.assertEqual(o["estado"], "contraoferta")
+        self.assertEqual(o["contraoferta"], 240000)
+        self.assertTrue(o["puede_decidir"])
+        self.assertFalse(o["puede_retirar"], "con una contraoferta encima ya no se retira, se decide")
+        estado, d = self._post("/api/portal_busqueda_oferta_decision",
+                               {"token": self.token, "i": self.i, "decision": "aceptar"},
+                               con_sesion=False)
+        self.assertEqual(estado, 200, d)
+        self.assertEqual(self._ficha()["oferta"]["estado"], "aceptada")
+
+    def test_aceptar_sin_decir_la_senal_no_vale(self):
+        """Aceptar y no decir cuánto ni a qué cuenta deja al comprador esperando un
+        correo que no llega."""
+        self._oferta()
+        estado, d = self._post("/api/inmueble_oferta_responder",
+                               {"oferta_id": self._id_de_la_oferta(), "decision": "aceptar"})
+        self.assertEqual(estado, 400, d)
+        self.assertEqual(self._ficha()["oferta"]["estado"], "presentada")
+
+    def test_al_aceptar_le_llegan_la_cuenta_y_el_plazo(self):
+        self._oferta()
+        estado, d = self._post("/api/inmueble_oferta_responder",
+                               {"oferta_id": self._id_de_la_oferta(), "decision": "aceptar",
+                                "senal": 6000, "limite": "2099-02-02"})
+        self.assertEqual(estado, 200, d)
+        o = self._ficha()["oferta"]
+        self.assertEqual(o["estado"], "reserva_pendiente")
+        self.assertEqual(o["senal"], 6000)
+        # El IBAN sale de la ficha de la empresa si no se manda otro.
+        self.assertEqual(o["iban"], "ES91 2100 0418 4502 0005 1332")
+        self.assertEqual(o["limite"], "2099-02-02")
+        self.assertTrue(o["puede_justificar"])
+
+    def test_sin_cuenta_en_ningun_sitio_se_dice(self):
+        self.conn.execute("UPDATE empresas SET iban = '' WHERE id = 'emp1'")
+        self.conn.commit()
+        self._oferta()
+        estado, d = self._post("/api/inmueble_oferta_responder",
+                               {"oferta_id": self._id_de_la_oferta(), "decision": "aceptar", "senal": 6000})
+        self.assertEqual(estado, 400, d)
+        self.assertIn("cuenta", d["error"])
+
+    def _hasta_la_senal(self):
+        self._oferta()
+        self._post("/api/inmueble_oferta_responder",
+                   {"oferta_id": self._id_de_la_oferta(), "decision": "aceptar", "senal": 6000})
+
+    def test_el_justificante_se_sube_y_queda_en_el_expediente(self):
+        self._hasta_la_senal()
+        estado, d = self._post("/api/portal_busqueda_justificante",
+                               {"token": self.token, "i": self.i, "nombre": "transferencia.pdf",
+                                "file_base64": base64.b64encode(b"%PDF-1.4 justificante").decode()},
+                               con_sesion=False)
+        self.assertEqual(estado, 200, d)
+        self.assertEqual(self._ficha()["oferta"]["estado"], "reserva_justificada")
+        doc = self.conn.execute(
+            "SELECT nombre, tipo, origen_tipo FROM inmueble_docs WHERE tipo = 'Justificante de la señal'"
+        ).fetchone()
+        self.assertEqual(doc["nombre"], "transferencia.pdf")
+        self.assertEqual(doc["origen_tipo"], "portal_justificante")
+
+    def test_no_se_sube_el_justificante_antes_de_tiempo(self):
+        self._oferta()
+        estado, d = self._post("/api/portal_busqueda_justificante",
+                               {"token": self.token, "i": self.i, "nombre": "x.pdf",
+                                "file_base64": base64.b64encode(b"%PDF").decode()}, con_sesion=False)
+        self.assertEqual(estado, 409, d)
+
+    def test_solo_pdf_o_foto(self):
+        self._hasta_la_senal()
+        estado, d = self._post("/api/portal_busqueda_justificante",
+                               {"token": self.token, "i": self.i, "nombre": "recibo.html",
+                                "file_base64": base64.b64encode(b"<script>").decode()}, con_sesion=False)
+        self.assertEqual(estado, 415, d)
+
+    def test_la_agencia_da_por_buena_la_senal_y_queda_reservado(self):
+        self._hasta_la_senal()
+        self._post("/api/portal_busqueda_justificante",
+                   {"token": self.token, "i": self.i, "nombre": "t.pdf",
+                    "file_base64": base64.b64encode(b"%PDF").decode()}, con_sesion=False)
+        estado, d = self._post("/api/inmueble_oferta_verificar", {"oferta_id": self._id_de_la_oferta()})
+        self.assertEqual(estado, 200, d)
+        o = self._ficha()["oferta"]
+        self.assertEqual(o["estado"], "reservada")
+        self.assertFalse(o["puede_ofertar"])
+        self.assertFalse(o["puede_justificar"])
+
+    def test_no_se_verifica_lo_que_no_se_ha_justificado(self):
+        self._hasta_la_senal()
+        self.assertEqual(self._post("/api/inmueble_oferta_verificar",
+                                    {"oferta_id": self._id_de_la_oferta()})[0], 409)
+
+    def test_la_historia_va_encadenada(self):
+        """La fila cambia de estado —es el ahora—; lo que pasó, no."""
+        self._hasta_la_senal()
+        filas = self.conn.execute(
+            "SELECT quien, que, prev_hash, integrity_hash FROM inmueble_oferta_eventos "
+            "ORDER BY created_at ASC").fetchall()
+        self.assertEqual([f["que"] for f in filas],
+                         ["presenta la oferta", "acepta la oferta y pide la señal"])
+        self.assertEqual(filas[0]["prev_hash"], "")
+        self.assertEqual(filas[1]["prev_hash"], filas[0]["integrity_hash"])
+        for f in filas:
+            self.assertTrue(f["integrity_hash"])
+
+    def test_tocar_un_apunte_despues_se_nota(self):
+        self._oferta()
+        fila = self.conn.execute("SELECT * FROM inmueble_oferta_eventos LIMIT 1").fetchone()
+        self.conn.execute("UPDATE inmueble_oferta_eventos SET importe = '1.00' WHERE id = ?",
+                          (fila["id"],))
+        self.conn.commit()
+        tocada = self.conn.execute("SELECT * FROM inmueble_oferta_eventos WHERE id = ?",
+                                   (fila["id"],)).fetchone()
+        import hashlib as _h
+        recalculado = _h.sha256(
+            S._payload_de_evento_de_oferta(tocada, tocada["prev_hash"]).encode("utf-8")).hexdigest()
+        self.assertNotEqual(recalculado, tocada["integrity_hash"])
+
+    def test_la_oferta_de_otro_comprador_no_se_ve(self):
+        self._ins("demandas", {"id": "dem3", "empresa_id": "emp1", "workspace_id": self.ws,
+                               "cliente_id": "cli2", "tipo": "Piso", "estado": "Activa",
+                               "created_at": AHORA, "updated_at": AHORA})
+        self._ins("inmueble_compradores", {"id": "ic8", "empresa_id": "emp1", "inmueble_id": "inm1",
+                                           "demanda_id": "dem3", "cliente_id": "cli2",
+                                           "estado": "Interesado", "created_at": AHORA,
+                                           "updated_at": AHORA})
+        self._oferta()
+        token2 = self._abre("dem3")
+        otra = self._vista(token2)["inmuebles"][self._posicion(token2, "Calle Uno 1")]
+        self.assertIsNone(otra["oferta"], "no puede ver la oferta de otro interesado")
+        self.assertNotIn("230000", self._get(f"/api/portal_busqueda?token={token2}")[1])
+
+    def test_no_se_responde_a_una_oferta_de_otro_workspace(self):
+        """Con un comercial, no con el Administrador sembrado: el Administrador
+        cruza workspaces por diseño y con él este test no probaría nada."""
+        self._ins("usuarios", {"id": "u2", "nombre": "Comercial Ajeno", "usuario": "ajeno",
+                               "email": "aj@x.test", "rol": "Comercial", "servicio": "Inmobiliaria",
+                               "activo": 1, "password_hash": S.hash_password(CLAVE),
+                               "created_at": AHORA, "updated_at": AHORA})
+        self._ins("workspace_miembros", {"id": "wm2", "workspace_id": self.ws, "usuario_id": "u2",
+                                         "rol": "Miembro", "created_at": AHORA, "updated_at": AHORA})
+        # Y con un segundo workspace de verdad: con uno solo, la autorreparación
+        # vincula al usuario al vuelo —es lo previsto para instalaciones legacy— y
+        # el test no probaría el aislamiento, sino ese atajo.
+        self._ins("workspaces", {"id": "ws-ajeno", "nombre": "Otra agencia", "slug": "otra-agencia",
+                                 "created_at": AHORA, "updated_at": AHORA})
+        self._oferta()
+        oferta_id = self._id_de_la_oferta()
+        self.conn.execute("UPDATE inmuebles SET workspace_id = 'ws-ajeno' WHERE id = 'inm1'")
+        self.conn.commit()
+        req = urllib.request.Request(
+            self.base + "/api/login",
+            data=json.dumps({"usuario": "ajeno", "password": CLAVE}).encode(),
+            headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as r:
+            self.cookie = r.headers.get("Set-Cookie").split(";")[0]
+        estado, d = self._post("/api/inmueble_oferta_responder",
+                               {"oferta_id": oferta_id, "decision": "rechazar"})
+        self.assertIn(estado, (403, 404), d)
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM inmueble_ofertas WHERE id = ?", (oferta_id,)).fetchone()["estado"],
+            "presentada")
+
+    def test_una_retirada_no_tapa_a_la_nueva(self):
+        """El sello de tiempo va al segundo: retirar una y presentar otra seguido
+        deja dos filas con la misma fecha, y ordenar sólo por fecha podía devolver
+        la retirada y dejarle la pantalla en un paso que ya no existe."""
+        self._oferta()
+        self._post("/api/portal_busqueda_oferta_decision",
+                   {"token": self.token, "i": self.i, "decision": "retirar"}, con_sesion=False)
+        ahora = self.conn.execute(
+            "SELECT created_at FROM inmueble_ofertas LIMIT 1").fetchone()["created_at"]
+        self._oferta(importe=235000)
+        # Se fuerza el empate, que es lo que pasa de verdad cuando van seguidas.
+        self.conn.execute("UPDATE inmueble_ofertas SET created_at = ?", (ahora,))
+        self.conn.commit()
+        o = self._ficha()["oferta"]
+        self.assertEqual(o["estado"], "presentada")
+        self.assertEqual(o["importe"], 235000)

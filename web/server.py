@@ -1228,6 +1228,9 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/portal_busqueda_derechos",
     "/api/portal_busqueda_retirar",
     "/api/portal_busqueda_visita",
+    "/api/portal_busqueda_oferta",
+    "/api/portal_busqueda_oferta_decision",
+    "/api/portal_busqueda_justificante",
     # El comunero comunica una incidencia desde su enlace. Sin sesión: la llave es
     # el token, y el tope de envíos está dentro.
     "/api/workspace_fincas_portal_incidencia",
@@ -32408,6 +32411,231 @@ _SQL_DOCS_DEL_COMPRADOR = (
 )
 
 
+# El camino desde que le gusta hasta que está reservado. Un estado por paso, y
+# ninguno se salta: cada uno dice quién tiene la pelota.
+ESTADOS_DE_OFERTA = {
+    "presentada": ("Oferta presentada", "Esperando respuesta de la propiedad"),
+    "contraoferta": ("Contraoferta de la propiedad", "Te toca a ti: acéptala o recházala"),
+    "rechazada": ("Oferta rechazada", ""),
+    "retirada": ("Oferta retirada", ""),
+    "aceptada": ("Oferta aceptada", "La agencia prepara la reserva"),
+    "reserva_pendiente": ("Pendiente de la señal", "Haz la transferencia y sube el justificante"),
+    "reserva_justificada": ("Justificante recibido", "La agencia lo está comprobando"),
+    "reservada": ("Reservado a tu nombre", ""),
+}
+# Desde estos ya no se puede tocar: son finales o le toca a la agencia.
+_OFERTA_CERRADA = {"rechazada", "retirada", "reservada"}
+
+
+def ensure_ofertas_schema(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS inmueble_ofertas (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT,
+          workspace_id TEXT,
+          inmueble_id TEXT NOT NULL,
+          demanda_id TEXT NOT NULL,
+          acceso_id TEXT,
+          cliente_id TEXT,
+          importe TEXT,
+          financiacion INTEGER NOT NULL DEFAULT 0,
+          plazo_escritura INTEGER,
+          vigencia TEXT,
+          comentario TEXT,
+          estado TEXT NOT NULL DEFAULT 'presentada',
+          respuesta_importe TEXT,
+          respuesta_nota TEXT,
+          respondida_at TEXT,
+          respondida_por TEXT,
+          senal TEXT,
+          iban TEXT,
+          reserva_limite TEXT,
+          justificante_doc TEXT,
+          justificante_at TEXT,
+          verificada_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    # La historia va aparte y encadenada. La fila de arriba cambia de estado —es el
+    # ahora—; lo que no puede cambiar es lo que pasó: quién ofreció cuánto y qué
+    # día, que es justo lo que se discute cuando algo se tuerce.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS inmueble_oferta_eventos (
+          id TEXT PRIMARY KEY,
+          oferta_id TEXT NOT NULL,
+          quien TEXT NOT NULL,
+          que TEXT NOT NULL,
+          detalle TEXT,
+          importe TEXT,
+          ip TEXT,
+          created_at TEXT NOT NULL,
+          prev_hash TEXT,
+          integrity_hash TEXT
+        )
+        """
+    )
+    for sql in (
+        "CREATE INDEX IF NOT EXISTS idx_ofertas_demanda ON inmueble_ofertas (demanda_id, inmueble_id)",
+        "CREATE INDEX IF NOT EXISTS idx_ofertas_inmueble ON inmueble_ofertas (inmueble_id, estado)",
+        "CREATE INDEX IF NOT EXISTS idx_oferta_eventos ON inmueble_oferta_eventos (oferta_id, created_at)",
+    ):
+        try:
+            conn.execute(sql)
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("ensure_ofertas_schema/indices", _fallo_tragado)
+    try:
+        conn.commit()
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_ofertas_schema/commit", _fallo_tragado)
+
+
+def _payload_de_evento_de_oferta(fila, prev_hash):
+    return "|".join([
+        str(prev_hash or ""),
+        str(row_value(fila, "id", "") or ""),
+        str(row_value(fila, "oferta_id", "") or ""),
+        str(row_value(fila, "quien", "") or ""),
+        str(row_value(fila, "que", "") or ""),
+        str(row_value(fila, "importe", "") or ""),
+        str(row_value(fila, "created_at", "") or ""),
+    ])
+
+
+def apunta_evento_de_oferta(conn, oferta_id, quien, que, *, detalle="", importe="", ip="", now=None):
+    """Un renglón más en la historia de la oferta, encadenado al anterior.
+
+    Sirve de poco guardar que se aceptó una oferta de 240.000 si después se puede
+    editar la fila y que ponga otra cosa sin que se note.
+    """
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    registro = {
+        "id": os.urandom(16).hex(),
+        "oferta_id": str(oferta_id or ""),
+        "quien": str(quien or ""),
+        "que": str(que or ""),
+        "detalle": str(detalle or "")[:600],
+        "importe": str(importe or ""),
+        "ip": str(ip or "")[:60],
+        "created_at": now,
+    }
+    prev_hash = ""
+    try:
+        fila = conn.execute(
+            "SELECT a.integrity_hash FROM inmueble_oferta_eventos a "
+            "WHERE COALESCE(a.integrity_hash,'') <> '' AND NOT EXISTS ("
+            "  SELECT 1 FROM inmueble_oferta_eventos b WHERE COALESCE(b.prev_hash,'') = a.integrity_hash) "
+            "ORDER BY a.created_at DESC, a.id DESC LIMIT 1"
+        ).fetchone()
+        if fila:
+            prev_hash = str(row_value(fila, "integrity_hash", "") or "")
+    except Exception:
+        _rollback_best_effort(conn)
+    registro["prev_hash"] = prev_hash
+    registro["integrity_hash"] = hashlib.sha256(
+        _payload_de_evento_de_oferta(registro, prev_hash).encode("utf-8")).hexdigest()
+    columnas = table_columns(conn, "inmueble_oferta_eventos") or set()
+    claves = [k for k in registro if k in columnas] or list(registro)
+    try:
+        conn.execute(
+            f"INSERT INTO inmueble_oferta_eventos ({', '.join(claves)}) "
+            f"VALUES ({', '.join(['?'] * len(claves))})",
+            [registro[k] for k in claves])
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("apunta_evento_de_oferta", _fallo_tragado)
+    return registro["id"]
+
+
+def _tarea_para_el_asesor(conn, acceso, inmueble_id, asunto, notas="", now=None, tipo="Seguimiento"):
+    """Una tarea pendiente en la bandeja de quien lleva la operación.
+
+    Todo lo que el comprador hace desde el portal acaba aquí. Sin esto, él da por
+    hecho que la agencia se ha enterado —ha ofertado, ha pedido cita, ha subido el
+    justificante— y la agencia no sabe nada.
+    """
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        acciones_cols = table_columns(conn, "acciones") or set()
+        fila = {
+            "id": os.urandom(16).hex(),
+            "empresa_id": str(row_value(acceso, "empresa_id", "") or ""),
+            "workspace_id": str(row_value(acceso, "workspace_id", "") or ""),
+            "servicio": "inmobiliaria",
+            "inmueble_id": str(inmueble_id or ""),
+            "cliente_id": str(row_value(acceso, "cliente_id", "") or ""),
+            "cliente_nombre": str(row_value(acceso, "nombre", "") or ""),
+            "fecha": now[:10],
+            "hora": "09:00",
+            "tipo": tipo,
+            "asunto": str(asunto or "")[:200],
+            "estado": "Pendiente",
+            "notas": str(notas or "")[:500],
+            "created_at": now,
+            "updated_at": now,
+        }
+        claves = [k for k in fila if k in acciones_cols and fila[k] != ""]
+        conn.execute(
+            f"INSERT INTO acciones ({', '.join(claves)}) VALUES ({', '.join(['?'] * len(claves))})",
+            [fila[k] for k in claves])
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("_tarea_para_el_asesor", _fallo_tragado)
+
+
+def oferta_del_comprador(conn, demanda_id, inmueble_id):
+    """La oferta viva de ese comprador sobre ese inmueble, si la hay."""
+    try:
+        ensure_ofertas_schema(conn)
+        # La viva primero, y sólo después por fecha: si retira una y presenta otra
+        # en el mismo segundo —el sello va al segundo— ordenar sólo por fecha puede
+        # devolver la retirada y dejarle la pantalla en un paso que ya no existe.
+        return conn.execute(
+            "SELECT * FROM inmueble_ofertas WHERE demanda_id = ? AND inmueble_id = ? "
+            "ORDER BY CASE WHEN estado IN ('rechazada','retirada') THEN 1 ELSE 0 END, "
+            "created_at DESC LIMIT 1",
+            (str(demanda_id or ""), str(inmueble_id or "")),
+        ).fetchone()
+    except Exception:
+        _rollback_best_effort(conn)
+        return None
+
+
+def vista_de_la_oferta(oferta):
+    """Lo que se le enseña al comprador de SU oferta. Nunca las de otros.
+
+    Ni cuántas hay, ni por cuánto: eso es una palanca de negociación y, dicho por
+    escrito y con fecha, una promesa que luego hay que sostener.
+    """
+    if not oferta:
+        return None
+    estado = str(row_value(oferta, "estado", "") or "presentada")
+    titulo, siguiente = ESTADOS_DE_OFERTA.get(estado, (estado, ""))
+    return {
+        "estado": estado,
+        "titulo": titulo,
+        "siguiente": siguiente,
+        "importe": round(parse_money_value(row_value(oferta, "importe", 0)) or 0, 2),
+        "financiacion": bool(int(row_value(oferta, "financiacion", 0) or 0)),
+        "plazo_escritura": row_value(oferta, "plazo_escritura", None),
+        "vigencia": _fecha_corta(row_value(oferta, "vigencia", "")),
+        "fecha": _fecha_corta(row_value(oferta, "created_at", "")),
+        "contraoferta": round(parse_money_value(row_value(oferta, "respuesta_importe", 0)) or 0, 2),
+        "nota": str(row_value(oferta, "respuesta_nota", "") or ""),
+        "senal": round(parse_money_value(row_value(oferta, "senal", 0)) or 0, 2),
+        "iban": str(row_value(oferta, "iban", "") or ""),
+        "limite": _fecha_corta(row_value(oferta, "reserva_limite", "")),
+        "justificante": bool(str(row_value(oferta, "justificante_doc", "") or "")),
+        # Qué puede hacer él ahora mismo. Lo decide el servidor: si lo decidiera la
+        # pantalla, bastaría con abrir la consola para «retirar» una reserva.
+        "puede_ofertar": estado in {"rechazada", "retirada"},
+        "puede_retirar": estado == "presentada",
+        "puede_decidir": estado == "contraoferta",
+        "puede_justificar": estado == "reserva_pendiente",
+    }
+
+
 def build_portal_de_busqueda(conn, acceso, *, registrar=True):
     """Lo que ve el comprador. Por lista blanca, campo a campo.
 
@@ -32509,6 +32737,7 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
                 _rollback_best_effort(conn)
         estado_inm = normalize_lookup_text(row_value(fila, "estado", ""))
         novedades = novedades_del_inmueble(conn, inmueble_id, desde=ultima_entrada)
+        oferta = vista_de_la_oferta(oferta_del_comprador(conn, demanda_id, inmueble_id))
         inmuebles.append({
             # `i` es la posición en ESTA lista. No hay ningún id por medio: con el
             # enlace no se puede pedir la foto de un inmueble que no te han enseñado.
@@ -32530,6 +32759,7 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
             "cita": citas_por_inmueble.get(inmueble_id),
             "documentos": documentos,
             "novedades": novedades,
+            "oferta": oferta,
         })
 
     # La agenda se pinta con la dirección, no con el id.
@@ -32595,6 +32825,27 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
     paleta = paleta_de_marca(
         row_value(empresa, "color_portal", "") if "color_portal" in cols_emp else "")
 
+    pendiente = []
+    try:
+        ids = [str(row_value(f, "inmueble_id", "") or "") for f in seleccion]
+        if ids:
+            marcas = ", ".join(["?"] * len(ids))
+            for tarea in conn.execute(
+                f"SELECT tarea, estado, fecha_limite, responsable, inmueble_id FROM inmueble_checklist "
+                f"WHERE inmueble_id IN ({marcas}) ORDER BY COALESCE(fecha_limite,'') ASC LIMIT 60", ids,
+            ).fetchall():
+                if normalize_lookup_text(row_value(tarea, "responsable", "")) not in {"COMPRADOR", "CLIENTE"}:
+                    continue
+                if normalize_lookup_text(row_value(tarea, "estado", "")) in {"HECHO", "COMPLETADA", "COMPLETADO"}:
+                    continue
+                pendiente.append({
+                    "tarea": str(row_value(tarea, "tarea", "") or ""),
+                    "fecha_limite": _fecha_corta(row_value(tarea, "fecha_limite", "")),
+                    "donde": donde.get(str(row_value(tarea, "inmueble_id", "") or ""), ""),
+                })
+    except Exception:
+        _rollback_best_effort(conn)
+
     vistos = sum(1 for x in inmuebles if x["opinion"])
     novedades_nuevas = sum(1 for x in inmuebles for n in x["novedades"] if n["nuevo"])
     return {
@@ -32623,6 +32874,7 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
         "agenda": agenda_final,
         "agenda_es_pasado": not proximas and bool(agenda_vista),
         "mensajes": hilo_del_comprador(conn, demanda_id),
+        "pendiente_de_ti": pendiente,
         "firmas": firmas,
         "valoraciones": {
             "principales": [{"clave": k, "etiqueta": VALORACIONES_DEL_COMPRADOR[k]}
@@ -66990,6 +67242,22 @@ class Handler(BaseHTTPRequestHandler):
     .novedades .marca { display: inline-block; background: var(--verde-claro); color: var(--verde);
       border-radius: 99px; padding: 1px 7px; font-size: 10.5px; font-weight: 600; margin-left: 6px;
       vertical-align: 1px; }
+    .oferta { display: grid; gap: 8px; border: 1px solid var(--linea); border-radius: 12px;
+      padding: 12px; background: var(--fondo); }
+    .oferta .paso { font-family: var(--titulos); font-size: 16px; font-weight: 600; }
+    .oferta .cual { font-size: 13px; color: var(--suave); }
+    .oferta .cifra { font-family: var(--titulos); font-size: 21px; font-weight: 600; color: var(--verde); }
+    .oferta .campos { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .oferta input[type=number], .oferta input[type=date] { border: 1px solid var(--linea);
+      border-radius: 8px; padding: 8px 10px; font: 13.5px var(--texto); background: var(--tarjeta);
+      color: var(--tinta); }
+    .oferta label { font-size: 13px; color: var(--suave); display: flex; align-items: center; gap: 6px; }
+    /* Cifras tabulares y espaciado, no una monoespaciada: sólo se sirven dos
+       familias y una pila `monospace` caería a la del sistema, que es justo lo que
+       hacía que la página no pareciera de nadie. Un IBAN se lee igual de bien. */
+    .cuenta { font-family: var(--texto); font-variant-numeric: tabular-nums; letter-spacing: .06em;
+      font-size: 14px; font-weight: 600; background: var(--tarjeta); border: 1px dashed var(--linea);
+      border-radius: 8px; padding: 9px 11px; word-break: break-all; }
     .pedir { display: grid; gap: 8px; background: var(--fondo); border-radius: 10px; padding: 10px; }
     .pedir .campos { display: flex; gap: 8px; flex-wrap: wrap; }
     .pedir input[type=date], .pedir select { border: 1px solid var(--linea); border-radius: 8px;
@@ -67201,6 +67469,7 @@ class Handler(BaseHTTPRequestHandler):
             </div>` : ""}
             <input type="text" class="comentario" placeholder="¿Quieres contarnos algo de este inmueble?"
                    value="${esc(x.comentario || "")}" />
+            <div class="caja-oferta"></div>
           </div>
         </article>`;
     }
@@ -67259,6 +67528,10 @@ class Handler(BaseHTTPRequestHandler):
                 <h2>Tus citas</h2>
                 <div class="lista" id="agenda"></div>
               </section>
+              <section class="tarjeta" id="cajaPendiente" style="display:none">
+                <h2>Falta por tu parte</h2>
+                <div class="lista" id="pendiente"></div>
+              </section>
               <section class="tarjeta">
                 <h2>Habla con tu asesor</h2>
                 <div class="lista" id="hilo" style="margin-bottom:10px"></div>
@@ -67304,6 +67577,13 @@ class Handler(BaseHTTPRequestHandler):
             <div class="suave" style="font-size:12px">${esc(m.quien)} · ${esc(m.fecha)}</div></div>`).join("")
         : '<div class="suave">Escríbele lo que necesites.</div>';
 
+      if ((d.pendiente_de_ti || []).length) {
+        document.getElementById("cajaPendiente").style.display = "";
+        document.getElementById("pendiente").innerHTML = d.pendiente_de_ti.map((p) =>
+          `<div class="item"><span>${esc(p.tarea)}${p.donde ? " · " + esc(p.donde) : ""}</span>
+             <span class="suave">${esc(p.fecha_limite || "")}</span></div>`).join("");
+      }
+
       const firmas = (d.firmas || []).filter((f) => f.pendiente);
       if (firmas.length) {
         document.getElementById("cajaFirmas").style.display = "";
@@ -67317,6 +67597,10 @@ class Handler(BaseHTTPRequestHandler):
       const motivosPosibles = (d.valoraciones || {}).motivos || [];
       rejilla.querySelectorAll(".ficha").forEach((ficha) => {
         const i = Number(ficha.dataset.i);
+        // El inmueble de ESTA tarjeta. `tarjetaInmueble` lo tenía en su propio
+        // ámbito y aquí no llega: usarlo directamente reventaba el bucle entero y
+        // la página se quedaba en «x is not defined», sin una sola ficha.
+        const x = (d.inmuebles || []).find((it) => it.i === i) || {};
         const comentario = ficha.querySelector(".comentario");
         const caja = ficha.querySelector(".opinar");
         const motivos = ficha.querySelector(".motivos");
@@ -67361,6 +67645,99 @@ class Handler(BaseHTTPRequestHandler):
 
         pintaOpinion(actual, false);
         comentario.onchange = () => manda(actual);
+
+        // El camino desde que le gusta hasta que está reservado. Qué puede hacer
+        // en cada paso lo dice el servidor, no esta pantalla: si lo decidiera
+        // aquí, bastaría con abrir la consola para «retirar» una reserva.
+        const cajaOferta = ficha.querySelector(".caja-oferta");
+        function pintaOferta(o) {
+          if (!o) {
+            cajaOferta.innerHTML = x.disponible ? `
+              <div class="oferta">
+                <div class="paso">¿Te decides?</div>
+                <div class="cual">Haz tu oferta. La presentamos a la propiedad y te decimos algo.</div>
+                <div class="campos">
+                  <input type="number" class="importe" min="1" step="1000"
+                         placeholder="Importe en €" aria-label="Importe que ofreces" />
+                  <input type="number" class="plazo" min="0" max="365" placeholder="Días para escriturar"
+                         aria-label="Días para escriturar" />
+                  <input type="date" class="vigencia" min="${esc(hoy)}" aria-label="La mantengo hasta" />
+                </div>
+                <label><input type="checkbox" class="financia" /> Necesito financiación</label>
+                <button class="boton ofertar">Presentar la oferta</button>
+              </div>` : "";
+            const b = cajaOferta.querySelector(".ofertar");
+            if (b) b.onclick = async () => {
+              const importe = Number(cajaOferta.querySelector(".importe").value || 0);
+              if (!importe) { alert("Escribe el importe que ofreces."); return; }
+              b.disabled = true;
+              try {
+                await pide("/api/portal_busqueda_oferta", {
+                  token, sesion: sesion(), i, importe,
+                  plazo_escritura: cajaOferta.querySelector(".plazo").value,
+                  vigencia: cajaOferta.querySelector(".vigencia").value,
+                  financiacion: cajaOferta.querySelector(".financia").checked,
+                  comentario: comentario.value,
+                });
+                cargar();
+              } catch (e) { alert(e.message); b.disabled = false; }
+            };
+            return;
+          }
+          const partes = [`<div class="oferta">`,
+            `<div class="paso">${esc(o.titulo)}</div>`];
+          if (o.importe) partes.push(`<div class="cifra">${eur(o.importe)}</div>`);
+          if (o.estado === "contraoferta" && o.contraoferta) {
+            partes.push(`<div class="cual">La propiedad pide <strong>${eur(o.contraoferta)}</strong>.</div>`);
+          }
+          if (o.nota) partes.push(`<div class="cual">${esc(o.nota)}</div>`);
+          if (o.estado === "reserva_pendiente") {
+            partes.push(`<div class="cual">Ingresa <strong>${eur(o.senal)}</strong>${
+              o.limite ? " antes del <strong>" + esc(o.limite) + "</strong>" : ""} en esta cuenta:</div>`);
+            partes.push(`<div class="cuenta">${esc(o.iban)}</div>`);
+            partes.push(`<div class="cual">Cuando lo tengas hecho, sube aquí el justificante.</div>`);
+            partes.push(`<input type="file" class="justificante" accept=".pdf,.jpg,.jpeg,.png,.webp" />`);
+          } else if (o.siguiente) {
+            partes.push(`<div class="cual">${esc(o.siguiente)}</div>`);
+          }
+          if (o.puede_retirar) partes.push(`<button class="boton plano decidir" data-d="retirar">Retirar la oferta</button>`);
+          if (o.puede_decidir) {
+            partes.push(`<div class="campos">
+              <button class="boton decidir" data-d="aceptar">Acepto ${eur(o.contraoferta)}</button>
+              <button class="boton plano decidir" data-d="rechazar">No me encaja</button></div>`);
+          }
+          partes.push(`</div>`);
+          cajaOferta.innerHTML = partes.join("");
+
+          cajaOferta.querySelectorAll(".decidir").forEach((b) => {
+            b.onclick = async () => {
+              if (b.dataset.d === "retirar" && !confirm("¿Seguro que retiras la oferta?")) return;
+              b.disabled = true;
+              try {
+                await pide("/api/portal_busqueda_oferta_decision",
+                           { token, sesion: sesion(), i, decision: b.dataset.d });
+                cargar();
+              } catch (e) { alert(e.message); b.disabled = false; }
+            };
+          });
+          const subir = cajaOferta.querySelector(".justificante");
+          if (subir) subir.onchange = async () => {
+            const f = subir.files && subir.files[0];
+            if (!f) return;
+            const lector = new FileReader();
+            lector.onload = async () => {
+              try {
+                await pide("/api/portal_busqueda_justificante", {
+                  token, sesion: sesion(), i, nombre: f.name,
+                  file_base64: String(lector.result).split(",")[1],
+                });
+                cargar();
+              } catch (e) { alert(e.message); }
+            };
+            lector.readAsDataURL(f);
+          };
+        }
+        pintaOferta(x.oferta);
 
         const boton = ficha.querySelector(".visita");
         if (boton) {
@@ -68412,6 +68789,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_busqueda_derechos",
             "/api/portal_busqueda_retirar",
             "/api/portal_busqueda_visita",
+            "/api/portal_busqueda_oferta",
+            "/api/portal_busqueda_oferta_decision",
+            "/api/portal_busqueda_justificante",
+            "/api/inmueble_oferta_responder",
+            "/api/inmueble_oferta_verificar",
             "/api/inmueble_renovar",
             "/api/renta_campaign_document",
             "/api/workspace_fincas_comunidad_delete",
@@ -69305,6 +69687,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_busqueda_derechos",
             "/api/portal_busqueda_retirar",
             "/api/portal_busqueda_visita",
+            "/api/portal_busqueda_oferta",
+            "/api/portal_busqueda_oferta_decision",
+            "/api/portal_busqueda_justificante",
+            "/api/inmueble_oferta_responder",
+            "/api/inmueble_oferta_verificar",
             "/api/demanda_portal_acceso",
             "/api/demanda_portal_acceso_revoke",
             "/api/demanda_portal_mensaje",
@@ -69838,6 +70225,125 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "visible": bool(visible)})
             return
 
+        if parsed.path in ("/api/inmueble_oferta_responder", "/api/inmueble_oferta_verificar"):
+            # El lado del asesor. La oferta la escribe el comprador; la respuesta,
+            # la señal y el visto bueno del ingreso los pone la agencia.
+            oferta_id = str(payload.get("oferta_id") or "").strip()
+            ensure_ofertas_schema(conn)
+            fila = conn.execute(
+                "SELECT * FROM inmueble_ofertas WHERE id = ? LIMIT 1", (oferta_id,)).fetchone()
+            if not fila:
+                json_response(self, {"error": "Oferta no encontrada"}, status=404)
+                return
+            inmueble_id = str(row_value(fila, "inmueble_id", "") or "")
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _f = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc},
+                              status=404 if "no encontrado" in str(err_acc) else 403)
+                return
+            ahora_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            quien = str((session or {}).get("nombre") or (session or {}).get("usuario") or "la agencia")
+            estado_actual = str(row_value(fila, "estado", "") or "")
+
+            if parsed.path == "/api/inmueble_oferta_verificar":
+                if estado_actual != "reserva_justificada":
+                    json_response(self, {"error": "No hay ningún justificante pendiente de comprobar"},
+                                  status=409)
+                    return
+                conn.execute(
+                    "UPDATE inmueble_ofertas SET estado = 'reservada', verificada_at = ?, updated_at = ? "
+                    "WHERE id = ?", (ahora_iso, ahora_iso, oferta_id))
+                apunta_evento_de_oferta(conn, oferta_id, quien, "da por buena la señal",
+                                        importe=str(row_value(fila, "senal", "") or ""), now=ahora_iso)
+                audit_event(conn, str(row_value(fila, "empresa_id", "") or ""), "inmueble", inmueble_id,
+                            "Señal verificada · inmueble reservado", usuario=quien,
+                            detalles={"oferta": oferta_id}, now=ahora_iso)
+                conn.commit()
+                avisa_al_comprador(conn, str(row_value(fila, "demanda_id", "") or ""), "reserva",
+                                   "Hemos comprobado tu ingreso: el inmueble queda reservado a tu nombre.",
+                                   referencia=oferta_id, now=ahora_iso)
+                json_response(self, {"ok": True, "estado": "reservada"})
+                return
+
+            decision = str(payload.get("decision") or "").strip().lower()
+            if estado_actual not in {"presentada", "aceptada"}:
+                json_response(self, {"error": f"Esta oferta está en «{estado_actual}» y no admite respuesta"},
+                              status=409)
+                return
+            if decision == "contraoferta":
+                importe = round(parse_money_value(payload.get("importe")) or 0, 2)
+                if importe <= 0:
+                    json_response(self, {"error": "Escribe el importe de la contraoferta"}, status=400)
+                    return
+                conn.execute(
+                    "UPDATE inmueble_ofertas SET estado = 'contraoferta', respuesta_importe = ?, "
+                    "respuesta_nota = ?, respondida_at = ?, respondida_por = ?, updated_at = ? WHERE id = ?",
+                    (f"{importe:.2f}", str(payload.get("nota") or "")[:600], ahora_iso, quien,
+                     ahora_iso, oferta_id))
+                apunta_evento_de_oferta(conn, oferta_id, quien, "contraoferta",
+                                        detalle=str(payload.get("nota") or "")[:600],
+                                        importe=f"{importe:.2f}", now=ahora_iso)
+                texto_aviso = f"Tienes una contraoferta de {format_eur_short(importe)} en tu portal."
+                nuevo_estado = "contraoferta"
+            elif decision == "rechazar":
+                conn.execute(
+                    "UPDATE inmueble_ofertas SET estado = 'rechazada', respuesta_nota = ?, "
+                    "respondida_at = ?, respondida_por = ?, updated_at = ? WHERE id = ?",
+                    (str(payload.get("nota") or "")[:600], ahora_iso, quien, ahora_iso, oferta_id))
+                apunta_evento_de_oferta(conn, oferta_id, quien, "rechaza la oferta",
+                                        detalle=str(payload.get("nota") or "")[:600], now=ahora_iso)
+                texto_aviso = "Han respondido a tu oferta. Entra en tu portal para verlo."
+                nuevo_estado = "rechazada"
+            elif decision == "aceptar":
+                # Aceptar sin decir cuánto es la señal y a qué cuenta deja al
+                # comprador esperando un correo que no llega. Se piden aquí.
+                senal = round(parse_money_value(payload.get("senal")) or 0, 2)
+                if senal <= 0:
+                    json_response(self, {"error": "Indica el importe de la señal"}, status=400)
+                    return
+                iban = re.sub(r"\s+", " ", str(payload.get("iban") or "").strip()).upper()
+                if not iban:
+                    empresa_row = conn.execute(
+                        "SELECT iban FROM empresas WHERE id = ? LIMIT 1",
+                        (str(row_value(fila, "empresa_id", "") or ""),)).fetchone()
+                    iban = str(row_value(empresa_row, "iban", "") or "").strip().upper()
+                if not iban:
+                    json_response(self, {"error": "No hay cuenta donde hacer el ingreso: "
+                                                  "ponla en la ficha de la empresa o mándala aquí"},
+                                  status=400)
+                    return
+                limite = str(payload.get("limite") or "").strip()[:10]
+                dia = parse_iso_date(limite) if re.match(r"^\d{4}-\d{2}-\d{2}$", limite) else None
+                if limite and not dia:
+                    json_response(self, {"error": "Esa fecha límite no existe"}, status=400)
+                    return
+                conn.execute(
+                    "UPDATE inmueble_ofertas SET estado = 'reserva_pendiente', senal = ?, iban = ?, "
+                    "reserva_limite = ?, respuesta_nota = ?, respondida_at = ?, respondida_por = ?, "
+                    "updated_at = ? WHERE id = ?",
+                    (f"{senal:.2f}", iban, dia.isoformat() if dia else "",
+                     str(payload.get("nota") or "")[:600], ahora_iso, quien, ahora_iso, oferta_id))
+                apunta_evento_de_oferta(conn, oferta_id, quien, "acepta la oferta y pide la señal",
+                                        detalle=f"señal {senal:.2f} a {iban}",
+                                        importe=str(row_value(fila, "importe", "") or ""), now=ahora_iso)
+                texto_aviso = (f"Tu oferta ha sido aceptada. Para reservarlo, ingresa "
+                               f"{format_eur_short(senal)} y sube el justificante en tu portal.")
+                nuevo_estado = "reserva_pendiente"
+            else:
+                json_response(self, {"error": "Decisión no válida",
+                                     "opciones": ["aceptar", "contraoferta", "rechazar"]}, status=400)
+                return
+
+            audit_event(conn, str(row_value(fila, "empresa_id", "") or ""), "inmueble", inmueble_id,
+                        f"Respuesta a la oferta del portal: {decision}", usuario=quien,
+                        detalles={"oferta": oferta_id, "estado": nuevo_estado}, now=ahora_iso)
+            conn.commit()
+            avisa_al_comprador(conn, str(row_value(fila, "demanda_id", "") or ""), f"oferta_{nuevo_estado}",
+                               texto_aviso, referencia=f"{oferta_id}:{nuevo_estado}", now=ahora_iso)
+            json_response(self, {"ok": True, "estado": nuevo_estado})
+            return
+
         if parsed.path == "/api/portal_busqueda_codigo":
             acceso, fallo = acceso_de_comprador_por_token(conn, payload.get("token") or "")
             if not acceso:
@@ -69872,7 +70378,8 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path in ("/api/portal_busqueda_opinion", "/api/portal_busqueda_mensaje",
                            "/api/portal_busqueda_firma", "/api/portal_busqueda_consentimiento",
                            "/api/portal_busqueda_derechos", "/api/portal_busqueda_retirar",
-                           "/api/portal_busqueda_visita"):
+                           "/api/portal_busqueda_visita", "/api/portal_busqueda_oferta",
+                           "/api/portal_busqueda_oferta_decision", "/api/portal_busqueda_justificante"):
             acceso, fallo = acceso_de_comprador_por_token(conn, payload.get("token") or "")
             if not acceso:
                 json_response(self, {"error": "Enlace no válido"},
@@ -70150,6 +70657,186 @@ class Handler(BaseHTTPRequestHandler):
                 conn.commit()
                 json_response(self, {"ok": True, "fecha": fecha, "franja": franja, "hoja": bool(hoja)})
                 return
+
+            if parsed.path in ("/api/portal_busqueda_oferta", "/api/portal_busqueda_oferta_decision",
+                               "/api/portal_busqueda_justificante"):
+                datos = build_portal_de_busqueda(conn, acceso, registrar=False)
+                try:
+                    indice = int(payload.get("i"))
+                except Exception:
+                    indice = -1
+                if not datos or indice < 0 or indice >= len(datos["inmuebles"]):
+                    json_response(self, {"error": "Ese inmueble no está en tu selección"}, status=404)
+                    return
+                ficha = datos["inmuebles"][indice]
+                inmueble_id = _inmueble_de_la_seleccion(conn, demanda_id, indice)
+                ensure_ofertas_schema(conn)
+                fila = oferta_del_comprador(conn, demanda_id, inmueble_id)
+                estado_actual = str(row_value(fila, "estado", "") or "") if fila else ""
+                ip = str(self.client_address[0] if getattr(self, "client_address", None) else "")
+
+                if parsed.path == "/api/portal_busqueda_oferta":
+                    if not ficha["disponible"]:
+                        json_response(self, {"error": "Este inmueble ya no está disponible"}, status=409)
+                        return
+                    # Sólo una oferta viva por inmueble. Si la anterior sigue en
+                    # pie, se retira antes: dos ofertas a la vez del mismo
+                    # comprador no significan nada.
+                    if fila and estado_actual not in {"rechazada", "retirada"}:
+                        json_response(self, {"error": "Ya tienes una oferta en marcha sobre este inmueble"},
+                                      status=409)
+                        return
+                    importe = round(parse_money_value(payload.get("importe")) or 0, 2)
+                    if importe <= 0:
+                        json_response(self, {"error": "Escribe el importe que ofreces"}, status=400)
+                        return
+                    vigencia = str(payload.get("vigencia") or "").strip()[:10]
+                    dia = parse_iso_date(vigencia) if re.match(r"^\d{4}-\d{2}-\d{2}$", vigencia) else None
+                    if vigencia and not dia:
+                        json_response(self, {"error": "Esa fecha no existe"}, status=400)
+                        return
+                    if dia and dia.isoformat() < ahora_iso[:10]:
+                        json_response(self, {"error": "La oferta no puede caducar antes de hoy"}, status=400)
+                        return
+                    try:
+                        plazo = max(0, int(payload.get("plazo_escritura") or 0))
+                    except Exception:
+                        plazo = 0
+                    oferta_id = os.urandom(16).hex()
+                    cols = table_columns(conn, "inmueble_ofertas") or set()
+                    nueva = {
+                        "id": oferta_id, "empresa_id": empresa_id,
+                        "workspace_id": str(row_value(acceso, "workspace_id", "") or ""),
+                        "inmueble_id": inmueble_id, "demanda_id": demanda_id,
+                        "acceso_id": str(row_value(acceso, "id", "") or ""),
+                        "cliente_id": str(row_value(acceso, "cliente_id", "") or ""),
+                        "importe": f"{importe:.2f}",
+                        "financiacion": 1 if payload.get("financiacion") else 0,
+                        "plazo_escritura": plazo or None,
+                        "vigencia": dia.isoformat() if dia else "",
+                        "comentario": str(payload.get("comentario") or "").strip()[:600],
+                        "estado": "presentada",
+                        "created_at": ahora_iso, "updated_at": ahora_iso,
+                    }
+                    claves = [k for k in nueva if k in cols] or list(nueva)
+                    conn.execute(
+                        f"INSERT INTO inmueble_ofertas ({', '.join(claves)}) "
+                        f"VALUES ({', '.join(['?'] * len(claves))})",
+                        [nueva[k] for k in claves])
+                    apunta_evento_de_oferta(conn, oferta_id, "comprador", "presenta la oferta",
+                                            detalle=nueva["comentario"], importe=f"{importe:.2f}",
+                                            ip=ip, now=ahora_iso)
+                    _tarea_para_el_asesor(
+                        conn, acceso, inmueble_id,
+                        f"Oferta de {format_eur_short(importe)} desde el portal · responder",
+                        nueva["comentario"], ahora_iso)
+                    audit_event(conn, empresa_id, "inmueble", inmueble_id,
+                                "Oferta presentada desde el portal del comprador",
+                                usuario=str(row_value(acceso, "nombre", "") or ""),
+                                detalles={"importe": importe, "financiacion": bool(nueva["financiacion"])},
+                                now=ahora_iso)
+                    conn.commit()
+                    json_response(self, {"ok": True, "estado": "presentada"})
+                    return
+
+                if not fila:
+                    json_response(self, {"error": "No hay ninguna oferta sobre este inmueble"}, status=404)
+                    return
+
+                if parsed.path == "/api/portal_busqueda_oferta_decision":
+                    decision = str(payload.get("decision") or "").strip().lower()
+                    if decision == "retirar":
+                        if estado_actual != "presentada":
+                            json_response(self, {"error": "Ya no se puede retirar"}, status=409)
+                            return
+                        destino, que = "retirada", "retira la oferta"
+                    elif decision in ("aceptar", "rechazar"):
+                        if estado_actual != "contraoferta":
+                            json_response(self, {"error": "No hay ninguna contraoferta que decidir"},
+                                          status=409)
+                            return
+                        destino = "aceptada" if decision == "aceptar" else "rechazada"
+                        que = ("acepta la contraoferta" if decision == "aceptar"
+                               else "rechaza la contraoferta")
+                    else:
+                        json_response(self, {"error": "Decisión no válida"}, status=400)
+                        return
+                    conn.execute(
+                        "UPDATE inmueble_ofertas SET estado = ?, updated_at = ? WHERE id = ?",
+                        (destino, ahora_iso, str(row_value(fila, "id", "") or "")))
+                    apunta_evento_de_oferta(conn, row_value(fila, "id", ""), "comprador", que,
+                                            importe=str(row_value(fila, "respuesta_importe", "") or ""),
+                                            ip=ip, now=ahora_iso)
+                    _tarea_para_el_asesor(conn, acceso, inmueble_id,
+                                          f"El interesado {que}", "", ahora_iso)
+                    audit_event(conn, empresa_id, "inmueble", inmueble_id, f"El comprador {que}",
+                                usuario=str(row_value(acceso, "nombre", "") or ""),
+                                detalles={"estado": destino}, now=ahora_iso)
+                    conn.commit()
+                    json_response(self, {"ok": True, "estado": destino})
+                    return
+
+                if parsed.path == "/api/portal_busqueda_justificante":
+                    # El justificante de la transferencia de la señal. No se cobra
+                    # por aquí: se ingresa en la cuenta de la agencia y aquí se
+                    # aporta el papel, que es lo que se acordó.
+                    if estado_actual != "reserva_pendiente":
+                        json_response(self, {"error": "Todavía no toca subir el justificante"}, status=409)
+                        return
+                    nombre = str(payload.get("nombre") or "").strip() or "justificante"
+                    crudo = payload.get("file_base64") or payload.get("data") or ""
+                    if "," in crudo:
+                        crudo = crudo.split(",", 1)[1]
+                    try:
+                        contenido = base64.b64decode(crudo, validate=True)
+                    except Exception:
+                        json_response(self, {"error": "El archivo no se ha podido leer"}, status=400)
+                        return
+                    if not contenido:
+                        json_response(self, {"error": "El archivo está vacío"}, status=400)
+                        return
+                    if len(contenido) > INMO_PORTAL_DOC_MAX_BYTES:
+                        json_response(self, {"error": f"El archivo pasa de {INMO_PORTAL_DOC_MAX_BYTES // (1024*1024)} MB"},
+                                      status=413)
+                        return
+                    ext = ("." + nombre.rsplit(".", 1)[-1].lower()) if "." in nombre else ""
+                    if ext not in INMO_PORTAL_DOC_TIPOS:
+                        json_response(self, {"error": "Sólo se admiten PDF o fotos"}, status=415)
+                        return
+                    carpeta_id = re.sub(r"[^A-Za-z0-9_-]+", "_", inmueble_id).strip("_") or "inmueble"
+                    carpeta = UPLOADS / "inmuebles" / carpeta_id / "docs"
+                    carpeta.mkdir(parents=True, exist_ok=True)
+                    doc_id = os.urandom(16).hex()
+                    destino_fichero = carpeta / f"justificante_{doc_id}{ext}"
+                    destino_fichero.write_bytes(contenido)
+                    docs_cols = table_columns(conn, "inmueble_docs") or set()
+                    doc = {"id": doc_id, "inmueble_id": inmueble_id, "nombre": nombre[:180],
+                           "url": f"/uploads/inmuebles/{carpeta_id}/docs/{destino_fichero.name}",
+                           "tipo": "Justificante de la señal", "estado": "Recibido",
+                           "origen_tipo": "portal_justificante", "origen_id": demanda_id,
+                           "created_at": ahora_iso, "updated_at": ahora_iso}
+                    claves = [k for k in doc if k in docs_cols]
+                    conn.execute(
+                        f"INSERT INTO inmueble_docs ({', '.join(claves)}) "
+                        f"VALUES ({', '.join(['?'] * len(claves))})",
+                        [doc[k] for k in claves])
+                    conn.execute(
+                        "UPDATE inmueble_ofertas SET estado = 'reserva_justificada', justificante_doc = ?, "
+                        "justificante_at = ?, updated_at = ? WHERE id = ?",
+                        (doc_id, ahora_iso, ahora_iso, str(row_value(fila, "id", "") or "")))
+                    apunta_evento_de_oferta(conn, row_value(fila, "id", ""), "comprador",
+                                            "aporta el justificante de la señal",
+                                            detalle=nombre[:180], ip=ip, now=ahora_iso)
+                    _tarea_para_el_asesor(conn, acceso, inmueble_id,
+                                          "Justificante de la señal recibido · comprobar el ingreso",
+                                          nombre[:180], ahora_iso)
+                    audit_event(conn, empresa_id, "inmueble", inmueble_id,
+                                "Justificante de la señal aportado por el comprador",
+                                usuario=str(row_value(acceso, "nombre", "") or ""),
+                                detalles={"nombre": nombre[:180]}, now=ahora_iso)
+                    conn.commit()
+                    json_response(self, {"ok": True, "estado": "reserva_justificada"})
+                    return
 
             if parsed.path == "/api/portal_busqueda_mensaje":
                 texto = str(payload.get("texto") or "").strip()[:2000]
