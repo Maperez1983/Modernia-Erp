@@ -1209,6 +1209,7 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/portal_venta_firma",
     "/api/portal_venta_consentimiento",
     "/api/portal_venta_derechos",
+    "/api/portal_venta_retirar",
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
     "/api/workspace_portal_public_request",
@@ -30491,6 +30492,9 @@ def ensure_inmueble_portal_schema(conn):
     # El correo llegó después que el teléfono: `ensure_column` para las instalaciones
     # que ya tienen la tabla creada.
     ensure_column(conn, "inmueble_portal_accesos", "email", "email TEXT")
+    # Un correo específico para derechos: el general de la empresa suele ir a
+    # comercial y una solicitud de supresión no puede perderse ahí.
+    ensure_column(conn, "empresas", "email_rgpd", "email_rgpd TEXT")
     # Y se confirma aquí. En Postgres el DDL es transaccional: si esto se llama desde
     # una petición de sólo lectura —que no confirma nada— las tablas se crean, la
     # consulta de después funciona porque va en la misma transacción, y al soltar la
@@ -31206,9 +31210,53 @@ TEXTO_COMERCIAL = (
 )
 
 
-def texto_de_consentimiento(ambito, agencia=""):
+def responsable_del_tratamiento(conn, empresa_id):
+    """Quién responde, con nombre y apellidos. La ley pide identidad y un canal
+    concreto para ejercer derechos, no «escribiendo a la agencia».
+
+    Sale de la ficha de la empresa, que es donde debe estar: el sistema es
+    multiempresa y cada una responde de lo suyo.
+    """
+    try:
+        cols = table_columns(conn, "empresas") or set()
+        campos = [c for c in ("nombre", "razon_social", "nif", "direccion", "direccion_fiscal",
+                              "email", "email_rgpd") if c in cols]
+        fila = conn.execute(
+            f"SELECT {', '.join(campos)} FROM empresas WHERE id = ? LIMIT 1", (str(empresa_id or ""),)
+        ).fetchone() if campos else None
+    except Exception:
+        _rollback_best_effort(conn)
+        fila = None
+    def v(*claves):
+        for c in claves:
+            valor = str(row_value(fila, c, "") or "").strip()
+            if valor:
+                return valor
+        return ""
+    return {
+        "nombre": v("razon_social", "nombre"),
+        "nif": v("nif"),
+        "domicilio": v("direccion_fiscal", "direccion"),
+        "correo": v("email_rgpd", "email"),
+    }
+
+
+def texto_de_consentimiento(ambito, agencia="", responsable=None):
     base = TEXTOS_DE_CONSENTIMIENTO.get(ambito) or TEXTOS_DE_CONSENTIMIENTO["propietario"]
-    parrafos = [p.replace("{agencia}", str(agencia or "la agencia")) for p in base["parrafos"]]
+    r = responsable or {}
+    identidad = str(r.get("nombre") or agencia or "la agencia")
+    if r.get("nif"):
+        identidad += f", con NIF {r['nif']}"
+    if r.get("domicilio"):
+        identidad += f" y domicilio en {r['domicilio']}"
+    parrafos = [p.replace("{agencia}", identidad) for p in base["parrafos"]]
+    if r.get("correo"):
+        # El canal para ejercer derechos, dicho con todas las letras y no como
+        # «escribiendo a la agencia», que no es un canal.
+        parrafos = [
+            p.replace("escribiendo a la agencia", f"escribiendo a {r['correo']}")
+            for p in parrafos
+        ]
     return {
         "version": CONSENTIMIENTO_VERSION,
         "ambito": ambito,
@@ -31305,7 +31353,8 @@ def guarda_consentimiento_de_portal(conn, acceso, *, ambito, agencia, nombre, ni
     """
     ensure_portal_consentimientos_schema(conn)
     now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    texto = texto_de_consentimiento(ambito, agencia)
+    texto = texto_de_consentimiento(
+        ambito, agencia, responsable_del_tratamiento(conn, row_value(acceso, "empresa_id", "")))
     registro = {
         "id": os.urandom(16).hex(),
         "ambito": ambito,
@@ -31658,12 +31707,12 @@ def sesion_de_portal_valida(acceso, sesion):
     return not caduca or caduca >= datetime.now(timezone.utc).date().isoformat()
 
 
-def manda_codigo_de_portal(conn, acceso, now=None):
+def manda_codigo_de_portal(conn, acceso, now=None, tabla="inmueble_portal_accesos"):
     now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     codigo = f"{secrets.randbelow(1000000):06d}"
     caduca = (datetime.now(timezone.utc) + timedelta(minutes=INMO_PORTAL_CODIGO_MINUTOS)).strftime("%Y-%m-%d %H:%M:%S")
     conn.execute(
-        "UPDATE inmueble_portal_accesos SET codigo_hash = ?, codigo_expira = ?, codigo_intentos = 0, updated_at = ? "
+        f"UPDATE {tabla} SET codigo_hash = ?, codigo_expira = ?, codigo_intentos = 0, updated_at = ? "
         "WHERE id = ?",
         (hash_portal_token(codigo), caduca, now, str(row_value(acceso, "id", "") or "")),
     )
@@ -31675,7 +31724,7 @@ def manda_codigo_de_portal(conn, acceso, now=None):
     return enviado, motivo
 
 
-def comprueba_codigo_de_portal(conn, acceso, codigo, now=None):
+def comprueba_codigo_de_portal(conn, acceso, codigo, now=None, tabla="inmueble_portal_accesos"):
     """Devuelve (sesion, error). Cuenta los intentos: seis mil combinaciones se
     prueban solas si nadie lleva la cuenta."""
     now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -31690,14 +31739,14 @@ def comprueba_codigo_de_portal(conn, acceso, codigo, now=None):
         return "", "caducado"
     if not hmac.compare_digest(guardado, hash_portal_token(str(codigo or "").strip())):
         conn.execute(
-            "UPDATE inmueble_portal_accesos SET codigo_intentos = COALESCE(codigo_intentos,0) + 1, updated_at = ? WHERE id = ?",
+            f"UPDATE {tabla} SET codigo_intentos = COALESCE(codigo_intentos,0) + 1, updated_at = ? WHERE id = ?",
             (now, acceso_id),
         )
         conn.commit()
         return "", "codigo_incorrecto"
     sesion = make_portal_token()
     conn.execute(
-        "UPDATE inmueble_portal_accesos SET sesion_hash = ?, sesion_expira = ?, codigo_hash = NULL, "
+        f"UPDATE {tabla} SET sesion_hash = ?, sesion_expira = ?, codigo_hash = NULL, "
         "codigo_expira = NULL, codigo_intentos = 0, updated_at = ? WHERE id = ?",
         (
             hash_portal_token(sesion),
@@ -42966,6 +43015,10 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_fincas_juntas", "hora", "hora TEXT")
     ensure_column(conn, "workspace_fincas_juntas", "lugar", "lugar TEXT")
     ensure_column(conn, "workspace_fincas_juntas", "hora_segunda", "hora_segunda TEXT")
+    # El acta debe decir quién convocó (art. 19.1.b LPH). Normalmente el presidente,
+    # pero también pueden promoverla propietarios que reúnan la cuarta parte o el 25 %
+    # de las cuotas (art. 16.1), y eso hay que poder escribirlo.
+    ensure_column(conn, "workspace_fincas_juntas", "convocada_por", "convocada_por TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_contabilidad (
@@ -52720,6 +52773,11 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
         (workspace_id, comunidad_id),
     ).fetchall()
     coef = {row_value(p, "id", ""): float(row_value(p, "coeficiente", 0) or 0) for p in propietarios}
+    #: Para poder poner nombre y piso a cada voto, no solo contarlos.
+    ficha_propietario = {
+        row_value(p, "id", ""): {"nombre": row_value(p, "nombre", ""), "piso": row_value(p, "piso", "")}
+        for p in propietarios
+    }
     total_coef = round(sum(coef.values()), 4)
     total_prop = len(propietarios)
 
@@ -52774,7 +52832,26 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
         # votaron: si no, una junta de cuatro gatos aprobaría por unanimidad.
         pct_coef = porcentaje(votos["Favor"], True)
         pct_prop = porcentaje(votos["Favor"], False)
+        # Quién votó qué, con su cuota. El artículo 19.1.f de la LPH lo exige en el
+        # acta cuando sea relevante para la validez del acuerdo —y con mayorías
+        # cualificadas o unanimidad lo es siempre—. El dato estaba en la base desde el
+        # principio; aquí solo se contaban los votos y los nombres se tiraban.
+        nominal = {
+            sentido.lower(): sorted(
+                (
+                    {
+                        "piso": ficha_propietario.get(vid, {}).get("piso", ""),
+                        "nombre": ficha_propietario.get(vid, {}).get("nombre", ""),
+                        "coeficiente": coef.get(vid, 0.0),
+                    }
+                    for vid in ids
+                ),
+                key=lambda x: (x["piso"], x["nombre"]),
+            )
+            for sentido, ids in votos.items()
+        }
         acuerdos.append({
+            "votos_nominales": nominal,
             "id": acuerdo_id,
             "orden": int(row_value(acuerdo, "orden", 0) or 0),
             "titulo": row_value(acuerdo, "titulo", ""),
@@ -54347,6 +54424,10 @@ FINCAS_MINUTOS_SEGUNDA_CONVOCATORIA = 30
 #: va «con la antelación posible», sin plazo fijado, así que no se avisa de nada.
 FINCAS_DIAS_ANTELACION_ORDINARIA = 6
 
+#: Plazo para cerrar el acta con las firmas del presidente y el secretario: al terminar
+#: la reunión o dentro de los diez días naturales siguientes (art. 19.2 LPH).
+FINCAS_DIAS_CIERRE_ACTA = 10
+
 
 def build_convocatoria_junta_pdf(junta, comunidad, acuerdos, morosos, workspace=None, company=None):
     """La convocatoria de la junta, con lo que el artículo 16 de la LPH obliga a poner.
@@ -54514,27 +54595,71 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
     company = company or {}
     junta = recuento.get("junta") or {}
     asistencia = recuento.get("asistencia") or {}
-    fecha = str(row_value(junta, "fecha", "") or "")[:10]
+    # En castellano y no en ISO: es un documento que se lee en una junta y se archiva
+    # en el libro de actas, no un registro de la base.
+    fecha_iso = str(row_value(junta, "fecha", "") or "")[:10]
+    MESES_ES = ("enero", "febrero", "marzo", "abril", "mayo", "junio",
+                "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+    try:
+        _d = datetime.strptime(fecha_iso, "%Y-%m-%d").date()
+        fecha = f"{_d.day} de {MESES_ES[_d.month - 1]} de {_d.year}"
+    except Exception:
+        fecha = fecha_iso
 
     def limpio(valor):
         texto = str(valor or "").strip()
         return "" if texto in {"-", "—", "None"} else texto
 
+    # El artículo 19.1 de la LPH enumera lo que el acta debe expresar «al menos». Estas
+    # tres primeras secciones cubren las letras a, b y c: fecha y LUGAR de celebración,
+    # quién convocó, y el carácter de la junta con la indicación de si se celebró en
+    # primera o en segunda convocatoria. El lugar y el convocante no estaban.
+    lugar = limpio(row_value(junta, "lugar", ""))
+    convocada_por = limpio(row_value(junta, "convocada_por", ""))
+    en_segunda = bool(asistencia.get("segunda_convocatoria"))
     sections = [
+        ("Comunidad", [linea for linea in (
+            f"Denominación: {limpio(row_value(comunidad, 'nombre', ''))}",
+            f"Dirección: {limpio(row_value(comunidad, 'direccion', ''))}" if limpio(row_value(comunidad, "direccion", "")) else "",
+            f"CIF: {limpio(row_value(comunidad, 'cif', ''))}" if limpio(row_value(comunidad, "cif", "")) else "",
+        ) if linea]),
+        ("Celebración", [
+            f"Junta {limpio(row_value(junta, 'tipo', '')) or 'ordinaria'} celebrada el {fecha}"
+            + (f" en {lugar}." if lugar else ", en lugar no señalado en el sistema."),
+            "Celebrada en segunda convocatoria." if en_segunda else "Celebrada en primera convocatoria.",
+            f"Convocada por: {convocada_por}." if convocada_por
+            else "Convocada por: ______________________  (no consta en el sistema; art. 19.1.b LPH).",
+        ]),
         ("Asistencia", {"kind": "kpi_cards", "columns": 3, "items": [
             {"label": "Asistentes", "value": f"{asistencia.get('asistentes', 0)} de {asistencia.get('propietarios_total', 0)}", "accent": 1},
             {"label": "Sobre propietarios", "value": f"{asistencia.get('asistentes_pct_propietarios', 0):.2f} %"},
             {"label": "Sobre coeficiente", "value": f"{asistencia.get('asistentes_pct_coeficiente', 0):.2f} %"},
         ]}),
         ("", [f"De ellos, {asistencia.get('presentes', 0)} presentes y "
-              f"{asistencia.get('representados', 0)} representados."
-              + (" Junta celebrada en segunda convocatoria." if asistencia.get("segunda_convocatoria") else "")]),
-        ("Comunidad", [linea for linea in (
-            f"Denominación: {limpio(row_value(comunidad, 'nombre', ''))}",
-            f"Dirección: {limpio(row_value(comunidad, 'direccion', ''))}" if limpio(row_value(comunidad, "direccion", "")) else "",
-            f"Junta {limpio(row_value(junta, 'tipo', '')) or 'ordinaria'} de {fecha}.",
-        ) if linea]),
+              f"{asistencia.get('representados', 0)} representados."]),
     ]
+
+    # Art. 19.1.e: el orden del día de la reunión. Iba implícito en los títulos de cada
+    # acuerdo; aquí va como lista, que es lo que pide la ley y lo que se lee de un vistazo.
+    puntos = [a for a in (recuento.get("acuerdos") or []) if limpio(a.get("titulo"))]
+    if puntos:
+        sections.append(("Orden del día", [
+            f"{p.get('orden', 0)}. {limpio(p.get('titulo'))}" for p in puntos
+        ]))
+
+    # Art. 19.1.d: relación de todos los asistentes y **sus respectivos cargos**, y de
+    # los representados, con indicación en todo caso de sus cuotas de participación.
+    # El cargo se deduce de quién figura como presidente o secretario en la ficha de la
+    # comunidad; si el nombre no casa, se deja en blanco en vez de repartir cargos.
+    def cargo_de(nombre):
+        clave = normalize_lookup_text(nombre or "")
+        if not clave:
+            return ""
+        for campo, etiqueta in (("presidente", "Presidente"), ("secretario", "Secretario")):
+            valor = normalize_lookup_text(limpio(row_value(comunidad, campo, "")))
+            if valor and valor == clave:
+                return etiqueta
+        return ""
 
     asistentes = [p for p in (recuento.get("propietarios") or []) if p.get("asiste")]
     if asistentes:
@@ -54542,19 +54667,34 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
             "kind": "table",
             "columns": [
                 {"label": "Inmueble", "width": 2},
-                {"label": "Propietario", "width": 5},
+                {"label": "Propietario", "width": 4},
+                {"label": "Cargo", "width": 2},
                 {"label": "Representado por", "width": 3},
                 {"label": "Coeficiente", "width": 2, "align": "right"},
             ],
-            "rows": [[p.get("piso", ""), p.get("nombre", ""), p.get("representado_por", "") or "—",
+            "rows": [[p.get("piso", ""), p.get("nombre", ""), cargo_de(p.get("nombre")) or "—",
+                      p.get("representado_por", "") or "—",
                       f"{float(p.get('coeficiente') or 0):.4f} %"] for p in asistentes],
         }))
+
+    def nominal(acuerdo, sentido):
+        """«Fulano (3º B, 2,1300 %)», que es como lo pide el art. 19.1.f."""
+        gente = (acuerdo.get("votos_nominales") or {}).get(sentido) or []
+        return ", ".join(
+            f"{v.get('nombre', '')} ({v.get('piso') or 'sin piso'}, {float(v.get('coeficiente') or 0):.4f} %)"
+            for v in gente
+        )
 
     for acuerdo in recuento.get("acuerdos") or []:
         if acuerdo.get("aprobado") is None:
             veredicto = "Sin mayoría asignada: el resultado no se dictamina."
         else:
             veredicto = "APROBADO" if acuerdo["aprobado"] else "NO APROBADO"
+        # Art. 19.1.f: los nombres de quienes votaron a favor y en contra, con sus
+        # cuotas, cuando sea relevante para la validez del acuerdo. Los votos estaban
+        # en la base desde siempre y el acta solo imprimía el recuento.
+        a_favor, en_contra = nominal(acuerdo, "favor"), nominal(acuerdo, "contra")
+        abstenciones = nominal(acuerdo, "abstencion")
         sections.append((f"{acuerdo.get('orden', 1)}. {acuerdo.get('titulo', '')}", [
             linea for linea in (
                 limpio(acuerdo.get("descripcion")),
@@ -54565,13 +54705,17 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
                 f"El voto a favor representa el {acuerdo.get('favor_propietarios', 0):.2f} % de los propietarios "
                 f"y el {acuerdo.get('favor_coeficiente', 0):.2f} % de los coeficientes, sobre "
                 f"{acuerdo.get('sobre', 'toda la comunidad')}.",
+                f"Votaron a favor: {a_favor}." if a_favor else "",
+                f"Votaron en contra: {en_contra}." if en_contra else "",
+                f"Se abstuvieron: {abstenciones}." if abstenciones else "",
                 veredicto,
             ) if linea
         ]))
 
     sections.append(("Firma", [
         "Esta acta recoge lo registrado en la aplicación durante la junta. Debe ser firmada por",
-        "el secretario administrador con el visto bueno del presidente.",
+        "el secretario administrador con el visto bueno del presidente, al terminar la reunión o",
+        f"dentro de los {FINCAS_DIAS_CIERRE_ACTA} días naturales siguientes (art. 19.2 LPH).",
         "",
         "",
         "Fdo.: El secretario administrador",
@@ -64824,10 +64968,15 @@ class Handler(BaseHTTPRequestHandler):
   <meta name="referrer" content="no-referrer" />
   <meta name="robots" content="noindex,nofollow" />
   <title>Mi venta</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:wght@500;600;700&display=swap" />
   <style>
+    /* La tipografía se sirve desde aquí, no desde Google. Pedirla fuera manda la IP
+       del propietario a un tercero cada vez que abre su enlace, sin que lo haya
+       consentido, y esta página la ve un cliente, no un empleado. Son 56 KB en
+       total: el subconjunto latino de la variable y la serif del titular. */
+    @font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400 600;
+      font-display: swap; src: url("/assets/fuentes/ibm-plex-sans.woff2") format("woff2"); }
+    @font-face { font-family: "IBM Plex Serif"; font-style: normal; font-weight: 600;
+      font-display: swap; src: url("/assets/fuentes/ibm-plex-serif.woff2") format("woff2"); }
     :root { color-scheme: light dark; --tinta: #0f172a; --suave: #64748b; --linea: #e2e8f0;
             --fondo: #f6f7f9; --tarjeta: #ffffff; --verde: #15803D; --verde-claro: #dcfce7;
             --ambar: #b45309; --ambar-claro: #fef3c7;
@@ -65338,7 +65487,8 @@ class Handler(BaseHTTPRequestHandler):
             ${esc(ag.nombre || "")} ·
             <a href="/api/portal_venta_consentimiento_pdf?token=${encodeURIComponent(token)}" target="_blank"
                rel="noopener" style="color:var(--verde)">lo que firmaste</a> ·
-            <a href="#" id="irDerechos" style="color:var(--verde)">tus datos</a>
+            <a href="#" id="irDerechos" style="color:var(--verde)">tus datos</a> ·
+            <a href="#" id="irRetirar" style="color:var(--verde)">retirar el consentimiento</a>
           </p>
         </div>
         <div class="barra">
@@ -65368,6 +65518,18 @@ class Handler(BaseHTTPRequestHandler):
           const r = await pide("/api/portal_venta_derechos", { token, sesion: sesion(), tipo,
                                                                texto: prompt("¿Quieres añadir algo?") || "" });
           alert("Recibido. Tu agencia tiene que contestarte antes del " + r.limite + ".");
+        } catch (e) { alert(e.message); }
+      };
+
+      const retirar = document.getElementById("irRetirar");
+      if (retirar) retirar.onclick = async (ev) => {
+        ev.preventDefault();
+        if (!confirm("Si retiras el consentimiento, este enlace dejará de funcionar y no podrás " +
+                     "seguir la venta desde aquí. Tu asesor te seguirá informando por teléfono.\n\n¿Seguimos?")) return;
+        try {
+          await pide("/api/portal_venta_retirar", { token, sesion: sesion() });
+          app.innerHTML = '<div class="aviso">Consentimiento retirado. Este enlace ya no funciona. ' +
+            'Si cambias de opinión, pídele a tu agencia uno nuevo.</div>';
         } catch (e) { alert(e.message); }
       };
 
@@ -66306,14 +66468,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_venta_firma",
             "/api/portal_venta_consentimiento",
             "/api/portal_venta_derechos",
-    "/api/portal_venta_consentimiento",
-    "/api/portal_venta_derechos",
-    "/api/portal_venta_firma",
-    "/api/portal_venta_consentimiento",
-    "/api/portal_venta_derechos",
-            "/api/inmueble_portal_mensaje",
-            "/api/inmueble_doc_compartir",
-            "/api/visita_resultado",
+            "/api/portal_venta_retirar",
             "/api/inmueble_renovar",
             "/api/renta_campaign_document",
             "/api/workspace_fincas_comunidad_delete",
@@ -67045,7 +67200,6 @@ class Handler(BaseHTTPRequestHandler):
                 "/api/inmueble_signature_request",
                 "/api/inmueble_signature_remind",
                 "/api/inmueble_signature_cancel",
-            "/api/inmueble_signature_cancel",
                 "/api/inmueble_signature_sign",
                 "/api/inmueble_signature_reject",
                 "/api/admin_seed_modernia_users",
@@ -67098,9 +67252,6 @@ class Handler(BaseHTTPRequestHandler):
             "/api/usuarios_invitar",
             "/api/auth_set_password",
             "/api/cliente_gestoria_update",
-            "/api/leads",
-            "/api/portal_leads",
-            "/api/portal_lead",
             "/api/inmueble_docs",
             "/api/inmueble_checklist_generate",
             "/api/inmueble_checklist_update",
@@ -67189,18 +67340,11 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_venta_firma",
             "/api/portal_venta_consentimiento",
             "/api/portal_venta_derechos",
-    "/api/portal_venta_consentimiento",
-    "/api/portal_venta_derechos",
-    "/api/portal_venta_firma",
-    "/api/portal_venta_consentimiento",
-    "/api/portal_venta_derechos",
+            "/api/portal_venta_retirar",
             "/api/inmueble_portal_mensaje",
             "/api/inmueble_doc_compartir",
             "/api/visita_resultado",
             "/api/inmueble_portal_acceso",
-            "/api/inmueble_portal_mensaje",
-            "/api/inmueble_doc_compartir",
-            "/api/visita_resultado",
             "/api/inmueble_portal_acceso_revoke",
         ):
             if not empresa_nombre:
@@ -67308,7 +67452,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path in ("/api/portal_venta_doc", "/api/portal_venta_propuesta",
                            "/api/portal_venta_mensaje", "/api/portal_venta_firma",
-                           "/api/portal_venta_consentimiento", "/api/portal_venta_derechos"):
+                           "/api/portal_venta_consentimiento", "/api/portal_venta_derechos",
+                           "/api/portal_venta_retirar"):
             acceso, fallo = acceso_de_portal_por_token(conn, payload.get("token") or "")
             if not acceso:
                 json_response(self, {"error": "Enlace no válido"}, status=403 if fallo in ("revocado", "caducado") else 404)
@@ -67344,6 +67489,28 @@ class Handler(BaseHTTPRequestHandler):
                 audit_event(conn, str(row_value(acceso, "empresa_id", "") or ""), "inmueble", inmueble_id,
                             "Consentimiento de acceso firmado", usuario=nombre,
                             detalles={"id": consent_id, "version": CONSENTIMIENTO_VERSION}, now=ahora_iso)
+                conn.commit()
+                json_response(self, {"ok": True})
+                return
+
+            if parsed.path == "/api/portal_venta_retirar":
+                # Retirar el consentimiento tiene que ser TAN fácil como darlo. Lo
+                # daba con un clic y para quitarlo tenía que pedirlo y esperar: eso
+                # no cumple. Aquí lo retira él, y el enlace deja de valer al momento.
+                #
+                # El documento firmado NO se borra: es la prueba de que en su día se
+                # dio y de qué texto se aceptó. Se marca revocado con su fecha.
+                ensure_portal_consentimientos_schema(conn)
+                conn.execute(
+                    "UPDATE portal_consentimientos SET revocado_at = ? WHERE acceso_id = ? AND revocado_at IS NULL",
+                    (ahora_iso, str(row_value(acceso, "id", "") or "")))
+                revoca_accesos_del_inmueble(conn, inmueble_id, "consentimiento retirado por el propietario",
+                                            now=ahora_iso)
+                audit_event(conn, str(row_value(acceso, "empresa_id", "") or ""), "cliente",
+                            str(row_value(acceso, "cliente_id", "") or ""),
+                            "Consentimiento retirado por el interesado",
+                            usuario=str(row_value(acceso, "nombre", "") or ""),
+                            detalles={"acceso": str(row_value(acceso, "id", "") or "")}, now=ahora_iso)
                 conn.commit()
                 json_response(self, {"ok": True})
                 return
@@ -94631,7 +94798,9 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
                 json_response(self, {
                     "estado": "consentimiento_requerido",
-                    "texto": texto_de_consentimiento("propietario", row_value(empresa_row, "nombre", "")),
+                    "texto": texto_de_consentimiento(
+                        "propietario", row_value(empresa_row, "nombre", ""),
+                        responsable_del_tratamiento(conn, row_value(acceso, "empresa_id", ""))),
                     "nombre": str(row_value(acceso, "nombre", "") or ""),
                 })
                 return

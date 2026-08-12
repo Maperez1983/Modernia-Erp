@@ -1437,11 +1437,14 @@ class LaImagenDeLaPaginaTests(BasePortal):
     antes que los colores o el espaciado.
     """
 
-    def test_carga_las_tipografias_de_la_casa(self):
+    def test_carga_las_tipografias_de_la_casa_desde_el_propio_servidor(self):
+        """Antes se pedían a Google, y eso mandaba la IP del cliente a un tercero
+        cada vez que abría su enlace. Se sirven desde aquí."""
         _, html = self._get("/portal-venta")
-        self.assertIn("fonts.googleapis.com", html)
-        self.assertIn("IBM+Plex+Serif", html)
-        self.assertIn("IBM+Plex+Sans", html)
+        self.assertNotIn("fonts.googleapis.com", html)
+        self.assertIn('font-family: "IBM Plex Serif"', html)
+        self.assertIn('font-family: "IBM Plex Sans"', html)
+        self.assertIn("/assets/fuentes/ibm-plex-sans.woff2", html)
 
     def test_los_titulares_van_en_la_serif(self):
         _, html = self._get("/portal-venta")
@@ -1834,3 +1837,71 @@ class EjercerDerechosDesdeElPortalTests(BasePortal):
         css = html[html.index("<style>"):html.index("</style>")]
         i = css.index(".casilla {")
         self.assertIn("display: flex", css[i:css.index("}", i)])
+
+
+class LosTresHuecosDelRGPDTests(BasePortal):
+    """Tres cosas que faltaban para poder darle el enlace a un cliente."""
+
+    def test_la_clausula_identifica_al_responsable_con_nif_y_domicilio(self):
+        """«La agencia» no identifica a nadie: la ley pide identidad y domicilio."""
+        self.conn.execute("UPDATE empresas SET razon_social='Estudio Velazquez 2012 S.L.', "
+                          "nif='B93227643', direccion='Ildefonso Marzo 18' WHERE id='emp1'")
+        self.conn.commit()
+        r = S.responsable_del_tratamiento(self.conn, "emp1")
+        t = S.texto_de_consentimiento("propietario", "Agencia", r)
+        self.assertIn("B93227643", t["parrafos"][0])
+        self.assertIn("Ildefonso Marzo 18", t["parrafos"][0])
+
+    def test_y_da_un_correo_concreto_para_ejercer_derechos(self):
+        S.ensure_inmueble_portal_schema(self.conn)
+        self.conn.execute("UPDATE empresas SET email_rgpd='derechos@ejemplo.test' WHERE id='emp1'")
+        self.conn.commit()
+        t = S.texto_de_consentimiento("propietario", "Agencia",
+                                      S.responsable_del_tratamiento(self.conn, "emp1"))
+        derechos = [p for p in t["parrafos"] if "derechos" in p.lower()][0]
+        self.assertIn("derechos@ejemplo.test", derechos)
+        self.assertNotIn("escribiendo a la agencia", derechos)
+
+    def test_la_pagina_no_pide_nada_a_google(self):
+        """Pedir la tipografía fuera manda la IP del cliente a un tercero cada vez
+        que abre su enlace, sin haberlo consentido."""
+        _, html = self._get("/portal-venta")
+        for fuera in ("fonts.googleapis.com", "fonts.gstatic.com", "googleapis"):
+            with self.subTest(fuera):
+                self.assertNotIn(fuera, html)
+        self.assertIn("@font-face", html)
+        self.assertIn("/assets/fuentes/", html)
+
+    def test_las_fuentes_están_en_el_repositorio(self):
+        carpeta = Path(__file__).resolve().parents[1] / "web" / "assets" / "fuentes"
+        for f in ("ibm-plex-sans.woff2", "ibm-plex-serif.woff2"):
+            with self.subTest(f):
+                self.assertTrue((carpeta / f).exists(), "falta la fuente que sirve la página")
+
+    def test_puede_retirar_el_consentimiento_el_mismo(self):
+        """Retirarlo tiene que ser tan fácil como darlo."""
+        token = self._token(self._abre_portal()["enlace"])
+        self.assertEqual(self._vista(token)["estado"], "ok")
+        estado, d = self._post("/api/portal_venta_retirar", {"token": token}, con_sesion=False)
+        self.assertEqual(estado, 200, d)
+        self.assertEqual(self._get(f"/api/portal_venta?token={token}")[0], 403)
+
+    def test_al_retirarlo_el_documento_firmado_NO_se_borra(self):
+        """Es la prueba de que en su día se dio, y de qué texto se aceptó."""
+        token = self._token(self._abre_portal()["enlace"])
+        self._post("/api/portal_venta_retirar", {"token": token}, con_sesion=False)
+        fila = self.conn.execute(
+            "SELECT documento_pdf, revocado_at FROM portal_consentimientos").fetchone()
+        self.assertTrue(fila["documento_pdf"])
+        self.assertTrue(fila["revocado_at"])
+
+    def test_y_queda_en_la_bitacora_quien_lo_retiró(self):
+        token = self._token(self._abre_portal()["enlace"])
+        self._post("/api/portal_venta_retirar", {"token": token}, con_sesion=False)
+        fila = self.conn.execute(
+            "SELECT accion FROM auditoria WHERE accion LIKE '%retirado%'").fetchone()
+        self.assertIsNotNone(fila)
+
+    def test_el_enlace_de_retirada_está_en_el_pie(self):
+        _, html = self._get("/portal-venta")
+        self.assertIn("retirar el consentimiento", html)
