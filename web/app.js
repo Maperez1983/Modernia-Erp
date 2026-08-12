@@ -24336,6 +24336,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
       <div class="form-grid" style="align-items:end;">
         <label class="span-2">Junta <select data-junta-sel></select></label>
         <div class="form-actions span-2">
+          <button type="button" class="secondary ghost" data-junta-convocatoria>Descargar convocatoria</button>
           <button type="button" class="secondary ghost" data-junta-acta>Descargar acta</button>
           <span class="muted" data-junta-status></span>
         </div>
@@ -24491,6 +24492,10 @@ const renderWorkspaceFincasCommunityFicha = async () => {
     panel.querySelector("[data-junta-acta]")?.addEventListener("click", () => {
       if (!sel.value) { if (estado) estado.textContent = "Elige una junta."; return; }
       window.open(`/api/workspace_fincas_acta?workspace_id=${encodeURIComponent(workspaceId)}&id=${encodeURIComponent(sel.value)}`, "_blank");
+    });
+    panel.querySelector("[data-junta-convocatoria]")?.addEventListener("click", () => {
+      if (!sel.value) { if (estado) estado.textContent = "Elige una junta."; return; }
+      window.open(`/api/workspace_fincas_convocatoria?workspace_id=${encodeURIComponent(workspaceId)}&id=${encodeURIComponent(sel.value)}`, "_blank");
     });
     await cargar();
     return;
