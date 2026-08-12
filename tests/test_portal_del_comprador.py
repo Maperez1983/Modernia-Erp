@@ -894,15 +894,15 @@ class LaCabeceraDeLaAgenciaTests(BaseComprador):
 
     def test_sin_color_elegido_va_el_verde_de_la_casa(self):
         d = self._vista(self._abre())
-        self.assertEqual(d["agencia"]["color"], S.PORTAL_COLOR_POR_DEFECTO)
-        self.assertEqual(d["agencia"]["tinta"], "#ffffff")
+        self.assertEqual(d["agencia"]["paleta"]["fondo"], S.PORTAL_COLOR_POR_DEFECTO)
+        self.assertEqual(d["agencia"]["paleta"]["tinta"], "#ffffff")
 
     def test_el_color_de_la_agencia_manda(self):
         self.conn.execute("UPDATE empresas SET color_portal = '#7C2D12' WHERE id = 'emp1'")
         self.conn.commit()
         d = self._vista(self._abre())
-        self.assertEqual(d["agencia"]["color"], "#7C2D12")
-        self.assertEqual(d["agencia"]["tinta"], "#ffffff")
+        self.assertEqual(d["agencia"]["paleta"]["fondo"], "#7C2D12")
+        self.assertEqual(d["agencia"]["paleta"]["tinta"], "#ffffff")
 
     def test_un_color_claro_cambia_la_letra_a_oscura(self):
         """Una agencia elige su color mirando su logo, no midiendo contrastes. Con
@@ -910,15 +910,38 @@ class LaCabeceraDeLaAgenciaTests(BaseComprador):
         self.conn.execute("UPDATE empresas SET color_portal = '#FACC15' WHERE id = 'emp1'")
         self.conn.commit()
         d = self._vista(self._abre())
-        self.assertEqual(d["agencia"]["color"], "#FACC15")
-        self.assertEqual(d["agencia"]["tinta"], "#0f172a")
+        self.assertEqual(d["agencia"]["paleta"]["fondo"], "#FACC15")
+        self.assertEqual(d["agencia"]["paleta"]["tinta"], "#0f172a")
 
     def test_un_color_que_no_se_lee_con_ninguna_letra_se_descarta(self):
         """Ni blanco ni negro llegan a 4,5:1: se vuelve al verde de la casa antes
         que publicar una cabecera ilegible."""
         self.conn.execute("UPDATE empresas SET color_portal = '#7A7A7A' WHERE id = 'emp1'")
         self.conn.commit()
-        self.assertEqual(self._vista(self._abre())["agencia"]["color"], S.PORTAL_COLOR_POR_DEFECTO)
+        self.assertEqual(self._vista(self._abre())["agencia"]["paleta"]["fondo"],
+                         S.PORTAL_COLOR_POR_DEFECTO)
+
+    def test_la_vista_sirve_la_paleta_que_la_pagina_lee(self):
+        """Este 500 estuvo en producción: al pasar de un color plano a la paleta se
+        cambió el cálculo y se dejaron dos claves apuntando a variables borradas, así
+        que la vista entera reventaba con `NameError`. Ninguna prueba comparaba lo que
+        el servidor mete en `agencia` con lo que `app.js` lee de ahí."""
+        agencia = self._vista(self._abre())["agencia"]
+        self.assertIn("paleta", agencia)
+        for clave in ("fondo", "tinta", "acento_claro", "acento_oscuro",
+                      "suave_claro", "suave_oscuro"):
+            with self.subTest(clave=clave):
+                self.assertRegex(str(agencia["paleta"].get(clave, "")), r"^#[0-9a-fA-F]{6}$")
+
+    def test_no_quedan_claves_de_color_sin_calcular(self):
+        """La causa exacta: el `return` seguía nombrando variables que ya no existían.
+        Las que salgan de `build_portal_de_busqueda` tienen que estar asignadas antes."""
+        fuente = Path(S.__file__).read_text(encoding="utf-8")
+        i = fuente.index("def build_portal_de_busqueda")
+        cuerpo = fuente[i: fuente.index("\ndef ", i + 10)]
+        for muerta in ('"color": color,', '"tinta": tinta,'):
+            with self.subTest(muerta):
+                self.assertNotIn(muerta, cuerpo)
 
     def test_lo_que_no_es_un_color_se_ignora(self):
         for basura in ("rojo", "#ZZZ", "15803D", "'; DROP TABLE empresas; --", "#15803D  "):

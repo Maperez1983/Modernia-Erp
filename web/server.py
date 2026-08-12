@@ -32603,8 +32603,12 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
             "nombre": str(row_value(empresa, "nombre", "") or ""),
             "asesor": str(row_value(demanda, "responsable", "") or ""),
             "logo": hay_logo,
-            "color": color,
-            "tinta": tinta,
+            # `paleta`, no `color`/`tinta`: al pasar de un color plano a la paleta
+            # completa se cambió la línea que las calculaba pero no estas dos, que
+            # quedaron apuntando a variables inexistentes. El portal respondía 500 a
+            # cada petición con `NameError: name 'color' is not defined`, y la página
+            # ya leía `d.agencia.paleta`.
+            "paleta": paleta,
         },
         # Lo que pidió, para que pueda decir «esto no era lo que buscaba» con el
         # criterio delante y no de memoria.
