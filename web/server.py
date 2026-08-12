@@ -1178,6 +1178,8 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/inmueble_signature_document",
     "/api/workspace_portal_public",
     "/api/workspace_fincas_portal_public",
+    "/api/workspace_fincas_portal_doc",
+    "/api/workspace_fincas_portal_junta",
     "/portal-comunidad",
     # Portal del propietario de un inmueble en venta. La llave es el token del
     # enlace; no hay sesión del CRM detrás y no debe haberla.
@@ -43617,6 +43619,9 @@ def ensure_workspace_product_tables(conn):
     # pero también pueden promoverla propietarios que reúnan la cuarta parte o el 25 %
     # de las cuotas (art. 16.1), y eso hay que poder escribirlo.
     ensure_column(conn, "workspace_fincas_juntas", "convocada_por", "convocada_por TEXT")
+    # Publicar una junta en el portal es una decisión del administrador, no un efecto
+    # de crearla: el acta se publica cuando está firmada, no mientras se redacta.
+    ensure_column(conn, "workspace_fincas_juntas", "publicado_portal", "publicado_portal INTEGER NOT NULL DEFAULT 0")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_contabilidad (
@@ -54453,6 +54458,20 @@ def make_portal_token():
     return secrets.token_urlsafe(32)
 
 
+def referencia_portal(token, identificador):
+    """Una referencia opaca para pedir un documento desde el portal.
+
+    El portal no manda identificadores internos —está razonado abajo: con un id se
+    puede probar suerte en otros endpoints—, pero para descargar un documento hace
+    falta poder nombrarlo. Esta referencia solo significa algo junto al token de quien
+    la recibió: el servidor recalcula las de los documentos que ese vecino puede ver y
+    busca la que encaja. Con otro token, la misma referencia no vale para nada.
+    """
+    return hashlib.sha256(
+        f"{hash_portal_token(token)}:{identificador}".encode("utf-8")
+    ).hexdigest()[:16]
+
+
 def fetch_fincas_portal_public(conn, token, *, registrar=True):
     """Datos que ve un propietario con su enlace. Solo los suyos.
 
@@ -54509,19 +54528,44 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
             "fecha_cobro": row_value(recibo, "fecha_cobro", "") or "",
         })
 
-    documentos = [
-        {
+    # Con su referencia para poder abrirlos: antes se listaban título, tipo y fecha y
+    # no había forma de descargarlos. Enseñar un documento que no se puede abrir es
+    # peor que no enseñarlo. Los que no tienen fichero detrás se marcan, para que la
+    # página no ofrezca un enlace que no lleva a ningún sitio.
+    documentos = []
+    for d in conn.execute(
+        "SELECT id, titulo, tipo, fecha, doc_key, doc_url FROM workspace_fincas_documentos "
+        "WHERE workspace_id = ? AND comunidad_id = ? AND COALESCE(visible_portal, 0) = 1 "
+        "ORDER BY COALESCE(fecha, '') DESC LIMIT 60",
+        (workspace_id, comunidad_id),
+    ).fetchall():
+        tiene_fichero = bool(str(row_value(d, "doc_key", "") or "").strip()
+                             or str(row_value(d, "doc_url", "") or "").strip())
+        documentos.append({
             "titulo": row_value(d, "titulo", ""),
             "tipo": row_value(d, "tipo", "") or "",
             "fecha": row_value(d, "fecha", "") or "",
-        }
-        for d in conn.execute(
-            "SELECT titulo, tipo, fecha FROM workspace_fincas_documentos "
-            "WHERE workspace_id = ? AND comunidad_id = ? AND COALESCE(visible_portal, 0) = 1 "
-            "ORDER BY COALESCE(fecha, '') DESC LIMIT 60",
-            (workspace_id, comunidad_id),
-        ).fetchall()
-    ]
+            "ref": referencia_portal(token, row_value(d, "id", "")) if tiene_fichero else "",
+        })
+
+    # Las juntas publicadas, con su convocatoria y su acta. Estos dos documentos sí
+    # llevan datos de otros vecinos —el acta dice quién votó qué y la convocatoria
+    # relaciona a quien no está al corriente—, pero no es una fuga: son documentos que
+    # la ley manda entregar a todos los propietarios (arts. 16.2 y 19.4 LPH). Por eso
+    # se publican de una en una y a mano, y no todas las juntas por defecto.
+    juntas = []
+    for j in conn.execute(
+        "SELECT id, fecha, tipo, estado FROM workspace_fincas_juntas "
+        "WHERE workspace_id = ? AND comunidad_id = ? AND COALESCE(publicado_portal, 0) = 1 "
+        "ORDER BY COALESCE(fecha, '') DESC LIMIT 30",
+        (workspace_id, comunidad_id),
+    ).fetchall():
+        juntas.append({
+            "fecha": str(row_value(j, "fecha", "") or "")[:10],
+            "tipo": row_value(j, "tipo", "") or "ordinaria",
+            "estado": row_value(j, "estado", "") or "",
+            "ref": referencia_portal(token, row_value(j, "id", "")),
+        })
 
     if registrar:
         try:
@@ -54548,6 +54592,7 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
         "recibos": recibos,
         "deuda": round(deuda, 2),
         "documentos": documentos,
+        "juntas": juntas,
         "caduca": caduca,
     }
 
@@ -66933,7 +66978,9 @@ class Handler(BaseHTTPRequestHandler):
     const app = document.getElementById("app");
     const token = new URLSearchParams(location.search).get("token") || "";
     // Se saca de la barra en cuanto lo tenemos: el enlace lleva la llave dentro y
-    // no hace falta que se quede en el historial ni salga en una captura.
+    // no hace falta que se quede en el historial ni salga en una captura. Se conserva
+    // en memoria porque los enlaces de descarga lo necesitan: son la misma llave, para
+    // la misma persona, en la misma pestaña.
     if (token) history.replaceState(null, "", location.pathname);
     if (!token) {
       app.innerHTML = '<div class="aviso">Falta el enlace de acceso. Pide uno a tu administrador.</div>';
@@ -66964,9 +67011,20 @@ class Handler(BaseHTTPRequestHandler):
                   <td class="num">${eur.format(x.importe || 0)}</td></tr>`).join("")}</tbody>
               </table>` : '<p class="muted">Todavía no hay recibos.</p>'}
             </div>
+            ${(d.juntas || []).length ? `<div class="card">
+              <h2 style="font-size:16px;margin:0 0 8px;">Juntas</h2>
+              <table><tbody>${d.juntas.map((x) => `<tr>
+                <td>${esc(x.fecha)}</td><td class="muted">${esc(x.tipo)}</td>
+                <td class="num"><a href="/api/workspace_fincas_portal_junta?tipo=convocatoria&ref=${encodeURIComponent(x.ref)}&token=${encodeURIComponent(token)}">Convocatoria</a>
+                  · <a href="/api/workspace_fincas_portal_junta?tipo=acta&ref=${encodeURIComponent(x.ref)}&token=${encodeURIComponent(token)}">Acta</a></td>
+              </tr>`).join("")}</tbody></table>
+            </div>` : ""}
             ${(d.documentos || []).length ? `<div class="card">
               <h2 style="font-size:16px;margin:0 0 8px;">Documentos de la comunidad</h2>
-              <table><tbody>${d.documentos.map((x) => `<tr><td>${esc(x.titulo)}</td><td class="muted">${esc(x.tipo)}</td><td class="num muted">${esc(x.fecha)}</td></tr>`).join("")}</tbody></table>
+              <table><tbody>${d.documentos.map((x) => `<tr>
+                <td>${x.ref ? `<a href="/api/workspace_fincas_portal_doc?ref=${encodeURIComponent(x.ref)}&token=${encodeURIComponent(token)}">${esc(x.titulo)}</a>` : esc(x.titulo)}</td>
+                <td class="muted">${esc(x.tipo)}</td>
+                <td class="num muted">${x.ref ? esc(x.fecha) : esc(x.fecha) + " · sin fichero"}</td></tr>`).join("")}</tbody></table>
             </div>` : ""}
             <p class="muted">Enlace válido hasta ${esc(d.caduca || "-")}. Si tienes dudas sobre algún recibo, habla con tu administrador.</p>`;
         })
@@ -96444,6 +96502,114 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             json_response(self, fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio))
+            return
+
+        if path in ("/api/workspace_fincas_portal_doc", "/api/workspace_fincas_portal_junta"):
+            # Descargas del portal del comunero. Sin sesión: la llave es el token del
+            # enlace, igual que la pantalla. Y la referencia que llega **no es un id**:
+            # se recalculan las de lo que ese vecino puede ver y se busca la que encaja,
+            # así que con otro token no vale, y probando números no se llega a nada.
+            token = (params.get("token", [""])[0] or "").strip()
+            ref = (params.get("ref", [""])[0] or "").strip()
+            if not token or not ref:
+                json_response(self, {"error": "token y ref requeridos"}, status=400)
+                return
+            acceso = conn.execute(
+                "SELECT workspace_id, comunidad_id, revocado, expires_at "
+                "FROM workspace_fincas_portal_accesos WHERE token_hash = ? LIMIT 1",
+                (hash_portal_token(token),),
+            ).fetchone()
+            if not acceso or int(row_value(acceso, "revocado", 0) or 0):
+                json_response(self, {"error": "enlace no válido"}, status=404)
+                return
+            caduca = str(row_value(acceso, "expires_at", "") or "")[:10]
+            if caduca and caduca < datetime.now().date().isoformat():
+                json_response(self, {"error": "caducado"}, status=403)
+                return
+            workspace_id = row_value(acceso, "workspace_id", "")
+            comunidad_id = row_value(acceso, "comunidad_id", "")
+
+            if path == "/api/workspace_fincas_portal_doc":
+                fila = next(
+                    (d for d in conn.execute(
+                        "SELECT id, titulo, doc_key, doc_url FROM workspace_fincas_documentos "
+                        "WHERE workspace_id = ? AND comunidad_id = ? AND COALESCE(visible_portal, 0) = 1",
+                        (workspace_id, comunidad_id),
+                    ).fetchall()
+                     if secrets.compare_digest(referencia_portal(token, row_value(d, "id", "")), ref)),
+                    None,
+                )
+                if not fila:
+                    json_response(self, {"error": "documento no disponible"}, status=404)
+                    return
+                url = str(row_value(fila, "doc_url", "") or "").strip()
+                clave = str(row_value(fila, "doc_key", "") or "").strip()
+                if clave:
+                    crudo, err = s3_get_object_bytes(clave)
+                    if not crudo:
+                        json_response(self, {"error": err or "no se pudo leer el documento"}, status=502)
+                        return
+                    binary_response(self, crudo, content_type="application/octet-stream",
+                                    filename=f"{_sepa_texto(row_value(fila, 'titulo', '') or 'documento', 60)}")
+                    return
+                if url.startswith(("/uploads/", "http://", "https://")):
+                    self.send_response(302)
+                    self.send_header("Location", url)
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Referrer-Policy", "no-referrer")
+                    self.end_headers()
+                    return
+                json_response(self, {"error": "documento sin fichero"}, status=404)
+                return
+
+            # La junta: convocatoria o acta, y solo si está publicada.
+            cual = (params.get("tipo", ["acta"])[0] or "acta").strip().lower()
+            if cual not in {"acta", "convocatoria"}:
+                json_response(self, {"error": "tipo no válido"}, status=400)
+                return
+            junta = next(
+                (j for j in conn.execute(
+                    "SELECT * FROM workspace_fincas_juntas "
+                    "WHERE workspace_id = ? AND comunidad_id = ? AND COALESCE(publicado_portal, 0) = 1",
+                    (workspace_id, comunidad_id),
+                ).fetchall()
+                 if secrets.compare_digest(referencia_portal(token, row_value(j, "id", "")), ref)),
+                None,
+            )
+            if not junta:
+                json_response(self, {"error": "junta no disponible"}, status=404)
+                return
+            junta_id = row_value(junta, "id", "")
+            comunidad = conn.execute(
+                "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (comunidad_id, workspace_id),
+            ).fetchone()
+            detalle = fetch_workspace_detail(conn, workspace_id)
+            empresa = (detalle.get("companies") or [{}])[0] if detalle.get("companies") else {}
+            if cual == "convocatoria":
+                acuerdos = [
+                    {"orden": int(row_value(f, "orden", 0) or 0),
+                     "titulo": row_value(f, "titulo", "") or "",
+                     "descripcion": row_value(f, "descripcion", "") or ""}
+                    for f in conn.execute(
+                        "SELECT orden, titulo, descripcion FROM workspace_fincas_junta_acuerdos "
+                        "WHERE junta_id = ? AND workspace_id = ? ORDER BY orden",
+                        (junta_id, workspace_id),
+                    ).fetchall()
+                ]
+                morosos = fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id)["rows"]
+                pdf = build_convocatoria_junta_pdf(
+                    junta, comunidad or {}, acuerdos, morosos,
+                    workspace=detalle.get("workspace") or {}, company=empresa)
+            else:
+                recuento = calcular_recuento_junta(conn, workspace_id, junta_id)
+                if not recuento:
+                    json_response(self, {"error": "junta no disponible"}, status=404)
+                    return
+                pdf = build_acta_junta_pdf(recuento, comunidad or {},
+                                           workspace=detalle.get("workspace") or {}, company=empresa)
+            binary_response(self, pdf, content_type="application/pdf",
+                            filename=f"{cual}_{str(row_value(junta, 'fecha', ''))[:10]}.pdf")
             return
 
         if path == "/api/workspace_fincas_portal_public":
