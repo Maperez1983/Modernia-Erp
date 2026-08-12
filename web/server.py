@@ -32061,6 +32061,50 @@ def color_de_marca(valor, por_defecto=PORTAL_COLOR_POR_DEFECTO):
     return por_defecto, "#ffffff"
 
 
+def _mezcla(color, hacia, factor):
+    """Acerca `color` a `hacia` un `factor` (0 = igual, 1 = el otro del todo)."""
+    a = [int(str(color).lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+    b = [int(str(hacia).lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+    return "#" + "".join(f"{round(x + (y - x) * factor):02x}" for x, y in zip(a, b))
+
+
+def _acento_legible(color, *fondos, objetivo=4.5):
+    """El color de la agencia, corrido lo justo para leerse sobre TODOS esos fondos.
+
+    Un mismo corporativo tiene que servir de tinta sobre la tarjeta y sobre la
+    etiqueta —que lleva su propio fondo teñido—, y el que manda es el segundo, que
+    es más claro. Calculando sólo contra la tarjeta, el precio se leía y la
+    etiqueta no. Se acerca a negro o a blanco en pasos pequeños hasta que pasa
+    4,5:1 en los dos; el tono se conserva, que es lo que hace que la marca se siga
+    reconociendo.
+    """
+    fondos = [f for f in fondos if f]
+    destino = "#000000" if _luminancia(fondos[0]) > 0.5 else "#ffffff"
+    salida = color
+    for paso in range(21):
+        if all(_contraste(salida, f) >= objetivo for f in fondos):
+            return salida
+        salida = _mezcla(color, destino, paso * 0.05)
+    return destino
+
+
+def paleta_de_marca(valor):
+    """Los cinco colores que salen de uno. Si la agencia pone su corporativo, el
+    portal entero va con él: dejar el precio en verde sobre una cabecera granate se
+    ve peor que no dejar elegir."""
+    fondo, tinta = color_de_marca(valor)
+    suave_claro = _mezcla(fondo, "#ffffff", 0.88)
+    suave_oscuro = _mezcla(fondo, "#0d0f13", 0.80)
+    return {
+        "fondo": fondo,
+        "tinta": tinta,
+        "acento_claro": _acento_legible(fondo, "#ffffff", suave_claro),
+        "acento_oscuro": _acento_legible(fondo, "#161a21", suave_oscuro),
+        "suave_claro": suave_claro,
+        "suave_oscuro": suave_oscuro,
+    }
+
+
 def correo_con_la_seleccion(*, agencia, enlace):
     return (
         f'<div style="font:400 15px/1.6 Helvetica,Arial,sans-serif;color:#334155;max-width:520px">'
@@ -32546,7 +32590,7 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
     # que la única agencia que usa esto tiene el suyo en S3 y salía sin logo. Ahora
     # lo sirve un endpoint con su token, como las fotos.
     hay_logo = bool(str(row_value(empresa, "logo_url", "") or "").strip())
-    color, tinta = color_de_marca(
+    paleta = paleta_de_marca(
         row_value(empresa, "color_portal", "") if "color_portal" in cols_emp else "")
 
     vistos = sum(1 for x in inmuebles if x["opinion"])
@@ -67044,9 +67088,17 @@ class Handler(BaseHTTPRequestHandler):
       // El color de la agencia, si lo ha puesto. La tinta la decide el servidor por
       // contraste, no el gusto: con un amarillo corporativo la letra blanca
       // desaparece y la cabecera queda ilegible.
-      if (d.agencia.color) {
-        document.documentElement.style.setProperty("--verde-solido", d.agencia.color);
-        document.documentElement.style.setProperty("--sobre-solido", d.agencia.tinta || "#fff");
+      const pal = d.agencia.paleta;
+      if (pal && pal.fondo) {
+        // En una hoja de estilo y no con `style.setProperty`: el acento tiene que
+        // cambiar con el tema del sistema, y eso sólo lo sabe hacer una media query.
+        let hoja = document.getElementById("marca");
+        if (!hoja) { hoja = document.createElement("style"); hoja.id = "marca";
+                     document.head.appendChild(hoja); }
+        hoja.textContent = `:root { --verde-solido: ${pal.fondo}; --sobre-solido: ${pal.tinta};
+            --verde: ${pal.acento_claro}; --verde-claro: ${pal.suave_claro}; }
+          @media (prefers-color-scheme: dark) {
+            :root { --verde: ${pal.acento_oscuro}; --verde-claro: ${pal.suave_oscuro}; } }`;
       }
       app.innerHTML = `
         <header class="cabecera">
