@@ -66778,7 +66778,12 @@ class Handler(BaseHTTPRequestHandler):
     .cabecera .interior { max-width: 1180px; margin: 0 auto; }
     .cabecera .alto { display: flex; align-items: center; justify-content: space-between; gap: 12px;
                       margin-bottom: 18px; }
-    .cabecera .marca img { height: 28px; width: auto; }
+    /* Pastilla blanca siempre, no sólo cuando hace falta: la mitad de los logos
+       vienen con su propio fondo blanco y encima de un color corporativo se ven
+       como un recorte pegado. Puesta a propósito, se lee como parte del diseño y
+       funciona igual con un PNG transparente. */
+    .cabecera .marca img { height: 28px; width: auto; display: block; background: #fff;
+      padding: 6px 9px; border-radius: 9px; }
     .cabecera .marca span { font-size: 14px; font-weight: 600; }
     .asesor { display: flex; align-items: center; gap: 9px; background: rgba(255,255,255,.16);
       border: 1px solid rgba(255,255,255,.28); border-radius: 99px; padding: 5px 12px 5px 5px; }
