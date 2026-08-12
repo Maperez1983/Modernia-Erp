@@ -1180,6 +1180,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/workspace_fincas_portal_public",
     "/api/workspace_fincas_portal_doc",
     "/api/workspace_fincas_portal_junta",
+    "/api/workspace_fincas_portal_certificado_pdf",
     "/portal-comunidad",
     # Portal del propietario de un inmueble en venta. La llave es el token del
     # enlace; no hay sesión del CRM detrás y no debe haberla.
@@ -1230,6 +1231,7 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     # El comunero comunica una incidencia desde su enlace. Sin sesión: la llave es
     # el token, y el tope de envíos está dentro.
     "/api/workspace_fincas_portal_incidencia",
+    "/api/workspace_fincas_portal_certificado",
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
     "/api/workspace_portal_public_request",
@@ -44004,6 +44006,23 @@ def ensure_workspace_product_tables(conn):
     # token: si alguien lee la tabla no puede entrar en el portal de nadie.
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_certificados (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          comunidad_id TEXT NOT NULL,
+          vecino_id TEXT NOT NULL,
+          estado TEXT NOT NULL DEFAULT 'Solicitado',
+          importe REAL,
+          fecha_solicitud TEXT,
+          fecha_pago TEXT,
+          fecha_descarga TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS workspace_fincas_portal_accesos (
           id TEXT PRIMARY KEY,
           workspace_id TEXT NOT NULL,
@@ -51251,6 +51270,9 @@ FINCAS_TARIFAS_DEFECTO = [
     {"clave": "minimo", "etiqueta": "Cuota mínima mensual", "tipo": "minimo", "unidad": "mes", "precio": 60.0, "orden": 5},
     # Trabajo puntual, no mensual: se cobra una vez y hay que ponerle precio.
     {"clave": "alta_comunidad", "etiqueta": "Constitución / alta de la comunidad", "tipo": "fija", "unidad": "servicio", "precio": 0.0, "orden": 6},
+    # El certificado del art. 9.1.e se cobra siempre. A cero de partida: el importe lo
+    # pone cada despacho y ponerle uno inventado sería peor que dejarlo en blanco.
+    {"clave": "certificado_corriente", "etiqueta": "Certificado de estar al corriente", "tipo": "fija", "unidad": "certificado", "precio": 0.0, "orden": 7},
 ]
 
 # La clave de cada concepto unitario y el campo del que sale su número de unidades.
@@ -54854,6 +54876,28 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
         ).fetchall()
     ]
 
+    # El certificado del art. 9.1.e: se cobra siempre, así que el vecino ve el precio
+    # antes de pedirlo y solo puede descargarlo cuando la administración confirma el
+    # pago. Sin confirmar, no hay enlace: el documento no se emite a crédito.
+    tarifa_cert = next(
+        (t for t in fetch_workspace_fincas_tarifas(conn, workspace_id, sembrar=False)
+         if t.get("clave") == "certificado_corriente" and int(t.get("activo", 1) or 0)),
+        None,
+    )
+    solicitud = conn.execute(
+        "SELECT id, estado, importe, fecha_solicitud, fecha_pago FROM workspace_fincas_certificados "
+        "WHERE workspace_id = ? AND vecino_id = ? ORDER BY COALESCE(created_at, '') DESC LIMIT 1",
+        (workspace_id, vecino_id),
+    ).fetchone()
+    certificado = {
+        "precio": round(float((tarifa_cert or {}).get("precio") or 0), 2),
+        "estado": row_value(solicitud, "estado", "") if solicitud else "",
+        "fecha": str(row_value(solicitud, "fecha_solicitud", "") or "")[:10] if solicitud else "",
+        # La referencia solo aparece cuando está pagado. Es lo que abre la descarga.
+        "ref": (referencia_portal(token, row_value(solicitud, "id", ""))
+                if solicitud and row_value(solicitud, "estado", "") == "Pagado" else ""),
+    }
+
     # Las juntas publicadas, con su convocatoria y su acta. Estos dos documentos sí
     # llevan datos de otros vecinos —el acta dice quién votó qué y la convocatoria
     # relaciona a quien no está al corriente—, pero no es una fuga: son documentos que
@@ -54900,6 +54944,7 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
         "documentos": documentos,
         "juntas": juntas,
         "incidencias": incidencias,
+        "certificado": certificado,
         "caduca": caduca,
     }
 
@@ -55975,7 +56020,20 @@ def fetch_workspace_fincas_comunidad_dashboard(conn, workspace_id, comunidad_id,
 
 
 def build_certificado_deuda_pdf(comunidad, vecino, recibos, workspace=None, company=None):
-    """Certificado del estado de deuda de un propietario.
+    """Certificado del estado de deudas de un propietario (art. 9.1.e LPH).
+
+    El documento **cambia de nombre según lo que certifica**, porque no es lo mismo:
+    quien va a vender necesita acreditar que está al corriente, y entregarle un papel
+    titulado «certificado de deuda» que dice cero es raro de leer y peor de enseñar en
+    una notaría. Con deuda pendiente sale como certificado de deuda; sin ella, como
+    certificado de estar al corriente de pago, que es el que pide el artículo 9.1.e
+    para transmitir la vivienda.
+
+    En el documento **no se cita ese artículo ni ningún otro**, y no es un olvido: lo
+    fija `test_no_se_inventa_plazos_ni_intereses`. Un papel que un programa emite sin
+    firma no debe invocar efectos legales; el nombre dice qué certifica y quien lo
+    firma sabe para qué sirve. La referencia al artículo vive en la pantalla del portal,
+    donde es una explicación y no una afirmación del documento.
 
     Se limita a lo que el CRM sabe con certeza: qué recibos hay impagados, de qué
     periodos y cuánto suman. **No** afirma nada sobre plazos, intereses ni efectos
@@ -55994,7 +56052,15 @@ def build_certificado_deuda_pdf(comunidad, vecino, recibos, workspace=None, comp
         texto = str(valor or "").strip()
         return "" if texto in {"-", "—", "None"} else texto
 
+    al_corriente = not recibos and total <= 0
     sections = [
+        ("Lo que se certifica", [
+            "Que el propietario que se identifica abajo SÍ está al corriente en el pago de todas "
+            "las deudas vencidas con la comunidad a la fecha de emisión de este certificado."
+            if al_corriente else
+            "Que el propietario que se identifica abajo NO está al corriente en el pago de las "
+            "deudas vencidas con la comunidad, según el detalle que consta más abajo.",
+        ]),
         ("Estado de deuda", {"kind": "kpi_cards", "columns": 3, "items": [
             {"label": "Importe pendiente", "value": format_eur(total), "accent": 1},
             {"label": "Recibos impagados", "value": str(len(recibos))},
@@ -56050,7 +56116,7 @@ def build_certificado_deuda_pdf(comunidad, vecino, recibos, workspace=None, comp
     except ImportError:
         from branded_pdf_vector import build_modernia_branded_document_pdf_vector
     return build_modernia_branded_document_pdf_vector(
-        "CERTIFICADO DE DEUDA",
+        "CERTIFICADO DE ESTAR AL CORRIENTE DE PAGO" if al_corriente else "CERTIFICADO DE DEUDA",
         f"{nombre}{f' · {piso}' if piso else ''}",
         sections,
         footer,
@@ -67424,6 +67490,17 @@ class Handler(BaseHTTPRequestHandler):
                 <td class="num muted">${x.ref ? esc(x.fecha) : esc(x.fecha) + " · sin fichero"}</td></tr>`).join("")}</tbody></table>
             </div>` : ""}
             <div class="card">
+              <h2 style="font-size:16px;margin:0 0 8px;">Certificado de estar al corriente</h2>
+              <p class="muted">Es el que pide la notaría para vender o hipotecar (art. 9.1.e LPH).</p>
+              ${d.certificado.ref
+                ? `<p><a href="/api/workspace_fincas_portal_certificado_pdf?ref=${encodeURIComponent(d.certificado.ref)}&token=${encodeURIComponent(token)}">Descargar el certificado</a></p>`
+                : d.certificado.estado === "Solicitado"
+                ? `<div class="aviso">Solicitado el ${esc(d.certificado.fecha)}. Estará disponible en cuanto la administración confirme el pago${d.certificado.precio ? " de " + eur.format(d.certificado.precio) : ""}.</div>`
+                : `<p>${d.certificado.precio ? "Precio: <strong>" + eur.format(d.certificado.precio) + "</strong>." : "Consulta el precio con tu administrador."}</p>
+                   <button id="cert-pedir">Solicitar</button>
+                   <div id="cert-aviso" style="margin-top:10px;"></div>`}
+            </div>
+            <div class="card">
               <h2 style="font-size:16px;margin:0 0 8px;">Comunicar una incidencia</h2>
               ${(d.incidencias || []).length ? `<table><tbody>${d.incidencias.map((x) => `<tr>
                 <td>${esc(x.titulo)}</td><td class="muted">${esc(x.fecha)}</td>
@@ -67437,6 +67514,24 @@ class Handler(BaseHTTPRequestHandler):
               <div id="inc-aviso" style="margin-top:10px;"></div>
             </div>
             <p class="muted">Enlace válido hasta ${esc(d.caduca || "-")}. Si tienes dudas sobre algún recibo, habla con tu administrador.</p>`;
+          const pedirCert = document.getElementById("cert-pedir");
+          if (pedirCert) pedirCert.addEventListener("click", async () => {
+            const av = document.getElementById("cert-aviso");
+            pedirCert.disabled = true;
+            av.innerHTML = '<p class="muted">Enviando…</p>';
+            try {
+              const r = await fetch("/api/workspace_fincas_portal_certificado", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ token }),
+              });
+              const res = await r.json();
+              if (!r.ok) throw new Error(res.error || "No se pudo solicitar");
+              av.innerHTML = '<div class="ok">Solicitado. Podrás descargarlo cuando la administración confirme el pago.</div>';
+            } catch (e) {
+              av.innerHTML = '<div class="aviso">' + esc(e.message || "No se pudo solicitar") + "</div>";
+              pedirCert.disabled = false;
+            }
+          });
           const boton = document.getElementById("inc-enviar");
           const aviso = document.getElementById("inc-aviso");
           boton.addEventListener("click", async () => {
@@ -68262,6 +68357,8 @@ class Handler(BaseHTTPRequestHandler):
             # basta: si no está también aquí, la lista blanca la rechaza antes de
             # llegar y el endpoint no existe para nadie.
             "/api/workspace_fincas_portal_incidencia",
+            "/api/workspace_fincas_portal_certificado",
+            "/api/workspace_fincas_certificado_pagado",
             "/api/workspace_fincas_portal_revocar",
             "/api/workspace_fincas_vecino_delete",
             "/api/workspace_presupuesto_delete",
@@ -81951,6 +82048,73 @@ class Handler(BaseHTTPRequestHandler):
                 "ejercicio": fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio),
             })
             return
+        elif parsed.path == "/api/workspace_fincas_portal_certificado":
+            # El vecino pide el certificado. No se emite aquí: queda solicitado y la
+            # administración confirma el cobro. Emitirlo antes sería regalar un
+            # servicio que se factura siempre.
+            token = str(payload.get("token") or "").strip()
+            acceso = conn.execute(
+                "SELECT workspace_id, comunidad_id, vecino_id, revocado, expires_at "
+                "FROM workspace_fincas_portal_accesos WHERE token_hash = ? LIMIT 1",
+                (hash_portal_token(token),),
+            ).fetchone() if token else None
+            if not acceso or int(row_value(acceso, "revocado", 0) or 0):
+                json_response(self, {"error": "enlace no válido"}, status=404)
+                return
+            caduca_acc = str(row_value(acceso, "expires_at", "") or "")[:10]
+            if caduca_acc and caduca_acc < datetime.now().date().isoformat():
+                json_response(self, {"error": "enlace caducado"}, status=403)
+                return
+            workspace_id = row_value(acceso, "workspace_id", "")
+            vecino_id = row_value(acceso, "vecino_id", "")
+            abierta = conn.execute(
+                "SELECT id FROM workspace_fincas_certificados WHERE workspace_id = ? AND vecino_id = ? "
+                "AND estado IN ('Solicitado', 'Pagado') LIMIT 1",
+                (workspace_id, vecino_id),
+            ).fetchone()
+            if abierta:
+                json_response(self, {"error": "Ya tienes una solicitud en curso."}, status=409)
+                return
+            tarifa = next(
+                (t for t in fetch_workspace_fincas_tarifas(conn, workspace_id, sembrar=False)
+                 if t.get("clave") == "certificado_corriente"), None)
+            conn.execute(
+                "INSERT INTO workspace_fincas_certificados (id, workspace_id, comunidad_id, vecino_id, "
+                "estado, importe, fecha_solicitud, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, 'Solicitado', ?, ?, datetime(?), datetime(?))",
+                (os.urandom(16).hex(), workspace_id, row_value(acceso, "comunidad_id", ""), vecino_id,
+                 round(float((tarifa or {}).get("precio") or 0), 2),
+                 datetime.now().date().isoformat(), now, now),
+            )
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
+
+        elif parsed.path == "/api/workspace_fincas_certificado_pagado":
+            # Lo confirma la administración desde el CRM, con sesión. El vecino no
+            # puede marcarse el pago a sí mismo.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            solicitud_id = str(payload.get("id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not solicitud_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            conn.execute(
+                "UPDATE workspace_fincas_certificados SET estado = 'Pagado', fecha_pago = ?, "
+                "updated_at = datetime(?) WHERE id = ? AND workspace_id = ?",
+                (datetime.now().date().isoformat(), now, solicitud_id, workspace_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
+
         elif parsed.path == "/api/workspace_fincas_portal_incidencia":
             # El comunero comunica una avería desde su enlace. Es el único sitio del
             # portal donde se escribe, así que aquí va todo el cuidado: la llave es el
@@ -97114,7 +97278,8 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio))
             return
 
-        if path in ("/api/workspace_fincas_portal_doc", "/api/workspace_fincas_portal_junta"):
+        if path in ("/api/workspace_fincas_portal_doc", "/api/workspace_fincas_portal_junta",
+                    "/api/workspace_fincas_portal_certificado_pdf"):
             # Descargas del portal del comunero. Sin sesión: la llave es el token del
             # enlace, igual que la pantalla. Y la referencia que llega **no es un id**:
             # se recalculan las de lo que ese vecino puede ver y se busca la que encaja,
@@ -97170,6 +97335,56 @@ class Handler(BaseHTTPRequestHandler):
                     self.end_headers()
                     return
                 json_response(self, {"error": "documento sin fichero"}, status=404)
+                return
+
+            if path == "/api/workspace_fincas_portal_certificado_pdf":
+                # Solo si está pagado. La referencia únicamente existe en ese estado
+                # —se calcula en el portal cuando lo está—, pero se vuelve a comprobar
+                # aquí: quien guardó el enlace de una vez anterior no puede reutilizarlo
+                # para una solicitud nueva sin pagar.
+                fila = next(
+                    (c for c in conn.execute(
+                        "SELECT id, vecino_id FROM workspace_fincas_certificados "
+                        "WHERE workspace_id = ? AND comunidad_id = ? AND estado = 'Pagado'",
+                        (workspace_id, comunidad_id),
+                    ).fetchall()
+                     if secrets.compare_digest(referencia_portal(token, row_value(c, "id", "")), ref)),
+                    None,
+                )
+                if not fila:
+                    json_response(self, {"error": "certificado no disponible"}, status=404)
+                    return
+                vecino = conn.execute(
+                    "SELECT * FROM workspace_fincas_vecinos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (row_value(fila, "vecino_id", ""), workspace_id),
+                ).fetchone()
+                comunidad = conn.execute(
+                    "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (comunidad_id, workspace_id),
+                ).fetchone()
+                impagados = conn.execute(
+                    "SELECT periodo, concepto, estado, importe FROM workspace_fincas_recibos "
+                    "WHERE workspace_id = ? AND vecino_id = ? AND estado IN ('Pendiente', 'Devuelto') "
+                    "ORDER BY periodo",
+                    (workspace_id, row_value(fila, "vecino_id", "")),
+                ).fetchall()
+                detalle = fetch_workspace_detail(conn, workspace_id)
+                pdf = build_certificado_deuda_pdf(
+                    comunidad or {}, vecino or {}, impagados,
+                    workspace=detalle.get("workspace") or {},
+                    company=(detalle.get("companies") or [{}])[0] if detalle.get("companies") else {})
+                try:
+                    conn.execute(
+                        "UPDATE workspace_fincas_certificados SET fecha_descarga = ?, updated_at = datetime(?) "
+                        "WHERE id = ?",
+                        (datetime.now().date().isoformat(), datetime.now().isoformat(timespec="seconds"),
+                         row_value(fila, "id", "")),
+                    )
+                    conn.commit()
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("portal_certificado_pdf/fecha_descarga", _fallo_tragado)
+                binary_response(self, pdf, content_type="application/pdf",
+                                filename="certificado.pdf")
                 return
 
             # La junta: convocatoria o acta, y solo si está publicada.

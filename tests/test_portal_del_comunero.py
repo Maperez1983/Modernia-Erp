@@ -246,5 +246,111 @@ class ComunicarUnaIncidenciaTests(BaseDePruebaTests):
         self.assertIn('"/api/workspace_fincas_portal_incidencia",', SERVER[i: SERVER.index("}", i)])
 
 
+class ElCertificadoSeCobraAntesDeDescargarseTests(BaseDePruebaTests):
+    """El certificado del art. 9.1.e se factura siempre, así que no se emite a crédito.
+
+    El vecino lo pide, ve el precio, y solo cuando la administración confirma el cobro
+    aparece el enlace. Marcar el pago es del CRM, con sesión: el vecino no puede
+    marcárselo a sí mismo.
+    """
+
+    def solicita(self, vecino_id="v1", comunidad_id="c1", estado="Solicitado", importe=25.0):
+        cid = server.os.urandom(8).hex()
+        self.conn.execute(
+            "INSERT INTO workspace_fincas_certificados (id, workspace_id, comunidad_id, vecino_id, "
+            "estado, importe, fecha_solicitud, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, '2026-08-12', '2026-08-12T10:00:00', '2026-08-12T10:00:00')",
+            (cid, WS, comunidad_id, vecino_id, estado, importe))
+        self.conn.commit()
+        return cid
+
+    def test_sin_solicitar_no_hay_estado_ni_enlace(self):
+        cert = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))["certificado"]
+        self.assertEqual(cert["estado"], "")
+        self.assertEqual(cert["ref"], "")
+
+    def test_solicitado_pero_sin_pagar_no_da_enlace(self):
+        """Lo importante: pedirlo no es tenerlo."""
+        self.solicita(estado="Solicitado")
+        cert = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))["certificado"]
+        self.assertEqual(cert["estado"], "Solicitado")
+        self.assertEqual(cert["ref"], "")
+
+    def test_pagado_si_da_enlace(self):
+        self.solicita(estado="Pagado")
+        cert = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))["certificado"]
+        self.assertEqual(cert["estado"], "Pagado")
+        self.assertTrue(cert["ref"])
+
+    def test_la_descarga_vuelve_a_comprobar_el_pago(self):
+        """La referencia solo se calcula si está pagado, pero el endpoint lo comprueba
+        otra vez: quien guardó el enlace de una solicitud anterior no puede usarlo para
+        una nueva sin pagar."""
+        i = SERVER.index('if path == "/api/workspace_fincas_portal_certificado_pdf":')
+        cuerpo = SERVER[i: SERVER.index("# La junta: convocatoria o acta", i)]
+        self.assertIn("estado = 'Pagado'", cuerpo)
+        self.assertIn("secrets.compare_digest", cuerpo)
+
+    def test_el_pago_lo_confirma_el_crm_con_sesion(self):
+        i = SERVER.index('elif parsed.path == "/api/workspace_fincas_certificado_pagado":')
+        cuerpo = SERVER[i: SERVER.index("\n        elif parsed.path ==", i + 10)]
+        self.assertIn("enforce_workspace_membership", cuerpo)
+        self.assertIn("write=True", cuerpo)
+        # Y no está entre las rutas que se pueden llamar sin sesión.
+        j = SERVER.index("AUTH_PUBLIC_POST_ENDPOINTS = {")
+        self.assertNotIn("workspace_fincas_certificado_pagado", SERVER[j: SERVER.index("}", j)])
+
+    def test_no_deja_pedir_dos_a_la_vez(self):
+        i = SERVER.index('elif parsed.path == "/api/workspace_fincas_portal_certificado":')
+        cuerpo = SERVER[i: SERVER.index("\n        elif parsed.path ==", i + 10)]
+        self.assertIn("estado IN ('Solicitado', 'Pagado')", cuerpo)
+        self.assertIn("status=409", cuerpo)
+
+    def test_el_precio_sale_de_la_tarifa_del_workspace(self):
+        i = SERVER.index('elif parsed.path == "/api/workspace_fincas_portal_certificado":')
+        cuerpo = SERVER[i: SERVER.index("\n        elif parsed.path ==", i + 10)]
+        self.assertIn('"certificado_corriente"', cuerpo)
+        self.assertNotIn('payload.get("importe")', cuerpo)   # no lo pone el vecino
+
+    def test_el_concepto_viene_en_la_tarifa_de_partida_y_a_cero(self):
+        """A cero para que cada despacho ponga el suyo; inventarle un precio sería peor."""
+        cert = next(t for t in server.FINCAS_TARIFAS_DEFECTO if t["clave"] == "certificado_corriente")
+        self.assertEqual(cert["tipo"], "fija")
+        self.assertEqual(cert["precio"], 0.0)
+
+
+class ElCertificadoDiceLoQueCertificaTests(unittest.TestCase):
+    """Se titulaba «certificado de deuda» también sin deuda, que es justo el caso de
+    quien va a vender y tiene que enseñarlo en una notaría."""
+
+    def _texto(self, recibos):
+        from io import BytesIO
+        from pypdf import PdfReader
+        pdf = server.build_certificado_deuda_pdf(
+            {"nombre": "C.P Una", "direccion": "Calle X 1"},
+            {"nombre": "ANA PEREZ", "piso": "6 C", "nif": "25123456X"},
+            recibos, company={"nombre": "Fincas Velazquez"})
+        return "\n".join(p.extract_text() for p in PdfReader(BytesIO(pdf)).pages)
+
+    def test_sin_deuda_es_certificado_de_estar_al_corriente(self):
+        texto = self._texto([])
+        self.assertIn("CERTIFICADO DE ESTAR AL CORRIENTE DE PAGO", texto)
+        self.assertIn("SÍ está al corriente", texto)
+        # El artículo NO se cita en el documento: lo prohíbe
+        # `test_no_se_inventa_plazos_ni_intereses`, y con razón. Un certificado que
+        # emite un programa sin firma no invoca efectos legales.
+        self.assertNotIn("9.1.e", texto)
+
+    def test_con_deuda_sigue_siendo_certificado_de_deuda(self):
+        texto = self._texto([{"periodo": "2026-07", "concepto": "Cuota", "estado": "Pendiente", "importe": 60}])
+        self.assertIn("CERTIFICADO DE DEUDA", texto)
+        self.assertIn("NO está al corriente", texto)
+
+    def test_sigue_sin_firmar_solo(self):
+        """Lo emite el secretario con el visto bueno del presidente; el programa no
+        pone ni la firma ni la responsabilidad."""
+        self.assertIn("Fdo.: El secretario administrador", self._texto([]))
+
+
 if __name__ == "__main__":
     unittest.main()
