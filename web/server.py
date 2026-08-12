@@ -1178,6 +1178,8 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/inmueble_signature_document",
     "/api/workspace_portal_public",
     "/api/workspace_fincas_portal_public",
+    "/api/workspace_fincas_portal_doc",
+    "/api/workspace_fincas_portal_junta",
     "/portal-comunidad",
     # Portal del propietario de un inmueble en venta. La llave es el token del
     # enlace; no hay sesión del CRM detrás y no debe haberla.
@@ -1223,6 +1225,7 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/portal_busqueda_consentimiento",
     "/api/portal_busqueda_derechos",
     "/api/portal_busqueda_retirar",
+    "/api/portal_busqueda_visita",
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
     "/api/workspace_portal_public_request",
@@ -32143,6 +32146,181 @@ def avisa_al_comprador(conn, demanda_id, motivo, texto, *, referencia="", now=No
     return enviados
 
 
+# Del cambio de etapa, al comprador sólo le importa una cosa: si puede seguir
+# aspirando a esa casa. «Propuesta» —que hay una oferta encima— NO está aquí a
+# propósito: es una palanca de venta, y por escrito y con fecha es una promesa que
+# luego hay que sostener.
+ETAPAS_PARA_EL_COMPRADOR = {
+    "RESERVADO": "Se ha reservado",
+    "CONTRATO DE ARRAS": "Arras firmadas: ya no está en venta",
+    "ARRAS": "Arras firmadas: ya no está en venta",
+    "COMPRAVENTA": "Vendido",
+    "VENDIDO": "Vendido",
+    "ALQUILER": "Alquilado",
+    "ENCARGO": "Vuelve a estar disponible",
+}
+_ETAPAS_CERRADAS = {"RESERVADO", "CONTRATO DE ARRAS", "ARRAS", "COMPRAVENTA", "VENDIDO", "ALQUILER"}
+
+
+def novedades_del_inmueble(conn, inmueble_id, *, desde="", limite=5):
+    """Qué ha cambiado en un inmueble, contado para quien se lo quiere comprar.
+
+    Un comprador vuelve al portal a preguntar dos cosas: si ha bajado de precio y
+    si todavía está libre. Las dos estaban ya guardadas —la bitácora apunta cada
+    cambio de precio con el importe de antes y el de después, y `crm_stage_events`
+    cada cambio de etapa—, sólo que nadie se las contaba.
+
+    `desde` es la última vez que entró: lo posterior se marca como nuevo, para que
+    al abrir vea qué ha pasado sin releerlo todo.
+
+    Dos cosas que se dejan fuera a conciencia: **la primera vez que se rellena un
+    precio no es una bajada** —en la bitácora eso es `from: null`, y en producción
+    hay 153 apuntes así— y **las ofertas de otros no se cuentan**.
+    """
+    inmueble_id = str(inmueble_id or "")
+    desde = str(desde or "")
+    novedades = []
+
+    try:
+        for f in conn.execute(
+            "SELECT detalles, created_at FROM auditoria WHERE entidad = 'inmueble' AND entidad_id = ? "
+            "ORDER BY created_at DESC LIMIT 120",
+            (inmueble_id,),
+        ).fetchall():
+            crudo = row_value(f, "detalles", "") or ""
+            if "precio" not in str(crudo).lower():
+                continue
+            try:
+                datos = json.loads(crudo) if isinstance(crudo, str) else dict(crudo)
+            except Exception:
+                continue
+            if not str(datos.get("campo") or "").startswith("precio"):
+                continue
+            antes = parse_money_value(datos.get("from")) or 0
+            despues = parse_money_value(datos.get("to")) or 0
+            # Sin un «antes» no hay cambio: es la primera vez que alguien escribe
+            # el precio, y anunciarlo como bajada sería mentir con buena letra.
+            if not antes or not despues or antes == despues:
+                continue
+            cuando = str(row_value(f, "created_at", "") or "")
+            novedades.append({
+                "fecha": _fecha_corta(cuando),
+                "texto": (f"Ha bajado de precio: de {format_eur(antes)} a {format_eur(despues)}"
+                          if despues < antes else
+                          f"Ha subido de precio: de {format_eur(antes)} a {format_eur(despues)}"),
+                "clave": "precio_baja" if despues < antes else "precio_sube",
+                "nuevo": bool(desde and cuando > desde),
+            })
+    except Exception:
+        _rollback_best_effort(conn)
+
+    try:
+        anterior = ""
+        etapas = conn.execute(
+            "SELECT to_etapa, created_at FROM crm_stage_events WHERE inmueble_id = ? "
+            "ORDER BY created_at ASC LIMIT 60",
+            (inmueble_id,),
+        ).fetchall()
+        for e in etapas:
+            etapa = normalize_lookup_text(row_value(e, "to_etapa", ""))
+            texto = ETAPAS_PARA_EL_COMPRADOR.get(etapa)
+            # «Vuelve a estar disponible» sólo si venía de estar cerrado. Si no, es
+            # el encargo del principio y no es ninguna novedad.
+            if etapa == "ENCARGO" and anterior not in _ETAPAS_CERRADAS:
+                anterior = etapa
+                continue
+            anterior = etapa
+            if not texto:
+                continue
+            cuando = str(row_value(e, "created_at", "") or "")
+            novedades.append({
+                "fecha": _fecha_corta(cuando),
+                "texto": texto,
+                "clave": "etapa",
+                "nuevo": bool(desde and cuando > desde),
+            })
+    except Exception:
+        _rollback_best_effort(conn)
+
+    novedades.sort(key=lambda x: str(x.get("fecha") or ""), reverse=True)
+    return novedades[:limite]
+
+
+def genera_hoja_de_visita(conn, inmueble_id, demanda_id, comprador, now=None):
+    """La hoja de visita del inmueble que va a ver, con su precio.
+
+    No es un documento nuevo: el CRM ya la genera desde la ficha. Aquí se hace sola
+    en cuanto se concierta la visita, que es cuando hace falta —y es lo que la ley
+    de vivienda espera que se le entregue por escrito antes de enseñarle nada—.
+
+    Se archiva en el expediente como cualquier otra, y se le enseña **sólo a él**:
+    lleva su nombre y su teléfono, así que va atada a su demanda y no al
+    interruptor general de «visible para compradores». Devuelve el id del documento
+    o "" si no se pudo (sin encargo vivo, o sin reportlab).
+    """
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    inmueble_id, demanda_id = str(inmueble_id or ""), str(demanda_id or "")
+    try:
+        inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+        if not inmueble:
+            return ""
+        captacion = conn.execute(
+            "SELECT * FROM captaciones WHERE inmueble_id = ? ORDER BY created_at DESC LIMIT 1",
+            (inmueble_id,),
+        ).fetchone()
+        # La misma regla que la hoja manual: sólo con encargo vivo. Un documento de
+        # visita de un inmueble que ya no llevamos no lo puede firmar nadie.
+        situacion = normalize_lookup_text(
+            row_value(captacion, "situacion_comercial", "") or row_value(inmueble, "estado", ""))
+        if situacion != "ENCARGO":
+            return ""
+        ya = conn.execute(
+            "SELECT id FROM inmueble_docs WHERE inmueble_id = ? AND COALESCE(origen_tipo,'') = ? "
+            "AND COALESCE(origen_id,'') = ? ORDER BY created_at DESC LIMIT 1",
+            (inmueble_id, "portal_hoja_visita", demanda_id),
+        ).fetchone()
+        if ya:
+            return str(row_value(ya, "id", "") or "")
+        empresa = conn.execute(
+            "SELECT * FROM empresas WHERE id = ? LIMIT 1",
+            (str(row_value(inmueble, "empresa_id", "") or ""),)).fetchone()
+        demanda = conn.execute("SELECT * FROM demandas WHERE id = ? LIMIT 1", (demanda_id,)).fetchone()
+        pdf = build_inmueble_visit_sheet_pdf(
+            dict(empresa) if empresa else {}, dict(inmueble),
+            dict(captacion) if captacion else {},
+            get_inmueble_propietarios(conn, inmueble_id) or [],
+            comprador or {},
+            dict(demanda) if demanda else None,
+        )
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("genera_hoja_de_visita/pdf", _fallo_tragado)
+        return ""
+    direccion = str(row_value(inmueble, "direccion", "") or "")
+    base = slugify_text(direccion or inmueble_id)[:50] or inmueble_id
+    doc_id = persist_generated_inmueble_pdf(
+        conn, inmueble_id, "Hoja de visita",
+        f"Hoja de visita · {direccion or base}", pdf, f"hoja_visita_{base}", now,
+        empresa_id=str(row_value(inmueble, "empresa_id", "") or ""),
+        plantilla_clave="hoja_visita",
+        origen_tipo="portal_hoja_visita", origen_id=demanda_id,
+    )
+    return str(doc_id or "")
+
+
+# Dos formas de que un documento llegue al comprador, y la segunda no puede ser el
+# interruptor general: su hoja de visita lleva su nombre y su teléfono, y con el
+# flag compartido la vería cualquier otro interesado en la misma casa. Va atada a
+# su demanda. La consulta vive aquí porque la usan la vista y la descarga, y si se
+# separaran el índice `n` dejaría de apuntar al mismo sitio.
+_SQL_DOCS_DEL_COMPRADOR = (
+    "SELECT nombre, url, created_at FROM inmueble_docs WHERE inmueble_id = ? AND ("
+    "  COALESCE(visible_comprador,0) = 1"
+    "  OR (COALESCE(origen_tipo,'') = 'portal_hoja_visita' AND COALESCE(origen_id,'') = ?)"
+    ") AND COALESCE(estado,'') <> 'Reemplazado' "
+    "ORDER BY COALESCE(created_at,'') DESC, id DESC LIMIT 12"
+)
+
+
 def build_portal_de_busqueda(conn, acceso, *, registrar=True):
     """Lo que ve el comprador. Por lista blanca, campo a campo.
 
@@ -32164,6 +32342,9 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
         return None
 
     ensure_demanda_portal_schema(conn)
+    # La última vez que entró, leída antes de que `registrar` la pise: es lo que
+    # decide qué lleva la marca de nuevo.
+    ultima_entrada = str(row_value(acceso, "last_access_at", "") or "")
     opiniones = {}
     try:
         for o in conn.execute(
@@ -32227,9 +32408,7 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
         if hay_flag_comprador:
             try:
                 for n, d in enumerate(conn.execute(
-                    "SELECT nombre, url, created_at FROM inmueble_docs WHERE inmueble_id = ? "
-                    "AND COALESCE(visible_comprador,0) = 1 ORDER BY COALESCE(created_at,'') DESC, id DESC LIMIT 12",
-                    (inmueble_id,),
+                    _SQL_DOCS_DEL_COMPRADOR, (inmueble_id, demanda_id),
                 ).fetchall()):
                     url = str(row_value(d, "url", "") or "")
                     if not url.startswith("/uploads/"):
@@ -32242,6 +32421,7 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
             except Exception:
                 _rollback_best_effort(conn)
         estado_inm = normalize_lookup_text(row_value(fila, "estado", ""))
+        novedades = novedades_del_inmueble(conn, inmueble_id, desde=ultima_entrada)
         inmuebles.append({
             # `i` es la posición en ESTA lista. No hay ningún id por medio: con el
             # enlace no se puede pedir la foto de un inmueble que no te han enseñado.
@@ -32262,6 +32442,7 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
             "comentario": opinion.get("comentario", ""),
             "cita": citas_por_inmueble.get(inmueble_id),
             "documentos": documentos,
+            "novedades": novedades,
         })
 
     # La agenda se pinta con la dirección, no con el id.
@@ -32321,6 +32502,7 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
         logo = ""
 
     vistos = sum(1 for x in inmuebles if x["opinion"])
+    novedades_nuevas = sum(1 for x in inmuebles for n in x["novedades"] if n["nuevo"])
     return {
         "comprador": {"nombre": str(row_value(acceso, "nombre", "") or "")},
         "agencia": {
@@ -32353,6 +32535,7 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
             "valorados": vistos,
             "pendientes": len(inmuebles) - vistos,
             "citas": len(proximas),
+            "novedades": novedades_nuevas,
         },
     }
 
@@ -43617,6 +43800,9 @@ def ensure_workspace_product_tables(conn):
     # pero también pueden promoverla propietarios que reúnan la cuarta parte o el 25 %
     # de las cuotas (art. 16.1), y eso hay que poder escribirlo.
     ensure_column(conn, "workspace_fincas_juntas", "convocada_por", "convocada_por TEXT")
+    # Publicar una junta en el portal es una decisión del administrador, no un efecto
+    # de crearla: el acta se publica cuando está firmada, no mientras se redacta.
+    ensure_column(conn, "workspace_fincas_juntas", "publicado_portal", "publicado_portal INTEGER NOT NULL DEFAULT 0")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_contabilidad (
@@ -53038,7 +53224,143 @@ def _sepa_texto(valor, limite=70):
     return re.sub(r"\s+", " ", limpio).strip()[:limite] or "N/A"
 
 
-def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None):
+#: El texto que la normativa SEPA obliga a incluir en la orden de domiciliación, con
+#: las ocho semanas de derecho al reembolso. Va literal: no es una redacción nuestra.
+SEPA_TEXTO_LEGAL = (
+    "Mediante la firma de esta orden de domiciliación, el deudor autoriza (A) al acreedor a "
+    "enviar instrucciones a la entidad del deudor para adeudar su cuenta y (B) a la entidad "
+    "para efectuar los adeudos en su cuenta siguiendo las instrucciones del acreedor. Como "
+    "parte de sus derechos, el deudor está legitimado al reembolso por su entidad en los "
+    "términos y condiciones del contrato suscrito con la misma. La solicitud de reembolso "
+    "deberá efectuarse dentro de las ocho semanas que siguen a la fecha de adeudo en cuenta. "
+    "Puede obtener información adicional sobre sus derechos en su entidad financiera."
+)
+
+#: Meses que hay que custodiar el mandato tras el último adeudo, por si el banco lo
+#: reclama. Trece: los doce del ciclo más uno de margen, que es lo que piden las
+#: entidades.
+SEPA_MESES_CUSTODIA = 13
+
+
+def referencia_mandato(vecino):
+    """La referencia del mandato de un propietario, siempre la misma.
+
+    Se usa en dos sitios que **no pueden discrepar**: el papel que firma el vecino y el
+    `<MndtId>` del fichero que va al banco. Si el banco recibe una referencia que no es
+    la del mandato que custodia el acreedor, devuelve el adeudo.
+
+    Si alguien la tecleó a mano, manda esa. Si no, se deriva del id del propietario, que
+    no cambia nunca: así el documento se puede volver a generar mil veces y sale igual.
+    Antes el fichero caía al `vecino_id` crudo mientras el papel no existía, así que
+    nadie podía comprobar que coincidieran.
+    """
+    puesta = str(row_value(vecino, "mandato_ref", "") or "").strip()
+    if puesta:
+        return puesta[:35]
+    # `vecino_id` primero: esta función recibe tanto la ficha del propietario —donde el
+    # id del vecino es `id`— como la fila del recibo, donde `id` es el del recibo y el
+    # del propietario viene en `vecino_id`. Derivarla del id equivocado daba una
+    # referencia distinta en el fichero y en el papel, que es justo lo que evita.
+    vid = str(row_value(vecino, "vecino_id", "") or "").strip()
+    if not vid:
+        vid = str(row_value(vecino, "id", "") or "").strip()
+    return f"MND-{vid[:12].upper()}" if vid else ""
+
+
+def build_mandato_sepa_pdf(vecino, comunidad, workspace=None, company=None):
+    """La orden de domiciliación que firma el propietario.
+
+    El CRM guardaba la referencia y la fecha del mandato y las metía en la remesa, pero
+    el documento que las origina —el que firma el vecino y que el acreedor debe
+    custodiar— se hacía fuera y luego se tecleaba a mano. Aquí sale con la referencia
+    que va a viajar en el fichero, para que no dependa de que alguien la copie bien.
+
+    Los campos que la normativa exige y el sistema no sabe se dejan en blanco a la
+    vista, no se rellenan a ojo: un mandato con un IBAN inventado es un adeudo devuelto.
+    """
+    workspace = workspace or {}
+    company = company or {}
+
+    def limpio(valor):
+        texto = str(valor or "").strip()
+        return "" if texto in {"-", "—", "None"} else texto
+
+    def o_en_blanco(valor, ancho=34):
+        return limpio(valor) or "_" * ancho
+
+    referencia = referencia_mandato(vecino)
+    iban_deudor = formatear_iban(row_value(vecino, "iban", "") or "")
+    acreedor_id = limpio(row_value(comunidad, "acreedor_sepa", ""))
+    piso = limpio(row_value(vecino, "piso", ""))
+    direccion_comunidad = limpio(row_value(comunidad, "direccion", ""))
+    direccion_deudor = ", ".join(p for p in (direccion_comunidad, piso) if p)
+
+    sections = [
+        ("", ["TODOS LOS CAMPOS HAN DE SER CUMPLIMENTADOS OBLIGATORIAMENTE. UNA VEZ FIRMADA "
+              "ESTA ORDEN DE DOMICILIACIÓN DEBE SER ENVIADA AL ACREEDOR PARA SU CUSTODIA."]),
+        ("Referencia de la orden de domiciliación", [
+            referencia or "_" * 34,
+            "La asigna el acreedor y es la que viaja en el fichero de adeudos: no se cambia.",
+        ]),
+        ("Acreedor", [
+            f"Nombre: {o_en_blanco(row_value(comunidad, 'nombre', ''))}",
+            f"Identificador del acreedor: {acreedor_id or '_' * 24}"
+            + ("" if acreedor_id else "   (la comunidad no lo tiene dado de alta)"),
+            f"Dirección: {o_en_blanco(direccion_comunidad)}",
+            "País: España",
+        ]),
+        ("Deudor", [
+            f"Nombre del deudor: {o_en_blanco(row_value(vecino, 'nombre', ''))}",
+            f"NIF: {o_en_blanco(row_value(vecino, 'nif', ''), 16)}",
+            f"Dirección: {o_en_blanco(direccion_deudor)}",
+            "País: España",
+            f"Cuenta de cargo (IBAN): {iban_deudor or '_' * 30}",
+            "BIC / SWIFT: " + "_" * 14 + "   (solo si su entidad lo pide)",
+        ]),
+        # Una opción por línea: el motor colapsa los espacios seguidos, así que
+        # alinearlas con espacios dejaba las dos casillas pegadas y no se veía cuál
+        # estaba marcada.
+        ("Tipo de pago", [
+            "[X] Pago recurrente — las cuotas de comunidad se adeudan periódicamente "
+            "mientras el mandato siga vigente.",
+            "[ ] Pago único",
+        ]),
+        # Con su propio título: es la cláusula que autoriza el adeudo, y sin encabezado
+        # se leía como una continuación del tipo de pago.
+        ("Autorización del deudor", [SEPA_TEXTO_LEGAL]),
+        ("Firma del deudor", [
+            "",
+            "Localidad: ______________________        Fecha: ____ / ____ / ________",
+            "",
+            "",
+            "Firma del titular de la cuenta: ______________________________",
+            "",
+            "El firmante debe ser el titular de la cuenta indicada arriba.",
+        ]),
+    ]
+
+    pie = [
+        f"El acreedor debe custodiar esta orden firmada mientras el mandato esté vigente y, "
+        f"al menos, {SEPA_MESES_CUSTODIA} meses después del último adeudo.",
+    ]
+    logo = _load_asset_logo("logos/fincas-velazquez.png", max_width=420)
+    try:
+        from .branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    except ImportError:
+        from branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    return build_modernia_branded_document_pdf_vector(
+        "ORDEN DE DOMICILIACIÓN DE ADEUDO DIRECTO SEPA",
+        f"{limpio(row_value(comunidad, 'nombre', '')) or 'Comunidad de propietarios'}"
+        + (f" · {piso}" if piso else ""),
+        sections,
+        pie,
+        company=dict(company, nombre_comercial=FINCAS_NOMBRE_COMERCIAL),
+        brand_logo_url=logo,
+        brand_color=workspace.get("primary_color"),
+    )
+
+
+def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None, primeros=None):
     """Fichero de adeudos directos SEPA (pain.008.001.02).
 
     Se genera con el esquema estándar, pero **cada banco pide lo suyo**: hay quien
@@ -53046,10 +53368,15 @@ def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None):
     identificador de acreedor con un sufijo concreto. Antes de usarlo en producción
     hay que validar un fichero de prueba con la entidad.
 
-    Todos los recibos van como `RCUR` (recurrente). El primer adeudo de un mandato
-    nuevo debería ir como `FRST`, pero eso exige llevar la cuenta de qué mandatos ya
-    han cobrado alguna vez, y hoy el CRM no la lleva: se documenta aquí para no dar
-    por hecho que está resuelto.
+    El primer adeudo de un mandato va como `FRST` y los siguientes como `RCUR`. Cuáles
+    son los primeros lo decide quien llama —lo sabe la base de datos, no este
+    generador— y llegan en `primeros`, un conjunto de referencias de mandato. Sin ese
+    argumento todo sale `RCUR`, que es como estaba.
+
+    Los dos grupos van en **bloques `PmtInf` separados**, uno por secuencia. El
+    `SeqTp` vive a nivel de bloque, así que mezclar primeros y recurrentes en el mismo
+    obligaría a repetirlo por operación y hay entidades que no lo admiten. Separarlos
+    es lo que aceptan todas.
     """
     from xml.sax.saxutils import escape as _esc
 
@@ -53060,17 +53387,19 @@ def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None):
     referencia = _sepa_texto(row_value(remesa, "referencia", ""), 35)
     fecha_cobro = str(row_value(remesa, "fecha_cobro", "") or ahora.date().isoformat())[:10]
 
-    lineas_recibos = []
-    total = 0.0
-    for numero, recibo in enumerate(recibos, start=1):
+    primeros = {str(r).strip() for r in (primeros or ()) if str(r or "").strip()}
+
+    def linea_de(numero, recibo):
         importe = round(parse_money_value(row_value(recibo, "importe", 0)), 2)
-        total += importe
-        lineas_recibos.append(
+        return importe, (
             "      <DrctDbtTxInf>\n"
             f"        <PmtId><EndToEndId>{_esc(_sepa_texto(f'{referencia}-{numero:04d}', 35))}</EndToEndId></PmtId>\n"
             f'        <InstdAmt Ccy="EUR">{importe:.2f}</InstdAmt>\n'
             "        <DrctDbtTx><MndtRltdInf>\n"
-            f"          <MndtId>{_esc(_sepa_texto(row_value(recibo, 'mandato_ref', '') or row_value(recibo, 'vecino_id', ''), 35))}</MndtId>\n"
+            # La MISMA referencia que lleva el papel firmado. Antes caía al `vecino_id`
+            # crudo, así que el fichero podía decirle al banco una referencia que no era
+            # la del mandato que el acreedor custodia, y eso es un adeudo devuelto.
+            f"          <MndtId>{_esc(_sepa_texto(referencia_mandato(recibo), 35))}</MndtId>\n"
             f"          <DtOfSgntr>{_esc(str(row_value(recibo, 'mandato_fecha', '') or fecha_cobro)[:10])}</DtOfSgntr>\n"
             "        </MndtRltdInf></DrctDbtTx>\n"
             f"        <Dbtr><Nm>{_esc(_sepa_texto(row_value(recibo, 'nombre', ''), 70))}</Nm></Dbtr>\n"
@@ -53078,7 +53407,42 @@ def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None):
             f"        <RmtInf><Ustrd>{_esc(_sepa_texto(row_value(recibo, 'concepto', ''), 140))}</Ustrd></RmtInf>\n"
             "      </DrctDbtTxInf>"
         )
-    total = round(total, 2)
+
+    # Un grupo por secuencia, conservando el orden de entrada dentro de cada uno.
+    grupos = {"FRST": {"lineas": [], "total": 0.0}, "RCUR": {"lineas": [], "total": 0.0}}
+    for numero, recibo in enumerate(recibos, start=1):
+        secuencia = "FRST" if referencia_mandato(recibo) in primeros else "RCUR"
+        importe, linea = linea_de(numero, recibo)
+        grupos[secuencia]["lineas"].append(linea)
+        grupos[secuencia]["total"] = round(grupos[secuencia]["total"] + importe, 2)
+    total = round(sum(g["total"] for g in grupos.values()), 2)
+
+    def bloque(secuencia, datos):
+        n = len(datos["lineas"])
+        # El PmtInfId lleva el sufijo de la secuencia: dos bloques en el mismo fichero
+        # no pueden compartir identificador.
+        pmt_id = _sepa_texto(f"{referencia}-{secuencia}", 35) if len(
+            [g for g in grupos.values() if g["lineas"]]) > 1 else _sepa_texto(referencia, 35)
+        return (
+            "    <PmtInf>\n"
+            f"      <PmtInfId>{_esc(pmt_id)}</PmtInfId>\n"
+            "      <PmtMtd>DD</PmtMtd>\n"
+            f"      <NbOfTxs>{n}</NbOfTxs>\n"
+            f"      <CtrlSum>{datos['total']:.2f}</CtrlSum>\n"
+            "      <PmtTpInf><SvcLvl><Cd>SEPA</Cd></SvcLvl><LclInstrm><Cd>CORE</Cd></LclInstrm>"
+            f"<SeqTp>{secuencia}</SeqTp></PmtTpInf>\n"
+            f"      <ReqdColltnDt>{_esc(fecha_cobro)}</ReqdColltnDt>\n"
+            f"      <Cdtr><Nm>{_esc(acreedor)}</Nm></Cdtr>\n"
+            f"      <CdtrAcct><Id><IBAN>{_esc(iban_comunidad)}</IBAN></Id></CdtrAcct>\n"
+            "      <CdtrAgt><FinInstnId><Othr><Id>NOTPROVIDED</Id></Othr></FinInstnId></CdtrAgt>\n"
+            "      <ChrgBr>SLEV</ChrgBr>\n"
+            "      <CdtrSchmeId><Id><PrvtId><Othr>\n"
+            f"        <Id>{_esc(acreedor_id)}</Id><SchmeNm><Prtry>SEPA</Prtry></SchmeNm>\n"
+            "      </Othr></PrvtId></Id></CdtrSchmeId>\n"
+            + "\n".join(datos["lineas"])
+            + "\n    </PmtInf>\n"
+        )
+
     cabecera = (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<Document xmlns="urn:iso:std:iso:20022:tech:xsd:pain.008.001.02">\n'
@@ -53090,23 +53454,11 @@ def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None):
         f"      <CtrlSum>{total:.2f}</CtrlSum>\n"
         f"      <InitgPty><Nm>{_esc(acreedor)}</Nm></InitgPty>\n"
         "    </GrpHdr>\n"
-        "    <PmtInf>\n"
-        f"      <PmtInfId>{_esc(_sepa_texto(referencia, 35))}</PmtInfId>\n"
-        "      <PmtMtd>DD</PmtMtd>\n"
-        f"      <NbOfTxs>{len(recibos)}</NbOfTxs>\n"
-        f"      <CtrlSum>{total:.2f}</CtrlSum>\n"
-        "      <PmtTpInf><SvcLvl><Cd>SEPA</Cd></SvcLvl><LclInstrm><Cd>CORE</Cd></LclInstrm>"
-        "<SeqTp>RCUR</SeqTp></PmtTpInf>\n"
-        f"      <ReqdColltnDt>{_esc(fecha_cobro)}</ReqdColltnDt>\n"
-        f"      <Cdtr><Nm>{_esc(acreedor)}</Nm></Cdtr>\n"
-        f"      <CdtrAcct><Id><IBAN>{_esc(iban_comunidad)}</IBAN></Id></CdtrAcct>\n"
-        "      <CdtrAgt><FinInstnId><Othr><Id>NOTPROVIDED</Id></Othr></FinInstnId></CdtrAgt>\n"
-        "      <ChrgBr>SLEV</ChrgBr>\n"
-        "      <CdtrSchmeId><Id><PrvtId><Othr>\n"
-        f"        <Id>{_esc(acreedor_id)}</Id><SchmeNm><Prtry>SEPA</Prtry></SchmeNm>\n"
-        "      </Othr></PrvtId></Id></CdtrSchmeId>\n"
     )
-    return (cabecera + "\n".join(lineas_recibos) + "\n    </PmtInf>\n  </CstmrDrctDbtInitn>\n</Document>\n").encode("utf-8")
+    # Primero los FRST: si el banco procesa por orden, el primer adeudo del mandato va
+    # antes que cualquier recurrente suyo.
+    bloques = "".join(bloque(sec, grupos[sec]) for sec in ("FRST", "RCUR") if grupos[sec]["lineas"])
+    return (cabecera + bloques + "  </CstmrDrctDbtInitn>\n</Document>\n").encode("utf-8")
 
 
 def fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo="", limit=800):
@@ -54287,6 +54639,20 @@ def make_portal_token():
     return secrets.token_urlsafe(32)
 
 
+def referencia_portal(token, identificador):
+    """Una referencia opaca para pedir un documento desde el portal.
+
+    El portal no manda identificadores internos —está razonado abajo: con un id se
+    puede probar suerte en otros endpoints—, pero para descargar un documento hace
+    falta poder nombrarlo. Esta referencia solo significa algo junto al token de quien
+    la recibió: el servidor recalcula las de los documentos que ese vecino puede ver y
+    busca la que encaja. Con otro token, la misma referencia no vale para nada.
+    """
+    return hashlib.sha256(
+        f"{hash_portal_token(token)}:{identificador}".encode("utf-8")
+    ).hexdigest()[:16]
+
+
 def fetch_fincas_portal_public(conn, token, *, registrar=True):
     """Datos que ve un propietario con su enlace. Solo los suyos.
 
@@ -54343,19 +54709,44 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
             "fecha_cobro": row_value(recibo, "fecha_cobro", "") or "",
         })
 
-    documentos = [
-        {
+    # Con su referencia para poder abrirlos: antes se listaban título, tipo y fecha y
+    # no había forma de descargarlos. Enseñar un documento que no se puede abrir es
+    # peor que no enseñarlo. Los que no tienen fichero detrás se marcan, para que la
+    # página no ofrezca un enlace que no lleva a ningún sitio.
+    documentos = []
+    for d in conn.execute(
+        "SELECT id, titulo, tipo, fecha, doc_key, doc_url FROM workspace_fincas_documentos "
+        "WHERE workspace_id = ? AND comunidad_id = ? AND COALESCE(visible_portal, 0) = 1 "
+        "ORDER BY COALESCE(fecha, '') DESC LIMIT 60",
+        (workspace_id, comunidad_id),
+    ).fetchall():
+        tiene_fichero = bool(str(row_value(d, "doc_key", "") or "").strip()
+                             or str(row_value(d, "doc_url", "") or "").strip())
+        documentos.append({
             "titulo": row_value(d, "titulo", ""),
             "tipo": row_value(d, "tipo", "") or "",
             "fecha": row_value(d, "fecha", "") or "",
-        }
-        for d in conn.execute(
-            "SELECT titulo, tipo, fecha FROM workspace_fincas_documentos "
-            "WHERE workspace_id = ? AND comunidad_id = ? AND COALESCE(visible_portal, 0) = 1 "
-            "ORDER BY COALESCE(fecha, '') DESC LIMIT 60",
-            (workspace_id, comunidad_id),
-        ).fetchall()
-    ]
+            "ref": referencia_portal(token, row_value(d, "id", "")) if tiene_fichero else "",
+        })
+
+    # Las juntas publicadas, con su convocatoria y su acta. Estos dos documentos sí
+    # llevan datos de otros vecinos —el acta dice quién votó qué y la convocatoria
+    # relaciona a quien no está al corriente—, pero no es una fuga: son documentos que
+    # la ley manda entregar a todos los propietarios (arts. 16.2 y 19.4 LPH). Por eso
+    # se publican de una en una y a mano, y no todas las juntas por defecto.
+    juntas = []
+    for j in conn.execute(
+        "SELECT id, fecha, tipo, estado FROM workspace_fincas_juntas "
+        "WHERE workspace_id = ? AND comunidad_id = ? AND COALESCE(publicado_portal, 0) = 1 "
+        "ORDER BY COALESCE(fecha, '') DESC LIMIT 30",
+        (workspace_id, comunidad_id),
+    ).fetchall():
+        juntas.append({
+            "fecha": str(row_value(j, "fecha", "") or "")[:10],
+            "tipo": row_value(j, "tipo", "") or "ordinaria",
+            "estado": row_value(j, "estado", "") or "",
+            "ref": referencia_portal(token, row_value(j, "id", "")),
+        })
 
     if registrar:
         try:
@@ -54382,6 +54773,7 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
         "recibos": recibos,
         "deuda": round(deuda, 2),
         "documentos": documentos,
+        "juntas": juntas,
         "caduca": caduca,
     }
 
@@ -60979,6 +61371,19 @@ def build_inmueble_visit_sheet_pdf(company, inmueble, captacion, owners, buyer, 
     c.setFont(PDF_FONT_BOLD, 8)
     c.drawString(margin, y + 10, "INMUEBLE VISITADO")
     field_row("DIRECCIÓN:", u(direccion_full), y)
+    y -= 18
+    # El precio, por escrito y con fecha. Es la mitad del sentido de este papel: el
+    # cliente firma que le enseñamos ESE inmueble a ESE precio. Estaba sólo en la
+    # variante de respaldo —la que se usa cuando no hay reportlab—, así que la hoja
+    # que se imprime de verdad salía sin él.
+    _precio_visita = 0
+    for _campo, _origen in (("precio_objetivo", inmueble), ("precio_pedido_cliente", inmueble),
+                            ("precio_encargo", inmueble), ("precio_valoracion", inmueble),
+                            ("precio_objetivo", captacion or {}), ("precio_encargo", captacion or {})):
+        _precio_visita = parse_money_value((_origen or {}).get(_campo)) or 0
+        if _precio_visita:
+            break
+    field_row("PRECIO:", format_eur(_precio_visita) if _precio_visita else "A CONSULTAR", y)
     y -= 26
 
     # Texto legal (resumen)
@@ -66312,6 +66717,16 @@ class Handler(BaseHTTPRequestHandler):
     .etiqueta { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 3px 9px;
                 border-radius: 99px; background: var(--verde-claro); color: var(--verde); }
     .etiqueta.aviso { background: var(--ambar-claro); color: var(--ambar); }
+    .novedades { display: grid; gap: 4px; border-left: 2px solid var(--linea); padding-left: 10px; }
+    .novedades div { font-size: 13px; color: var(--suave); }
+    .novedades b { color: var(--tinta); font-weight: 500; }
+    .novedades .marca { display: inline-block; background: var(--verde-claro); color: var(--verde);
+      border-radius: 99px; padding: 1px 7px; font-size: 10.5px; font-weight: 600; margin-left: 6px;
+      vertical-align: 1px; }
+    .pedir { display: grid; gap: 8px; background: var(--fondo); border-radius: 10px; padding: 10px; }
+    .pedir .campos { display: flex; gap: 8px; flex-wrap: wrap; }
+    .pedir input[type=date], .pedir select { border: 1px solid var(--linea); border-radius: 8px;
+      padding: 8px 10px; font: 13.5px var(--texto); background: var(--tarjeta); color: var(--tinta); }
     .miniaturas { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; max-width: 100%; }
     .miniaturas img { width: 74px; height: 54px; object-fit: cover; border-radius: 8px; flex: 0 0 auto;
                       border: 1px solid var(--linea); cursor: pointer; }
@@ -66461,6 +66876,8 @@ class Handler(BaseHTTPRequestHandler):
 
     const esDescarte = (v) => String(v || "").indexOf("descarta") === 0;
 
+    const hoy = new Date().toISOString().slice(0, 10);
+
     function tarjetaInmueble(x) {
       const q = "token=" + encodeURIComponent(token) + "&s=" + encodeURIComponent(sesion());
       const foto = x.fotos
@@ -66475,8 +66892,16 @@ class Handler(BaseHTTPRequestHandler):
         x.tipo, x.m2 ? x.m2 + " m²" : "", x.habitaciones ? x.habitaciones + " hab." : "",
         x.banos ? x.banos + (Number(x.banos) === 1 ? " baño" : " baños") : "",
       ].filter(Boolean).map((r) => `<span>${esc(r)}</span>`).join("");
+      const pedida = x.cita && String(x.cita.estado || "").toLowerCase() === "solicitada";
       const cita = x.cita && x.cita.futura
-        ? `<div class="etiqueta">Visita el ${esc(x.cita.fecha)}${x.cita.hora ? " a las " + esc(x.cita.hora) : ""}</div>`
+        ? `<div class="etiqueta${pedida ? " aviso" : ""}">${pedida
+            ? "Visita pedida para el " + esc(x.cita.fecha) + " · pendiente de confirmar"
+            : "Visita el " + esc(x.cita.fecha) + (x.cita.hora ? " a las " + esc(x.cita.hora) : "")}</div>`
+        : "";
+      const novedades = (x.novedades || []).length
+        ? `<div class="novedades">` + x.novedades.map((n) =>
+            `<div><b>${esc(n.texto)}</b> · ${esc(n.fecha)}${n.nuevo ? '<span class="marca">nuevo</span>' : ""}</div>`
+          ).join("") + `</div>`
         : "";
       const docs = (x.documentos || []).map((d) =>
         `<a href="/api/portal_busqueda_documento?${q}&i=${x.i}&n=${d.n}" target="_blank"
@@ -66491,11 +66916,22 @@ class Handler(BaseHTTPRequestHandler):
             <div class="rasgos">${rasgos}</div>
             ${x.disponible ? "" : '<div class="etiqueta aviso">Ya no está disponible</div>'}
             ${cita}
+            ${novedades}
             ${minis.length ? `<div class="miniaturas">${minis.join("")}</div>` : ""}
             ${x.descripcion ? `<p class="texto">${esc(x.descripcion)}</p>` : ""}
             ${docs ? `<div class="suave" style="font-size:13px">Documentos: ${docs}</div>` : ""}
             <div class="opinar"></div>
             <div class="motivos"></div>
+            ${x.disponible && !pedida ? `<div class="pedir">
+              <div class="campos">
+                <input type="date" class="dia" min="${esc(hoy)}" aria-label="Día para la visita" />
+                <select class="franja" aria-label="Franja">
+                  <option value="mañana">Por la mañana</option>
+                  <option value="tarde" selected>Por la tarde</option>
+                </select>
+                <button class="boton plano visita">Pedir visita</button>
+              </div>
+            </div>` : ""}
             <input type="text" class="comentario" placeholder="¿Quieres contarnos algo de este inmueble?"
                    value="${esc(x.comentario || "")}" />
           </div>
@@ -66526,6 +66962,7 @@ class Handler(BaseHTTPRequestHandler):
               <div><b>${r.seleccionados || 0}</b><span>inmuebles para ti</span></div>
               <div><b>${r.valorados || 0}</b><span>valorados</span></div>
               <div><b>${r.citas || 0}</b><span>visitas previstas</span></div>
+              ${r.novedades ? `<div><b>${r.novedades}</b><span>novedades desde tu última visita</span></div>` : ""}
             </div>
           </div>
         </header>
@@ -66641,6 +67078,26 @@ class Handler(BaseHTTPRequestHandler):
 
         pintaOpinion(actual, false);
         comentario.onchange = () => manda(actual);
+
+        const boton = ficha.querySelector(".visita");
+        if (boton) {
+          boton.onclick = async () => {
+            const dia = ficha.querySelector(".dia").value;
+            if (!dia) { alert("Elige el día que te viene bien."); return; }
+            boton.disabled = true;
+            try {
+              const r = await pide("/api/portal_busqueda_visita", {
+                token, sesion: sesion(), i, fecha: dia,
+                franja: ficha.querySelector(".franja").value,
+                comentario: comentario.value,
+              });
+              alert(r.hoja
+                ? "Pedida. Te hemos dejado la hoja de visita con los datos y el precio en este mismo inmueble."
+                : "Pedida. Tu asesor te confirma la hora.");
+              cargar();
+            } catch (e) { alert(e.message); boton.disabled = false; }
+          };
+        }
       });
 
       // Las fotos, a tamaño grande.
@@ -66756,7 +67213,9 @@ class Handler(BaseHTTPRequestHandler):
     const app = document.getElementById("app");
     const token = new URLSearchParams(location.search).get("token") || "";
     // Se saca de la barra en cuanto lo tenemos: el enlace lleva la llave dentro y
-    // no hace falta que se quede en el historial ni salga en una captura.
+    // no hace falta que se quede en el historial ni salga en una captura. Se conserva
+    // en memoria porque los enlaces de descarga lo necesitan: son la misma llave, para
+    // la misma persona, en la misma pestaña.
     if (token) history.replaceState(null, "", location.pathname);
     if (!token) {
       app.innerHTML = '<div class="aviso">Falta el enlace de acceso. Pide uno a tu administrador.</div>';
@@ -66787,9 +67246,20 @@ class Handler(BaseHTTPRequestHandler):
                   <td class="num">${eur.format(x.importe || 0)}</td></tr>`).join("")}</tbody>
               </table>` : '<p class="muted">Todavía no hay recibos.</p>'}
             </div>
+            ${(d.juntas || []).length ? `<div class="card">
+              <h2 style="font-size:16px;margin:0 0 8px;">Juntas</h2>
+              <table><tbody>${d.juntas.map((x) => `<tr>
+                <td>${esc(x.fecha)}</td><td class="muted">${esc(x.tipo)}</td>
+                <td class="num"><a href="/api/workspace_fincas_portal_junta?tipo=convocatoria&ref=${encodeURIComponent(x.ref)}&token=${encodeURIComponent(token)}">Convocatoria</a>
+                  · <a href="/api/workspace_fincas_portal_junta?tipo=acta&ref=${encodeURIComponent(x.ref)}&token=${encodeURIComponent(token)}">Acta</a></td>
+              </tr>`).join("")}</tbody></table>
+            </div>` : ""}
             ${(d.documentos || []).length ? `<div class="card">
               <h2 style="font-size:16px;margin:0 0 8px;">Documentos de la comunidad</h2>
-              <table><tbody>${d.documentos.map((x) => `<tr><td>${esc(x.titulo)}</td><td class="muted">${esc(x.tipo)}</td><td class="num muted">${esc(x.fecha)}</td></tr>`).join("")}</tbody></table>
+              <table><tbody>${d.documentos.map((x) => `<tr>
+                <td>${x.ref ? `<a href="/api/workspace_fincas_portal_doc?ref=${encodeURIComponent(x.ref)}&token=${encodeURIComponent(token)}">${esc(x.titulo)}</a>` : esc(x.titulo)}</td>
+                <td class="muted">${esc(x.tipo)}</td>
+                <td class="num muted">${x.ref ? esc(x.fecha) : esc(x.fecha) + " · sin fichero"}</td></tr>`).join("")}</tbody></table>
             </div>` : ""}
             <p class="muted">Enlace válido hasta ${esc(d.caduca || "-")}. Si tienes dudas sobre algún recibo, habla con tu administrador.</p>`;
         })
@@ -67563,6 +68033,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_busqueda_consentimiento",
             "/api/portal_busqueda_derechos",
             "/api/portal_busqueda_retirar",
+            "/api/portal_busqueda_visita",
             "/api/inmueble_renovar",
             "/api/renta_campaign_document",
             "/api/workspace_fincas_comunidad_delete",
@@ -68449,6 +68920,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_busqueda_consentimiento",
             "/api/portal_busqueda_derechos",
             "/api/portal_busqueda_retirar",
+            "/api/portal_busqueda_visita",
             "/api/demanda_portal_acceso",
             "/api/demanda_portal_acceso_revoke",
             "/api/demanda_portal_mensaje",
@@ -69015,7 +69487,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if parsed.path in ("/api/portal_busqueda_opinion", "/api/portal_busqueda_mensaje",
                            "/api/portal_busqueda_firma", "/api/portal_busqueda_consentimiento",
-                           "/api/portal_busqueda_derechos", "/api/portal_busqueda_retirar"):
+                           "/api/portal_busqueda_derechos", "/api/portal_busqueda_retirar",
+                           "/api/portal_busqueda_visita"):
             acceso, fallo = acceso_de_comprador_por_token(conn, payload.get("token") or "")
             if not acceso:
                 json_response(self, {"error": "Enlace no válido"},
@@ -69180,6 +69653,118 @@ class Handler(BaseHTTPRequestHandler):
                         apunta_escritura_tragada("portal_busqueda_opinion/acciones", _fallo_tragado)
                 conn.commit()
                 json_response(self, {"ok": True})
+                return
+
+            if parsed.path == "/api/portal_busqueda_visita":
+                # Pedir visita sin pasar por el hilo de mensajes. Antes la única
+                # forma era escribir «me gustaría verlo» y esperar a que alguien lo
+                # leyera; ahora entra como cita solicitada en la agenda, con día y
+                # franja, y le deja tarea al asesor.
+                datos = build_portal_de_busqueda(conn, acceso, registrar=False)
+                try:
+                    indice = int(payload.get("i"))
+                except Exception:
+                    indice = -1
+                if not datos or indice < 0 or indice >= len(datos["inmuebles"]):
+                    json_response(self, {"error": "Ese inmueble no está en tu selección"}, status=404)
+                    return
+                ficha = datos["inmuebles"][indice]
+                if not ficha["disponible"]:
+                    json_response(self, {"error": "Este inmueble ya no está disponible"}, status=409)
+                    return
+                # Con la forma no basta: «2099-13-40» la tiene y no es un día. Se
+                # parsea de verdad, que es lo único que lo demuestra.
+                fecha = str(payload.get("fecha") or "").strip()[:10]
+                dia = parse_iso_date(fecha) if re.match(r"^\d{4}-\d{2}-\d{2}$", fecha) else None
+                if not dia:
+                    json_response(self, {"error": "Elige un día"}, status=400)
+                    return
+                fecha = dia.isoformat()
+                if fecha < ahora_iso[:10]:
+                    json_response(self, {"error": "Ese día ya ha pasado"}, status=400)
+                    return
+                franja = str(payload.get("franja") or "").strip().lower()
+                if franja not in {"mañana", "manana", "tarde"}:
+                    franja = "tarde"
+                franja = "mañana" if franja.startswith("ma") else "tarde"
+                inmueble_id = _inmueble_de_la_seleccion(conn, demanda_id, indice)
+                if not inmueble_id:
+                    json_response(self, {"error": "Ese inmueble no está en tu selección"}, status=404)
+                    return
+                # Una petición por inmueble y día: pulsar dos veces no llena la
+                # agenda del asesor de citas repetidas.
+                ya = conn.execute(
+                    "SELECT id FROM visitas WHERE inmueble_id = ? AND demanda_id = ? AND fecha = ? LIMIT 1",
+                    (inmueble_id, demanda_id, fecha)).fetchone()
+                if not ya:
+                    vis_cols = table_columns(conn, "visitas") or set()
+                    fila = {
+                        "id": os.urandom(16).hex(),
+                        "empresa_id": empresa_id,
+                        "workspace_id": str(row_value(acceso, "workspace_id", "") or ""),
+                        "inmueble_id": inmueble_id,
+                        "demanda_id": demanda_id,
+                        "fecha": fecha,
+                        "hora": "",
+                        # «Solicitada», no «Prevista»: la confirma la agencia. Darla
+                        # por hecha en su agenda sería prometer en nombre de otro.
+                        "estado": "Solicitada",
+                        "notas": f"Pedida por el interesado desde el portal · prefiere por la {franja}",
+                        "created_at": ahora_iso,
+                        "updated_at": ahora_iso,
+                    }
+                    claves = [k for k in fila if k in vis_cols]
+                    conn.execute(
+                        f"INSERT INTO visitas ({', '.join(claves)}) VALUES ({', '.join(['?'] * len(claves))})",
+                        [fila[k] for k in claves])
+                    try:
+                        acciones_cols = table_columns(conn, "acciones") or set()
+                        tarea = {
+                            "id": os.urandom(16).hex(),
+                            "empresa_id": empresa_id,
+                            "workspace_id": str(row_value(acceso, "workspace_id", "") or ""),
+                            "servicio": "inmobiliaria",
+                            "inmueble_id": inmueble_id,
+                            "cliente_id": str(row_value(acceso, "cliente_id", "") or ""),
+                            "cliente_nombre": str(row_value(acceso, "nombre", "") or ""),
+                            "fecha": ahora_iso[:10],
+                            "hora": "09:00",
+                            "tipo": "Seguimiento",
+                            "asunto": f"Pide visita el {fecha} por la {franja} · confirmar hora",
+                            "estado": "Pendiente",
+                            "notas": str(payload.get("comentario") or "")[:500],
+                            "created_at": ahora_iso,
+                            "updated_at": ahora_iso,
+                        }
+                        claves = [k for k in tarea if k in acciones_cols and tarea[k] != ""]
+                        conn.execute(
+                            f"INSERT INTO acciones ({', '.join(claves)}) VALUES ({', '.join(['?'] * len(claves))})",
+                            [tarea[k] for k in claves])
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("portal_busqueda_visita/acciones", _fallo_tragado)
+                # Pedir verlo es querer verlo: si no había dicho nada, se anota.
+                if not ficha["opinion"]:
+                    conn.execute(
+                        "INSERT INTO demanda_portal_opiniones (id, acceso_id, demanda_id, inmueble_id, "
+                        "cliente_id, valoracion, comentario, visto, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, 'verlo', '', 1, ?, ?)",
+                        (os.urandom(16).hex(), str(row_value(acceso, "id", "") or ""), demanda_id,
+                         inmueble_id, str(row_value(acceso, "cliente_id", "") or ""), ahora_iso, ahora_iso))
+                cliente = conn.execute(
+                    "SELECT nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
+                    (str(row_value(acceso, "cliente_id", "") or ""),)).fetchone()
+                hoja = genera_hoja_de_visita(conn, inmueble_id, demanda_id, {
+                    "nombre": str(row_value(cliente, "nombre", "") or row_value(acceso, "nombre", "") or ""),
+                    "nif": str(row_value(cliente, "nif", "") or ""),
+                    "telefono": str(row_value(cliente, "telefono", "") or row_value(acceso, "telefono", "") or ""),
+                    "email": str(row_value(cliente, "email", "") or row_value(acceso, "email", "") or ""),
+                }, now=ahora_iso)
+                audit_event(conn, empresa_id, "inmueble", inmueble_id,
+                            "Visita pedida desde el portal del comprador",
+                            usuario=str(row_value(acceso, "nombre", "") or ""),
+                            detalles={"fecha": fecha, "franja": franja, "hoja": bool(hoja)}, now=ahora_iso)
+                conn.commit()
+                json_response(self, {"ok": True, "fecha": fecha, "franja": franja, "hoja": bool(hoja)})
                 return
 
             if parsed.path == "/api/portal_busqueda_mensaje":
@@ -95929,7 +96514,28 @@ class Handler(BaseHTTPRequestHandler):
                 "WHERE r.remesa_id = ? AND r.workspace_id = ? ORDER BY v.piso, v.nombre",
                 (remesa_id, workspace_id),
             ).fetchall()
-            xml = build_remesa_sepa_xml(remesa, comunidad or {}, recibos)
+            # Cuáles van como FRST: los mandatos que no han cobrado nunca, y los que
+            # se firmaron DESPUÉS del último cobro —eso es un mandato nuevo del mismo
+            # propietario, y su secuencia vuelve a empezar—. Lo sabe la base, no el
+            # generador del fichero.
+            ultimo_cobro = {
+                row_value(f, "vecino_id", ""): str(row_value(f, "ultimo", "") or "")[:10]
+                for f in conn.execute(
+                    "SELECT r.vecino_id, MAX(rm.fecha_cobro) AS ultimo "
+                    "FROM workspace_fincas_recibos r "
+                    "JOIN workspace_fincas_remesas rm ON rm.id = r.remesa_id "
+                    "WHERE r.workspace_id = ? AND r.comunidad_id = ? AND r.remesa_id IS NOT NULL "
+                    "AND r.remesa_id != ? GROUP BY r.vecino_id",
+                    (workspace_id, row_value(remesa, "comunidad_id", ""), remesa_id),
+                ).fetchall()
+            }
+            primeros = set()
+            for recibo in recibos:
+                anterior = ultimo_cobro.get(row_value(recibo, "vecino_id", ""), "")
+                firma = str(row_value(recibo, "mandato_fecha", "") or "")[:10]
+                if not anterior or (firma and firma > anterior):
+                    primeros.add(referencia_mandato(recibo))
+            xml = build_remesa_sepa_xml(remesa, comunidad or {}, recibos, primeros=primeros)
             binary_response(
                 self, xml, content_type="application/xml",
                 filename=f"remesa_{row_value(remesa, 'referencia', remesa_id)}.xml",
@@ -96003,6 +96609,43 @@ class Handler(BaseHTTPRequestHandler):
             )
             binary_response(self, pdf, content_type="application/pdf",
                             filename=f"acta_{str(row_value(recuento['junta'], 'fecha', ''))[:10]}.pdf")
+            return
+
+        if path == "/api/workspace_fincas_mandato":
+            # La orden de domiciliación que firma el propietario. Se generaba fuera del
+            # CRM y luego se tecleaba a mano su referencia, que es la que viaja al banco.
+            workspace_id = params.get("workspace_id", [""])[0]
+            vecino_id = (params.get("id", [""])[0] or "").strip()
+            if not workspace_id or not vecino_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            vecino = conn.execute(
+                "SELECT * FROM workspace_fincas_vecinos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (vecino_id, workspace_id),
+            ).fetchone()
+            if not vecino:
+                json_response(self, {"error": "propietario no encontrado"}, status=404)
+                return
+            comunidad = conn.execute(
+                "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (row_value(vecino, "comunidad_id", ""), workspace_id),
+            ).fetchone()
+            detalle = fetch_workspace_detail(conn, workspace_id)
+            pdf = build_mandato_sepa_pdf(
+                vecino, comunidad or {},
+                workspace=detalle.get("workspace") or {},
+                company=(detalle.get("companies") or [{}])[0] if detalle.get("companies") else {},
+            )
+            binary_response(self, pdf, content_type="application/pdf",
+                            filename=f"mandato_sepa_{referencia_mandato(vecino)}.pdf")
             return
 
         if path == "/api/workspace_fincas_convocatoria":
@@ -96201,6 +96844,114 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             json_response(self, fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio))
+            return
+
+        if path in ("/api/workspace_fincas_portal_doc", "/api/workspace_fincas_portal_junta"):
+            # Descargas del portal del comunero. Sin sesión: la llave es el token del
+            # enlace, igual que la pantalla. Y la referencia que llega **no es un id**:
+            # se recalculan las de lo que ese vecino puede ver y se busca la que encaja,
+            # así que con otro token no vale, y probando números no se llega a nada.
+            token = (params.get("token", [""])[0] or "").strip()
+            ref = (params.get("ref", [""])[0] or "").strip()
+            if not token or not ref:
+                json_response(self, {"error": "token y ref requeridos"}, status=400)
+                return
+            acceso = conn.execute(
+                "SELECT workspace_id, comunidad_id, revocado, expires_at "
+                "FROM workspace_fincas_portal_accesos WHERE token_hash = ? LIMIT 1",
+                (hash_portal_token(token),),
+            ).fetchone()
+            if not acceso or int(row_value(acceso, "revocado", 0) or 0):
+                json_response(self, {"error": "enlace no válido"}, status=404)
+                return
+            caduca = str(row_value(acceso, "expires_at", "") or "")[:10]
+            if caduca and caduca < datetime.now().date().isoformat():
+                json_response(self, {"error": "caducado"}, status=403)
+                return
+            workspace_id = row_value(acceso, "workspace_id", "")
+            comunidad_id = row_value(acceso, "comunidad_id", "")
+
+            if path == "/api/workspace_fincas_portal_doc":
+                fila = next(
+                    (d for d in conn.execute(
+                        "SELECT id, titulo, doc_key, doc_url FROM workspace_fincas_documentos "
+                        "WHERE workspace_id = ? AND comunidad_id = ? AND COALESCE(visible_portal, 0) = 1",
+                        (workspace_id, comunidad_id),
+                    ).fetchall()
+                     if secrets.compare_digest(referencia_portal(token, row_value(d, "id", "")), ref)),
+                    None,
+                )
+                if not fila:
+                    json_response(self, {"error": "documento no disponible"}, status=404)
+                    return
+                url = str(row_value(fila, "doc_url", "") or "").strip()
+                clave = str(row_value(fila, "doc_key", "") or "").strip()
+                if clave:
+                    crudo, err = s3_get_object_bytes(clave)
+                    if not crudo:
+                        json_response(self, {"error": err or "no se pudo leer el documento"}, status=502)
+                        return
+                    binary_response(self, crudo, content_type="application/octet-stream",
+                                    filename=f"{_sepa_texto(row_value(fila, 'titulo', '') or 'documento', 60)}")
+                    return
+                if url.startswith(("/uploads/", "http://", "https://")):
+                    self.send_response(302)
+                    self.send_header("Location", url)
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("Referrer-Policy", "no-referrer")
+                    self.end_headers()
+                    return
+                json_response(self, {"error": "documento sin fichero"}, status=404)
+                return
+
+            # La junta: convocatoria o acta, y solo si está publicada.
+            cual = (params.get("tipo", ["acta"])[0] or "acta").strip().lower()
+            if cual not in {"acta", "convocatoria"}:
+                json_response(self, {"error": "tipo no válido"}, status=400)
+                return
+            junta = next(
+                (j for j in conn.execute(
+                    "SELECT * FROM workspace_fincas_juntas "
+                    "WHERE workspace_id = ? AND comunidad_id = ? AND COALESCE(publicado_portal, 0) = 1",
+                    (workspace_id, comunidad_id),
+                ).fetchall()
+                 if secrets.compare_digest(referencia_portal(token, row_value(j, "id", "")), ref)),
+                None,
+            )
+            if not junta:
+                json_response(self, {"error": "junta no disponible"}, status=404)
+                return
+            junta_id = row_value(junta, "id", "")
+            comunidad = conn.execute(
+                "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (comunidad_id, workspace_id),
+            ).fetchone()
+            detalle = fetch_workspace_detail(conn, workspace_id)
+            empresa = (detalle.get("companies") or [{}])[0] if detalle.get("companies") else {}
+            if cual == "convocatoria":
+                acuerdos = [
+                    {"orden": int(row_value(f, "orden", 0) or 0),
+                     "titulo": row_value(f, "titulo", "") or "",
+                     "descripcion": row_value(f, "descripcion", "") or ""}
+                    for f in conn.execute(
+                        "SELECT orden, titulo, descripcion FROM workspace_fincas_junta_acuerdos "
+                        "WHERE junta_id = ? AND workspace_id = ? ORDER BY orden",
+                        (junta_id, workspace_id),
+                    ).fetchall()
+                ]
+                morosos = fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id)["rows"]
+                pdf = build_convocatoria_junta_pdf(
+                    junta, comunidad or {}, acuerdos, morosos,
+                    workspace=detalle.get("workspace") or {}, company=empresa)
+            else:
+                recuento = calcular_recuento_junta(conn, workspace_id, junta_id)
+                if not recuento:
+                    json_response(self, {"error": "junta no disponible"}, status=404)
+                    return
+                pdf = build_acta_junta_pdf(recuento, comunidad or {},
+                                           workspace=detalle.get("workspace") or {}, company=empresa)
+            binary_response(self, pdf, content_type="application/pdf",
+                            filename=f"{cual}_{str(row_value(junta, 'fecha', ''))[:10]}.pdf")
             return
 
         if path == "/api/workspace_fincas_portal_public":
@@ -96450,9 +97201,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             inmueble_id = _inmueble_de_la_seleccion(conn, row_value(acceso, "demanda_id", ""), pos)
             candidatos = conn.execute(
-                "SELECT nombre, url FROM inmueble_docs WHERE inmueble_id = ? "
-                "AND COALESCE(visible_comprador,0) = 1 ORDER BY COALESCE(created_at,'') DESC, id DESC LIMIT 12",
-                (inmueble_id,)).fetchall()
+                _SQL_DOCS_DEL_COMPRADOR,
+                (inmueble_id, str(row_value(acceso, "demanda_id", "") or ""))).fetchall()
             if n >= len(candidatos):
                 # Se lo han dejado de compartir entre que cargó la página y pinchó.
                 json_response(self, {"error": "Documento no disponible"}, status=404)
