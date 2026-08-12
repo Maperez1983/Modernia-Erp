@@ -181,6 +181,13 @@ class BasePortal(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code, e.read().decode()
 
+    def _cabeceras(self, ruta):
+        try:
+            with urllib.request.urlopen(self.base + ruta) as r:
+                return r.status, dict(r.headers)
+        except urllib.error.HTTPError as e:
+            return e.code, dict(e.headers)
+
     def _abre_portal(self, inmueble_id="inm1", firmar=True):
         estado, d = self._post("/api/inmueble_portal_acceso", {"inmueble_id": inmueble_id, "avisar": False})
         self.assertEqual(estado, 200, d)
@@ -1446,6 +1453,23 @@ class LaImagenDeLaPaginaTests(BasePortal):
         self.assertIn('font-family: "IBM Plex Sans"', html)
         self.assertIn("/assets/fuentes/ibm-plex-sans.woff2", html)
 
+    def test_y_los_ficheros_estan_donde_el_servidor_los_busca(self):
+        """Declararlas no basta. Estuvieron en `web/assets/fuentes/` y daban 404 en
+        producción: `ASSETS` es la carpeta `assets/` de la raíz, no la de `web/`. La
+        página se veía igual de sosa que antes y el test anterior seguía en verde."""
+        for url in re.findall(r'url\("(/assets/[^"]+)"\)', self._get("/portal-venta")[1]):
+            with self.subTest(url):
+                destino = S.safe_resolve_under(S.ASSETS, url.replace("/assets/", "", 1))
+                self.assertIsNotNone(destino, f"{url} no resuelve dentro de assets/")
+                self.assertTrue(destino.is_file(), f"{url} no existe: falta {destino}")
+
+    def test_la_fuente_se_sirve_con_su_tipo(self):
+        """Con `text/plain` algunos navegadores la rechazan y vuelven a la del sistema."""
+        estado, cabeceras = self._cabeceras("/assets/fuentes/ibm-plex-sans.woff2")
+        self.assertEqual(estado, 200)
+        self.assertEqual(cabeceras.get("Content-Type"), "font/woff2")
+        self.assertIn("immutable", cabeceras.get("Cache-Control", ""))
+
     def test_los_titulares_van_en_la_serif(self):
         _, html = self._get("/portal-venta")
         css = html[html.index("<style>"):html.index("</style>")]
@@ -1873,10 +1897,12 @@ class LosTresHuecosDelRGPDTests(BasePortal):
         self.assertIn("/assets/fuentes/", html)
 
     def test_las_fuentes_están_en_el_repositorio(self):
-        carpeta = Path(__file__).resolve().parents[1] / "web" / "assets" / "fuentes"
+        # `S.ASSETS`, no una ruta escrita a mano: estaban en `web/assets/fuentes/`,
+        # este test las encontraba y en producción daban 404.
         for f in ("ibm-plex-sans.woff2", "ibm-plex-serif.woff2"):
             with self.subTest(f):
-                self.assertTrue((carpeta / f).exists(), "falta la fuente que sirve la página")
+                self.assertTrue((S.ASSETS / "fuentes" / f).exists(),
+                                "falta la fuente que sirve la página")
 
     def test_puede_retirar_el_consentimiento_el_mismo(self):
         """Retirarlo tiene que ser tan fácil como darlo."""
