@@ -141,6 +141,13 @@ class BaseComprador(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code, e.read().decode()
 
+    def _cabeceras(self, ruta):
+        try:
+            with urllib.request.urlopen(self.base + ruta) as r:
+                return r.status, dict(r.headers)
+        except urllib.error.HTTPError as e:
+            return e.code, dict(e.headers)
+
     def _abre(self, demanda_id="dem1", firmar=True):
         estado, d = self._post("/api/demanda_portal_acceso", {"demanda_id": demanda_id, "avisar": False})
         self.assertEqual(estado, 200, d)
@@ -657,7 +664,9 @@ class ElSeguimientoDelEstadoTests(BaseComprador):
         x = self._vista(self._abre())["inmuebles"][self._posicion(self._abre(), "Calle Uno 1")]
         textos = [n["texto"] for n in x["novedades"]]
         self.assertTrue(any("bajado" in t for t in textos), textos)
-        self.assertTrue(any("249.000" in t for t in textos), textos)
+        self.assertTrue(any("249.000 €" in t for t in textos), textos)
+        # Sin céntimos: «249.000,00 €» por una casa se lee como un extracto.
+        self.assertFalse(any(",00" in t for t in textos), textos)
 
     def test_una_subida_tambien_se_le_cuenta(self):
         """Enseñar sólo las bajadas convierte el portal en un folleto."""
@@ -877,3 +886,84 @@ class LaHojaDeVisitaSeHaceSolaTests(BaseComprador):
         self.assertEqual(estado, 200, d)
         self.assertFalse(d["hoja"])
         self.assertEqual(self.conn.execute("SELECT COUNT(*) c FROM visitas").fetchone()["c"], 1)
+
+
+class LaCabeceraDeLaAgenciaTests(BaseComprador):
+    """El color y el logo son de la agencia, no míos. Con una condición: que se
+    siga leyendo."""
+
+    def test_sin_color_elegido_va_el_verde_de_la_casa(self):
+        d = self._vista(self._abre())
+        self.assertEqual(d["agencia"]["color"], S.PORTAL_COLOR_POR_DEFECTO)
+        self.assertEqual(d["agencia"]["tinta"], "#ffffff")
+
+    def test_el_color_de_la_agencia_manda(self):
+        self.conn.execute("UPDATE empresas SET color_portal = '#7C2D12' WHERE id = 'emp1'")
+        self.conn.commit()
+        d = self._vista(self._abre())
+        self.assertEqual(d["agencia"]["color"], "#7C2D12")
+        self.assertEqual(d["agencia"]["tinta"], "#ffffff")
+
+    def test_un_color_claro_cambia_la_letra_a_oscura(self):
+        """Una agencia elige su color mirando su logo, no midiendo contrastes. Con
+        un amarillo corporativo la letra blanca desaparece."""
+        self.conn.execute("UPDATE empresas SET color_portal = '#FACC15' WHERE id = 'emp1'")
+        self.conn.commit()
+        d = self._vista(self._abre())
+        self.assertEqual(d["agencia"]["color"], "#FACC15")
+        self.assertEqual(d["agencia"]["tinta"], "#0f172a")
+
+    def test_un_color_que_no_se_lee_con_ninguna_letra_se_descarta(self):
+        """Ni blanco ni negro llegan a 4,5:1: se vuelve al verde de la casa antes
+        que publicar una cabecera ilegible."""
+        self.conn.execute("UPDATE empresas SET color_portal = '#7A7A7A' WHERE id = 'emp1'")
+        self.conn.commit()
+        self.assertEqual(self._vista(self._abre())["agencia"]["color"], S.PORTAL_COLOR_POR_DEFECTO)
+
+    def test_lo_que_no_es_un_color_se_ignora(self):
+        for basura in ("rojo", "#ZZZ", "15803D", "'; DROP TABLE empresas; --", "#15803D  "):
+            with self.subTest(basura):
+                self.assertEqual(S.color_de_marca(basura)[0], S.PORTAL_COLOR_POR_DEFECTO)
+
+    def test_el_contraste_elegido_es_de_verdad(self):
+        for color in ("#15803D", "#7C2D12", "#FACC15", "#0EA5E9", "#831843"):
+            fondo, tinta = S.color_de_marca(color)
+            with self.subTest(color):
+                self.assertGreaterEqual(S._contraste(fondo, tinta), 4.5)
+
+    def test_el_logo_en_s3_ya_no_se_descarta(self):
+        """Sólo se enseñaba si estaba en `/assets/`, y la única agencia que usa esto
+        tiene el suyo en S3: salía sin logo y no lo sabía nadie."""
+        self.conn.execute("UPDATE empresas SET logo_url = 's3://company_logos/x.png' WHERE id = 'emp1'")
+        self.conn.commit()
+        self.assertTrue(self._vista(self._abre())["agencia"]["logo"])
+
+    def test_el_logo_se_sirve_con_el_token_y_no_de_otra_forma(self):
+        origen = S.ASSETS / "verifika2" / "verifika2_wordmark_check_green.png"
+        if not origen.exists():
+            self.skipTest("no hay logo de ejemplo en assets/")
+        self.conn.execute("UPDATE empresas SET logo_url = ? WHERE id = 'emp1'",
+                          ("/assets/verifika2/" + origen.name,))
+        self.conn.commit()
+        token = self._abre()
+        with urllib.request.urlopen(
+                self.base + f"/api/portal_busqueda_logo?token={token}") as r:
+            self.assertEqual(r.status, 200)
+            self.assertEqual(r.headers.get("Content-Type"), "image/png")
+            self.assertTrue(r.read().startswith(b"\x89PNG"))
+        self.assertEqual(self._get("/api/portal_busqueda_logo?token=" + "a" * 43)[0], 404)
+
+    def test_sin_logo_no_se_inventa_uno(self):
+        self.conn.execute("UPDATE empresas SET logo_url = '' WHERE id = 'emp1'")
+        self.conn.commit()
+        token = self._abre()
+        self.assertFalse(self._vista(token)["agencia"]["logo"])
+        estado, _ = self._cabeceras(f"/api/portal_busqueda_logo?token={token}")
+        self.assertEqual(estado, 404)
+
+    def test_la_pagina_usa_los_dos_tokens(self):
+        _, html = self._get("/portal-busqueda")
+        css = html[html.index("<style>"):html.index("</style>")]
+        i = css.index(".cabecera {")
+        self.assertIn("var(--sobre-solido)", css[i:css.index("}", i)])
+        self.assertIn('setProperty("--verde-solido"', html)

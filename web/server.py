@@ -1191,6 +1191,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     # Portal del comprador. Misma llave: el token del enlace, sin sesión del CRM.
     "/api/portal_busqueda",
     "/api/portal_busqueda_foto",
+    "/api/portal_busqueda_logo",
     "/api/portal_busqueda_documento",
     "/api/portal_busqueda_consentimiento_pdf",
     "/portal-busqueda",
@@ -31893,6 +31894,8 @@ def ensure_demanda_portal_schema(conn):
     # El correo para ejercer derechos. Lo crea también el portal del propietario,
     # pero una instalación puede abrir antes el del comprador y la cláusula lo cita.
     ensure_column(conn, "empresas", "email_rgpd", "email_rgpd TEXT")
+    # El color de la cabecera de los portales. Vacío = el verde de la casa.
+    ensure_column(conn, "empresas", "color_portal", "color_portal TEXT")
     # Postgres hace el DDL dentro de la transacción: sin este commit, una petición
     # de sólo lectura crea las tablas, responde 200 y el rollback del pool se las
     # lleva. Pasó con las del propietario, en producción.
@@ -32020,6 +32023,39 @@ def revoca_accesos_de_la_demanda(conn, demanda_id, motivo, now=None):
     except Exception as _fallo_tragado:
         apunta_escritura_tragada("revoca_accesos_de_la_demanda", _fallo_tragado)
         return 0
+
+
+PORTAL_COLOR_POR_DEFECTO = "#15803D"
+
+
+def _luminancia(hexa):
+    hexa = str(hexa or "").lstrip("#")
+    partes = [int(hexa[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    partes = [x / 12.92 if x <= 0.03928 else ((x + 0.055) / 1.055) ** 2.4 for x in partes]
+    return 0.2126 * partes[0] + 0.7152 * partes[1] + 0.0722 * partes[2]
+
+
+def _contraste(a, b):
+    la, lb = sorted((_luminancia(a), _luminancia(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def color_de_marca(valor, por_defecto=PORTAL_COLOR_POR_DEFECTO):
+    """El color de la cabecera y qué letra se le pone encima.
+
+    Una agencia elige su color corporativo mirando su logo, no midiendo
+    contrastes: si pone un amarillo, la letra blanca desaparece. Aquí se decide la
+    tinta —blanca u oscura— por la que se lea, y si no se lee con ninguna se
+    vuelve al verde de la casa. Nadie va a publicar una cabecera ilegible por
+    haberse equivocado de campo.
+    """
+    crudo = str(valor or "").strip()
+    if not re.match(r"^#[0-9A-Fa-f]{6}$", crudo):
+        return por_defecto, "#ffffff"
+    for tinta in ("#ffffff", "#0f172a"):
+        if _contraste(crudo, tinta) >= 4.5:
+            return crudo, tinta
+    return por_defecto, "#ffffff"
 
 
 def correo_con_la_seleccion(*, agencia, enlace):
@@ -32205,9 +32241,11 @@ def novedades_del_inmueble(conn, inmueble_id, *, desde="", limite=5):
             cuando = str(row_value(f, "created_at", "") or "")
             novedades.append({
                 "fecha": _fecha_corta(cuando),
-                "texto": (f"Ha bajado de precio: de {format_eur(antes)} a {format_eur(despues)}"
+                # `format_eur_short`, no `format_eur`: «279.000,00 €» por una casa
+                # se lee como un extracto bancario, no como un anuncio.
+                "texto": (f"Ha bajado de precio: de {format_eur_short(antes)} a {format_eur_short(despues)}"
                           if despues < antes else
-                          f"Ha subido de precio: de {format_eur(antes)} a {format_eur(despues)}"),
+                          f"Ha subido de precio: de {format_eur_short(antes)} a {format_eur_short(despues)}"),
                 "clave": "precio_baja" if despues < antes else "precio_sube",
                 "nuevo": bool(desde and cuando > desde),
             })
@@ -32492,14 +32530,21 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
             apunta_escritura_tragada("build_portal_de_busqueda/accesos", _fallo_tragado)
 
     cols_emp = table_columns(conn, "empresas") or set()
-    campos_emp = "nombre" + (", logo_url" if "logo_url" in cols_emp else "")
+    # Pedidas en el SELECT, no confiadas a `row_value`: cuando la columna no está
+    # entre las seleccionadas cae a `fila[0]` —aquí, el nombre de la empresa— y el
+    # color elegido se ignoraba sin decir nada.
+    campos_emp = ", ".join(["nombre"] + [c for c in ("logo_url", "color_portal") if c in cols_emp])
     empresa = conn.execute(
         f"SELECT {campos_emp} FROM empresas WHERE id = ? LIMIT 1",
         (str(row_value(demanda, "empresa_id", "") or ""),),
     ).fetchone()
-    logo = str(row_value(empresa, "logo_url", "") or "").strip()
-    if not logo.startswith("/assets/"):
-        logo = ""
+    # Antes: sólo se enseñaba si estaba en `/assets/`, porque desde el portal no hay
+    # sesión para pedir `/uploads` ni para firmar un enlace de S3. El resultado es
+    # que la única agencia que usa esto tiene el suyo en S3 y salía sin logo. Ahora
+    # lo sirve un endpoint con su token, como las fotos.
+    hay_logo = bool(str(row_value(empresa, "logo_url", "") or "").strip())
+    color, tinta = color_de_marca(
+        row_value(empresa, "color_portal", "") if "color_portal" in cols_emp else "")
 
     vistos = sum(1 for x in inmuebles if x["opinion"])
     novedades_nuevas = sum(1 for x in inmuebles for n in x["novedades"] if n["nuevo"])
@@ -32508,7 +32553,9 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
         "agencia": {
             "nombre": str(row_value(empresa, "nombre", "") or ""),
             "asesor": str(row_value(demanda, "responsable", "") or ""),
-            "logo": logo,
+            "logo": hay_logo,
+            "color": color,
+            "tinta": tinta,
         },
         # Lo que pidió, para que pueda decir «esto no era lo que buscaba» con el
         # criterio delante y no de memoria.
@@ -66666,6 +66713,7 @@ class Handler(BaseHTTPRequestHandler):
                usar ese mismo verde de fondo dejaba el texto blanco en 1,74:1. Éste
                da 5,02:1 con blanco y 3,82:1 contra el fondo oscuro de la página. */
             --verde-solido: #15803D;
+            --sobre-solido: #ffffff;
             --texto: "IBM Plex Sans", "Segoe UI", sans-serif;
             --titulos: "IBM Plex Serif", Georgia, serif; }
     @media (prefers-color-scheme: dark) {
@@ -66679,10 +66727,10 @@ class Handler(BaseHTTPRequestHandler):
     main { max-width: 1180px; margin: 0 auto; }
     .contenido { padding: 0 16px; display: grid; gap: 14px; }
     h1 { font-family: var(--titulos); font-size: 30px; font-weight: 600; margin: 0;
-         letter-spacing: -0.01em; line-height: 1.1; color: #fff; }
+         letter-spacing: -0.01em; line-height: 1.1; color: var(--sobre-solido); }
     h2 { font-size: 13px; margin: 0 0 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--suave); }
     .suave { color: var(--suave); }
-    .cabecera { background: var(--verde-solido); color: #fff; padding: 22px 16px 26px; }
+    .cabecera { background: var(--verde-solido); color: var(--sobre-solido); padding: 22px 16px 26px; }
     .cabecera .interior { max-width: 1180px; margin: 0 auto; }
     .cabecera .alto { display: flex; align-items: center; justify-content: space-between; gap: 12px;
                       margin-bottom: 18px; }
@@ -66690,7 +66738,8 @@ class Handler(BaseHTTPRequestHandler):
     .cabecera .marca span { font-size: 14px; font-weight: 600; }
     .asesor { display: flex; align-items: center; gap: 9px; background: rgba(255,255,255,.16);
       border: 1px solid rgba(255,255,255,.28); border-radius: 99px; padding: 5px 12px 5px 5px; }
-    .asesor .cara { width: 30px; height: 30px; border-radius: 99px; background: #fff; color: var(--verde-solido);
+    .asesor .cara { width: 30px; height: 30px; border-radius: 99px; background: var(--sobre-solido);
+      color: var(--verde-solido);
       display: grid; place-items: center; font-weight: 700; font-size: 13px; }
     .asesor b { font-size: 13px; font-weight: 600; display: block; line-height: 1.2; }
     .asesor i { font-size: 11px; font-style: normal; opacity: .85; }
@@ -66740,10 +66789,10 @@ class Handler(BaseHTTPRequestHandler):
     /* Los motivos son una matización, no una respuesta: van un peldaño por debajo. */
     .motivos button { padding: 4px 10px; font-weight: 500; font-size: 12px; color: var(--suave); }
     .opinar button[aria-pressed="true"] { background: var(--verde-solido);
-      border-color: var(--verde-solido); color: #fff; }
+      border-color: var(--verde-solido); color: var(--sobre-solido); }
     .motivos button[aria-pressed="true"] { border-color: var(--verde); color: var(--verde);
       background: var(--verde-claro); }
-    .boton { background: var(--verde-solido); color: #fff; border: 0; border-radius: 10px; padding: 11px 16px;
+    .boton { background: var(--verde-solido); color: var(--sobre-solido); border: 0; border-radius: 10px; padding: 11px 16px;
              font: 600 14px var(--texto); cursor: pointer; }
     .boton.plano { background: transparent; color: var(--verde); border: 1px solid var(--verde); }
     input[type=text], textarea { width: 100%; border: 1px solid var(--linea); border-radius: 10px;
@@ -66946,12 +66995,20 @@ class Handler(BaseHTTPRequestHandler):
         b.habitaciones_min ? b.habitaciones_min + " hab. o más" : "",
       ].filter(Boolean).join(" · ");
       const inicial = (d.agencia.asesor || d.agencia.nombre || "?").trim().charAt(0).toUpperCase();
+      // El color de la agencia, si lo ha puesto. La tinta la decide el servidor por
+      // contraste, no el gusto: con un amarillo corporativo la letra blanca
+      // desaparece y la cabecera queda ilegible.
+      if (d.agencia.color) {
+        document.documentElement.style.setProperty("--verde-solido", d.agencia.color);
+        document.documentElement.style.setProperty("--sobre-solido", d.agencia.tinta || "#fff");
+      }
       app.innerHTML = `
         <header class="cabecera">
           <div class="interior">
             <div class="alto">
               <div class="marca">${d.agencia.logo
-                ? `<img src="${esc(d.agencia.logo)}" alt="${esc(d.agencia.nombre)}" />`
+                ? `<img src="/api/portal_busqueda_logo?token=${encodeURIComponent(token)}&s=${encodeURIComponent(sesion())}"
+                        alt="${esc(d.agencia.nombre)}" />`
                 : `<span>${esc(d.agencia.nombre || "")}</span>`}</div>
               ${d.agencia.asesor ? `<div class="asesor"><div class="cara">${esc(inicial)}</div>
                 <div><b>${esc(d.agencia.asesor)}</b><i>tu asesor</i></div></div>` : ""}
@@ -97175,6 +97232,39 @@ class Handler(BaseHTTPRequestHandler):
             tipo = {"png": "image/png", "webp": "image/webp"}.get(
                 ruta.suffix.lower().lstrip("."), "image/jpeg")
             binary_response(self, ruta.read_bytes(), content_type=tipo)
+            return
+
+        if path == "/api/portal_busqueda_logo":
+            # El logo de la agencia, venga de donde venga: `/assets`, `/uploads` o
+            # S3. Desde el portal no hay sesión para pedir `/uploads` ni forma de
+            # firmar un enlace de S3, así que lo sirve el servidor con el token del
+            # interesado. `_load_brand_logo` ya sabe resolver los tres sitios.
+            token = _request_token_param(self, params, "token")
+            acceso, _fallo = acceso_de_comprador_por_token(conn, token)
+            if not acceso:
+                json_response(self, {"error": "Enlace no válido"}, status=404)
+                return
+            if not sesion_de_portal_valida(acceso, params.get("s", [""])[0]):
+                json_response(self, {"error": "Confirma tu identidad con el código"}, status=401)
+                return
+            empresa = conn.execute(
+                "SELECT logo_url FROM empresas WHERE id = ? LIMIT 1",
+                (str(row_value(acceso, "empresa_id", "") or ""),)).fetchone()
+            crudo_logo = str(row_value(empresa, "logo_url", "") or "").strip()
+            # Sin logo propio se contesta 404. `_load_brand_logo` cae al de
+            # Verifika2 si no encuentra nada, y enseñarle al comprador la marca del
+            # fabricante del CRM en vez de la de su agencia no es «no hay logo».
+            imagen = _load_brand_logo(crudo_logo, max_width=360) if crudo_logo else None
+            if imagen is None:
+                json_response(self, {"error": "Sin logo"}, status=404)
+                return
+            try:
+                buf = BytesIO()
+                imagen.convert("RGBA").save(buf, format="PNG")
+            except Exception:
+                json_response(self, {"error": "Sin logo"}, status=404)
+                return
+            binary_response(self, buf.getvalue(), content_type="image/png")
             return
 
         if path == "/api/portal_busqueda_documento":
