@@ -594,6 +594,23 @@ class LaPaginaTests(BaseComprador):
                 self.assertIn(f"/assets/fuentes/{f}", html)
                 self.assertTrue((S.ASSETS / "fuentes" / f).exists())
 
+    def test_el_verde_de_las_superficies_no_cambia_con_el_tema(self):
+        """`--verde` se aclara en modo oscuro para poder leerse sobre negro. Usar
+        ese mismo verde de FONDO con letra blanca dejaba la cabecera y las pastillas
+        marcadas en 1,74:1: se veían, pero no se leían. Las superficies llevan su
+        propio token, igual en los dos temas."""
+        _, html = self._get("/portal-busqueda")
+        css = html[html.index("<style>"):html.index("</style>")]
+        for regla in (".cabecera {", '.opinar button[aria-pressed="true"] {', ".boton {"):
+            i = css.index(regla)
+            with self.subTest(regla):
+                trozo = css[i:css.index("}", i)]
+                self.assertIn("var(--verde-solido)", trozo)
+                self.assertNotIn("background: var(--verde);", trozo)
+        # Y el token no se redefine en el bloque de modo oscuro.
+        oscuro = css[css.index("@media (prefers-color-scheme: dark)"):]
+        self.assertNotIn("--verde-solido", oscuro[:oscuro.index("}\n    }")])
+
     def test_un_bano_no_son_banos(self):
         """Salía «1 baños» en la mitad de las fichas de la muestra."""
         _, html = self._get("/portal-busqueda")
