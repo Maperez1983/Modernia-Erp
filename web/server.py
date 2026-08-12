@@ -1226,6 +1226,9 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/portal_busqueda_derechos",
     "/api/portal_busqueda_retirar",
     "/api/portal_busqueda_visita",
+    # El comunero comunica una incidencia desde su enlace. Sin sesión: la llave es
+    # el token, y el tope de envíos está dentro.
+    "/api/workspace_fincas_portal_incidencia",
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
     "/api/workspace_portal_public_request",
@@ -43644,6 +43647,11 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_fincas_incidencias", "seguro_id", "seguro_id TEXT")
     ensure_column(conn, "workspace_fincas_incidencias", "siniestro_ref", "siniestro_ref TEXT")
     ensure_column(conn, "workspace_fincas_incidencias", "coste_estimado", "coste_estimado REAL")
+    # Quién la comunicó y por dónde. Una incidencia que entra por el portal hay que
+    # poder distinguirla: no la ha triado nadie todavía, y el administrador necesita
+    # saber a quién contestar.
+    ensure_column(conn, "workspace_fincas_incidencias", "vecino_id", "vecino_id TEXT")
+    ensure_column(conn, "workspace_fincas_incidencias", "origen", "origen TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_proveedores (
@@ -54630,6 +54638,16 @@ def fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio
 #: renovarlo con la persona que de verdad vive ahí.
 FINCAS_PORTAL_DIAS_VALIDEZ = 180
 
+#: Cuántas incidencias puede comunicar un vecino en un día desde el portal. No es
+#: desconfianza: un enlace puede acabar en manos de cualquiera, y sin tope una tarde
+#: tonta llena la bandeja del administrador de ruido y tapa lo que importa.
+FINCAS_PORTAL_INCIDENCIAS_DIA = 5
+
+#: Lo que se acepta escribir. Recortar en el servidor y no solo en la pantalla: el
+#: formulario se puede saltar, la validación no.
+FINCAS_PORTAL_TITULO_MAX = 120
+FINCAS_PORTAL_DESCRIPCION_MAX = 2000
+
 
 def hash_portal_token(raw):
     return hashlib.sha256(str(raw or "").encode("utf-8")).hexdigest()
@@ -54729,6 +54747,22 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
             "ref": referencia_portal(token, row_value(d, "id", "")) if tiene_fichero else "",
         })
 
+    # Las incidencias que ha comunicado él. Solo las suyas: una gotera en el 3.º B es
+    # de su vecino, no de la comunidad entera, y el portal no enseña datos de otros.
+    incidencias = [
+        {
+            "titulo": row_value(i, "titulo", ""),
+            "estado": row_value(i, "estado", "") or "Abierta",
+            "fecha": str(row_value(i, "fecha_apertura", "") or "")[:10],
+        }
+        for i in conn.execute(
+            "SELECT titulo, estado, fecha_apertura FROM workspace_fincas_incidencias "
+            "WHERE workspace_id = ? AND comunidad_id = ? AND vecino_id = ? "
+            "ORDER BY COALESCE(fecha_apertura, '') DESC LIMIT 30",
+            (workspace_id, comunidad_id, vecino_id),
+        ).fetchall()
+    ]
+
     # Las juntas publicadas, con su convocatoria y su acta. Estos dos documentos sí
     # llevan datos de otros vecinos —el acta dice quién votó qué y la convocatoria
     # relaciona a quien no está al corriente—, pero no es una fuga: son documentos que
@@ -54774,6 +54808,7 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
         "deuda": round(deuda, 2),
         "documentos": documentos,
         "juntas": juntas,
+        "incidencias": incidencias,
         "caduca": caduca,
     }
 
@@ -67209,6 +67244,13 @@ class Handler(BaseHTTPRequestHandler):
     .estado[data-e="Cobrado"] { color: #15803d; border-color: #86efac; }
     .estado[data-e="Devuelto"], .estado[data-e="Pendiente"] { color: #b45309; border-color: #fcd34d; }
     .aviso { padding: 12px 14px; border-radius: 12px; background: #fef3c7; border: 1px solid #fcd34d; color: #92400e; }
+    .ok { padding: 12px 14px; border-radius: 12px; background: #dcfce7; border: 1px solid #86efac; color: #14532d; }
+    input, textarea { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 10px;
+                      border: 1px solid #d1d5db; font: inherit; background: transparent; color: inherit; }
+    label { display: block; margin: 10px 0 4px; font-size: 13px; color: #6b7280; }
+    button { margin-top: 12px; padding: 10px 16px; border-radius: 10px; border: 1px solid #d1d5db;
+             background: #15803d; color: #fff; font: inherit; cursor: pointer; }
+    button[disabled] { opacity: .55; cursor: default; }
     @media (prefers-color-scheme: dark) {
       body { background: #111; color: #f3f4f6; }
       .card, .kpi { border-color: #333; }
@@ -67272,7 +67314,42 @@ class Handler(BaseHTTPRequestHandler):
                 <td class="muted">${esc(x.tipo)}</td>
                 <td class="num muted">${x.ref ? esc(x.fecha) : esc(x.fecha) + " · sin fichero"}</td></tr>`).join("")}</tbody></table>
             </div>` : ""}
+            <div class="card">
+              <h2 style="font-size:16px;margin:0 0 8px;">Comunicar una incidencia</h2>
+              ${(d.incidencias || []).length ? `<table><tbody>${d.incidencias.map((x) => `<tr>
+                <td>${esc(x.titulo)}</td><td class="muted">${esc(x.fecha)}</td>
+                <td class="num"><span class="estado" data-e="${esc(x.estado)}">${esc(x.estado)}</span></td>
+              </tr>`).join("")}</tbody></table><p class="muted" style="margin-top:10px;">Estas son las que has comunicado tú.</p>` : ""}
+              <label for="inc-titulo">Qué pasa</label>
+              <input id="inc-titulo" maxlength="120" placeholder="Gotera en el techo del garaje" />
+              <label for="inc-desc">Detalles (opcional)</label>
+              <textarea id="inc-desc" rows="3" maxlength="2000" placeholder="Desde cuándo, dónde exactamente, si va a más…"></textarea>
+              <button id="inc-enviar">Comunicar</button>
+              <div id="inc-aviso" style="margin-top:10px;"></div>
+            </div>
             <p class="muted">Enlace válido hasta ${esc(d.caduca || "-")}. Si tienes dudas sobre algún recibo, habla con tu administrador.</p>`;
+          const boton = document.getElementById("inc-enviar");
+          const aviso = document.getElementById("inc-aviso");
+          boton.addEventListener("click", async () => {
+            const titulo = document.getElementById("inc-titulo").value.trim();
+            if (titulo.length < 4) { aviso.innerHTML = '<div class="aviso">Cuenta en una línea qué pasa.</div>'; return; }
+            boton.disabled = true;
+            aviso.innerHTML = '<p class="muted">Enviando…</p>';
+            try {
+              const r = await fetch("/api/workspace_fincas_portal_incidencia", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ token, titulo, descripcion: document.getElementById("inc-desc").value }),
+              });
+              const res = await r.json();
+              if (!r.ok) throw new Error(res.error || "No se pudo enviar");
+              aviso.innerHTML = '<div class="ok">Comunicada. La administración la verá con tu nombre y tu piso.</div>';
+              document.getElementById("inc-titulo").value = "";
+              document.getElementById("inc-desc").value = "";
+            } catch (e) {
+              aviso.innerHTML = '<div class="aviso">' + esc(e.message || "No se pudo enviar") + "</div>";
+              boton.disabled = false;
+            }
+          });
         })
         .catch((e) => { app.innerHTML = '<div class="aviso">' + esc(e.message || "No se pudo cargar") + "</div>"; });
     }
@@ -68072,6 +68149,10 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_equipo",
             "/api/workspace_contrato_plantillas",
             "/api/workspace_fincas_portal_alta",
+            # La comunica el vecino desde su enlace, sin sesión. Marcarla pública no
+            # basta: si no está también aquí, la lista blanca la rechaza antes de
+            # llegar y el endpoint no existe para nadie.
+            "/api/workspace_fincas_portal_incidencia",
             "/api/workspace_fincas_portal_revocar",
             "/api/workspace_fincas_vecino_delete",
             "/api/workspace_presupuesto_delete",
@@ -81761,6 +81842,65 @@ class Handler(BaseHTTPRequestHandler):
                 "ejercicio": fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio),
             })
             return
+        elif parsed.path == "/api/workspace_fincas_portal_incidencia":
+            # El comunero comunica una avería desde su enlace. Es el único sitio del
+            # portal donde se escribe, así que aquí va todo el cuidado: la llave es el
+            # token, hay tope de envíos y la validación se hace en el servidor —el
+            # formulario se puede saltar, esto no—.
+            token = str(payload.get("token") or "").strip()
+            if not token:
+                json_response(self, {"error": "token requerido"}, status=400)
+                return
+            acceso = conn.execute(
+                "SELECT id, workspace_id, comunidad_id, vecino_id, revocado, expires_at "
+                "FROM workspace_fincas_portal_accesos WHERE token_hash = ? LIMIT 1",
+                (hash_portal_token(token),),
+            ).fetchone()
+            if not acceso or int(row_value(acceso, "revocado", 0) or 0):
+                json_response(self, {"error": "enlace no válido"}, status=404)
+                return
+            caduca = str(row_value(acceso, "expires_at", "") or "")[:10]
+            if caduca and caduca < datetime.now().date().isoformat():
+                json_response(self, {"error": "enlace caducado"}, status=403)
+                return
+            workspace_id = row_value(acceso, "workspace_id", "")
+            comunidad_id = row_value(acceso, "comunidad_id", "")
+            vecino_id = row_value(acceso, "vecino_id", "")
+
+            titulo = re.sub(r"\s+", " ", str(payload.get("titulo") or "")).strip()[:FINCAS_PORTAL_TITULO_MAX]
+            descripcion = str(payload.get("descripcion") or "").strip()[:FINCAS_PORTAL_DESCRIPCION_MAX]
+            if len(titulo) < 4:
+                json_response(self, {"error": "Cuenta en una línea qué pasa."}, status=400)
+                return
+
+            # El tope es por vecino y por día natural.
+            desde = (datetime.now() - timedelta(days=1)).isoformat(timespec="seconds")
+            recientes = conn.execute(
+                "SELECT COUNT(*) AS n FROM workspace_fincas_incidencias "
+                "WHERE workspace_id = ? AND vecino_id = ? AND COALESCE(created_at, '') >= ?",
+                (workspace_id, vecino_id, desde),
+            ).fetchone()
+            if int(row_value(recientes, "n", 0) or 0) >= FINCAS_PORTAL_INCIDENCIAS_DIA:
+                json_response(self, {
+                    "error": "Has comunicado varias incidencias hoy. Si es urgente, llama a la administración.",
+                }, status=429)
+                return
+
+            # La prioridad no la pone el vecino: describir es suyo, triar es del
+            # administrador. Entra Abierta y sin prioridad, para que se vea que nadie
+            # la ha mirado todavía.
+            conn.execute(
+                "INSERT INTO workspace_fincas_incidencias "
+                "(id, workspace_id, comunidad_id, titulo, descripcion, estado, fecha_apertura, "
+                " vecino_id, origen, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 'Abierta', ?, ?, 'portal', datetime(?), datetime(?))",
+                (os.urandom(16).hex(), workspace_id, comunidad_id, titulo, descripcion or None,
+                 datetime.now().date().isoformat(), vecino_id, now, now),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "recuento": fetch_fincas_portal_public(conn, token, registrar=False)})
+            return
+
         elif parsed.path == "/api/workspace_fincas_portal_alta":
             session = getattr(self, "auth_session", None) or self._current_session()
             workspace_id = str(payload.get("workspace_id") or "").strip()

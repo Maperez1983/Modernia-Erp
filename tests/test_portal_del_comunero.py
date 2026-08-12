@@ -172,5 +172,79 @@ class LasDescargasSeComprubanContraLoPublicadoTests(unittest.TestCase):
         self.assertIn("tipo=acta", pagina)
 
 
+class ComunicarUnaIncidenciaTests(BaseDePruebaTests):
+    """El único sitio del portal donde el vecino escribe, así que es donde más cuidado
+    hace falta: la llave es el token, hay tope de envíos y la validación va en el
+    servidor —el formulario se puede saltar—."""
+
+    def _crea(self, workspace_id, comunidad_id, vecino_id, titulo, cuando=None):
+        """Lo que hace el endpoint al insertar, para poder probar el tope sin HTTP."""
+        self.conn.execute(
+            "INSERT INTO workspace_fincas_incidencias (id, workspace_id, comunidad_id, titulo, "
+            "estado, fecha_apertura, vecino_id, origen, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, 'Abierta', '2026-08-12', ?, 'portal', ?, ?)",
+            (server.os.urandom(8).hex(), workspace_id, comunidad_id, titulo, vecino_id,
+             cuando or "2026-08-12T10:00:00", "2026-08-12T10:00:00"))
+        self.conn.commit()
+
+    def test_solo_ve_las_suyas(self):
+        self._crea(WS, "c1", "v1", "Gotera en mi trastero")
+        self._crea(WS, "c1", "otro", "La del vecino de arriba")
+        datos = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))
+        self.assertEqual([i["titulo"] for i in datos["incidencias"]], ["Gotera en mi trastero"])
+
+    def test_el_tope_esta_puesto_y_es_por_vecino_y_dia(self):
+        self.assertEqual(server.FINCAS_PORTAL_INCIDENCIAS_DIA, 5)
+        i = SERVER.index('elif parsed.path == "/api/workspace_fincas_portal_incidencia":')
+        cuerpo = SERVER[i: SERVER.index("\n        elif parsed.path ==", i + 10)]
+        self.assertIn("FINCAS_PORTAL_INCIDENCIAS_DIA", cuerpo)
+        self.assertIn("vecino_id = ?", cuerpo)
+        self.assertIn("status=429", cuerpo)
+
+    def test_la_comunidad_sale_del_token_y_no_del_envio(self):
+        """Si viniera en el cuerpo, cualquiera con un enlace escribiría en otra finca."""
+        i = SERVER.index('elif parsed.path == "/api/workspace_fincas_portal_incidencia":')
+        cuerpo = SERVER[i: SERVER.index("\n        elif parsed.path ==", i + 10)]
+        self.assertIn('comunidad_id = row_value(acceso, "comunidad_id", "")', cuerpo)
+        self.assertNotIn('payload.get("comunidad_id")', cuerpo)
+        self.assertNotIn('payload.get("vecino_id")', cuerpo)
+
+    def test_recorta_en_el_servidor(self):
+        i = SERVER.index('elif parsed.path == "/api/workspace_fincas_portal_incidencia":')
+        cuerpo = SERVER[i: SERVER.index("\n        elif parsed.path ==", i + 10)]
+        self.assertIn("FINCAS_PORTAL_TITULO_MAX", cuerpo)
+        self.assertIn("FINCAS_PORTAL_DESCRIPCION_MAX", cuerpo)
+        self.assertEqual(server.FINCAS_PORTAL_TITULO_MAX, 120)
+        self.assertEqual(server.FINCAS_PORTAL_DESCRIPCION_MAX, 2000)
+
+    def test_no_deja_mandar_un_titulo_vacio(self):
+        i = SERVER.index('elif parsed.path == "/api/workspace_fincas_portal_incidencia":')
+        cuerpo = SERVER[i: SERVER.index("\n        elif parsed.path ==", i + 10)]
+        self.assertIn("len(titulo) < 4", cuerpo)
+
+    def test_entra_abierta_sin_prioridad_y_marcada_como_del_portal(self):
+        """Describir es del vecino; triar, del administrador. Y hay que poder
+        distinguir lo que nadie ha mirado todavía."""
+        i = SERVER.index('elif parsed.path == "/api/workspace_fincas_portal_incidencia":')
+        cuerpo = SERVER[i: SERVER.index("\n        elif parsed.path ==", i + 10)]
+        insert = cuerpo[cuerpo.index("INSERT INTO workspace_fincas_incidencias"):
+                        cuerpo.index("conn.commit()")]
+        self.assertIn("'Abierta'", insert)
+        self.assertIn("'portal'", insert)
+        # En la sentencia, no en el comentario que explica por qué: la primera versión
+        # de este test buscaba la palabra en todo el bloque y la encontraba ahí.
+        self.assertNotIn("prioridad", insert)
+
+    def test_respeta_revocacion_y_caducidad(self):
+        i = SERVER.index('elif parsed.path == "/api/workspace_fincas_portal_incidencia":')
+        cuerpo = SERVER[i: SERVER.index("\n        elif parsed.path ==", i + 10)]
+        self.assertIn('row_value(acceso, "revocado", 0)', cuerpo)
+        self.assertIn("expires_at", cuerpo)
+
+    def test_es_ruta_publica_de_escritura(self):
+        i = SERVER.index("AUTH_PUBLIC_POST_ENDPOINTS = {")
+        self.assertIn('"/api/workspace_fincas_portal_incidencia",', SERVER[i: SERVER.index("}", i)])
+
+
 if __name__ == "__main__":
     unittest.main()
