@@ -1184,6 +1184,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/portal_venta",
     "/api/portal_venta_foto",
     "/api/portal_venta_documento",
+    "/api/portal_venta_consentimiento_pdf",
     "/portal-venta",
     "/api/workspace_portal_s3_url",
     "/api/workspace_factura_pdf_public",
@@ -1206,6 +1207,8 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/portal_venta_propuesta",
     "/api/portal_venta_mensaje",
     "/api/portal_venta_firma",
+    "/api/portal_venta_consentimiento",
+    "/api/portal_venta_derechos",
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
     "/api/workspace_portal_public_request",
@@ -31132,6 +31135,246 @@ def ensure_visita_resultado_schema(conn):
         apunta_escritura_tragada("ensure_visita_resultado_schema/commit", _fallo_tragado)
 
 
+# ─────────────── Consentimiento informado para entrar en un portal ───────────────
+#
+# Nadie entra sin firmar. La cláusula se versiona: si mañana cambia el texto, lo
+# firmado sigue diciendo lo que decía el día que se firmó, que es lo único que vale
+# si alguien lo discute. Por eso se guarda también el hash del texto.
+#
+# AVISO: esta redacción la ha preparado el desarrollo a partir de lo que el sistema
+# hace de verdad, que es la parte difícil de acertar en una plantilla genérica. No
+# sustituye a la revisión de vuestro asesor legal antes de usarla con clientes.
+
+CONSENTIMIENTO_VERSION = "2026-08-11"
+
+TEXTOS_DE_CONSENTIMIENTO = {
+    "propietario": {
+        "titulo": "Información sobre el tratamiento de tus datos",
+        "resumen": "Vas a acceder al seguimiento de la venta de tu inmueble.",
+        "parrafos": [
+            "**Quién trata tus datos.** {agencia}, como responsable del tratamiento.",
+            "**Para qué.** Para gestionar el encargo de venta de tu inmueble y para que puedas "
+            "seguir su estado desde este espacio: visitas realizadas y previstas, interesados, "
+            "ofertas recibidas, documentación y comunicación con tu asesor.",
+            "**Con qué legitimación.** La ejecución del contrato de encargo que nos une, y tu "
+            "consentimiento para habilitarte este acceso en concreto.",
+            "**Qué datos.** Tu nombre, NIF, teléfono y correo; los datos del inmueble; y lo que "
+            "escribas o subas en este espacio.",
+            "**Quién puede verlos.** Sólo el personal de la agencia que lleva tu encargo. No se "
+            "ceden a terceros salvo obligación legal. Los datos se alojan en servidores dentro "
+            "del Espacio Económico Europeo.",
+            "**Qué NO se enseña aquí.** La identidad de los compradores interesados, ni los "
+            "honorarios de la agencia, ni las notas internas del asesor.",
+            "**Cuánto tiempo.** Mientras dure el encargo y después el plazo legal de conservación "
+            "que corresponda. Este acceso se cierra automáticamente al terminar la venta.",
+            "**Tus derechos.** Puedes acceder, rectificar, suprimir, limitar u oponerte al "
+            "tratamiento, y solicitar la portabilidad de tus datos, desde este mismo espacio o "
+            "escribiendo a la agencia. También puedes reclamar ante la Agencia Española de "
+            "Protección de Datos (www.aepd.es).",
+            "**Este enlace es personal.** No lo compartas: quien lo tenga puede ver el seguimiento "
+            "de tu venta.",
+        ],
+    },
+    "comprador": {
+        "titulo": "Información sobre el tratamiento de tus datos",
+        "resumen": "Vas a acceder a la selección de inmuebles que te ha preparado tu asesor.",
+        "parrafos": [
+            "**Quién trata tus datos.** {agencia}, como responsable del tratamiento.",
+            "**Para qué.** Para buscarte inmuebles que encajen con lo que nos has pedido, "
+            "enseñártelos, concertar visitas y acompañarte si decides comprar.",
+            "**Con qué legitimación.** Tu solicitud de servicio y tu consentimiento para "
+            "habilitarte este acceso.",
+            "**Qué datos.** Tu nombre, NIF, teléfono y correo; lo que buscas (zona, tipo, "
+            "presupuesto); y lo que escribas o subas en este espacio.",
+            "**Quién puede verlos.** Sólo el personal de la agencia. Si haces una oferta sobre un "
+            "inmueble, al propietario se le comunica el importe y las condiciones, **no tu "
+            "identidad**, salvo que llegues a formalizar la operación.",
+            "**Cuánto tiempo.** Mientras tu búsqueda siga activa y después el plazo legal que "
+            "corresponda. Puedes pedir que la cerremos cuando quieras.",
+            "**Tus derechos.** Puedes acceder, rectificar, suprimir, limitar u oponerte al "
+            "tratamiento, y solicitar la portabilidad de tus datos, desde este mismo espacio o "
+            "escribiendo a la agencia. También puedes reclamar ante la Agencia Española de "
+            "Protección de Datos (www.aepd.es).",
+            "**Este enlace es personal.** No lo compartas.",
+        ],
+    },
+}
+
+TEXTO_COMERCIAL = (
+    "Además, quiero recibir avisos de inmuebles y servicios que puedan interesarme. "
+    "Es opcional y puedo retirarlo cuando quiera; no condiciona el servicio."
+)
+
+
+def texto_de_consentimiento(ambito, agencia=""):
+    base = TEXTOS_DE_CONSENTIMIENTO.get(ambito) or TEXTOS_DE_CONSENTIMIENTO["propietario"]
+    parrafos = [p.replace("{agencia}", str(agencia or "la agencia")) for p in base["parrafos"]]
+    return {
+        "version": CONSENTIMIENTO_VERSION,
+        "ambito": ambito,
+        "titulo": base["titulo"],
+        "resumen": base["resumen"],
+        "parrafos": parrafos,
+        "comercial": TEXTO_COMERCIAL,
+        # El hash cierra la versión: si el texto cambiara una coma, lo firmado
+        # seguiría demostrando qué se leyó exactamente aquel día.
+        "sha256": hashlib.sha256(("\n".join(parrafos) + TEXTO_COMERCIAL).encode("utf-8")).hexdigest(),
+    }
+
+
+def ensure_portal_consentimientos_schema(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS portal_consentimientos (
+          id TEXT PRIMARY KEY,
+          ambito TEXT NOT NULL,
+          acceso_id TEXT,
+          empresa_id TEXT,
+          inmueble_id TEXT,
+          demanda_id TEXT,
+          cliente_id TEXT,
+          nombre TEXT,
+          nif TEXT,
+          texto_version TEXT,
+          texto_sha256 TEXT,
+          acepta_informacion INTEGER NOT NULL DEFAULT 0,
+          acepta_comercial INTEGER NOT NULL DEFAULT 0,
+          firma_png TEXT,
+          documento_pdf TEXT,
+          ip TEXT,
+          agente TEXT,
+          revocado_at TEXT,
+          created_at TEXT NOT NULL,
+          prev_hash TEXT,
+          integrity_hash TEXT
+        )
+        """
+    )
+    for sql in (
+        "CREATE INDEX IF NOT EXISTS idx_portal_consent_acceso ON portal_consentimientos (acceso_id)",
+        "CREATE INDEX IF NOT EXISTS idx_portal_consent_cliente ON portal_consentimientos (cliente_id, created_at)",
+    ):
+        try:
+            conn.execute(sql)
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("ensure_portal_consentimientos_schema/indices", _fallo_tragado)
+    try:
+        conn.commit()
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_portal_consentimientos_schema/commit", _fallo_tragado)
+
+
+def _payload_de_consentimiento(fila, prev_hash):
+    return "|".join([
+        str(prev_hash or ""),
+        str(row_value(fila, "id", "") or ""),
+        str(row_value(fila, "ambito", "") or ""),
+        str(row_value(fila, "cliente_id", "") or ""),
+        str(row_value(fila, "nombre", "") or ""),
+        str(row_value(fila, "nif", "") or ""),
+        str(row_value(fila, "texto_sha256", "") or ""),
+        str(row_value(fila, "acepta_comercial", "") or ""),
+        str(row_value(fila, "created_at", "") or ""),
+    ])
+
+
+def consentimiento_vigente(conn, acceso_id):
+    try:
+        ensure_portal_consentimientos_schema(conn)
+        return conn.execute(
+            "SELECT * FROM portal_consentimientos WHERE acceso_id = ? AND revocado_at IS NULL "
+            "AND texto_version = ? ORDER BY created_at DESC LIMIT 1",
+            (str(acceso_id or ""), CONSENTIMIENTO_VERSION),
+        ).fetchone()
+    except Exception:
+        _rollback_best_effort(conn)
+        return None
+
+
+def guarda_consentimiento_de_portal(conn, acceso, *, ambito, agencia, nombre, nif,
+                                    acepta_comercial, firma_png, ip="", agente="", now=None):
+    """Firma el consentimiento y **guarda el documento en la base**, no en disco.
+
+    El PDF va dentro de la fila, en base64. En disco se puede perder al reconstruir
+    el servidor, al rotar un contenedor o al limpiar `uploads`; y lo que hay que
+    poder enseñar dentro de dos años, cuando alguien discuta si consintió, es
+    exactamente este papel. Ocupa unos pocos kilobytes por persona.
+
+    Va encadenado por hash como las decisiones sobre ofertas: sirve de poco guardar
+    el documento si luego se puede editar la fila sin que se note.
+    """
+    ensure_portal_consentimientos_schema(conn)
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    texto = texto_de_consentimiento(ambito, agencia)
+    registro = {
+        "id": os.urandom(16).hex(),
+        "ambito": ambito,
+        "acceso_id": str(row_value(acceso, "id", "") or ""),
+        "empresa_id": str(row_value(acceso, "empresa_id", "") or ""),
+        "inmueble_id": str(row_value(acceso, "inmueble_id", "") or ""),
+        "demanda_id": str(row_value(acceso, "demanda_id", "") or ""),
+        "cliente_id": str(row_value(acceso, "cliente_id", "") or ""),
+        "nombre": str(nombre or "").strip()[:180],
+        "nif": str(nif or "").strip()[:20],
+        "texto_version": texto["version"],
+        "texto_sha256": texto["sha256"],
+        "acepta_informacion": 1,
+        "acepta_comercial": 1 if acepta_comercial else 0,
+        "firma_png": str(firma_png or "")[:400000] or None,
+        "ip": str(ip or "")[:60],
+        "agente": str(agente or "")[:250],
+        "created_at": now,
+    }
+
+    cuerpo = [f"Ámbito: {ambito}", f"Firmante: {registro['nombre']} · {registro['nif'] or 'sin NIF'}",
+              f"Fecha y hora (UTC): {now}", f"Desde: {registro['ip'] or '-'}",
+              f"Versión del texto: {texto['version']}", f"Huella del texto (SHA-256): {texto['sha256']}",
+              f"Comunicaciones comerciales: {'SÍ acepta' if registro['acepta_comercial'] else 'NO acepta'}",
+              "", "TEXTO ACEPTADO:", ""]
+    cuerpo += [p.replace("**", "") for p in texto["parrafos"]]
+    if registro["acepta_comercial"]:
+        cuerpo += ["", texto["comercial"]]
+    try:
+        pdf = build_branded_text_document_pdf(
+            "CONSENTIMIENTO INFORMADO DE ACCESO",
+            f"{agencia or 'La agencia'} · {texto['resumen']}",
+            cuerpo,
+            ["Documento generado y conservado por el CRM. La aceptación se registró de forma "
+             "electrónica con fecha, hora y dirección de origen."],
+        )
+        registro["documento_pdf"] = base64.b64encode(pdf).decode("ascii")
+    except Exception as _fallo_tragado:
+        # Sin PDF se guarda igual: el registro y el texto firmado son lo que vale.
+        apunta_escritura_tragada("guarda_consentimiento_de_portal/pdf", _fallo_tragado)
+        registro["documento_pdf"] = None
+
+    prev_hash = ""
+    try:
+        fila = conn.execute(
+            "SELECT a.integrity_hash FROM portal_consentimientos a "
+            "WHERE COALESCE(a.integrity_hash,'') <> '' AND NOT EXISTS ("
+            "  SELECT 1 FROM portal_consentimientos b WHERE COALESCE(b.prev_hash,'') = a.integrity_hash) "
+            "ORDER BY a.created_at DESC, a.id DESC LIMIT 1"
+        ).fetchone()
+        if fila:
+            prev_hash = str(row_value(fila, "integrity_hash", "") or "")
+    except Exception:
+        _rollback_best_effort(conn)
+    integridad = hashlib.sha256(_payload_de_consentimiento(registro, prev_hash).encode("utf-8")).hexdigest()
+    registro["prev_hash"] = prev_hash
+    registro["integrity_hash"] = integridad
+
+    columnas = table_columns(conn, "portal_consentimientos") or set()
+    claves = [k for k in registro if k in columnas] or list(registro)
+    conn.execute(
+        f"INSERT INTO portal_consentimientos ({', '.join(claves)}) "
+        f"VALUES ({', '.join(['?'] * len(claves))})",
+        [registro[k] for k in claves],
+    )
+    conn.commit()
+    return registro["id"]
+
+
 def ensure_inmueble_portal_mensajes_schema(conn):
     """El hilo entre el propietario y su comercial.
 
@@ -42717,6 +42960,12 @@ def ensure_workspace_product_tables(conn):
     # En segunda convocatoria el denominador cambia: la mayoría se cuenta sobre los
     # asistentes, no sobre el total de la comunidad (LPH art. 17.7).
     ensure_column(conn, "workspace_fincas_juntas", "segunda_convocatoria", "segunda_convocatoria INTEGER NOT NULL DEFAULT 0")
+    # El artículo 16.2 de la LPH obliga a que la convocatoria diga el lugar y la hora de
+    # primera y segunda convocatoria. La tabla solo guardaba la fecha, así que eso había
+    # que escribirlo a mano fuera del sistema.
+    ensure_column(conn, "workspace_fincas_juntas", "hora", "hora TEXT")
+    ensure_column(conn, "workspace_fincas_juntas", "lugar", "lugar TEXT")
+    ensure_column(conn, "workspace_fincas_juntas", "hora_segunda", "hora_segunda TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_contabilidad (
@@ -54089,6 +54338,167 @@ def fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id):
     }
 
 
+#: Minutos entre la primera y la segunda convocatoria cuando no se indica otra hora.
+#: «Podrá celebrarse el mismo día, si se hubiese indicado, transcurrida media hora
+#: desde la anterior» (art. 16.2 LPH). Editable desde la propia junta.
+FINCAS_MINUTOS_SEGUNDA_CONVOCATORIA = 30
+
+#: Antelación mínima de la convocatoria ordinaria (art. 16.3 LPH). La extraordinaria
+#: va «con la antelación posible», sin plazo fijado, así que no se avisa de nada.
+FINCAS_DIAS_ANTELACION_ORDINARIA = 6
+
+
+def build_convocatoria_junta_pdf(junta, comunidad, acuerdos, morosos, workspace=None, company=None):
+    """La convocatoria de la junta, con lo que el artículo 16 de la LPH obliga a poner.
+
+    Hasta ahora esto se escribía a mano fuera del CRM, y los datos los tenía todos el
+    sistema: el orden del día está en `workspace_fincas_junta_acuerdos` y quién debe,
+    en la morosidad. El endpoint que se llamaba «convocatoria» solo marcaba un sí/no
+    —si la junta se celebra en segunda—, que es de las cosas que peor envejecen.
+
+    El artículo 16.2 exige cuatro cosas, y las cuatro van aquí: los asuntos a tratar,
+    el lugar con día y hora de primera y segunda convocatoria, la relación de
+    propietarios que no están al corriente de pago, y la advertencia de que quedan
+    privados del derecho de voto (art. 15.2).
+
+    Lo que el sistema no sabe no se inventa: si no hay lugar señalado, el documento
+    deja el hueco a la vista en vez de poner una sala que nadie ha reservado.
+    """
+    workspace = workspace or {}
+    company = company or {}
+
+    def limpio(valor):
+        texto = str(valor or "").strip()
+        return "" if texto in {"-", "—", "None"} else texto
+
+    tipo = (limpio(row_value(junta, "tipo", "")) or "ordinaria").lower()
+    fecha_iso = str(row_value(junta, "fecha", "") or "")[:10]
+    hora = limpio(row_value(junta, "hora", "")) or "—"
+    lugar = limpio(row_value(junta, "lugar", ""))
+    hora_segunda = limpio(row_value(junta, "hora_segunda", ""))
+    if not hora_segunda and hora != "—":
+        try:
+            base = datetime.strptime(hora[:5], "%H:%M")
+            hora_segunda = (base + timedelta(minutes=FINCAS_MINUTOS_SEGUNDA_CONVOCATORIA)).strftime("%H:%M")
+        except Exception:
+            hora_segunda = ""
+
+    MESES_ES = ("enero", "febrero", "marzo", "abril", "mayo", "junio",
+                "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre")
+    try:
+        d = datetime.strptime(fecha_iso, "%Y-%m-%d").date()
+        fecha_larga = f"{d.day} de {MESES_ES[d.month - 1]} de {d.year}"
+    except Exception:
+        d, fecha_larga = None, fecha_iso or "—"
+
+    sections = [
+        ("Comunidad", [linea for linea in (
+            f"Denominación: {limpio(row_value(comunidad, 'nombre', ''))}",
+            f"Dirección: {limpio(row_value(comunidad, 'direccion', ''))}" if limpio(row_value(comunidad, "direccion", "")) else "",
+            f"CIF: {limpio(row_value(comunidad, 'cif', ''))}" if limpio(row_value(comunidad, "cif", "")) else "",
+        ) if linea]),
+        # Las tarjetas llevan solo la hora. Con la fecha entera dentro, el motor las
+        # recortaba por ancho y se comía el «· 18:00» — justo el dato que el art. 16.2
+        # obliga a indicar. El día y el lugar van debajo, en texto, donde no se cortan.
+        ("Convocatoria", {"kind": "kpi_cards", "columns": 3, "items": [
+            {"label": "Junta", "value": tipo.capitalize(), "accent": 1},
+            {"label": "1.ª convocatoria", "value": hora},
+            {"label": "2.ª convocatoria", "value": hora_segunda or "Sin señalar"},
+        ]}),
+        ("", [
+            f"Día de celebración: {fecha_larga}.",
+            f"Hora: {hora} en primera convocatoria"
+            + (f" y {hora_segunda} en segunda." if hora_segunda else ", sin segunda convocatoria señalada."),
+            f"Lugar de celebración: {lugar}" if lugar
+            else "Lugar de celebración: ______________________  (sin señalar en el sistema)",
+            "En segunda convocatoria la junta se celebra el mismo día, transcurrida media hora "
+            "desde la primera, salvo que arriba se indique otra hora (art. 16.2 LPH)."
+            if hora_segunda else
+            "No se ha señalado segunda convocatoria: sin ella, la junta solo puede celebrarse "
+            "válidamente en primera con los quórums del art. 16.2 LPH.",
+        ]),
+    ]
+
+    # El orden del día. Si no hay puntos registrados, se dice: una convocatoria sin
+    # asuntos a tratar no cumple el art. 16.2 y es mejor que se vea antes de enviarla.
+    puntos = [a for a in (acuerdos or []) if limpio(a.get("titulo"))]
+    if puntos:
+        sections.append(("Orden del día", [
+            linea for punto in puntos for linea in (
+                f"{punto.get('orden', 0)}. {limpio(punto.get('titulo'))}",
+                *( [f"      {limpio(punto.get('descripcion'))}"] if limpio(punto.get("descripcion")) else [] ),
+            )
+        ]))
+    else:
+        sections.append(("Orden del día", [
+            "No hay puntos registrados para esta junta.",
+            "El artículo 16.2 de la LPH exige que la convocatoria indique los asuntos a tratar.",
+        ]))
+
+    # Art. 15.2: quien no esté al corriente puede participar en la deliberación pero no
+    # vota, y el art. 16.2 obliga a que la convocatoria lo advierta y liste a quiénes.
+    if morosos:
+        sections.append(("Propietarios no al corriente de pago", {
+            "kind": "table",
+            "columns": [
+                {"label": "Inmueble", "width": 2},
+                {"label": "Propietario", "width": 5},
+                {"label": "Recibos", "width": 2, "align": "right"},
+                {"label": "Deuda", "width": 2, "align": "right"},
+            ],
+            "rows": [[m.get("piso", ""), m.get("nombre", ""), str(m.get("recibos", 0)),
+                      format_eur(m.get("deuda", 0))] for m in morosos],
+            "total": ["Total", "", "", format_eur(sum(float(m.get("deuda") or 0) for m in morosos))],
+        }))
+        sections.append(("", [
+            "Los propietarios relacionados no están al corriente en el pago de las deudas vencidas "
+            "con la comunidad. Podrán participar en las deliberaciones, pero NO tendrán derecho de "
+            "voto (art. 15.2 LPH), salvo que antes del inicio de la junta hayan pagado, impugnado "
+            "judicialmente la deuda o consignado su importe judicial o notarialmente.",
+        ]))
+    else:
+        sections.append(("Propietarios no al corriente de pago", [
+            "Ninguno: a día de hoy no consta deuda vencida pendiente en la comunidad.",
+        ]))
+
+    sections.append(("Representación", [
+        "Si no puede asistir, puede delegar su representación por escrito en otro propietario "
+        "o en cualquier persona, haciéndolo constar con su firma (art. 15.1 LPH).",
+        "",
+        "D./D.ª ____________________________________, propietario/a del inmueble __________,",
+        "delego mi representación y voto en D./D.ª ____________________________________.",
+        "",
+        "Firma: ______________________",
+    ]))
+
+    pie = ["Convocatoria emitida desde el CRM. Documento sujeto a firma del secretario administrador."]
+    if tipo.startswith("ordinaria"):
+        pie.append(
+            f"La convocatoria de la junta ordinaria debe llegar a todos los propietarios con al menos "
+            f"{FINCAS_DIAS_ANTELACION_ORDINARIA} días de antelación (art. 16.3 LPH)."
+        )
+    sections.append(("Firma", [
+        "", "Fdo.: El secretario administrador", "", "", "V.º B.º El presidente",
+    ]))
+
+    logo = _load_asset_logo("logos/fincas-velazquez.png", max_width=420)
+    sello = _load_asset_logo("logos/colegio-administradores-v2.png", max_width=300)
+    try:
+        from .branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    except ImportError:
+        from branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    return build_modernia_branded_document_pdf_vector(
+        "CONVOCATORIA DE JUNTA",
+        f"{limpio(row_value(comunidad, 'nombre', '')) or 'Comunidad de propietarios'} · {fecha_larga}",
+        sections,
+        pie,
+        company=dict(company, nombre_comercial=FINCAS_NOMBRE_COMERCIAL),
+        brand_logo_url=logo,
+        brand_color=workspace.get("primary_color"),
+        seal_image=sello,
+    )
+
+
 def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
     """Acta de la junta: asistentes, votación y resultado de cada acuerdo.
 
@@ -64560,7 +64970,16 @@ class Handler(BaseHTTPRequestHandler):
     /* Después de definir `.barra`, no antes: con la misma especificidad gana la
        última regla, y la de arriba no llegaba a aplicarse nunca. */
     @media (min-width: 940px) { .barra { display: none; } body { padding-bottom: 24px; } }
-  </style>
+      .legal { max-width: 640px; margin: 0 auto; padding: 24px 16px 40px; }
+    .legal .parrafo { font-size: 14px; margin: 0 0 11px; }
+    .casilla { display: flex; gap: 10px; align-items: flex-start; margin: 14px 0; font-size: 14px; }
+    .casilla input { width: 18px; height: 18px; margin-top: 3px; flex: 0 0 auto; }
+    .rubrica { border: 1px dashed var(--linea); border-radius: 12px; background: var(--fondo);
+      touch-action: none; width: 100%; height: 130px; display: block; }
+    .campo { display: block; margin-bottom: 12px; font-size: 14px; }
+    .campo input { width: 100%; margin-top: 4px; padding: 11px 12px; border: 1px solid var(--linea);
+      border-radius: 12px; background: var(--fondo); color: var(--tinta); }
+</style>
 </head>
 <body>
   <main id="app"><p class="suave" style="padding:24px 16px">Cargando…</p></main>
@@ -64602,6 +65021,81 @@ class Handler(BaseHTTPRequestHandler):
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || "No se pudo completar");
       return d;
+    }
+
+    function pantallaConsentimiento(d) {
+      const t = d.texto || {};
+      const parrafos = (t.parrafos || []).map((p) =>
+        `<p class="parrafo">${esc(p).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")}</p>`).join("");
+      app.innerHTML = `
+        <div class="legal">
+          <h1>${esc(t.titulo || "Antes de entrar")}</h1>
+          <p class="suave">${esc(t.resumen || "")}</p>
+          <div class="tarjeta" style="margin:16px 0">${parrafos}</div>
+          <div class="tarjeta">
+            <label class="campo">Nombre y apellidos
+              <input id="cNombre" value="${esc(d.nombre || "")}" /></label>
+            <label class="campo">NIF <span class="suave">(opcional)</span>
+              <input id="cNif" /></label>
+            <label class="casilla"><input type="checkbox" id="cInfo" />
+              <span>He leído y acepto la información sobre el tratamiento de mis datos.</span></label>
+            <label class="casilla"><input type="checkbox" id="cComercial" />
+              <span>${esc(t.comercial || "")}</span></label>
+            <p class="suave" style="margin:14px 0 6px;font-size:13px">Firma aquí con el dedo o el ratón</p>
+            <canvas id="cFirma" class="rubrica"></canvas>
+            <div style="display:flex;gap:8px;margin-top:12px">
+              <button id="cEnviar">Firmar y entrar</button>
+              <button id="cBorrar" class="fantasma">Borrar firma</button>
+            </div>
+            <p class="suave" id="cEstado" style="margin:10px 0 0;font-size:13px"></p>
+          </div>
+        </div>`;
+
+      const lienzo = document.getElementById("cFirma");
+      const ctx = lienzo.getContext("2d");
+      const escala = window.devicePixelRatio || 1;
+      lienzo.width = lienzo.offsetWidth * escala;
+      lienzo.height = lienzo.offsetHeight * escala;
+      ctx.scale(escala, escala);
+      ctx.lineWidth = 2; ctx.lineCap = "round";
+      ctx.strokeStyle = getComputedStyle(document.body).color;
+      let pintando = false, hayFirma = false;
+      const punto = (ev) => {
+        const r = lienzo.getBoundingClientRect();
+        const t = ev.touches ? ev.touches[0] : ev;
+        return { x: t.clientX - r.left, y: t.clientY - r.top };
+      };
+      const empieza = (ev) => { ev.preventDefault(); pintando = true; const p = punto(ev);
+        ctx.beginPath(); ctx.moveTo(p.x, p.y); };
+      const sigue = (ev) => { if (!pintando) return; ev.preventDefault(); const p = punto(ev);
+        ctx.lineTo(p.x, p.y); ctx.stroke(); hayFirma = true; };
+      const para = () => { pintando = false; };
+      ["mousedown", "touchstart"].forEach((e) => lienzo.addEventListener(e, empieza, { passive: false }));
+      ["mousemove", "touchmove"].forEach((e) => lienzo.addEventListener(e, sigue, { passive: false }));
+      ["mouseup", "mouseleave", "touchend"].forEach((e) => lienzo.addEventListener(e, para));
+      document.getElementById("cBorrar").onclick = () => {
+        ctx.clearRect(0, 0, lienzo.width, lienzo.height); hayFirma = false;
+      };
+
+      const estado = document.getElementById("cEstado");
+      document.getElementById("cEnviar").onclick = async () => {
+        const nombre = (document.getElementById("cNombre").value || "").trim();
+        if (!nombre) { estado.textContent = "Escribe tu nombre y apellidos."; return; }
+        if (!document.getElementById("cInfo").checked) {
+          estado.textContent = "Tienes que aceptar la información para entrar."; return;
+        }
+        estado.textContent = "Guardando…";
+        try {
+          await pide("/api/portal_venta_consentimiento", {
+            token, sesion: sesion(), nombre,
+            nif: (document.getElementById("cNif").value || "").trim(),
+            acepta_informacion: true,
+            acepta_comercial: document.getElementById("cComercial").checked,
+            firma: hayFirma ? lienzo.toDataURL("image/png") : "",
+          });
+          cargar();
+        } catch (e) { estado.textContent = e.message; }
+      };
     }
 
     function pantallaCodigo(telefono) {
@@ -64840,7 +65334,12 @@ class Handler(BaseHTTPRequestHandler):
               </div>
             </div>
           </div>
-          <p class="suave" style="text-align:center;font-size:12px;margin:4px 0 0">${esc(ag.nombre || "")}</p>
+          <p class="suave" style="text-align:center;font-size:12px;margin:4px 0 0">
+            ${esc(ag.nombre || "")} ·
+            <a href="/api/portal_venta_consentimiento_pdf?token=${encodeURIComponent(token)}" target="_blank"
+               rel="noopener" style="color:var(--verde)">lo que firmaste</a> ·
+            <a href="#" id="irDerechos" style="color:var(--verde)">tus datos</a>
+          </p>
         </div>
         <div class="barra">
           ${p && !p.decidida ? '<button id="irOferta">Responder a la oferta</button>'
@@ -64859,6 +65358,18 @@ class Handler(BaseHTTPRequestHandler):
         document.getElementById("historia").innerHTML = linea(historia.length);
         ev.target.remove();
       });
+
+      const derechos = document.getElementById("irDerechos");
+      if (derechos) derechos.onclick = async (ev) => {
+        ev.preventDefault();
+        const tipo = prompt("¿Qué quieres pedir?\n\nacceso · rectificacion · supresion · oposicion · portabilidad · limitacion");
+        if (!tipo) return;
+        try {
+          const r = await pide("/api/portal_venta_derechos", { token, sesion: sesion(), tipo,
+                                                               texto: prompt("¿Quieres añadir algo?") || "" });
+          alert("Recibido. Tu agencia tiene que contestarte antes del " + r.limite + ".");
+        } catch (e) { alert(e.message); }
+      };
 
       app.querySelectorAll(".firmar").forEach((b) => {
         b.onclick = async () => {
@@ -64926,6 +65437,7 @@ class Handler(BaseHTTPRequestHandler):
           : "/api/portal_venta?token=" + encodeURIComponent(token) + "&s=" + encodeURIComponent(sesion());
         const d = await pide(ruta);
         if (d.estado === "codigo_requerido") { pantallaCodigo(d.telefono); return; }
+        if (d.estado === "consentimiento_requerido") { pantallaConsentimiento(d); return; }
         pinta(d);
         if (d.vista_previa) {
           const cinta = document.createElement("div");
@@ -65792,7 +66304,13 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_venta_propuesta",
             "/api/portal_venta_mensaje",
             "/api/portal_venta_firma",
+            "/api/portal_venta_consentimiento",
+            "/api/portal_venta_derechos",
+    "/api/portal_venta_consentimiento",
+    "/api/portal_venta_derechos",
     "/api/portal_venta_firma",
+    "/api/portal_venta_consentimiento",
+    "/api/portal_venta_derechos",
             "/api/inmueble_portal_mensaje",
             "/api/inmueble_doc_compartir",
             "/api/visita_resultado",
@@ -66669,7 +67187,13 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_venta_propuesta",
             "/api/portal_venta_mensaje",
             "/api/portal_venta_firma",
+            "/api/portal_venta_consentimiento",
+            "/api/portal_venta_derechos",
+    "/api/portal_venta_consentimiento",
+    "/api/portal_venta_derechos",
     "/api/portal_venta_firma",
+    "/api/portal_venta_consentimiento",
+    "/api/portal_venta_derechos",
             "/api/inmueble_portal_mensaje",
             "/api/inmueble_doc_compartir",
             "/api/visita_resultado",
@@ -66783,7 +67307,8 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path in ("/api/portal_venta_doc", "/api/portal_venta_propuesta",
-                           "/api/portal_venta_mensaje", "/api/portal_venta_firma"):
+                           "/api/portal_venta_mensaje", "/api/portal_venta_firma",
+                           "/api/portal_venta_consentimiento", "/api/portal_venta_derechos"):
             acceso, fallo = acceso_de_portal_por_token(conn, payload.get("token") or "")
             if not acceso:
                 json_response(self, {"error": "Enlace no válido"}, status=403 if fallo in ("revocado", "caducado") else 404)
@@ -66793,6 +67318,82 @@ class Handler(BaseHTTPRequestHandler):
                 return
             inmueble_id = str(row_value(acceso, "inmueble_id", "") or "")
             ahora_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+            if parsed.path == "/api/portal_venta_consentimiento":
+                nombre = str(payload.get("nombre") or "").strip()
+                if not nombre:
+                    json_response(self, {"error": "Escribe tu nombre y apellidos"}, status=400)
+                    return
+                if not payload.get("acepta_informacion"):
+                    # Sin la casilla marcada no hay consentimiento: no se guarda un
+                    # «medio consentimiento» que luego no vale para nada.
+                    json_response(self, {"error": "Tienes que aceptar la información para entrar"},
+                                  status=400)
+                    return
+                empresa_row = conn.execute(
+                    "SELECT e.nombre FROM empresas e JOIN inmuebles i ON i.empresa_id = e.id "
+                    "WHERE i.id = ? LIMIT 1", (inmueble_id,)).fetchone()
+                consent_id = guarda_consentimiento_de_portal(
+                    conn, acceso, ambito="propietario",
+                    agencia=str(row_value(empresa_row, "nombre", "") or ""),
+                    nombre=nombre, nif=payload.get("nif"),
+                    acepta_comercial=bool(payload.get("acepta_comercial")),
+                    firma_png=payload.get("firma"),
+                    ip=str(self.client_address[0] if getattr(self, "client_address", None) else ""),
+                    agente=str(self.headers.get("User-Agent") or ""), now=ahora_iso)
+                audit_event(conn, str(row_value(acceso, "empresa_id", "") or ""), "inmueble", inmueble_id,
+                            "Consentimiento de acceso firmado", usuario=nombre,
+                            detalles={"id": consent_id, "version": CONSENTIMIENTO_VERSION}, now=ahora_iso)
+                conn.commit()
+                json_response(self, {"ok": True})
+                return
+
+            if parsed.path == "/api/portal_venta_derechos":
+                # Ejercer derechos desde el propio portal. La ley da un mes para
+                # contestar, así que además de guardarlo se deja una tarea con esa
+                # fecha: un derecho que se recibe y nadie ve es una multa esperando.
+                tipo = normalize_lookup_text(payload.get("tipo") or "")
+                validos = {"ACCESO", "RECTIFICACION", "SUPRESION", "OPOSICION", "PORTABILIDAD",
+                           "LIMITACION"}
+                if tipo not in validos:
+                    json_response(self, {"error": "Elige un derecho válido",
+                                         "opciones": sorted(validos)}, status=400)
+                    return
+                detalle = str(payload.get("texto") or "").strip()[:1000]
+                limite = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+                try:
+                    acciones_cols = table_columns(conn, "acciones") or set()
+                    fila = {
+                        "id": os.urandom(16).hex(),
+                        "empresa_id": str(row_value(acceso, "empresa_id", "") or ""),
+                        "workspace_id": str(row_value(acceso, "workspace_id", "") or ""),
+                        "servicio": "inmobiliaria",
+                        "inmueble_id": inmueble_id,
+                        "cliente_id": str(row_value(acceso, "cliente_id", "") or ""),
+                        "cliente_nombre": str(row_value(acceso, "nombre", "") or ""),
+                        "fecha": limite,
+                        "hora": "09:00",
+                        "tipo": "Seguimiento",
+                        "asunto": f"RGPD · derecho de {tipo.lower()} · responder antes del {limite}",
+                        "estado": "Pendiente",
+                        "notas": detalle,
+                        "created_at": ahora_iso,
+                        "updated_at": ahora_iso,
+                    }
+                    claves = [k for k in fila if k in acciones_cols and fila[k] != ""]
+                    conn.execute(
+                        f"INSERT INTO acciones ({', '.join(claves)}) VALUES ({', '.join(['?'] * len(claves))})",
+                        [fila[k] for k in claves])
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("portal_venta_derechos/acciones", _fallo_tragado)
+                audit_event(conn, str(row_value(acceso, "empresa_id", "") or ""), "cliente",
+                            str(row_value(acceso, "cliente_id", "") or ""),
+                            f"Ejercicio de derechos RGPD: {tipo.lower()}",
+                            usuario=str(row_value(acceso, "nombre", "") or ""),
+                            detalles={"texto": detalle, "limite": limite}, now=ahora_iso)
+                conn.commit()
+                json_response(self, {"ok": True, "limite": limite})
+                return
 
             if parsed.path == "/api/portal_venta_firma":
                 # Firmar la propuesta, el encargo o lo que le manden, desde aquí.
@@ -93736,6 +94337,57 @@ class Handler(BaseHTTPRequestHandler):
                             filename=f"acta_{str(row_value(recuento['junta'], 'fecha', ''))[:10]}.pdf")
             return
 
+        if path == "/api/workspace_fincas_convocatoria":
+            # La convocatoria, con lo que exige el art. 16.2 de la LPH. Hasta ahora el
+            # endpoint que llevaba ese nombre solo marcaba si la junta era en segunda.
+            workspace_id = params.get("workspace_id", [""])[0]
+            junta_id = (params.get("id", [""])[0] or "").strip()
+            if not workspace_id or not junta_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            junta = conn.execute(
+                "SELECT * FROM workspace_fincas_juntas WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (junta_id, workspace_id),
+            ).fetchone()
+            if not junta:
+                json_response(self, {"error": "junta no encontrada"}, status=404)
+                return
+            comunidad_id = row_value(junta, "comunidad_id", "")
+            comunidad = conn.execute(
+                "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (comunidad_id, workspace_id),
+            ).fetchone()
+            acuerdos = [
+                {
+                    "orden": int(row_value(f, "orden", 0) or 0),
+                    "titulo": row_value(f, "titulo", "") or "",
+                    "descripcion": row_value(f, "descripcion", "") or "",
+                }
+                for f in conn.execute(
+                    "SELECT orden, titulo, descripcion FROM workspace_fincas_junta_acuerdos "
+                    "WHERE junta_id = ? AND workspace_id = ? ORDER BY orden",
+                    (junta_id, workspace_id),
+                ).fetchall()
+            ]
+            morosos = fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id)["rows"]
+            detalle = fetch_workspace_detail(conn, workspace_id)
+            pdf = build_convocatoria_junta_pdf(
+                junta, comunidad or {}, acuerdos, morosos,
+                workspace=detalle.get("workspace") or {},
+                company=(detalle.get("companies") or [{}])[0] if detalle.get("companies") else {},
+            )
+            binary_response(self, pdf, content_type="application/pdf",
+                            filename=f"convocatoria_{str(row_value(junta, 'fecha', ''))[:10]}.pdf")
+            return
+
         if path == "/api/workspace_fincas_polizas":
             # Pólizas del workspace para enlazarlas con una incidencia. Se devuelve
             # lo justo para elegir en un desplegable: ni importes ni datos del
@@ -93969,6 +94621,20 @@ class Handler(BaseHTTPRequestHandler):
                     "telefono": _mask_phone(row_value(acceso, "telefono", "")),
                 })
                 return
+            # Nadie entra sin firmar. Y la firma se pide ANTES de devolver un solo
+            # dato del expediente, no después de enseñarlo con un aviso encima.
+            if not consentimiento_vigente(conn, row_value(acceso, "id", "")):
+                empresa_row = conn.execute(
+                    "SELECT e.nombre FROM empresas e JOIN inmuebles i ON i.empresa_id = e.id "
+                    "WHERE i.id = ? LIMIT 1",
+                    (str(row_value(acceso, "inmueble_id", "") or ""),),
+                ).fetchone()
+                json_response(self, {
+                    "estado": "consentimiento_requerido",
+                    "texto": texto_de_consentimiento("propietario", row_value(empresa_row, "nombre", "")),
+                    "nombre": str(row_value(acceso, "nombre", "") or ""),
+                })
+                return
             datos = build_portal_de_venta(conn, acceso)
             if not datos:
                 json_response(self, {"error": "Enlace no válido"}, status=404)
@@ -94044,6 +94710,25 @@ class Handler(BaseHTTPRequestHandler):
                      ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
             binary_response(self, ruta.read_bytes(),
                             content_type=tipos.get(ruta.suffix.lower(), "application/octet-stream"))
+            return
+
+        if path == "/api/portal_venta_consentimiento_pdf":
+            # Su copia. Poder llevarse lo que uno ha firmado no es un extra: es lo
+            # que convierte un consentimiento en algo que el firmante puede releer.
+            token = _request_token_param(self, params, "token")
+            acceso, _f = acceso_de_portal_por_token(conn, token)
+            if not acceso:
+                json_response(self, {"error": "Enlace no válido"}, status=404)
+                return
+            fila = consentimiento_vigente(conn, row_value(acceso, "id", ""))
+            crudo = str(row_value(fila, "documento_pdf", "") or "") if fila else ""
+            if not crudo:
+                json_response(self, {"error": "No hay documento firmado"}, status=404)
+                return
+            try:
+                binary_response(self, base64.b64decode(crudo), content_type="application/pdf")
+            except Exception:
+                json_response(self, {"error": "No se pudo leer el documento"}, status=500)
             return
 
         if path == "/api/inmueble_portal_mensajes":
