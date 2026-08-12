@@ -51,9 +51,10 @@ class LaConstanteTests(unittest.TestCase):
         """Es lo que devolvía `datetime('now')` y lo que hay guardado; cambiarlo a
         hora local desplazaría dos horas todo lo nuevo respecto de lo viejo."""
         fuente = (Path(__file__).resolve().parents[1] / "web" / "server.py").read_text(encoding="utf-8")
+        # Sin ventana fija: el fichero crece y la asignación se aleja del `def`.
+        # Se busca desde `_do_POST` hasta el final, que es lo que se quiere afirmar.
         i = fuente.index("def _do_POST")
-        bloque = fuente[i:i + 90000]
-        m = re.search(r"^        now = (.+)$", bloque, re.M)
+        m = re.search(r"^        now = (.+)$", fuente[i:], re.M)
         self.assertIsNotNone(m, "no se encuentra la asignación de `now` en _do_POST")
         self.assertIn("timezone.utc", m.group(1))
         self.assertIn("%Y-%m-%d %H:%M:%S", m.group(1))

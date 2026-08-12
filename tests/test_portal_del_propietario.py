@@ -181,9 +181,16 @@ class BasePortal(unittest.TestCase):
         except urllib.error.HTTPError as e:
             return e.code, e.read().decode()
 
-    def _abre_portal(self, inmueble_id="inm1"):
+    def _abre_portal(self, inmueble_id="inm1", firmar=True):
         estado, d = self._post("/api/inmueble_portal_acceso", {"inmueble_id": inmueble_id, "avisar": False})
         self.assertEqual(estado, 200, d)
+        if firmar:
+            # Desde que hay portón de consentimiento, entrar exige firmarlo. Los
+            # tests que prueban el CONTENIDO firman aquí; los que prueban el portón
+            # llaman con `firmar=False`.
+            self._post("/api/portal_venta_consentimiento", {
+                "token": self._token(d["enlace"]), "nombre": "Lucía Vendedora",
+                "acepta_informacion": True}, con_sesion=False)
         return d
 
     def _token(self, enlace):
@@ -378,6 +385,11 @@ class ElSegundoFactorTests(BasePortal):
         estado, d = self._post("/api/portal_venta_codigo", {"token": self.token, "codigo": codigo},
                                con_sesion=False)
         self.assertEqual(estado, 200, d)
+        # Con segundo factor, firmar el consentimiento también exige la sesión: en
+        # `setUp` no había ninguna todavía, así que se firma aquí.
+        self._post("/api/portal_venta_consentimiento",
+                   {"token": self.token, "sesion": d["sesion"], "nombre": "Lucía",
+                    "acepta_informacion": True}, con_sesion=False)
         vista = json.loads(self._get(f"/api/portal_venta?token={self.token}&s={d['sesion']}")[1])
         self.assertEqual(vista["estado"], "ok")
 
@@ -418,6 +430,10 @@ class ElSegundoFactorTests(BasePortal):
     def test_sin_canal_no_hay_segundo_factor_y_se_dice(self):
         """Fingir una seguridad que no existe es peor que no tenerla: se informa."""
         os.environ.pop("SIGNATURE_SMS_WEBHOOK_URL", None)
+        # Sin canal ya no hace falta sesión, así que ahora sí se puede firmar.
+        self._post("/api/portal_venta_consentimiento",
+                   {"token": self.token, "nombre": "Lucía", "acepta_informacion": True},
+                   con_sesion=False)
         d = self._vista(self.token)
         self.assertEqual(d["estado"], "ok")
         self.assertFalse(d["segundo_factor"])
@@ -1592,3 +1608,143 @@ class LosGraficosTests(BasePortal):
         _, html = self._get("/portal-venta")
         self.assertIn("Los cambios de precio van marcados en el mes", html)
         self.assertIn('class="meses"', html)
+
+
+class NadieEntraSinFirmarTests(BasePortal):
+    """El consentimiento se pide ANTES de devolver un solo dato del expediente, no
+    después de enseñarlo con un aviso encima."""
+
+    def setUp(self):
+        super().setUp()
+        self.token = self._token(self._abre_portal(firmar=False)["enlace"])
+
+    def _firma(self, **extra):
+        cuerpo = {"token": self.token, "nombre": "Lucía Vendedora", "nif": "11111111H",
+                  "acepta_informacion": True, "acepta_comercial": False}
+        cuerpo.update(extra)
+        return self._post("/api/portal_venta_consentimiento", cuerpo, con_sesion=False)
+
+    def test_sin_firmar_no_se_ve_nada_del_expediente(self):
+        estado, crudo = self._get(f"/api/portal_venta?token={self.token}")
+        self.assertEqual(estado, 200)
+        d = json.loads(crudo)
+        self.assertEqual(d["estado"], "consentimiento_requerido")
+        self.assertNotIn("Calle Portal", crudo)
+        self.assertNotIn("cronologia", d)
+
+    def test_el_texto_que_se_enseña_va_versionado_y_con_su_huella(self):
+        d = json.loads(self._get(f"/api/portal_venta?token={self.token}")[1])
+        self.assertEqual(d["texto"]["version"], S.CONSENTIMIENTO_VERSION)
+        self.assertEqual(len(d["texto"]["sha256"]), 64)
+
+    def test_al_firmar_se_entra(self):
+        estado, d = self._firma()
+        self.assertEqual(estado, 200, d)
+        self.assertEqual(self._vista(self.token)["estado"], "ok")
+
+    def test_sin_marcar_la_casilla_no_se_guarda_medio_consentimiento(self):
+        S.ensure_portal_consentimientos_schema(self.conn)
+        estado, d = self._firma(acepta_informacion=False)
+        self.assertEqual(estado, 400, d)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) c FROM portal_consentimientos").fetchone()["c"], 0)
+
+    def test_sin_nombre_tampoco(self):
+        self.assertEqual(self._firma(nombre="  ")[0], 400)
+
+    def test_el_documento_firmado_queda_en_la_base(self):
+        """En disco se pierde al reconstruir el servidor; esto tiene que poder
+        enseñarse dentro de dos años."""
+        self._firma()
+        fila = self.conn.execute("SELECT documento_pdf, nombre, nif FROM portal_consentimientos").fetchone()
+        self.assertEqual(fila["nombre"], "Lucía Vendedora")
+        import base64 as b64
+        self.assertTrue(fila["documento_pdf"], "no se guardó el PDF")
+        self.assertTrue(b64.b64decode(fila["documento_pdf"]).startswith(b"%PDF"))
+
+    def test_guarda_la_huella_del_texto_que_se_firmó(self):
+        """Si mañana cambia la redacción, lo firmado sigue diciendo lo que decía."""
+        self._firma()
+        fila = self.conn.execute("SELECT texto_sha256, texto_version FROM portal_consentimientos").fetchone()
+        self.assertEqual(fila["texto_version"], S.CONSENTIMIENTO_VERSION)
+        self.assertEqual(len(fila["texto_sha256"]), 64)
+
+    def test_guarda_la_firma_dibujada_si_la_hay(self):
+        self._firma(firma="data:image/png;base64,iVBORw0KGgo=")
+        fila = self.conn.execute("SELECT firma_png FROM portal_consentimientos").fetchone()
+        self.assertTrue(fila["firma_png"])
+
+    def test_lo_comercial_es_opcional_y_se_guarda_aparte(self):
+        self._firma(acepta_comercial=True)
+        fila = self.conn.execute("SELECT acepta_informacion, acepta_comercial FROM portal_consentimientos").fetchone()
+        self.assertEqual((fila["acepta_informacion"], fila["acepta_comercial"]), (1, 1))
+
+    def test_puede_descargar_su_copia(self):
+        self._firma()
+        req = urllib.request.Request(self.base + f"/api/portal_venta_consentimiento_pdf?token={self.token}")
+        with urllib.request.urlopen(req) as r:
+            self.assertEqual(r.status, 200)
+            self.assertEqual(r.headers.get("Content-Type"), "application/pdf")
+
+    def test_va_encadenado_y_tocarlo_se_nota(self):
+        self._firma()
+        fila = self.conn.execute("SELECT integrity_hash FROM portal_consentimientos").fetchone()
+        self.assertEqual(len(fila["integrity_hash"]), 64)
+
+    def test_si_cambia_la_version_del_texto_se_vuelve_a_pedir(self):
+        self._firma()
+        self.conn.execute("UPDATE portal_consentimientos SET texto_version = '2020-01-01'")
+        self.conn.commit()
+        d = json.loads(self._get(f"/api/portal_venta?token={self.token}")[1])
+        self.assertEqual(d["estado"], "consentimiento_requerido")
+
+
+class EjercerDerechosDesdeElPortalTests(BasePortal):
+    def setUp(self):
+        super().setUp()
+        self.token = self._token(self._abre_portal()["enlace"])
+
+    def test_puede_pedir_el_acceso_a_sus_datos(self):
+        estado, d = self._post("/api/portal_venta_derechos",
+                               {"token": self.token, "tipo": "acceso", "texto": "Quiero copia"},
+                               con_sesion=False)
+        self.assertEqual(estado, 200, d)
+        self.assertTrue(d["limite"])
+
+    def test_deja_una_tarea_con_la_fecha_limite(self):
+        """Un derecho que se recibe y nadie ve es una multa esperando."""
+        self._post("/api/portal_venta_derechos", {"token": self.token, "tipo": "supresion"},
+                   con_sesion=False)
+        fila = self.conn.execute("SELECT asunto, fecha, estado FROM acciones WHERE asunto LIKE 'RGPD%'").fetchone()
+        self.assertIsNotNone(fila)
+        self.assertEqual(fila["estado"], "Pendiente")
+        self.assertIn("responder antes del", fila["asunto"])
+
+    def test_un_derecho_inventado_se_rechaza(self):
+        estado, d = self._post("/api/portal_venta_derechos", {"token": self.token, "tipo": "lo_que_sea"},
+                               con_sesion=False)
+        self.assertEqual(estado, 400, d)
+        self.assertIn("opciones", d)
+
+    def test_el_plazo_es_de_un_mes(self):
+        _, d = self._post("/api/portal_venta_derechos", {"token": self.token, "tipo": "acceso"},
+                          con_sesion=False)
+        limite = S.datetime.strptime(d["limite"], "%Y-%m-%d").date()
+        dias = (limite - S.datetime.now(S.timezone.utc).date()).days
+        self.assertGreaterEqual(dias, 28)
+        self.assertLessEqual(dias, 31)
+
+    def test_los_estilos_de_la_pantalla_de_firma_están_en_la_página(self):
+        """Una sustitución que no encaja no avisa: `str.replace` devuelve el texto
+        igual y se despliega sin estilos. Pasó: las dos casillas salían pegadas en un
+        párrafo y el recuadro de firma sin borde."""
+        _, html = self._get("/portal-venta")
+        css = html[html.index("<style>"):html.index("</style>")]
+        for regla in (".casilla {", ".rubrica {", ".legal {", ".campo {"):
+            with self.subTest(regla):
+                self.assertIn(regla, css)
+
+    def test_cada_casilla_va_en_su_línea(self):
+        _, html = self._get("/portal-venta")
+        css = html[html.index("<style>"):html.index("</style>")]
+        i = css.index(".casilla {")
+        self.assertIn("display: flex", css[i:css.index("}", i)])
