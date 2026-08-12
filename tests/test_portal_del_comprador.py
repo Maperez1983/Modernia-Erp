@@ -966,4 +966,56 @@ class LaCabeceraDeLaAgenciaTests(BaseComprador):
         css = html[html.index("<style>"):html.index("</style>")]
         i = css.index(".cabecera {")
         self.assertIn("var(--sobre-solido)", css[i:css.index("}", i)])
-        self.assertIn('setProperty("--verde-solido"', html)
+        # La marca se aplica con una hoja de estilo y no con `style.setProperty`:
+        # el acento tiene que cambiar con el tema del sistema, y eso sólo lo sabe
+        # hacer una media query.
+        self.assertIn("--verde-solido: ${pal.fondo}", html)
+        self.assertIn("prefers-color-scheme: dark", html[html.index('hoja.textContent'):])
+
+
+class LaPaletaQueSaleDeUnSoloColorTests(unittest.TestCase):
+    """Dejar el precio en verde sobre una cabecera granate se ve peor que no dejar
+    elegir. Del corporativo salen los cinco colores, y los cinco tienen que leerse
+    en los dos temas."""
+
+    COLORES = ("#15803D", "#7C2D12", "#0EA5E9", "#831843", "#FACC15", "#1E3A8A", "#EA580C")
+
+    def test_el_acento_se_lee_sobre_tarjeta_clara_y_oscura(self):
+        for color in self.COLORES:
+            p = S.paleta_de_marca(color)
+            with self.subTest(color=color, tema="claro"):
+                self.assertGreaterEqual(S._contraste(p["acento_claro"], "#ffffff"), 4.5)
+            with self.subTest(color=color, tema="oscuro"):
+                self.assertGreaterEqual(S._contraste(p["acento_oscuro"], "#161a21"), 4.5)
+
+    def test_la_etiqueta_se_lee_sobre_su_propio_fondo_suave(self):
+        for color in self.COLORES:
+            p = S.paleta_de_marca(color)
+            with self.subTest(color=color, tema="claro"):
+                self.assertGreaterEqual(S._contraste(p["acento_claro"], p["suave_claro"]), 4.5)
+            with self.subTest(color=color, tema="oscuro"):
+                self.assertGreaterEqual(S._contraste(p["acento_oscuro"], p["suave_oscuro"]), 4.5)
+
+    def test_la_cabecera_se_lee_con_su_tinta(self):
+        for color in self.COLORES:
+            p = S.paleta_de_marca(color)
+            with self.subTest(color):
+                self.assertGreaterEqual(S._contraste(p["fondo"], p["tinta"]), 4.5)
+
+    def test_sin_color_la_cabecera_sigue_siendo_la_de_siempre(self):
+        p = S.paleta_de_marca("")
+        self.assertEqual(p["fondo"], S.PORTAL_COLOR_POR_DEFECTO)
+        # El acento sale del mismo verde, un punto más oscuro para que la etiqueta
+        # —tinta sobre fondo teñido— llegue a 4,5:1. Antes se quedaba en 4,31.
+        self.assertGreaterEqual(S._contraste(p["acento_claro"], p["suave_claro"]), 4.5)
+
+    def test_el_tono_se_conserva(self):
+        """Corrido para que se lea, no cambiado: un naranja tiene que seguir
+        pareciendo naranja o la marca deja de reconocerse."""
+        def canal_dominante(hexa):
+            v = [int(hexa.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+            return v.index(max(v))
+        for color in ("#EA580C", "#0EA5E9", "#831843"):
+            with self.subTest(color):
+                p = S.paleta_de_marca(color)
+                self.assertEqual(canal_dominante(p["acento_oscuro"]), canal_dominante(color))
