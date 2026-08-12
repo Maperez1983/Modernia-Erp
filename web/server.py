@@ -53027,6 +53027,142 @@ def _sepa_texto(valor, limite=70):
     return re.sub(r"\s+", " ", limpio).strip()[:limite] or "N/A"
 
 
+#: El texto que la normativa SEPA obliga a incluir en la orden de domiciliación, con
+#: las ocho semanas de derecho al reembolso. Va literal: no es una redacción nuestra.
+SEPA_TEXTO_LEGAL = (
+    "Mediante la firma de esta orden de domiciliación, el deudor autoriza (A) al acreedor a "
+    "enviar instrucciones a la entidad del deudor para adeudar su cuenta y (B) a la entidad "
+    "para efectuar los adeudos en su cuenta siguiendo las instrucciones del acreedor. Como "
+    "parte de sus derechos, el deudor está legitimado al reembolso por su entidad en los "
+    "términos y condiciones del contrato suscrito con la misma. La solicitud de reembolso "
+    "deberá efectuarse dentro de las ocho semanas que siguen a la fecha de adeudo en cuenta. "
+    "Puede obtener información adicional sobre sus derechos en su entidad financiera."
+)
+
+#: Meses que hay que custodiar el mandato tras el último adeudo, por si el banco lo
+#: reclama. Trece: los doce del ciclo más uno de margen, que es lo que piden las
+#: entidades.
+SEPA_MESES_CUSTODIA = 13
+
+
+def referencia_mandato(vecino):
+    """La referencia del mandato de un propietario, siempre la misma.
+
+    Se usa en dos sitios que **no pueden discrepar**: el papel que firma el vecino y el
+    `<MndtId>` del fichero que va al banco. Si el banco recibe una referencia que no es
+    la del mandato que custodia el acreedor, devuelve el adeudo.
+
+    Si alguien la tecleó a mano, manda esa. Si no, se deriva del id del propietario, que
+    no cambia nunca: así el documento se puede volver a generar mil veces y sale igual.
+    Antes el fichero caía al `vecino_id` crudo mientras el papel no existía, así que
+    nadie podía comprobar que coincidieran.
+    """
+    puesta = str(row_value(vecino, "mandato_ref", "") or "").strip()
+    if puesta:
+        return puesta[:35]
+    # `vecino_id` primero: esta función recibe tanto la ficha del propietario —donde el
+    # id del vecino es `id`— como la fila del recibo, donde `id` es el del recibo y el
+    # del propietario viene en `vecino_id`. Derivarla del id equivocado daba una
+    # referencia distinta en el fichero y en el papel, que es justo lo que evita.
+    vid = str(row_value(vecino, "vecino_id", "") or "").strip()
+    if not vid:
+        vid = str(row_value(vecino, "id", "") or "").strip()
+    return f"MND-{vid[:12].upper()}" if vid else ""
+
+
+def build_mandato_sepa_pdf(vecino, comunidad, workspace=None, company=None):
+    """La orden de domiciliación que firma el propietario.
+
+    El CRM guardaba la referencia y la fecha del mandato y las metía en la remesa, pero
+    el documento que las origina —el que firma el vecino y que el acreedor debe
+    custodiar— se hacía fuera y luego se tecleaba a mano. Aquí sale con la referencia
+    que va a viajar en el fichero, para que no dependa de que alguien la copie bien.
+
+    Los campos que la normativa exige y el sistema no sabe se dejan en blanco a la
+    vista, no se rellenan a ojo: un mandato con un IBAN inventado es un adeudo devuelto.
+    """
+    workspace = workspace or {}
+    company = company or {}
+
+    def limpio(valor):
+        texto = str(valor or "").strip()
+        return "" if texto in {"-", "—", "None"} else texto
+
+    def o_en_blanco(valor, ancho=34):
+        return limpio(valor) or "_" * ancho
+
+    referencia = referencia_mandato(vecino)
+    iban_deudor = formatear_iban(row_value(vecino, "iban", "") or "")
+    acreedor_id = limpio(row_value(comunidad, "acreedor_sepa", ""))
+    piso = limpio(row_value(vecino, "piso", ""))
+    direccion_comunidad = limpio(row_value(comunidad, "direccion", ""))
+    direccion_deudor = ", ".join(p for p in (direccion_comunidad, piso) if p)
+
+    sections = [
+        ("", ["TODOS LOS CAMPOS HAN DE SER CUMPLIMENTADOS OBLIGATORIAMENTE. UNA VEZ FIRMADA "
+              "ESTA ORDEN DE DOMICILIACIÓN DEBE SER ENVIADA AL ACREEDOR PARA SU CUSTODIA."]),
+        ("Referencia de la orden de domiciliación", [
+            referencia or "_" * 34,
+            "La asigna el acreedor y es la que viaja en el fichero de adeudos: no se cambia.",
+        ]),
+        ("Acreedor", [
+            f"Nombre: {o_en_blanco(row_value(comunidad, 'nombre', ''))}",
+            f"Identificador del acreedor: {acreedor_id or '_' * 24}"
+            + ("" if acreedor_id else "   (la comunidad no lo tiene dado de alta)"),
+            f"Dirección: {o_en_blanco(direccion_comunidad)}",
+            "País: España",
+        ]),
+        ("Deudor", [
+            f"Nombre del deudor: {o_en_blanco(row_value(vecino, 'nombre', ''))}",
+            f"NIF: {o_en_blanco(row_value(vecino, 'nif', ''), 16)}",
+            f"Dirección: {o_en_blanco(direccion_deudor)}",
+            "País: España",
+            f"Cuenta de cargo (IBAN): {iban_deudor or '_' * 30}",
+            "BIC / SWIFT: " + "_" * 14 + "   (solo si su entidad lo pide)",
+        ]),
+        # Una opción por línea: el motor colapsa los espacios seguidos, así que
+        # alinearlas con espacios dejaba las dos casillas pegadas y no se veía cuál
+        # estaba marcada.
+        ("Tipo de pago", [
+            "[X] Pago recurrente — las cuotas de comunidad se adeudan periódicamente "
+            "mientras el mandato siga vigente.",
+            "[ ] Pago único",
+        ]),
+        # Con su propio título: es la cláusula que autoriza el adeudo, y sin encabezado
+        # se leía como una continuación del tipo de pago.
+        ("Autorización del deudor", [SEPA_TEXTO_LEGAL]),
+        ("Firma del deudor", [
+            "",
+            "Localidad: ______________________        Fecha: ____ / ____ / ________",
+            "",
+            "",
+            "Firma del titular de la cuenta: ______________________________",
+            "",
+            "El firmante debe ser el titular de la cuenta indicada arriba.",
+        ]),
+    ]
+
+    pie = [
+        f"El acreedor debe custodiar esta orden firmada mientras el mandato esté vigente y, "
+        f"al menos, {SEPA_MESES_CUSTODIA} meses después del último adeudo.",
+    ]
+    logo = _load_asset_logo("logos/fincas-velazquez.png", max_width=420)
+    try:
+        from .branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    except ImportError:
+        from branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    return build_modernia_branded_document_pdf_vector(
+        "ORDEN DE DOMICILIACIÓN DE ADEUDO DIRECTO SEPA",
+        f"{limpio(row_value(comunidad, 'nombre', '')) or 'Comunidad de propietarios'}"
+        + (f" · {piso}" if piso else ""),
+        sections,
+        pie,
+        company=dict(company, nombre_comercial=FINCAS_NOMBRE_COMERCIAL),
+        brand_logo_url=logo,
+        brand_color=workspace.get("primary_color"),
+    )
+
+
 def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None):
     """Fichero de adeudos directos SEPA (pain.008.001.02).
 
@@ -53059,7 +53195,10 @@ def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None):
             f"        <PmtId><EndToEndId>{_esc(_sepa_texto(f'{referencia}-{numero:04d}', 35))}</EndToEndId></PmtId>\n"
             f'        <InstdAmt Ccy="EUR">{importe:.2f}</InstdAmt>\n'
             "        <DrctDbtTx><MndtRltdInf>\n"
-            f"          <MndtId>{_esc(_sepa_texto(row_value(recibo, 'mandato_ref', '') or row_value(recibo, 'vecino_id', ''), 35))}</MndtId>\n"
+            # La MISMA referencia que lleva el papel firmado. Antes caía al `vecino_id`
+            # crudo, así que el fichero podía decirle al banco una referencia que no era
+            # la del mandato que el acreedor custodia, y eso es un adeudo devuelto.
+            f"          <MndtId>{_esc(_sepa_texto(referencia_mandato(recibo), 35))}</MndtId>\n"
             f"          <DtOfSgntr>{_esc(str(row_value(recibo, 'mandato_fecha', '') or fecha_cobro)[:10])}</DtOfSgntr>\n"
             "        </MndtRltdInf></DrctDbtTx>\n"
             f"        <Dbtr><Nm>{_esc(_sepa_texto(row_value(recibo, 'nombre', ''), 70))}</Nm></Dbtr>\n"
@@ -95967,6 +96106,43 @@ class Handler(BaseHTTPRequestHandler):
             )
             binary_response(self, pdf, content_type="application/pdf",
                             filename=f"acta_{str(row_value(recuento['junta'], 'fecha', ''))[:10]}.pdf")
+            return
+
+        if path == "/api/workspace_fincas_mandato":
+            # La orden de domiciliación que firma el propietario. Se generaba fuera del
+            # CRM y luego se tecleaba a mano su referencia, que es la que viaja al banco.
+            workspace_id = params.get("workspace_id", [""])[0]
+            vecino_id = (params.get("id", [""])[0] or "").strip()
+            if not workspace_id or not vecino_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            vecino = conn.execute(
+                "SELECT * FROM workspace_fincas_vecinos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (vecino_id, workspace_id),
+            ).fetchone()
+            if not vecino:
+                json_response(self, {"error": "propietario no encontrado"}, status=404)
+                return
+            comunidad = conn.execute(
+                "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (row_value(vecino, "comunidad_id", ""), workspace_id),
+            ).fetchone()
+            detalle = fetch_workspace_detail(conn, workspace_id)
+            pdf = build_mandato_sepa_pdf(
+                vecino, comunidad or {},
+                workspace=detalle.get("workspace") or {},
+                company=(detalle.get("companies") or [{}])[0] if detalle.get("companies") else {},
+            )
+            binary_response(self, pdf, content_type="application/pdf",
+                            filename=f"mandato_sepa_{referencia_mandato(vecino)}.pdf")
             return
 
         if path == "/api/workspace_fincas_convocatoria":

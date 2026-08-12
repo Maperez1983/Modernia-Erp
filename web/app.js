@@ -23975,6 +23975,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
             <div class="form-actions span-all">
               <button type="submit">Guardar</button>
               <button type="button" class="secondary ghost" data-vecino-nuevo>Nuevo</button>
+              <button type="button" class="secondary ghost" data-vecino-mandato>Orden de domiciliación SEPA</button>
             </div>
           </form>
           <details class="fincas-tarifa-panel" data-censo-import>
@@ -24121,6 +24122,16 @@ const renderWorkspaceFincasCommunityFicha = async () => {
       if (titleEl) titleEl.textContent = "Nuevo propietario";
     };
     workspaceFincasCommunityFichaPanel.querySelector("[data-vecino-nuevo]")?.addEventListener("click", reset);
+    workspaceFincasCommunityFichaPanel.querySelector("[data-vecino-mandato]")?.addEventListener("click", () => {
+      // La orden se genera con la referencia que va a viajar al banco, así que hay que
+      // haber guardado al propietario antes: sin id no hay mandato que emitir.
+      const vecinoId = String(form?.querySelector('[name="id"]')?.value || "").trim();
+      if (!vecinoId) {
+        if (statusEl) statusEl.textContent = "Guarda primero al propietario.";
+        return;
+      }
+      window.open(`/api/workspace_fincas_mandato?workspace_id=${encodeURIComponent(workspaceId)}&id=${encodeURIComponent(vecinoId)}`, "_blank");
+    });
     workspaceFincasCommunityFichaPanel.querySelector("[data-censo-cargar]")?.addEventListener("click", async () => {
       const texto = workspaceFincasCommunityFichaPanel.querySelector("[data-censo-texto]")?.value || "";
       const reemplazar = workspaceFincasCommunityFichaPanel.querySelector("[data-censo-reemplazar]")?.checked;
