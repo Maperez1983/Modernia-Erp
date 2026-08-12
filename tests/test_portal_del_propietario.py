@@ -1470,6 +1470,19 @@ class LaImagenDeLaPaginaTests(BasePortal):
         self.assertEqual(cabeceras.get("Content-Type"), "font/woff2")
         self.assertIn("immutable", cabeceras.get("Cache-Control", ""))
 
+    def test_el_verde_de_superficie_no_se_aclara_en_modo_oscuro(self):
+        """`--verde` se aclara en oscuro para poder leerse sobre negro. De FONDO,
+        con letra blanca encima, daba 1,74:1: la portada de un inmueble sin fotos
+        —hay varios— y la inicial del asesor, que sale siempre."""
+        _, html = self._get("/portal-venta")
+        css = html[html.index("<style>"):html.index("</style>")]
+        for regla in (".portada {", ".asesor .cara {"):
+            i = css.index(regla)
+            with self.subTest(regla):
+                self.assertIn("var(--verde-solido)", css[i:css.index("}", i)])
+        oscuro = css[css.index("@media (prefers-color-scheme: dark)"):]
+        self.assertNotIn("--verde-solido", oscuro[:oscuro.index("}\n    }")])
+
     def test_los_titulares_van_en_la_serif(self):
         _, html = self._get("/portal-venta")
         css = html[html.index("<style>"):html.index("</style>")]

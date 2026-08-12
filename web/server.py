@@ -65763,6 +65763,11 @@ class Handler(BaseHTTPRequestHandler):
             --sobre-verde: #ffffff;
             /* Las mismas dos familias que el CRM. Sin esto la página caía a la
                tipografía del sistema y no parecía de nadie. */
+            /* El verde de superficie con letra blanca encima. No cambia con el
+               tema: `--verde` se aclara en oscuro para leerse sobre negro, y de
+               fondo con blanco daba 1,74:1 —la portada de un inmueble sin fotos y
+               la inicial del asesor, que sale siempre—. */
+            --verde-solido: #15803D;
             --texto: "IBM Plex Sans", "Segoe UI", sans-serif;
             --titulos: "IBM Plex Serif", Georgia, serif; }
     @media (prefers-color-scheme: dark) {
@@ -65780,7 +65785,7 @@ class Handler(BaseHTTPRequestHandler):
          letter-spacing: -0.01em; line-height: 1.1; }
     h2 { font-size: 13px; margin: 0 0 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--suave); }
     .suave { color: var(--suave); }
-    .portada { position: relative; min-height: 300px; background: var(--verde); overflow: hidden; display: flex; }
+    .portada { position: relative; min-height: 300px; background: var(--verde-solido); overflow: hidden; display: flex; }
     .portada img.fondo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
     .portada .velo { position: absolute; inset: 0;
       background: linear-gradient(180deg, rgba(0,0,0,.55) 0%, rgba(0,0,0,.15) 40%, rgba(0,0,0,.82) 100%); }
@@ -65792,7 +65797,7 @@ class Handler(BaseHTTPRequestHandler):
     .asesor { display: flex; align-items: center; gap: 9px; background: rgba(255,255,255,.16);
       backdrop-filter: blur(6px); border: 1px solid rgba(255,255,255,.28); border-radius: 99px;
       padding: 5px 12px 5px 5px; cursor: pointer; }
-    .asesor .cara { width: 30px; height: 30px; border-radius: 99px; background: #fff; color: var(--verde);
+    .asesor .cara { width: 30px; height: 30px; border-radius: 99px; background: #fff; color: var(--verde-solido);
       display: grid; place-items: center; font-weight: 700; font-size: 13px; }
     .asesor b { font-size: 13px; font-weight: 600; display: block; line-height: 1.2; }
     .asesor i { font-size: 11px; font-style: normal; opacity: .85; }
@@ -66428,6 +66433,11 @@ class Handler(BaseHTTPRequestHandler):
     :root { color-scheme: light dark; --tinta: #0f172a; --suave: #64748b; --linea: #e2e8f0;
             --fondo: #f6f7f9; --tarjeta: #ffffff; --verde: #15803D; --verde-claro: #dcfce7;
             --ambar: #b45309; --ambar-claro: #fef3c7; --sobre-verde: #ffffff;
+            /* El verde de las superficies con letra blanca NO cambia con el tema:
+               `--verde` se aclara en oscuro para poder leerse sobre fondo negro, y
+               usar ese mismo verde de fondo dejaba el texto blanco en 1,74:1. Éste
+               da 5,02:1 con blanco y 3,82:1 contra el fondo oscuro de la página. */
+            --verde-solido: #15803D;
             --texto: "IBM Plex Sans", "Segoe UI", sans-serif;
             --titulos: "IBM Plex Serif", Georgia, serif; }
     @media (prefers-color-scheme: dark) {
@@ -66444,7 +66454,7 @@ class Handler(BaseHTTPRequestHandler):
          letter-spacing: -0.01em; line-height: 1.1; color: #fff; }
     h2 { font-size: 13px; margin: 0 0 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--suave); }
     .suave { color: var(--suave); }
-    .cabecera { background: var(--verde); color: #fff; padding: 22px 16px 26px; }
+    .cabecera { background: var(--verde-solido); color: #fff; padding: 22px 16px 26px; }
     .cabecera .interior { max-width: 1180px; margin: 0 auto; }
     .cabecera .alto { display: flex; align-items: center; justify-content: space-between; gap: 12px;
                       margin-bottom: 18px; }
@@ -66452,7 +66462,7 @@ class Handler(BaseHTTPRequestHandler):
     .cabecera .marca span { font-size: 14px; font-weight: 600; }
     .asesor { display: flex; align-items: center; gap: 9px; background: rgba(255,255,255,.16);
       border: 1px solid rgba(255,255,255,.28); border-radius: 99px; padding: 5px 12px 5px 5px; }
-    .asesor .cara { width: 30px; height: 30px; border-radius: 99px; background: #fff; color: var(--verde);
+    .asesor .cara { width: 30px; height: 30px; border-radius: 99px; background: #fff; color: var(--verde-solido);
       display: grid; place-items: center; font-weight: 700; font-size: 13px; }
     .asesor b { font-size: 13px; font-weight: 600; display: block; line-height: 1.2; }
     .asesor i { font-size: 11px; font-style: normal; opacity: .85; }
@@ -66491,10 +66501,11 @@ class Handler(BaseHTTPRequestHandler):
       cursor: pointer; }
     /* Los motivos son una matización, no una respuesta: van un peldaño por debajo. */
     .motivos button { padding: 4px 10px; font-weight: 500; font-size: 12px; color: var(--suave); }
-    .opinar button[aria-pressed="true"] { background: var(--verde); border-color: var(--verde); color: #fff; }
+    .opinar button[aria-pressed="true"] { background: var(--verde-solido);
+      border-color: var(--verde-solido); color: #fff; }
     .motivos button[aria-pressed="true"] { border-color: var(--verde); color: var(--verde);
       background: var(--verde-claro); }
-    .boton { background: var(--verde); color: #fff; border: 0; border-radius: 10px; padding: 11px 16px;
+    .boton { background: var(--verde-solido); color: #fff; border: 0; border-radius: 10px; padding: 11px 16px;
              font: 600 14px var(--texto); cursor: pointer; }
     .boton.plano { background: transparent; color: var(--verde); border: 1px solid var(--verde); }
     input[type=text], textarea { width: 100%; border: 1px solid var(--linea); border-radius: 10px;
