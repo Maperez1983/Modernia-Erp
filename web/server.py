@@ -1186,6 +1186,12 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/portal_venta_documento",
     "/api/portal_venta_consentimiento_pdf",
     "/portal-venta",
+    # Portal del comprador. Misma llave: el token del enlace, sin sesión del CRM.
+    "/api/portal_busqueda",
+    "/api/portal_busqueda_foto",
+    "/api/portal_busqueda_documento",
+    "/api/portal_busqueda_consentimiento_pdf",
+    "/portal-busqueda",
     "/api/workspace_portal_s3_url",
     "/api/workspace_factura_pdf_public",
     "/api/workspace_portal_facturas_excel",
@@ -1210,6 +1216,13 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/portal_venta_consentimiento",
     "/api/portal_venta_derechos",
     "/api/portal_venta_retirar",
+    "/api/portal_busqueda_codigo",
+    "/api/portal_busqueda_opinion",
+    "/api/portal_busqueda_mensaje",
+    "/api/portal_busqueda_firma",
+    "/api/portal_busqueda_consentimiento",
+    "/api/portal_busqueda_derechos",
+    "/api/portal_busqueda_retirar",
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
     "/api/workspace_portal_public_request",
@@ -31229,6 +31242,13 @@ def responsable_del_tratamiento(conn, empresa_id):
         fila = None
     def v(*claves):
         for c in claves:
+            # Sólo lo que se ha pedido en el SELECT. `row_value` cae a `fila[0]`
+            # cuando no encuentra la clave, y `fila[0]` aquí es el nombre de la
+            # empresa: sin este filtro, una instalación sin `email_rgpd` acababa
+            # diciéndole al interesado que ejerciera sus derechos «escribiendo a
+            # Agencia Propia», que no es un canal ni es una dirección.
+            if c not in campos:
+                continue
             valor = str(row_value(fila, c, "") or "").strip()
             if valor:
                 return valor
@@ -31757,6 +31777,573 @@ def comprueba_codigo_de_portal(conn, acceso, codigo, now=None, tabla="inmueble_p
     )
     conn.commit()
     return sesion, ""
+
+
+# ---------------------------------------------------------------------------
+# Portal del comprador
+#
+# El del propietario contesta «cómo va MI venta». Éste contesta otra cosa: «qué me
+# habéis buscado». Son dos personas distintas con dos preguntas distintas, así que
+# no es la misma pantalla con otro filtro.
+#
+# La pieza que lo sostiene ya existía: `inmueble_compradores` es la selección que
+# el asesor hace para una demanda. Aquí se le enseña esa selección al interesado,
+# se le deja opinar sobre cada inmueble —y esa opinión vuelve a la ficha, que es
+# donde sirve— y se le enseñan sus citas.
+# ---------------------------------------------------------------------------
+
+# Cerrada a propósito, como los resultados de visita: en texto libre no se puede
+# contar, y contar es lo que convierte diez inmuebles enseñados en un criterio.
+VALORACIONES_DEL_COMPRADOR = {
+    "encaja": "Me encaja",
+    "verlo": "Quiero visitarlo",
+    "dudas": "Me gusta, pero tengo dudas",
+    "descarta_precio": "Se me va de precio",
+    "descarta_zona": "No es la zona que busco",
+    "descarta": "No me encaja",
+}
+# Las dos primeras son interés; las demás, descarte. El asesor necesita ver esa
+# línea sin leerse los seis textos.
+VALORACIONES_POSITIVAS = {"encaja", "verlo", "dudas"}
+
+
+def ensure_demanda_portal_schema(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS demanda_portal_accesos (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT,
+          empresa_id TEXT,
+          demanda_id TEXT NOT NULL,
+          cliente_id TEXT,
+          nombre TEXT,
+          telefono TEXT,
+          email TEXT,
+          token_hash TEXT NOT NULL,
+          codigo_hash TEXT,
+          codigo_expira TEXT,
+          codigo_intentos INTEGER NOT NULL DEFAULT 0,
+          sesion_hash TEXT,
+          sesion_expira TEXT,
+          expires_at TEXT,
+          revocado INTEGER NOT NULL DEFAULT 0,
+          revocado_motivo TEXT,
+          accesos INTEGER NOT NULL DEFAULT 0,
+          last_access_at TEXT,
+          creado_por TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS demanda_portal_opiniones (
+          id TEXT PRIMARY KEY,
+          acceso_id TEXT,
+          demanda_id TEXT NOT NULL,
+          inmueble_id TEXT NOT NULL,
+          cliente_id TEXT,
+          valoracion TEXT,
+          comentario TEXT,
+          visto INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS demanda_portal_mensajes (
+          id TEXT PRIMARY KEY,
+          demanda_id TEXT NOT NULL,
+          acceso_id TEXT,
+          cliente_id TEXT,
+          autor TEXT NOT NULL,
+          autor_nombre TEXT,
+          texto TEXT NOT NULL,
+          leido INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
+    for sql in (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_demanda_portal_token ON demanda_portal_accesos (token_hash)",
+        "CREATE INDEX IF NOT EXISTS idx_demanda_portal_demanda ON demanda_portal_accesos (demanda_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_demanda_opinion ON demanda_portal_opiniones (demanda_id, inmueble_id)",
+        "CREATE INDEX IF NOT EXISTS idx_demanda_mensajes ON demanda_portal_mensajes (demanda_id, created_at)",
+    ):
+        try:
+            conn.execute(sql)
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("ensure_demanda_portal_schema/indices", _fallo_tragado)
+    # Un documento del inmueble sólo llega al comprador si alguien lo decide, y con
+    # su propio interruptor: lo que se comparte con el dueño de la casa no es lo
+    # mismo que lo que se comparte con quien se la quiere comprar.
+    ensure_column(conn, "inmueble_docs", "visible_comprador", "visible_comprador INTEGER DEFAULT 0")
+    # El correo para ejercer derechos. Lo crea también el portal del propietario,
+    # pero una instalación puede abrir antes el del comprador y la cláusula lo cita.
+    ensure_column(conn, "empresas", "email_rgpd", "email_rgpd TEXT")
+    # Postgres hace el DDL dentro de la transacción: sin este commit, una petición
+    # de sólo lectura crea las tablas, responde 200 y el rollback del pool se las
+    # lleva. Pasó con las del propietario, en producción.
+    try:
+        conn.commit()
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_demanda_portal_schema/commit", _fallo_tragado)
+
+
+def contacto_del_comprador(conn, demanda_id, cliente):
+    """Teléfono y correo del interesado, mirando también por dónde entró.
+
+    Los leads de la web caen en `demandas.portal_lead_contact` sin llegar a crear
+    ficha de cliente, así que mirar sólo `clientes` deja fuera justo a los que
+    acaban de escribir.
+    """
+    telefono = str(row_value(cliente, "telefono", "") or "").strip()
+    email = str(row_value(cliente, "email", "") or "").strip()
+    if telefono and email:
+        return {"telefono": telefono, "email": email, "hay": True}
+    columnas = table_columns(conn, "demandas") or set()
+    if "portal_lead_contact" in columnas:
+        try:
+            fila = conn.execute(
+                "SELECT portal_lead_contact FROM demandas WHERE id = ? LIMIT 1",
+                (str(demanda_id or ""),),
+            ).fetchone()
+        except Exception:
+            _rollback_best_effort(conn)
+            fila = None
+        crudo = str(row_value(fila, "portal_lead_contact", "") or "").strip()
+        if crudo:
+            if "@" in crudo and not email:
+                email = crudo
+            elif not telefono and re.search(r"\d{6,}", crudo):
+                telefono = crudo
+    return {"telefono": telefono, "email": email, "hay": bool(telefono or email)}
+
+
+def url_del_portal_de_busqueda(token, base_url=""):
+    base = resolve_public_link_base_url(base_url)
+    return f"{str(base or '').rstrip('/')}/portal-busqueda?token={urllib.parse.quote(token)}"
+
+
+def crea_acceso_de_comprador(conn, *, demanda, cliente, session=None, now=None, dias=None, contacto=None):
+    """Da de alta (o rota) el acceso de un comprador. El token en claro se devuelve
+    una sola vez: en la base sólo queda su hash."""
+    ensure_demanda_portal_schema(conn)
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    demanda_id = str(row_value(demanda, "id", "") or "")
+    cliente_id = str(row_value(cliente, "id", "") or "") or str(row_value(demanda, "cliente_id", "") or "")
+    token = make_portal_token()
+    caduca = (datetime.now(timezone.utc) + timedelta(days=int(dias or INMO_PORTAL_DIAS))).strftime("%Y-%m-%d")
+    try:
+        conn.execute(
+            "UPDATE demanda_portal_accesos SET revocado = 1, revocado_motivo = 'rotado', updated_at = ? "
+            "WHERE demanda_id = ? AND revocado = 0",
+            (now, demanda_id),
+        )
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("crea_acceso_de_comprador/rotacion", _fallo_tragado)
+    acceso_id = os.urandom(16).hex()
+    contacto = contacto or contacto_del_comprador(conn, demanda_id, cliente)
+    fila = {
+        "id": acceso_id,
+        "workspace_id": str(row_value(demanda, "workspace_id", "") or "") or None,
+        "empresa_id": str(row_value(demanda, "empresa_id", "") or "") or None,
+        "demanda_id": demanda_id,
+        "cliente_id": cliente_id or None,
+        "nombre": str(row_value(cliente, "nombre", "") or ""),
+        "telefono": contacto.get("telefono") or "",
+        "email": contacto.get("email") or "",
+        "token_hash": hash_portal_token(token),
+        "expires_at": caduca,
+        "revocado": 0,
+        "accesos": 0,
+        "creado_por": str((session or {}).get("usuario") or "") or None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    columnas = table_columns(conn, "demanda_portal_accesos") or set()
+    claves = [k for k in fila if k in columnas] or list(fila)
+    conn.execute(
+        f"INSERT INTO demanda_portal_accesos ({', '.join(claves)}) "
+        f"VALUES ({', '.join(['?'] * len(claves))})",
+        [fila[k] for k in claves],
+    )
+    return {"id": acceso_id, "token": token, "caduca": caduca, "contacto": contacto}
+
+
+def acceso_de_comprador_por_token(conn, token):
+    """Busca el acceso y dice por qué no vale, si no vale."""
+    token = str(token or "").strip()
+    if not token:
+        return None, "sin_token"
+    try:
+        ensure_demanda_portal_schema(conn)
+        fila = conn.execute(
+            "SELECT * FROM demanda_portal_accesos WHERE token_hash = ? LIMIT 1",
+            (hash_portal_token(token),),
+        ).fetchone()
+    except Exception:
+        _rollback_best_effort(conn)
+        return None, "error"
+    if not fila:
+        return None, "desconocido"
+    if int(row_value(fila, "revocado", 0) or 0):
+        return None, "revocado"
+    caduca = str(row_value(fila, "expires_at", "") or "")[:10]
+    if caduca and caduca < datetime.now(timezone.utc).date().isoformat():
+        return None, "caducado"
+    return fila, ""
+
+
+def revoca_accesos_de_la_demanda(conn, demanda_id, motivo, now=None):
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        ensure_demanda_portal_schema(conn)
+        cur = conn.execute(
+            "UPDATE demanda_portal_accesos SET revocado = 1, revocado_motivo = ?, updated_at = ? "
+            "WHERE demanda_id = ? AND revocado = 0",
+            (str(motivo or "cerrado"), now, str(demanda_id or "")),
+        )
+        return int(getattr(cur, "rowcount", 0) or 0)
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("revoca_accesos_de_la_demanda", _fallo_tragado)
+        return 0
+
+
+def correo_con_la_seleccion(*, agencia, enlace):
+    return (
+        f'<div style="font:400 15px/1.6 Helvetica,Arial,sans-serif;color:#334155;max-width:520px">'
+        f'<p>Hola,</p>'
+        f'<p>Hemos preparado una <strong>selección de inmuebles</strong> para ti. Desde tu enlace '
+        f'puedes verlos con fotos, decirnos cuáles te encajan y pedir visita.</p>'
+        f'<p style="margin:22px 0"><a href="{html.escape(enlace)}" '
+        f'style="background:#15803D;color:#fff;padding:12px 20px;border-radius:8px;'
+        f'text-decoration:none;font-weight:600">Ver mi selección</a></p>'
+        f'<p style="font-size:13px;color:#64748b">Este enlace es personal. No lo compartas.</p>'
+        f'<p style="font-size:13px;color:#64748b">{html.escape(agencia or "")}</p></div>'
+    )
+
+
+def _inmueble_de_la_seleccion(conn, demanda_id, indice):
+    """El id que hay en la posición `indice` de la selección del comprador.
+
+    Tiene que ordenar EXACTAMENTE igual que `build_portal_de_busqueda`: el portal
+    no manda ids, manda posiciones, y si las dos listas se ordenaran distinto una
+    opinión acabaría pegada a otro inmueble.
+    """
+    try:
+        indice = int(indice)
+    except Exception:
+        return ""
+    if indice < 0:
+        return ""
+    try:
+        filas = conn.execute(
+            "SELECT ic.inmueble_id AS inmueble_id FROM inmueble_compradores ic "
+            "JOIN inmuebles i ON i.id = ic.inmueble_id WHERE ic.demanda_id = ? "
+            "ORDER BY COALESCE(ic.created_at,'') DESC, ic.id DESC LIMIT 40",
+            (str(demanda_id or ""),),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return ""
+    if indice >= len(filas):
+        return ""
+    return str(row_value(filas[indice], "inmueble_id", "") or "")
+
+
+def precio_pedido_del_inmueble(inmueble):
+    """El precio que se le pide al comprador.
+
+    Hay cuatro columnas y ninguna está siempre puesta; mirando sólo
+    `precio_objetivo` conté quince inmuebles «sin precio» que sí lo tenían. Se
+    devuelve el primero con valor, en este orden.
+    """
+    for campo in ("precio_objetivo", "precio_pedido_cliente", "precio_encargo", "precio_valoracion"):
+        valor = round(parse_money_value(row_value(inmueble, campo, 0)) or 0, 2)
+        if valor:
+            return valor
+    return 0
+
+
+def hilo_del_comprador(conn, demanda_id, limite=60):
+    try:
+        ensure_demanda_portal_schema(conn)
+        filas = conn.execute(
+            "SELECT autor, autor_nombre, texto, created_at FROM demanda_portal_mensajes "
+            "WHERE demanda_id = ? ORDER BY created_at ASC LIMIT ?",
+            (str(demanda_id or ""), int(limite)),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return []
+    return [
+        {
+            "mio": str(row_value(m, "autor", "") or "") == "comprador",
+            "quien": str(row_value(m, "autor_nombre", "") or ""),
+            "texto": str(row_value(m, "texto", "") or ""),
+            "fecha": str(row_value(m, "created_at", "") or "")[:16].replace("T", " "),
+        }
+        for m in filas
+    ]
+
+
+def avisa_al_comprador(conn, demanda_id, motivo, texto, *, referencia="", now=None):
+    """Un aviso por el canal que haya, sin repetirlo si ya se mandó ese mismo.
+
+    Confirma por dentro: si el aviso sale y el commit se queda colgando de la
+    petición que lo provocó, un error posterior lo borra y el mensaje ya está en el
+    teléfono de alguien.
+    """
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        ensure_demanda_portal_schema(conn)
+        accesos = conn.execute(
+            "SELECT * FROM demanda_portal_accesos WHERE demanda_id = ? AND revocado = 0",
+            (str(demanda_id or ""),),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return 0
+    enviados = 0
+    for acceso in accesos:
+        acceso_id = str(row_value(acceso, "id", "") or "")
+        try:
+            ya = conn.execute(
+                "SELECT 1 FROM inmueble_portal_avisos WHERE acceso_id = ? AND motivo = ? "
+                "AND COALESCE(referencia,'') = ? LIMIT 1",
+                (acceso_id, str(motivo), str(referencia or "")),
+            ).fetchone()
+        except Exception:
+            _rollback_best_effort(conn)
+            ya = None
+        if ya:
+            continue
+        enviado, detalle = envia_mensaje_al_propietario(row_value(acceso, "telefono", ""), texto)
+        try:
+            conn.execute(
+                "INSERT INTO inmueble_portal_avisos (id, acceso_id, inmueble_id, motivo, referencia, "
+                "canal, enviado, detalle, created_at) VALUES (?, ?, '', ?, ?, ?, ?, ?, ?)",
+                (os.urandom(16).hex(), acceso_id, str(motivo), str(referencia or ""),
+                 canal_para_avisar(), 1 if enviado else 0, str(detalle or ""), now),
+            )
+            conn.commit()
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("avisa_al_comprador/registro", _fallo_tragado)
+        enviados += 1 if enviado else 0
+    return enviados
+
+
+def build_portal_de_busqueda(conn, acceso, *, registrar=True):
+    """Lo que ve el comprador. Por lista blanca, campo a campo.
+
+    Lo que **no** sale, y no es un olvido:
+
+    - **Quién es el propietario.** Ni nombre, ni teléfono, ni que existan varios.
+      El comprador negocia con la agencia, no con el vendedor.
+    - **Los honorarios**, el precio de encargo o cualquier margen.
+    - **Los demás interesados en el mismo inmueble.** Ni cuántos son: eso es una
+      palanca de venta, no un dato suyo, y decirlo por escrito es una promesa.
+    - **Las notas internas** del asesor sobre él o sobre el inmueble.
+    - **Ningún identificador interno.** Los inmuebles se numeran por su posición en
+      la selección, así que con el enlace no se puede pedir nada de fuera de ella.
+    """
+    demanda_id = str(row_value(acceso, "demanda_id", "") or "")
+    acceso_id = str(row_value(acceso, "id", "") or "")
+    demanda = conn.execute("SELECT * FROM demandas WHERE id = ? LIMIT 1", (demanda_id,)).fetchone()
+    if not demanda:
+        return None
+
+    ensure_demanda_portal_schema(conn)
+    opiniones = {}
+    try:
+        for o in conn.execute(
+            "SELECT inmueble_id, valoracion, comentario FROM demanda_portal_opiniones WHERE demanda_id = ?",
+            (demanda_id,),
+        ).fetchall():
+            opiniones[str(row_value(o, "inmueble_id", "") or "")] = {
+                "valoracion": str(row_value(o, "valoracion", "") or ""),
+                "comentario": str(row_value(o, "comentario", "") or ""),
+            }
+    except Exception:
+        _rollback_best_effort(conn)
+
+    # Las citas del comprador, por inmueble, para poder decir «tienes visita el
+    # jueves» en la propia tarjeta y no sólo en una agenda aparte.
+    citas_por_inmueble = {}
+    agenda = []
+    hoy = datetime.now(timezone.utc).date().isoformat()
+    try:
+        for v in conn.execute(
+            "SELECT inmueble_id, fecha, hora, estado FROM visitas WHERE demanda_id = ? "
+            "ORDER BY COALESCE(fecha,'') DESC LIMIT 60",
+            (demanda_id,),
+        ).fetchall():
+            fecha = _fecha_corta(row_value(v, "fecha", ""))
+            cita = {
+                "fecha": fecha,
+                "hora": str(row_value(v, "hora", "") or ""),
+                "estado": str(row_value(v, "estado", "") or ""),
+                "futura": bool(fecha and fecha >= hoy),
+            }
+            clave = str(row_value(v, "inmueble_id", "") or "")
+            if clave and (clave not in citas_por_inmueble or cita["futura"]):
+                citas_por_inmueble[clave] = cita
+            agenda.append(dict(cita, inmueble_id=clave))
+    except Exception:
+        _rollback_best_effort(conn)
+
+    docs_cols = table_columns(conn, "inmueble_docs") or set()
+    hay_flag_comprador = "visible_comprador" in docs_cols
+
+    inmuebles = []
+    # Campos explícitos, no `i.*`: `inmueble_compradores` también tiene `estado` —el
+    # del interesado en el embudo— y mezclarlos deja el «disponible» al azar de qué
+    # columna gane. Y el desempate por `ic.id`, porque el índice que viaja al portal
+    # es la posición en esta lista y dos filas del mismo día no pueden bailar.
+    seleccion = conn.execute(
+        "SELECT ic.inmueble_id AS inmueble_id, i.direccion AS direccion, i.poblacion AS poblacion, "
+        "i.tipo_inmueble AS tipo_inmueble, i.m2 AS m2, i.habitaciones AS habitaciones, "
+        "i.banos AS banos, i.descripcion AS descripcion, i.estado AS estado, "
+        "i.precio_objetivo AS precio_objetivo, i.precio_pedido_cliente AS precio_pedido_cliente, "
+        "i.precio_encargo AS precio_encargo, i.precio_valoracion AS precio_valoracion "
+        "FROM inmueble_compradores ic JOIN inmuebles i ON i.id = ic.inmueble_id "
+        "WHERE ic.demanda_id = ? ORDER BY COALESCE(ic.created_at,'') DESC, ic.id DESC LIMIT 40",
+        (demanda_id,),
+    ).fetchall()
+    for orden, fila in enumerate(seleccion):
+        inmueble_id = str(row_value(fila, "inmueble_id", "") or "")
+        opinion = opiniones.get(inmueble_id) or {}
+        documentos = []
+        if hay_flag_comprador:
+            try:
+                for n, d in enumerate(conn.execute(
+                    "SELECT nombre, url, created_at FROM inmueble_docs WHERE inmueble_id = ? "
+                    "AND COALESCE(visible_comprador,0) = 1 ORDER BY COALESCE(created_at,'') DESC, id DESC LIMIT 12",
+                    (inmueble_id,),
+                ).fetchall()):
+                    url = str(row_value(d, "url", "") or "")
+                    if not url.startswith("/uploads/"):
+                        continue
+                    documentos.append({
+                        "nombre": str(row_value(d, "nombre", "") or ""),
+                        "fecha": _fecha_corta(row_value(d, "created_at", "")),
+                        "n": n,
+                    })
+            except Exception:
+                _rollback_best_effort(conn)
+        estado_inm = normalize_lookup_text(row_value(fila, "estado", ""))
+        inmuebles.append({
+            # `i` es la posición en ESTA lista. No hay ningún id por medio: con el
+            # enlace no se puede pedir la foto de un inmueble que no te han enseñado.
+            "i": orden,
+            "direccion": str(row_value(fila, "direccion", "") or ""),
+            "poblacion": str(row_value(fila, "poblacion", "") or ""),
+            "tipo": str(row_value(fila, "tipo_inmueble", "") or ""),
+            "m2": row_value(fila, "m2", None),
+            "habitaciones": row_value(fila, "habitaciones", None),
+            "banos": row_value(fila, "banos", None),
+            "precio": precio_pedido_del_inmueble(fila),
+            "fotos": len(fotos_del_inmueble(conn, inmueble_id)),
+            "descripcion": str(row_value(fila, "descripcion", "") or "").strip()[:700],
+            # Del estado sólo lo que le afecta: si sigue disponible o ya no.
+            "disponible": estado_inm not in {"VENDIDO", "ALQUILER", "COMPRAVENTA", "RESERVADO",
+                                             "CONTRATO DE ARRAS", "ARRAS", "CERRADO NEGATIVAMENTE"},
+            "opinion": opinion.get("valoracion", ""),
+            "comentario": opinion.get("comentario", ""),
+            "cita": citas_por_inmueble.get(inmueble_id),
+            "documentos": documentos,
+        })
+
+    # La agenda se pinta con la dirección, no con el id.
+    donde = {str(row_value(f, "inmueble_id", "") or ""): str(row_value(f, "direccion", "") or "")
+             for f in seleccion}
+    agenda_vista = sorted(
+        [{"fecha": c["fecha"], "hora": c["hora"], "estado": c["estado"], "futura": c["futura"],
+          "donde": donde.get(c["inmueble_id"], "")}
+         for c in agenda if c["fecha"]],
+        key=lambda x: (x["fecha"], x["hora"] or ""),
+    )
+    proximas = [c for c in agenda_vista if c["futura"]]
+    agenda_final = proximas[:12] if proximas else list(reversed(agenda_vista))[:6]
+
+    firmas = []
+    try:
+        ensure_inmueble_signature_schema(conn)
+        ids = [str(row_value(f, "inmueble_id", "") or "") for f in seleccion]
+        if ids:
+            marcas = ", ".join(["?"] * len(ids))
+            for f in conn.execute(
+                f"SELECT id, doc_nombre, status, signed_at, created_at, signer_telefono, signer_nombre "
+                f"FROM inmueble_signature_requests WHERE inmueble_id IN ({marcas}) "
+                "ORDER BY created_at DESC LIMIT 30", ids,
+            ).fetchall():
+                if not solicitud_de_firma_es_suya(f, acceso):
+                    continue
+                estado_f = str(row_value(f, "status", "") or "")
+                firmas.append({
+                    "id": str(row_value(f, "id", "") or ""),
+                    "documento": str(row_value(f, "doc_nombre", "") or ""),
+                    "estado": estado_f,
+                    "fecha": _fecha_corta(row_value(f, "signed_at", "") or row_value(f, "created_at", "")),
+                    "pendiente": estado_f not in {"signed", "rejected"},
+                })
+    except Exception:
+        _rollback_best_effort(conn)
+
+    if registrar and acceso_id:
+        try:
+            conn.execute(
+                "UPDATE demanda_portal_accesos SET accesos = COALESCE(accesos,0) + 1, last_access_at = ? WHERE id = ?",
+                (datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), acceso_id),
+            )
+            conn.commit()
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("build_portal_de_busqueda/accesos", _fallo_tragado)
+
+    cols_emp = table_columns(conn, "empresas") or set()
+    campos_emp = "nombre" + (", logo_url" if "logo_url" in cols_emp else "")
+    empresa = conn.execute(
+        f"SELECT {campos_emp} FROM empresas WHERE id = ? LIMIT 1",
+        (str(row_value(demanda, "empresa_id", "") or ""),),
+    ).fetchone()
+    logo = str(row_value(empresa, "logo_url", "") or "").strip()
+    if not logo.startswith("/assets/"):
+        logo = ""
+
+    vistos = sum(1 for x in inmuebles if x["opinion"])
+    return {
+        "comprador": {"nombre": str(row_value(acceso, "nombre", "") or "")},
+        "agencia": {
+            "nombre": str(row_value(empresa, "nombre", "") or ""),
+            "asesor": str(row_value(demanda, "responsable", "") or ""),
+            "logo": logo,
+        },
+        # Lo que pidió, para que pueda decir «esto no era lo que buscaba» con el
+        # criterio delante y no de memoria.
+        "busqueda": {
+            "tipo": str(row_value(demanda, "tipologia", "") or row_value(demanda, "tipo", "") or ""),
+            "zona": str(row_value(demanda, "zona", "") or ""),
+            "precio_max": round(parse_money_value(row_value(demanda, "precio_max", 0)) or 0, 2),
+            "habitaciones_min": row_value(demanda, "habitaciones_min", None),
+            "m2_min": row_value(demanda, "m2_min", None),
+        },
+        "inmuebles": inmuebles,
+        "agenda": agenda_final,
+        "agenda_es_pasado": not proximas and bool(agenda_vista),
+        "mensajes": hilo_del_comprador(conn, demanda_id),
+        "firmas": firmas,
+        "valoraciones": [{"clave": k, "etiqueta": v} for k, v in VALORACIONES_DEL_COMPRADOR.items()],
+        "resumen": {
+            "seleccionados": len(inmuebles),
+            "valorados": vistos,
+            "pendientes": len(inmuebles) - vistos,
+            "citas": len(proximas),
+        },
+    }
 
 
 def create_owner_portal_code(owner_name, owner_contact, listing_ids):
@@ -65642,6 +66229,443 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
 
+        if parsed.path == "/portal-busqueda":
+            # Página suelta, como la del propietario y por lo mismo: quien entra es
+            # un comprador con su enlace, no un usuario del CRM, y el JavaScript de
+            # la aplicación sabe de honorarios y de márgenes.
+            page = r"""<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex,nofollow" />
+  <title>Mi selección</title>
+  <style>
+    /* Servidas desde aquí, no desde Google: pedirlas fuera manda la IP de quien
+       abre el enlace a un tercero que no ha consentido. */
+    @font-face { font-family: "IBM Plex Sans"; font-style: normal; font-weight: 400 600;
+      font-display: swap; src: url("/assets/fuentes/ibm-plex-sans.woff2") format("woff2"); }
+    @font-face { font-family: "IBM Plex Serif"; font-style: normal; font-weight: 600;
+      font-display: swap; src: url("/assets/fuentes/ibm-plex-serif.woff2") format("woff2"); }
+    :root { color-scheme: light dark; --tinta: #0f172a; --suave: #64748b; --linea: #e2e8f0;
+            --fondo: #f6f7f9; --tarjeta: #ffffff; --verde: #15803D; --verde-claro: #dcfce7;
+            --ambar: #b45309; --ambar-claro: #fef3c7; --sobre-verde: #ffffff;
+            --texto: "IBM Plex Sans", "Segoe UI", sans-serif;
+            --titulos: "IBM Plex Serif", Georgia, serif; }
+    @media (prefers-color-scheme: dark) {
+      :root { --tinta: #f1f5f9; --suave: #94a3b8; --linea: #262b36; --fondo: #0d0f13; --tarjeta: #161a21;
+              --verde: #4ade80; --verde-claro: #14301f; --ambar: #fbbf24; --ambar-claro: #2e2410;
+              --sobre-verde: #06301f; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--fondo); color: var(--tinta);
+           font: 15px/1.6 var(--texto); padding-bottom: 40px; -webkit-font-smoothing: antialiased; }
+    main { max-width: 1180px; margin: 0 auto; }
+    .contenido { padding: 0 16px; display: grid; gap: 14px; }
+    h1 { font-family: var(--titulos); font-size: 30px; font-weight: 600; margin: 0;
+         letter-spacing: -0.01em; line-height: 1.1; color: #fff; }
+    h2 { font-size: 13px; margin: 0 0 12px; letter-spacing: .04em; text-transform: uppercase; color: var(--suave); }
+    .suave { color: var(--suave); }
+    .cabecera { background: var(--verde); color: #fff; padding: 22px 16px 26px; }
+    .cabecera .interior { max-width: 1180px; margin: 0 auto; }
+    .cabecera .alto { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+                      margin-bottom: 18px; }
+    .cabecera .marca img { height: 28px; width: auto; }
+    .cabecera .marca span { font-size: 14px; font-weight: 600; }
+    .asesor { display: flex; align-items: center; gap: 9px; background: rgba(255,255,255,.16);
+      border: 1px solid rgba(255,255,255,.28); border-radius: 99px; padding: 5px 12px 5px 5px; }
+    .asesor .cara { width: 30px; height: 30px; border-radius: 99px; background: #fff; color: var(--verde);
+      display: grid; place-items: center; font-weight: 700; font-size: 13px; }
+    .asesor b { font-size: 13px; font-weight: 600; display: block; line-height: 1.2; }
+    .asesor i { font-size: 11px; font-style: normal; opacity: .85; }
+    .criterio { margin: 6px 0 0; font-size: 13.5px; opacity: .92; }
+    .cifras { display: flex; gap: 22px; flex-wrap: wrap; margin-top: 16px; }
+    .cifras div b { font-family: var(--titulos); font-size: 26px; font-weight: 600; display: block;
+                    line-height: 1; }
+    .cifras div span { font-size: 12px; opacity: .85; }
+    .tarjeta { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 14px;
+               padding: 16px; }
+    .rejilla { display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+    .ficha { background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 14px;
+             overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+    .ficha .foto { position: relative; aspect-ratio: 16/10; background: var(--fondo); }
+    .ficha .foto img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .ficha .foto .vacia { width: 100%; height: 100%; display: grid; place-items: center;
+                          color: var(--suave); font-size: 13px; }
+    .ficha .cuerpo { padding: 14px; display: grid; gap: 8px; min-width: 0; }
+    .ficha h3 { font-family: var(--titulos); font-size: 19px; font-weight: 600; margin: 0;
+                line-height: 1.25; }
+    .ficha .precio { font-family: var(--titulos); font-size: 22px; font-weight: 600; color: var(--verde); }
+    .ficha .rasgos { display: flex; gap: 12px; flex-wrap: wrap; font-size: 13px; color: var(--suave); }
+    .ficha p.texto { margin: 0; font-size: 14px; color: var(--suave); }
+    .etiqueta { display: inline-block; font-size: 11.5px; font-weight: 600; padding: 3px 9px;
+                border-radius: 99px; background: var(--verde-claro); color: var(--verde); }
+    .etiqueta.aviso { background: var(--ambar-claro); color: var(--ambar); }
+    .miniaturas { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; max-width: 100%; }
+    .miniaturas img { width: 74px; height: 54px; object-fit: cover; border-radius: 8px; flex: 0 0 auto;
+                      border: 1px solid var(--linea); cursor: pointer; }
+    .opinar { display: flex; gap: 6px; flex-wrap: wrap; }
+    .opinar button { border: 1px solid var(--linea); background: var(--tarjeta); color: var(--tinta);
+      border-radius: 99px; padding: 6px 12px; font: 600 12.5px var(--texto); cursor: pointer; }
+    .opinar button[aria-pressed="true"] { background: var(--verde); border-color: var(--verde); color: #fff; }
+    .boton { background: var(--verde); color: #fff; border: 0; border-radius: 10px; padding: 11px 16px;
+             font: 600 14px var(--texto); cursor: pointer; }
+    .boton.plano { background: transparent; color: var(--verde); border: 1px solid var(--verde); }
+    input[type=text], textarea { width: 100%; border: 1px solid var(--linea); border-radius: 10px;
+      padding: 10px 12px; font: 14px var(--texto); background: var(--tarjeta); color: var(--tinta); }
+    .fila { display: flex; gap: 8px; align-items: center; }
+    .lista { display: grid; gap: 8px; }
+    .lista .item { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0;
+                   border-bottom: 1px solid var(--linea); font-size: 14px; }
+    .lista .item:last-child { border-bottom: 0; }
+    .sobre { background: var(--sobre-verde); border: 1px solid var(--linea); border-radius: 12px;
+             padding: 10px 12px; font-size: 14px; }
+    .sobre.mio { background: var(--verde-claro); }
+    .aviso { background: var(--ambar-claro); color: var(--ambar); border-radius: 12px; padding: 12px 14px;
+             font-size: 14px; margin: 16px; }
+    .pie { text-align: center; color: var(--suave); font-size: 12.5px; padding: 26px 16px 0; }
+    .pie a { color: var(--suave); }
+    .columnas { display: grid; gap: 14px; grid-template-columns: 1fr; }
+    @media (min-width: 900px) { .columnas { grid-template-columns: 2fr 1fr; align-items: start; } }
+    .columna { min-width: 0; display: grid; gap: 14px; }
+    .columna > * { min-width: 0; }
+    dialog { border: 0; border-radius: 14px; padding: 0; max-width: 92vw; background: transparent; }
+    dialog img { max-width: 92vw; max-height: 86vh; border-radius: 14px; display: block; }
+    dialog::backdrop { background: rgba(0,0,0,.72); }
+  </style>
+</head>
+<body>
+  <main id="app"><div class="aviso">Cargando…</div></main>
+  <dialog id="lupa"><img alt="" /></dialog>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const token = params.get("token") || "";
+    const previa = params.get("preview") || "";
+    // El token fuera de la barra en cuanto carga: no se queda en el historial ni en
+    // una captura de pantalla que se reenvía sin pensar.
+    if (token) history.replaceState(null, "", location.pathname);
+    const app = document.getElementById("app");
+    const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const eur = (n) => (Number(n) || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR",
+      maximumFractionDigits: 0 });
+    const clave = "portal_busqueda_sesion";
+    const sesion = () => { try { return sessionStorage.getItem(clave) || localStorage.getItem(clave) || ""; }
+      catch (e) { return ""; } };
+    const guardaSesion = (s) => { try { localStorage.setItem(clave, s); sessionStorage.setItem(clave, s); }
+      catch (e) {} };
+
+    async function pide(ruta, cuerpo) {
+      const r = await fetch(ruta, cuerpo
+        ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cuerpo) }
+        : {});
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "No se ha podido cargar");
+      return d;
+    }
+
+    function pantallaCodigo(telefono) {
+      app.innerHTML = `
+        <div class="contenido" style="max-width:460px;margin:60px auto">
+          <div class="tarjeta">
+            <h2>Confirma que eres tú</h2>
+            <p class="suave" style="margin-top:0">Te mandamos un código al ${esc(telefono || "teléfono que tenemos")}.</p>
+            <button class="boton" id="pedir">Mandarme el código</button>
+            <div id="paso2" style="display:none;margin-top:14px">
+              <input type="text" id="codigo" inputmode="numeric" maxlength="6" placeholder="000000" />
+              <button class="boton" id="entrar" style="margin-top:8px">Entrar</button>
+            </div>
+            <div id="err" class="suave" style="margin-top:10px"></div>
+          </div>
+        </div>`;
+      const err = document.getElementById("err");
+      document.getElementById("pedir").onclick = async () => {
+        try { await pide("/api/portal_busqueda_codigo", { token });
+          document.getElementById("paso2").style.display = "block";
+          err.textContent = "Te lo hemos mandado. Caduca en 15 minutos.";
+        } catch (e) { err.textContent = e.message; }
+      };
+      document.getElementById("entrar").onclick = async () => {
+        try {
+          const d = await pide("/api/portal_busqueda_codigo",
+            { token, codigo: document.getElementById("codigo").value });
+          guardaSesion(d.sesion); cargar();
+        } catch (e) { err.textContent = e.message; }
+      };
+    }
+
+    function pantallaConsentimiento(d) {
+      const t = d.texto || {};
+      app.innerHTML = `
+        <div class="contenido" style="max-width:640px;margin:40px auto">
+          <div class="tarjeta">
+            <h1 style="color:var(--tinta);font-size:24px">${esc(t.titulo || "Antes de entrar")}</h1>
+            <p class="suave">${esc(t.resumen || "")}</p>
+            <div style="max-height:44vh;overflow:auto;border:1px solid var(--linea);border-radius:12px;
+                        padding:12px;margin:14px 0;font-size:14px" id="texto"></div>
+            <label class="fila" style="align-items:flex-start;gap:9px">
+              <input type="checkbox" id="info" style="margin-top:4px" />
+              <span>He leído la información y acepto que tratéis mis datos para enseñarme inmuebles.</span>
+            </label>
+            <label class="fila" style="align-items:flex-start;gap:9px;margin-top:8px">
+              <input type="checkbox" id="comercial" style="margin-top:4px" />
+              <span class="suave">${esc(t.comercial || "")}</span>
+            </label>
+            <input type="text" id="nombre" placeholder="Nombre y apellidos" style="margin-top:12px"
+                   value="${esc(d.nombre || "")}" />
+            <input type="text" id="nif" placeholder="NIF (opcional)" style="margin-top:8px" />
+            <button class="boton" id="firmar" style="margin-top:12px;width:100%">Aceptar y entrar</button>
+            <div id="err" class="suave" style="margin-top:10px"></div>
+          </div>
+        </div>`;
+      const caja = document.getElementById("texto");
+      (t.parrafos || []).forEach((p) => {
+        const el = document.createElement("p");
+        el.innerHTML = esc(p).replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+        caja.appendChild(el);
+      });
+      document.getElementById("firmar").onclick = async () => {
+        const err = document.getElementById("err");
+        try {
+          await pide("/api/portal_busqueda_consentimiento", {
+            token, sesion: sesion(),
+            nombre: document.getElementById("nombre").value,
+            nif: document.getElementById("nif").value,
+            acepta_informacion: document.getElementById("info").checked,
+            acepta_comercial: document.getElementById("comercial").checked,
+          });
+          cargar();
+        } catch (e) { err.textContent = e.message; }
+      };
+    }
+
+    function tarjetaInmueble(x, valoraciones) {
+      const q = "token=" + encodeURIComponent(token) + "&s=" + encodeURIComponent(sesion());
+      const foto = x.fotos
+        ? `<img loading="lazy" alt="" src="/api/portal_busqueda_foto?${q}&i=${x.i}&n=0" />`
+        : `<div class="vacia">Sin fotos todavía</div>`;
+      const minis = [];
+      for (let n = 1; n < Math.min(x.fotos, 7); n++) {
+        minis.push(`<img loading="lazy" alt="" data-grande="/api/portal_busqueda_foto?${q}&i=${x.i}&n=${n}"
+                     src="/api/portal_busqueda_foto?${q}&i=${x.i}&n=${n}" />`);
+      }
+      const rasgos = [
+        x.tipo, x.m2 ? x.m2 + " m²" : "", x.habitaciones ? x.habitaciones + " hab." : "",
+        x.banos ? x.banos + " baños" : "",
+      ].filter(Boolean).map((r) => `<span>${esc(r)}</span>`).join("");
+      const cita = x.cita && x.cita.futura
+        ? `<div class="etiqueta">Visita el ${esc(x.cita.fecha)}${x.cita.hora ? " a las " + esc(x.cita.hora) : ""}</div>`
+        : "";
+      const docs = (x.documentos || []).map((d) =>
+        `<a href="/api/portal_busqueda_documento?${q}&i=${x.i}&n=${d.n}" target="_blank"
+            rel="noopener">${esc(d.nombre)}</a>`).join(" · ");
+      return `
+        <article class="ficha" data-i="${x.i}">
+          <div class="foto">${foto}</div>
+          <div class="cuerpo">
+            <h3>${esc(x.direccion || "Inmueble")}</h3>
+            <div class="suave" style="font-size:13px">${esc(x.poblacion || "")}</div>
+            <div class="precio">${x.precio ? eur(x.precio) : "Precio a consultar"}</div>
+            <div class="rasgos">${rasgos}</div>
+            ${x.disponible ? "" : '<div class="etiqueta aviso">Ya no está disponible</div>'}
+            ${cita}
+            ${minis.length ? `<div class="miniaturas">${minis.join("")}</div>` : ""}
+            ${x.descripcion ? `<p class="texto">${esc(x.descripcion)}</p>` : ""}
+            ${docs ? `<div class="suave" style="font-size:13px">Documentos: ${docs}</div>` : ""}
+            <div class="opinar">
+              ${valoraciones.map((v) => `<button data-v="${esc(v.clave)}"
+                  aria-pressed="${x.opinion === v.clave}">${esc(v.etiqueta)}</button>`).join("")}
+            </div>
+            <input type="text" class="comentario" placeholder="¿Quieres contarnos algo de este inmueble?"
+                   value="${esc(x.comentario || "")}" />
+          </div>
+        </article>`;
+    }
+
+    function pinta(d) {
+      const r = d.resumen || {};
+      const b = d.busqueda || {};
+      const criterio = [
+        b.tipo, b.zona, b.precio_max ? "hasta " + eur(b.precio_max) : "",
+        b.habitaciones_min ? b.habitaciones_min + " hab. o más" : "",
+      ].filter(Boolean).join(" · ");
+      const inicial = (d.agencia.asesor || d.agencia.nombre || "?").trim().charAt(0).toUpperCase();
+      app.innerHTML = `
+        <header class="cabecera">
+          <div class="interior">
+            <div class="alto">
+              <div class="marca">${d.agencia.logo
+                ? `<img src="${esc(d.agencia.logo)}" alt="${esc(d.agencia.nombre)}" />`
+                : `<span>${esc(d.agencia.nombre || "")}</span>`}</div>
+              ${d.agencia.asesor ? `<div class="asesor"><div class="cara">${esc(inicial)}</div>
+                <div><b>${esc(d.agencia.asesor)}</b><i>tu asesor</i></div></div>` : ""}
+            </div>
+            <h1>${esc(d.comprador.nombre ? "Hola, " + d.comprador.nombre.split(" ")[0] : "Tu selección")}</h1>
+            ${criterio ? `<p class="criterio">Buscas ${esc(criterio)}</p>` : ""}
+            <div class="cifras">
+              <div><b>${r.seleccionados || 0}</b><span>inmuebles para ti</span></div>
+              <div><b>${r.valorados || 0}</b><span>valorados</span></div>
+              <div><b>${r.citas || 0}</b><span>visitas previstas</span></div>
+            </div>
+          </div>
+        </header>
+        <div class="contenido" style="padding-top:16px">
+          <div class="columnas">
+            <div class="columna">
+              <div class="rejilla" id="rejilla"></div>
+            </div>
+            <div class="columna">
+              <section class="tarjeta">
+                <h2>Tus citas</h2>
+                <div class="lista" id="agenda"></div>
+              </section>
+              <section class="tarjeta">
+                <h2>Habla con tu asesor</h2>
+                <div class="lista" id="hilo" style="margin-bottom:10px"></div>
+                <input type="text" id="mensaje" placeholder="Escribe aquí" />
+                <button class="boton plano" id="enviar" style="margin-top:8px;width:100%">Enviar</button>
+              </section>
+              <section class="tarjeta" id="cajaFirmas" style="display:none">
+                <h2>Pendiente de firmar</h2>
+                <div class="lista" id="firmas"></div>
+              </section>
+            </div>
+          </div>
+          <div class="pie">
+            Este espacio es tuyo y personal.
+            <a href="/api/portal_busqueda_consentimiento_pdf?token=${encodeURIComponent(token)}"
+               target="_blank" rel="noopener">Ver lo que firmaste</a> ·
+            <a href="#" id="retirar">retirar el consentimiento</a>
+          </div>
+        </div>`;
+
+      const rejilla = document.getElementById("rejilla");
+      if (!(d.inmuebles || []).length) {
+        rejilla.innerHTML = `<div class="tarjeta suave">Tu asesor todavía no ha seleccionado inmuebles.
+          En cuanto lo haga, los verás aquí.</div>`;
+      } else {
+        rejilla.innerHTML = d.inmuebles.map((x) => tarjetaInmueble(x, d.valoraciones || [])).join("");
+      }
+
+      const agenda = document.getElementById("agenda");
+      agenda.innerHTML = (d.agenda || []).length
+        ? d.agenda.map((c) => `<div class="item"><span>${esc(c.donde || "Visita")}</span>
+            <span class="suave">${esc(c.fecha)}${c.hora ? " · " + esc(c.hora) : ""}</span></div>`).join("")
+        : '<div class="suave">Todavía no tienes ninguna visita concertada.</div>';
+      if (d.agenda_es_pasado && (d.agenda || []).length) {
+        agenda.insertAdjacentHTML("afterbegin",
+          '<div class="suave" style="font-size:12.5px">Últimas visitas</div>');
+      }
+
+      const hilo = document.getElementById("hilo");
+      hilo.innerHTML = (d.mensajes || []).length
+        ? d.mensajes.map((m) => `<div class="sobre ${m.mio ? "mio" : ""}">
+            <div>${esc(m.texto)}</div>
+            <div class="suave" style="font-size:12px">${esc(m.quien)} · ${esc(m.fecha)}</div></div>`).join("")
+        : '<div class="suave">Escríbele lo que necesites.</div>';
+
+      const firmas = (d.firmas || []).filter((f) => f.pendiente);
+      if (firmas.length) {
+        document.getElementById("cajaFirmas").style.display = "";
+        document.getElementById("firmas").innerHTML = firmas.map((f) =>
+          `<div class="item"><span>${esc(f.documento)}</span>
+             <button class="boton plano firmar" data-id="${esc(f.id)}">Firmar</button></div>`).join("");
+      }
+
+      // Opinar sobre un inmueble: el botón se pinta al momento y se manda detrás.
+      rejilla.querySelectorAll(".ficha").forEach((ficha) => {
+        const i = Number(ficha.dataset.i);
+        const comentario = ficha.querySelector(".comentario");
+        const manda = async (valoracion) => {
+          try {
+            await pide("/api/portal_busqueda_opinion", {
+              token, sesion: sesion(), i, valoracion, comentario: comentario.value,
+            });
+          } catch (e) { alert(e.message); }
+        };
+        ficha.querySelectorAll(".opinar button").forEach((b) => {
+          b.onclick = () => {
+            const activo = b.getAttribute("aria-pressed") === "true";
+            ficha.querySelectorAll(".opinar button").forEach((o) =>
+              o.setAttribute("aria-pressed", "false"));
+            b.setAttribute("aria-pressed", activo ? "false" : "true");
+            manda(activo ? "" : b.dataset.v);
+          };
+        });
+        comentario.onchange = () => {
+          const elegido = ficha.querySelector('.opinar button[aria-pressed="true"]');
+          manda(elegido ? elegido.dataset.v : "");
+        };
+      });
+
+      // Las fotos, a tamaño grande.
+      const lupa = document.getElementById("lupa");
+      rejilla.querySelectorAll(".miniaturas img").forEach((img) => {
+        img.onclick = () => { lupa.querySelector("img").src = img.dataset.grande; lupa.showModal(); };
+      });
+      lupa.onclick = () => lupa.close();
+
+      document.getElementById("enviar").onclick = async () => {
+        const caja = document.getElementById("mensaje");
+        const texto = caja.value.trim();
+        if (!texto) return;
+        try { await pide("/api/portal_busqueda_mensaje", { token, sesion: sesion(), texto });
+          caja.value = ""; cargar();
+        } catch (e) { alert(e.message); }
+      };
+      document.querySelectorAll(".firmar").forEach((b) => {
+        b.onclick = async () => {
+          try {
+            const r = await pide("/api/portal_busqueda_firma", { token, sesion: sesion(), id: b.dataset.id });
+            location.href = r.enlace;
+          } catch (e) { alert(e.message); }
+        };
+      });
+      document.getElementById("retirar").onclick = async (ev) => {
+        ev.preventDefault();
+        if (!confirm("Si retiras el consentimiento, este enlace dejará de funcionar. ¿Seguro?")) return;
+        try {
+          await pide("/api/portal_busqueda_retirar", { token, sesion: sesion() });
+          app.innerHTML = '<div class="aviso">Consentimiento retirado. Este enlace ya no funciona.</div>';
+        } catch (e) { alert(e.message); }
+      };
+    }
+
+    async function cargar() {
+      try {
+        const ruta = previa
+          ? "/api/portal_busqueda?preview=" + encodeURIComponent(previa)
+          : "/api/portal_busqueda?token=" + encodeURIComponent(token) + "&s=" + encodeURIComponent(sesion());
+        const d = await pide(ruta);
+        if (d.estado === "codigo_requerido") { pantallaCodigo(d.telefono); return; }
+        if (d.estado === "consentimiento_requerido") { pantallaConsentimiento(d); return; }
+        pinta(d);
+        if (d.vista_previa) {
+          const cinta = document.createElement("div");
+          cinta.className = "aviso";
+          cinta.textContent = "Vista previa · esto es lo que ve el comprador. No cuenta como visita suya.";
+          app.appendChild(cinta);
+        }
+      } catch (e) {
+        app.innerHTML = '<div class="aviso">' + esc(e.message) + '</div>';
+      }
+    }
+    cargar();
+  </script>
+</body>
+</html>"""
+            body = page.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Robots-Tag", "noindex, nofollow")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if parsed.path == "/portal-comunidad":
             # Página suelta, sin cargar el CRM entero: quien entra aquí es un vecino
             # con su enlace, no un usuario de la aplicación. El token viaja en la
@@ -66484,6 +67508,17 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_venta_consentimiento",
             "/api/portal_venta_derechos",
             "/api/portal_venta_retirar",
+            "/api/demanda_portal_acceso",
+            "/api/demanda_portal_acceso_revoke",
+            "/api/demanda_portal_mensaje",
+            "/api/inmueble_doc_compartir_comprador",
+            "/api/portal_busqueda_codigo",
+            "/api/portal_busqueda_opinion",
+            "/api/portal_busqueda_mensaje",
+            "/api/portal_busqueda_firma",
+            "/api/portal_busqueda_consentimiento",
+            "/api/portal_busqueda_derechos",
+            "/api/portal_busqueda_retirar",
             "/api/inmueble_renovar",
             "/api/renta_campaign_document",
             "/api/workspace_fincas_comunidad_delete",
@@ -67361,6 +68396,19 @@ class Handler(BaseHTTPRequestHandler):
             "/api/visita_resultado",
             "/api/inmueble_portal_acceso",
             "/api/inmueble_portal_acceso_revoke",
+            # Y los del comprador, por lo mismo: el ámbito sale de la demanda o del
+            # token, nunca del nombre de empresa que mande el navegador.
+            "/api/portal_busqueda_codigo",
+            "/api/portal_busqueda_opinion",
+            "/api/portal_busqueda_mensaje",
+            "/api/portal_busqueda_firma",
+            "/api/portal_busqueda_consentimiento",
+            "/api/portal_busqueda_derechos",
+            "/api/portal_busqueda_retirar",
+            "/api/demanda_portal_acceso",
+            "/api/demanda_portal_acceso_revoke",
+            "/api/demanda_portal_mensaje",
+            "/api/inmueble_doc_compartir_comprador",
         ):
             if not empresa_nombre:
                 json_response(self, {"error": "empresa_nombre requerido"}, status=400)
@@ -67705,6 +68753,13 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"ok": True, "nombre": nombre[:180]})
                 return
 
+            # Con guarda propia, no como caída del final de la cadena: así estaba y
+            # meter un endpoint detrás se la llevó por delante —la petición se iba a
+            # parar al manejador de hipotecas y contestaba «id y fecha_firma
+            # requeridos» a un propietario que aceptaba una oferta—.
+            if parsed.path != "/api/portal_venta_propuesta":
+                json_response(self, {"error": "endpoint no válido"}, status=404)
+                return
             decision = normalize_lookup_text(payload.get("decision") or "")
             if decision not in {"ACEPTO", "RECHAZO"}:
                 json_response(self, {"error": "decision debe ser acepto o rechazo"}, status=400)
@@ -67756,6 +68811,401 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "decision": decision.lower()})
             return
+
+        # ------------------------------------------------------------------
+        # Portal del comprador
+        # ------------------------------------------------------------------
+        if parsed.path == "/api/demanda_portal_acceso":
+            # Lo abre el asesor desde la ficha de la demanda. El enlace en claro se
+            # devuelve UNA vez: en la base sólo queda su hash, así que si se pierde
+            # hay que generar otro (y el anterior deja de valer).
+            demanda_id = str(payload.get("demanda_id") or "").strip()
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, dem = enforce_inmueble_access(
+                conn, session, demanda_id, write=True, tabla="demandas")
+            if not ok_acc:
+                json_response(self, {"error": str(err_acc).replace("Inmueble", "Demanda")},
+                              status=404 if "no encontrado" in str(err_acc) else 403)
+                return
+            demanda = conn.execute("SELECT * FROM demandas WHERE id = ? LIMIT 1", (demanda_id,)).fetchone()
+            cliente = None
+            cliente_id = str(row_value(demanda, "cliente_id", "") or "")
+            if cliente_id:
+                cliente = conn.execute(
+                    "SELECT id, nombre, telefono, email FROM clientes WHERE id = ? LIMIT 1",
+                    (cliente_id,)).fetchone()
+            datos = crea_acceso_de_comprador(conn, demanda=demanda, cliente=cliente or {}, session=session)
+            conn.commit()
+            enlace = url_del_portal_de_busqueda(datos["token"])
+            contacto = datos.get("contacto") or {}
+            aviso = {"enviado": False, "canal": "", "motivo": "no_pedido"}
+            if payload.get("avisar"):
+                texto = (f"Ya puedes ver la selección de inmuebles que hemos preparado para ti: {enlace}")
+                if hay_canal_para_avisar() and contacto.get("telefono"):
+                    enviado, motivo = envia_mensaje_al_propietario(contacto["telefono"], texto)
+                    aviso = {"enviado": bool(enviado), "canal": canal_para_avisar(), "motivo": motivo}
+                elif hay_correo_configurado() and contacto.get("email"):
+                    empresa_row = conn.execute(
+                        "SELECT nombre FROM empresas WHERE id = ? LIMIT 1",
+                        (str(row_value(demanda, "empresa_id", "") or ""),)).fetchone()
+                    res = send_email_smtp(
+                        "Tu selección de inmuebles", contacto["email"],
+                        f"Ya puedes ver la selección que hemos preparado para ti: {enlace}",
+                        html_body=correo_con_la_seleccion(
+                            agencia=str(row_value(empresa_row, "nombre", "") or ""), enlace=enlace))
+                    aviso = {"enviado": bool(res.get("ok")), "canal": "email",
+                             "motivo": str(res.get("error") or "")}
+                else:
+                    aviso = {"enviado": False, "canal": "", "motivo": "sin_canal"}
+            audit_event(conn, str(row_value(demanda, "empresa_id", "") or ""), "demanda", demanda_id,
+                        "Acceso al portal del comprador",
+                        usuario=str((session or {}).get("usuario") or ""),
+                        detalles={"caduca": datos["caduca"], "aviso": aviso.get("canal") or "ninguno"})
+            conn.commit()
+            json_response(self, {"ok": True, "enlace": enlace, "caduca": datos["caduca"],
+                                 "contacto": {"telefono": _mask_phone(contacto.get("telefono", "")),
+                                              "email": contacto.get("email", "")},
+                                 "aviso": aviso})
+            return
+
+        if parsed.path == "/api/demanda_portal_acceso_revoke":
+            demanda_id = str(payload.get("demanda_id") or "").strip()
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _d = enforce_inmueble_access(
+                conn, session, demanda_id, write=True, tabla="demandas")
+            if not ok_acc:
+                json_response(self, {"error": str(err_acc).replace("Inmueble", "Demanda")},
+                              status=404 if "no encontrado" in str(err_acc) else 403)
+                return
+            n = revoca_accesos_de_la_demanda(conn, demanda_id, "anulado desde el CRM")
+            conn.commit()
+            json_response(self, {"ok": True, "anulados": n})
+            return
+
+        if parsed.path == "/api/demanda_portal_mensaje":
+            # La respuesta del asesor, al mismo hilo que ve el comprador.
+            demanda_id = str(payload.get("demanda_id") or "").strip()
+            texto = str(payload.get("texto") or "").strip()[:2000]
+            if not demanda_id or not texto:
+                json_response(self, {"error": "demanda_id y texto requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _d = enforce_inmueble_access(
+                conn, session, demanda_id, write=True, tabla="demandas")
+            if not ok_acc:
+                json_response(self, {"error": str(err_acc).replace("Inmueble", "Demanda")},
+                              status=404 if "no encontrado" in str(err_acc) else 403)
+                return
+            ensure_demanda_portal_schema(conn)
+            sello = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            conn.execute(
+                "INSERT INTO demanda_portal_mensajes (id, demanda_id, autor, autor_nombre, texto, leido, created_at) "
+                "VALUES (?, ?, 'agencia', ?, ?, 0, ?)",
+                (os.urandom(16).hex(), demanda_id,
+                 str((session or {}).get("nombre") or (session or {}).get("usuario") or "Tu asesor"),
+                 texto, sello))
+            conn.commit()
+            avisa_al_comprador(conn, demanda_id, "mensaje",
+                               "Tu asesor te ha escrito sobre tu búsqueda.",
+                               referencia=sello, now=sello)
+            json_response(self, {"ok": True})
+            return
+
+        if parsed.path == "/api/inmueble_doc_compartir_comprador":
+            # El interruptor de «esto pueden verlo los compradores». Aparte del del
+            # propietario a propósito: la nota simple se le enseña a quien compra, y
+            # el certificado de tasación que pidió el vendedor, no.
+            doc_id = str(payload.get("doc_id") or "").strip()
+            inmueble_id = str(payload.get("inmueble_id") or "").strip()
+            if not doc_id or not inmueble_id:
+                json_response(self, {"error": "doc_id e inmueble_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _f = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc},
+                              status=404 if "no encontrado" in str(err_acc) else 403)
+                return
+            ensure_demanda_portal_schema(conn)
+            visible = 1 if payload.get("visible") else 0
+            cur = conn.execute(
+                "UPDATE inmueble_docs SET visible_comprador = ?, updated_at = ? WHERE id = ? AND inmueble_id = ?",
+                (visible, datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), doc_id, inmueble_id))
+            if not int(getattr(cur, "rowcount", 0) or 0):
+                json_response(self, {"error": "Documento no encontrado"}, status=404)
+                return
+            conn.commit()
+            json_response(self, {"ok": True, "visible": bool(visible)})
+            return
+
+        if parsed.path == "/api/portal_busqueda_codigo":
+            acceso, fallo = acceso_de_comprador_por_token(conn, payload.get("token") or "")
+            if not acceso:
+                json_response(self, {"error": "Enlace no válido"}, status=404 if fallo != "revocado" else 403)
+                return
+            if not hay_canal_para_avisar():
+                json_response(self, {"error": "No hay canal de mensajes configurado"}, status=409)
+                return
+            codigo = str(payload.get("codigo") or "").strip()
+            if not codigo:
+                enviado, motivo = manda_codigo_de_portal(conn, acceso, tabla="demanda_portal_accesos")
+                json_response(self, {
+                    "enviado": bool(enviado),
+                    "telefono": _mask_phone(row_value(acceso, "telefono", "")),
+                    "motivo": "" if enviado else motivo,
+                }, status=200 if enviado else 502)
+                return
+            sesion, err = comprueba_codigo_de_portal(conn, acceso, codigo, tabla="demanda_portal_accesos")
+            if err:
+                textos = {
+                    "codigo_incorrecto": "El código no es correcto.",
+                    "caducado": "El código ha caducado. Pide uno nuevo.",
+                    "demasiados_intentos": "Demasiados intentos. Pide un código nuevo.",
+                    "sin_codigo": "Pide un código primero.",
+                }
+                json_response(self, {"error": textos.get(err, err)},
+                              status=429 if err == "demasiados_intentos" else 400)
+                return
+            json_response(self, {"ok": True, "sesion": sesion})
+            return
+
+        if parsed.path in ("/api/portal_busqueda_opinion", "/api/portal_busqueda_mensaje",
+                           "/api/portal_busqueda_firma", "/api/portal_busqueda_consentimiento",
+                           "/api/portal_busqueda_derechos", "/api/portal_busqueda_retirar"):
+            acceso, fallo = acceso_de_comprador_por_token(conn, payload.get("token") or "")
+            if not acceso:
+                json_response(self, {"error": "Enlace no válido"},
+                              status=403 if fallo in ("revocado", "caducado") else 404)
+                return
+            if not sesion_de_portal_valida(acceso, payload.get("sesion") or ""):
+                json_response(self, {"error": "Confirma tu identidad con el código"}, status=401)
+                return
+            demanda_id = str(row_value(acceso, "demanda_id", "") or "")
+            empresa_id = str(row_value(acceso, "empresa_id", "") or "")
+            ahora_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+            if parsed.path == "/api/portal_busqueda_consentimiento":
+                nombre = str(payload.get("nombre") or "").strip()
+                if not nombre:
+                    json_response(self, {"error": "Escribe tu nombre y apellidos"}, status=400)
+                    return
+                if not payload.get("acepta_informacion"):
+                    json_response(self, {"error": "Tienes que aceptar la información para entrar"},
+                                  status=400)
+                    return
+                empresa_row = conn.execute(
+                    "SELECT nombre FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+                consent_id = guarda_consentimiento_de_portal(
+                    conn, acceso, ambito="comprador",
+                    agencia=str(row_value(empresa_row, "nombre", "") or ""),
+                    nombre=nombre, nif=payload.get("nif"),
+                    acepta_comercial=bool(payload.get("acepta_comercial")),
+                    firma_png=payload.get("firma"),
+                    ip=str(self.client_address[0] if getattr(self, "client_address", None) else ""),
+                    agente=str(self.headers.get("User-Agent") or ""), now=ahora_iso)
+                audit_event(conn, empresa_id, "demanda", demanda_id,
+                            "Consentimiento de acceso firmado", usuario=nombre,
+                            detalles={"id": consent_id, "version": CONSENTIMIENTO_VERSION}, now=ahora_iso)
+                conn.commit()
+                json_response(self, {"ok": True})
+                return
+
+            if parsed.path == "/api/portal_busqueda_retirar":
+                ensure_portal_consentimientos_schema(conn)
+                conn.execute(
+                    "UPDATE portal_consentimientos SET revocado_at = ? WHERE acceso_id = ? AND revocado_at IS NULL",
+                    (ahora_iso, str(row_value(acceso, "id", "") or "")))
+                revoca_accesos_de_la_demanda(conn, demanda_id, "consentimiento retirado por el interesado",
+                                             now=ahora_iso)
+                audit_event(conn, empresa_id, "cliente", str(row_value(acceso, "cliente_id", "") or ""),
+                            "Consentimiento retirado por el interesado",
+                            usuario=str(row_value(acceso, "nombre", "") or ""),
+                            detalles={"acceso": str(row_value(acceso, "id", "") or "")}, now=ahora_iso)
+                conn.commit()
+                json_response(self, {"ok": True})
+                return
+
+            if parsed.path == "/api/portal_busqueda_derechos":
+                tipo = normalize_lookup_text(payload.get("tipo") or "")
+                validos = {"ACCESO", "RECTIFICACION", "SUPRESION", "OPOSICION", "PORTABILIDAD",
+                           "LIMITACION"}
+                if tipo not in validos:
+                    json_response(self, {"error": "Elige un derecho válido",
+                                         "opciones": sorted(validos)}, status=400)
+                    return
+                detalle = str(payload.get("texto") or "").strip()[:1000]
+                limite = (datetime.now(timezone.utc) + timedelta(days=30)).strftime("%Y-%m-%d")
+                try:
+                    acciones_cols = table_columns(conn, "acciones") or set()
+                    fila = {
+                        "id": os.urandom(16).hex(),
+                        "empresa_id": empresa_id,
+                        "workspace_id": str(row_value(acceso, "workspace_id", "") or ""),
+                        "servicio": "inmobiliaria",
+                        "cliente_id": str(row_value(acceso, "cliente_id", "") or ""),
+                        "cliente_nombre": str(row_value(acceso, "nombre", "") or ""),
+                        "fecha": limite,
+                        "hora": "09:00",
+                        "tipo": "Seguimiento",
+                        "asunto": f"RGPD · derecho de {tipo.lower()} · responder antes del {limite}",
+                        "estado": "Pendiente",
+                        "notas": detalle,
+                        "created_at": ahora_iso,
+                        "updated_at": ahora_iso,
+                    }
+                    claves = [k for k in fila if k in acciones_cols and fila[k] != ""]
+                    conn.execute(
+                        f"INSERT INTO acciones ({', '.join(claves)}) VALUES ({', '.join(['?'] * len(claves))})",
+                        [fila[k] for k in claves])
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("portal_busqueda_derechos/acciones", _fallo_tragado)
+                audit_event(conn, empresa_id, "cliente", str(row_value(acceso, "cliente_id", "") or ""),
+                            f"Ejercicio de derechos RGPD: {tipo.lower()}",
+                            usuario=str(row_value(acceso, "nombre", "") or ""),
+                            detalles={"texto": detalle, "limite": limite}, now=ahora_iso)
+                conn.commit()
+                json_response(self, {"ok": True, "limite": limite})
+                return
+
+            if parsed.path == "/api/portal_busqueda_opinion":
+                # Lo que opina de cada inmueble. El índice es la posición en SU
+                # selección: no hay id de inmueble en el cuerpo, así que no se puede
+                # opinar sobre algo que no le han enseñado.
+                datos = build_portal_de_busqueda(conn, acceso, registrar=False)
+                if not datos:
+                    json_response(self, {"error": "Enlace no válido"}, status=404)
+                    return
+                try:
+                    indice = int(payload.get("i"))
+                except Exception:
+                    indice = -1
+                if indice < 0 or indice >= len(datos["inmuebles"]):
+                    json_response(self, {"error": "Ese inmueble no está en tu selección"}, status=404)
+                    return
+                valoracion = str(payload.get("valoracion") or "").strip()
+                if valoracion and valoracion not in VALORACIONES_DEL_COMPRADOR:
+                    json_response(self, {"error": "Valoración no válida",
+                                         "opciones": sorted(VALORACIONES_DEL_COMPRADOR)}, status=400)
+                    return
+                comentario = str(payload.get("comentario") or "").strip()[:600]
+                inmueble_id = _inmueble_de_la_seleccion(conn, demanda_id, indice)
+                if not inmueble_id:
+                    json_response(self, {"error": "Ese inmueble no está en tu selección"}, status=404)
+                    return
+                ensure_demanda_portal_schema(conn)
+                cur = conn.execute(
+                    "UPDATE demanda_portal_opiniones SET valoracion = ?, comentario = ?, visto = 1, "
+                    "updated_at = ? WHERE demanda_id = ? AND inmueble_id = ?",
+                    (valoracion, comentario, ahora_iso, demanda_id, inmueble_id))
+                if not int(getattr(cur, "rowcount", 0) or 0):
+                    conn.execute(
+                        "INSERT INTO demanda_portal_opiniones (id, acceso_id, demanda_id, inmueble_id, "
+                        "cliente_id, valoracion, comentario, visto, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                        (os.urandom(16).hex(), str(row_value(acceso, "id", "") or ""), demanda_id,
+                         inmueble_id, str(row_value(acceso, "cliente_id", "") or ""),
+                         valoracion, comentario, ahora_iso, ahora_iso))
+                # Y una tarea para el asesor cuando quiere verlo: una opinión que
+                # nadie lee es peor que no preguntar, porque él ya ha pedido cita.
+                if valoracion in {"verlo", "encaja"}:
+                    try:
+                        acciones_cols = table_columns(conn, "acciones") or set()
+                        fila = {
+                            "id": os.urandom(16).hex(),
+                            "empresa_id": empresa_id,
+                            "workspace_id": str(row_value(acceso, "workspace_id", "") or ""),
+                            "servicio": "inmobiliaria",
+                            "inmueble_id": inmueble_id,
+                            "cliente_id": str(row_value(acceso, "cliente_id", "") or ""),
+                            "cliente_nombre": str(row_value(acceso, "nombre", "") or ""),
+                            "fecha": ahora_iso[:10],
+                            "hora": "09:00",
+                            "tipo": "Seguimiento",
+                            "asunto": ("El interesado quiere visitar este inmueble"
+                                       if valoracion == "verlo" else "Al interesado le encaja este inmueble"),
+                            "estado": "Pendiente",
+                            "notas": comentario[:500],
+                            "created_at": ahora_iso,
+                            "updated_at": ahora_iso,
+                        }
+                        claves = [k for k in fila if k in acciones_cols and fila[k] != ""]
+                        conn.execute(
+                            f"INSERT INTO acciones ({', '.join(claves)}) VALUES ({', '.join(['?'] * len(claves))})",
+                            [fila[k] for k in claves])
+                    except Exception as _fallo_tragado:
+                        apunta_escritura_tragada("portal_busqueda_opinion/acciones", _fallo_tragado)
+                conn.commit()
+                json_response(self, {"ok": True})
+                return
+
+            if parsed.path == "/api/portal_busqueda_mensaje":
+                texto = str(payload.get("texto") or "").strip()[:2000]
+                if not texto:
+                    json_response(self, {"error": "Escribe algo primero"}, status=400)
+                    return
+                ensure_demanda_portal_schema(conn)
+                conn.execute(
+                    "INSERT INTO demanda_portal_mensajes (id, demanda_id, acceso_id, cliente_id, autor, "
+                    "autor_nombre, texto, leido, created_at) VALUES (?, ?, ?, ?, 'comprador', ?, ?, 0, ?)",
+                    (os.urandom(16).hex(), demanda_id, str(row_value(acceso, "id", "") or ""),
+                     str(row_value(acceso, "cliente_id", "") or ""),
+                     str(row_value(acceso, "nombre", "") or "El interesado"), texto, ahora_iso))
+                try:
+                    acciones_cols = table_columns(conn, "acciones") or set()
+                    fila = {
+                        "id": os.urandom(16).hex(),
+                        "empresa_id": empresa_id,
+                        "workspace_id": str(row_value(acceso, "workspace_id", "") or ""),
+                        "servicio": "inmobiliaria",
+                        "cliente_id": str(row_value(acceso, "cliente_id", "") or ""),
+                        "cliente_nombre": str(row_value(acceso, "nombre", "") or ""),
+                        "fecha": ahora_iso[:10],
+                        "hora": "09:00",
+                        "tipo": "Seguimiento",
+                        "asunto": "El interesado te ha escrito desde su selección",
+                        "estado": "Pendiente",
+                        "notas": texto[:500],
+                        "created_at": ahora_iso,
+                        "updated_at": ahora_iso,
+                    }
+                    claves = [k for k in fila if k in acciones_cols and fila[k] != ""]
+                    conn.execute(
+                        f"INSERT INTO acciones ({', '.join(claves)}) VALUES ({', '.join(['?'] * len(claves))})",
+                        [fila[k] for k in claves])
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("portal_busqueda_mensaje/acciones", _fallo_tragado)
+                conn.commit()
+                json_response(self, {"ok": True})
+                return
+
+            if parsed.path == "/api/portal_busqueda_firma":
+                pedido = str(payload.get("id") or "").strip()
+                ensure_inmueble_signature_schema(conn)
+                fila = conn.execute(
+                    "SELECT * FROM inmueble_signature_requests WHERE id = ? LIMIT 1", (pedido,)).fetchone()
+                if not fila or not solicitud_de_firma_es_suya(fila, acceso):
+                    json_response(self, {"error": "Esa firma no es tuya"}, status=403)
+                    return
+                # Y además tiene que ser de un inmueble de SU selección: que el
+                # nombre coincida no basta para abrir la firma de otro expediente.
+                suyos = {str(row_value(f, "inmueble_id", "") or "") for f in conn.execute(
+                    "SELECT inmueble_id FROM inmueble_compradores WHERE demanda_id = ?", (demanda_id,)
+                ).fetchall()}
+                if str(row_value(fila, "inmueble_id", "") or "") not in suyos:
+                    json_response(self, {"error": "Esa firma no es tuya"}, status=403)
+                    return
+                if str(row_value(fila, "status", "") or "") in {"signed", "rejected"}:
+                    json_response(self, {"error": "Esa firma ya está resuelta"}, status=409)
+                    return
+                nuevo = make_signature_token()
+                conn.execute(
+                    "UPDATE inmueble_signature_requests SET token_hash = ?, updated_at = datetime(?) WHERE id = ?",
+                    (hash_signature_token(nuevo), ahora_iso, pedido))
+                record_signature_event(conn, pedido, "portal_reenlace",
+                                       details={"origen": "portal del comprador"}, now=ahora_iso)
+                conn.commit()
+                json_response(self, {"ok": True, "enlace": build_public_fragment_url("firma_inmo", nuevo)})
+                return
 
         if parsed.path == "/api/inmueble_signature_reject":
             token = str(payload.get("token") or "").strip()
@@ -94826,6 +96276,204 @@ class Handler(BaseHTTPRequestHandler):
             datos["estado"] = "ok"
             datos["segundo_factor"] = hay_canal_para_avisar()
             json_response(self, datos)
+            return
+
+        if path == "/api/portal_busqueda":
+            # Público a propósito: entra el comprador con su enlace, sin sesión del
+            # CRM. Y la vista previa del asesor, con la suya, para ver lo mismo sin
+            # gastarle una visita al interesado.
+            previa = str(params.get("preview", [""])[0] or "").strip()
+            if previa:
+                session = getattr(self, "auth_session", None) or self._current_session()
+                if not session:
+                    json_response(self, {
+                        "error": "Entra primero en el CRM en este mismo navegador y vuelve a abrir el enlace.",
+                    }, status=401)
+                    return
+                ok_acc, err_acc, dem = enforce_inmueble_access(conn, session, previa, tabla="demandas")
+                if not ok_acc:
+                    json_response(self, {"error": str(err_acc).replace("Inmueble", "Demanda")},
+                                  status=404 if "no encontrado" in str(err_acc) else 403)
+                    return
+                cliente = conn.execute(
+                    "SELECT c.id, c.nombre, c.telefono FROM clientes c JOIN demandas d ON d.cliente_id = c.id "
+                    "WHERE d.id = ? LIMIT 1", (previa,)).fetchone()
+                datos = build_portal_de_busqueda(conn, {
+                    "id": "",
+                    "demanda_id": previa,
+                    "empresa_id": row_value(dem, "empresa_id", ""),
+                    "cliente_id": row_value(cliente, "id", ""),
+                    "nombre": row_value(cliente, "nombre", ""),
+                    "telefono": row_value(cliente, "telefono", ""),
+                }, registrar=False)
+                if not datos:
+                    json_response(self, {"error": "Demanda no encontrada"}, status=404)
+                    return
+                datos["estado"] = "ok"
+                datos["vista_previa"] = True
+                datos["segundo_factor"] = hay_canal_para_avisar()
+                json_response(self, datos)
+                return
+
+            token = _request_token_param(self, params, "token")
+            if not token:
+                json_response(self, {"error": "token requerido"}, status=400)
+                return
+            acceso, fallo = acceso_de_comprador_por_token(conn, token)
+            if fallo == "revocado":
+                json_response(self, {"error": "Este enlace ha sido anulado. Pide uno nuevo a tu agencia."}, status=403)
+                return
+            if fallo == "caducado":
+                json_response(self, {"error": "Este enlace ha caducado. Pide uno nuevo a tu agencia."}, status=403)
+                return
+            if not acceso:
+                json_response(self, {"error": "Enlace no válido"}, status=404)
+                return
+            if not sesion_de_portal_valida(acceso, params.get("s", [""])[0]):
+                json_response(self, {
+                    "estado": "codigo_requerido",
+                    "telefono": _mask_phone(row_value(acceso, "telefono", "")),
+                })
+                return
+            if not consentimiento_vigente(conn, row_value(acceso, "id", "")):
+                empresa_row = conn.execute(
+                    "SELECT nombre FROM empresas WHERE id = ? LIMIT 1",
+                    (str(row_value(acceso, "empresa_id", "") or ""),)).fetchone()
+                json_response(self, {
+                    "estado": "consentimiento_requerido",
+                    "texto": texto_de_consentimiento(
+                        "comprador", row_value(empresa_row, "nombre", ""),
+                        responsable_del_tratamiento(conn, row_value(acceso, "empresa_id", ""))),
+                    "nombre": str(row_value(acceso, "nombre", "") or ""),
+                })
+                return
+            datos = build_portal_de_busqueda(conn, acceso)
+            if not datos:
+                json_response(self, {"error": "Enlace no válido"}, status=404)
+                return
+            datos["estado"] = "ok"
+            datos["segundo_factor"] = hay_canal_para_avisar()
+            json_response(self, datos)
+            return
+
+        if path == "/api/portal_busqueda_foto":
+            # `i` es la posición del inmueble en SU selección y `n` la de la foto.
+            # Ninguno de los dos es un id, así que no hay forma de pedir la foto de
+            # un inmueble que no le han enseñado.
+            token = _request_token_param(self, params, "token")
+            acceso, _fallo = acceso_de_comprador_por_token(conn, token)
+            if not acceso:
+                json_response(self, {"error": "Enlace no válido"}, status=404)
+                return
+            if not sesion_de_portal_valida(acceso, params.get("s", [""])[0]):
+                json_response(self, {"error": "Confirma tu identidad con el código"}, status=401)
+                return
+            inmueble_id = _inmueble_de_la_seleccion(
+                conn, row_value(acceso, "demanda_id", ""), params.get("i", ["-1"])[0])
+            if not inmueble_id:
+                json_response(self, {"error": "No hay foto"}, status=404)
+                return
+            fotos = fotos_del_inmueble(conn, inmueble_id)
+            try:
+                indice = max(0, int(params.get("n", ["0"])[0] or 0))
+            except Exception:
+                indice = 0
+            if indice >= len(fotos):
+                json_response(self, {"error": "No hay foto"}, status=404)
+                return
+            ruta = _signature_url_to_local_path(fotos[indice])
+            if not ruta or not ruta.exists():
+                json_response(self, {"error": "No hay foto"}, status=404)
+                return
+            tipo = {"png": "image/png", "webp": "image/webp"}.get(
+                ruta.suffix.lower().lstrip("."), "image/jpeg")
+            binary_response(self, ruta.read_bytes(), content_type=tipo)
+            return
+
+        if path == "/api/portal_busqueda_documento":
+            token = _request_token_param(self, params, "token")
+            acceso, _fallo = acceso_de_comprador_por_token(conn, token)
+            if not acceso:
+                json_response(self, {"error": "Enlace no válido"}, status=404)
+                return
+            if not sesion_de_portal_valida(acceso, params.get("s", [""])[0]):
+                json_response(self, {"error": "Confirma tu identidad con el código"}, status=401)
+                return
+            datos = build_portal_de_busqueda(conn, acceso, registrar=False)
+            try:
+                pos = int(params.get("i", ["-1"])[0])
+                n = int(params.get("n", ["-1"])[0])
+            except Exception:
+                pos = n = -1
+            if not datos or pos < 0 or pos >= len(datos["inmuebles"]):
+                json_response(self, {"error": "Documento no disponible"}, status=404)
+                return
+            visibles = datos["inmuebles"][pos]["documentos"]
+            if not any(d["n"] == n for d in visibles):
+                json_response(self, {"error": "Documento no disponible"}, status=404)
+                return
+            inmueble_id = _inmueble_de_la_seleccion(conn, row_value(acceso, "demanda_id", ""), pos)
+            candidatos = conn.execute(
+                "SELECT nombre, url FROM inmueble_docs WHERE inmueble_id = ? "
+                "AND COALESCE(visible_comprador,0) = 1 ORDER BY COALESCE(created_at,'') DESC, id DESC LIMIT 12",
+                (inmueble_id,)).fetchall()
+            if n >= len(candidatos):
+                # Se lo han dejado de compartir entre que cargó la página y pinchó.
+                json_response(self, {"error": "Documento no disponible"}, status=404)
+                return
+            ruta = _signature_url_to_local_path(str(row_value(candidatos[n], "url", "") or ""))
+            if not ruta or not ruta.exists():
+                json_response(self, {"error": "Documento no disponible"}, status=404)
+                return
+            tipos = {".pdf": "application/pdf", ".png": "image/png", ".webp": "image/webp"}
+            binary_response(self, ruta.read_bytes(),
+                            content_type=tipos.get(ruta.suffix.lower(), "image/jpeg"))
+            return
+
+        if path == "/api/portal_busqueda_consentimiento_pdf":
+            # Su copia de lo que firmó. Sale de la base, no del disco.
+            token = _request_token_param(self, params, "token")
+            acceso, _fallo = acceso_de_comprador_por_token(conn, token)
+            if not acceso:
+                json_response(self, {"error": "Enlace no válido"}, status=404)
+                return
+            firmado = consentimiento_vigente(conn, row_value(acceso, "id", ""))
+            crudo = str(row_value(firmado, "documento_pdf", "") or "") if firmado else ""
+            if not crudo:
+                json_response(self, {"error": "No hay documento"}, status=404)
+                return
+            try:
+                binary_response(self, base64.b64decode(crudo), content_type="application/pdf")
+            except Exception:
+                json_response(self, {"error": "No hay documento"}, status=404)
+            return
+
+        if path == "/api/demanda_portal_accesos":
+            # Para la ficha: quién tiene enlace vivo, cuándo entró y cuántas veces.
+            # Nunca el token; sólo se guarda su hash y no hay forma de recuperarlo.
+            demanda_id = str(params.get("demanda_id", [""])[0] or "").strip()
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _d = enforce_inmueble_access(conn, session, demanda_id, tabla="demandas")
+            if not ok_acc:
+                json_response(self, {"error": str(err_acc).replace("Inmueble", "Demanda")},
+                              status=404 if "no encontrado" in str(err_acc) else 403)
+                return
+            ensure_demanda_portal_schema(conn)
+            filas = conn.execute(
+                "SELECT id, nombre, telefono, email, expires_at, revocado, revocado_motivo, accesos, "
+                "last_access_at, created_at FROM demanda_portal_accesos WHERE demanda_id = ? "
+                "ORDER BY created_at DESC LIMIT 20", (demanda_id,)).fetchall()
+            json_response(self, {"accesos": [{
+                "nombre": str(row_value(f, "nombre", "") or ""),
+                "telefono": _mask_phone(row_value(f, "telefono", "")),
+                "email": str(row_value(f, "email", "") or ""),
+                "caduca": str(row_value(f, "expires_at", "") or ""),
+                "revocado": bool(int(row_value(f, "revocado", 0) or 0)),
+                "motivo": str(row_value(f, "revocado_motivo", "") or ""),
+                "entradas": int(row_value(f, "accesos", 0) or 0),
+                "ultima": str(row_value(f, "last_access_at", "") or "")[:16].replace("T", " "),
+                "creado": str(row_value(f, "created_at", "") or "")[:10],
+            } for f in filas]})
             return
 
         if path == "/api/portal_venta_foto":
