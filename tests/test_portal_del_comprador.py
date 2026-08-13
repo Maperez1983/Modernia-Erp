@@ -1291,3 +1291,120 @@ class DeLaOfertaALaReservaTests(BaseComprador):
         o = self._ficha()["oferta"]
         self.assertEqual(o["estado"], "presentada")
         self.assertEqual(o["importe"], 235000)
+
+
+class LaMediacionDeLaAgenciaTests(BaseComprador):
+    """Del comprador al propietario no se pasa solo. Una oferta que salta de uno a
+    otro sin que nadie la trabaje deja a la agencia fuera de su propia operación."""
+
+    def setUp(self):
+        super().setUp()
+        S.ensure_ofertas_schema(self.conn)
+        S.ensure_inmueble_portal_schema(self.conn)
+        self.token = self._abre()
+        self.i = self._posicion(self.token, "Calle Uno 1")
+        self._post("/api/portal_busqueda_oferta",
+                   {"token": self.token, "i": self.i, "importe": 232000,
+                    "comentario": "Ojo: esto lo escribe el comprador"}, con_sesion=False)
+        self.oferta_id = self.conn.execute(
+            "SELECT id FROM inmueble_ofertas LIMIT 1").fetchone()["id"]
+
+    def _presentar(self, **extra):
+        cuerpo = {"oferta_id": self.oferta_id, "nota": "Cliente solvente, viene con financiación cerrada"}
+        cuerpo.update(extra)
+        return self._post("/api/inmueble_oferta_presentar", cuerpo)
+
+    def test_hasta_que_el_asesor_no_la_presenta_el_propietario_no_ve_nada(self):
+        inm = self.conn.execute("SELECT estado FROM inmuebles WHERE id='inm1'").fetchone()
+        self.assertEqual(inm["estado"], "Encargo")
+        self.assertEqual(self.conn.execute(
+            "SELECT COUNT(*) c FROM operaciones_inmobiliarias").fetchone()["c"], 0)
+
+    def test_al_presentarla_se_sella_el_precio_y_sube_la_etapa(self):
+        estado, d = self._presentar()
+        self.assertEqual(estado, 200, d)
+        op = self.conn.execute(
+            "SELECT precio_propuesta, fecha_propuesta, origen FROM operaciones_inmobiliarias").fetchone()
+        self.assertEqual(float(op["precio_propuesta"]), 232000.0)
+        self.assertEqual(op["origen"], "portal_comprador")
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM inmuebles WHERE id='inm1'").fetchone()["estado"], "Propuesta")
+
+    def test_no_se_lleva_al_expediente_quien_es_el_comprador(self):
+        """Quién compra no es asunto del vendedor mientras no se formalice, y esa
+        fila alimenta documentos suyos."""
+        self._presentar()
+        op = self.conn.execute("SELECT * FROM operaciones_inmobiliarias").fetchone()
+        crudo = json.dumps({k: str(v) for k, v in dict(op).items()})
+        self.assertNotIn("Carlos Comprador", crudo)
+        self.assertNotIn("600111222", crudo)
+
+    def test_lo_que_llega_es_la_nota_del_asesor_no_el_comentario_del_comprador(self):
+        self._presentar()
+        fila = self.conn.execute(
+            "SELECT mediacion_nota FROM inmueble_ofertas WHERE id = ?", (self.oferta_id,)).fetchone()
+        self.assertIn("solvente", fila["mediacion_nota"])
+        self.assertNotIn("lo escribe el comprador", fila["mediacion_nota"])
+
+    def test_presentarla_dos_veces_no(self):
+        self._presentar()
+        self.assertEqual(self._presentar()[0], 409)
+
+    def test_una_oferta_ya_contraofertada_no_se_presenta(self):
+        self._post("/api/inmueble_oferta_responder",
+                   {"oferta_id": self.oferta_id, "decision": "contraoferta", "importe": 240000})
+        self.assertEqual(self._presentar()[0], 409)
+
+    def test_el_comprador_no_ve_que_se_ha_presentado(self):
+        self._presentar()
+        crudo = self._get(f"/api/portal_busqueda?token={self.token}")[1]
+        self.assertNotIn("mediacion", crudo)
+        self.assertNotIn("presentada_al_propietario", crudo)
+        o = self._vista(self.token)["inmuebles"][self.i]["oferta"]
+        self.assertEqual(o["estado"], "presentada")
+        self.assertEqual(o["titulo"], "Oferta presentada")
+
+    def test_la_decision_del_propietario_vuelve_al_asesor_y_no_al_comprador(self):
+        """Que el vendedor haya dicho que sí no es un dato del comprador: el paso
+        siguiente lo abre la agencia."""
+        self._presentar()
+        S.ensure_inmueble_portal_decisiones_schema(self.conn)
+        self._ins("inmueble_propietarios", {"id": "ip1", "inmueble_id": "inm1", "cliente_id": "cli2",
+                                            "created_at": AHORA, "updated_at": AHORA})
+        estado, d = self._post("/api/inmueble_portal_acceso",
+                               {"inmueble_id": "inm1", "avisar": False})
+        self.assertEqual(estado, 200, d)
+        token_prop = d["enlace"].split("token=", 1)[1]
+        self._post("/api/portal_venta_consentimiento",
+                   {"token": token_prop, "nombre": "Pilar Propietaria", "acepta_informacion": True},
+                   con_sesion=False)
+        estado, d = self._post("/api/portal_venta_propuesta",
+                               {"token": token_prop, "decision": "acepto"}, con_sesion=False)
+        self.assertEqual(estado, 200, d)
+        # Por dentro consta; para el comprador no ha cambiado nada.
+        fila = self.conn.execute(
+            "SELECT estado, mediacion FROM inmueble_ofertas WHERE id = ?", (self.oferta_id,)).fetchone()
+        self.assertEqual(fila["mediacion"], "propietario_acepta")
+        self.assertEqual(fila["estado"], "presentada")
+        o = self._vista(self.token)["inmuebles"][self.i]["oferta"]
+        self.assertEqual(o["titulo"], "Oferta presentada")
+        self.assertFalse(o["puede_justificar"])
+
+    def test_la_ficha_del_asesor_si_lo_ve_todo(self):
+        self._presentar()
+        estado, cuerpo = self._get("/api/inmueble_ofertas?inmueble_id=inm1", con_sesion=True)
+        self.assertEqual(estado, 200, cuerpo)
+        oferta = json.loads(cuerpo)["ofertas"][0]
+        self.assertEqual(oferta["mediacion"], "presentada_al_propietario")
+        self.assertEqual(oferta["comprador"], "Carlos Comprador")
+        self.assertFalse(oferta["puede_presentar"])
+
+    def test_esa_lista_no_se_ve_sin_sesion(self):
+        self.assertEqual(self._get("/api/inmueble_ofertas?inmueble_id=inm1")[0], 401)
+
+    def test_la_historia_recoge_los_dos_lados(self):
+        self._presentar()
+        quienes = [r["quien"] for r in self.conn.execute(
+            "SELECT quien FROM inmueble_oferta_eventos ORDER BY created_at ASC").fetchall()]
+        self.assertEqual(quienes[0], "comprador")
+        self.assertIn("Ana Asesora", quienes[1])

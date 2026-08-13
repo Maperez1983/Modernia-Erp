@@ -32470,6 +32470,12 @@ def ensure_ofertas_schema(conn):
         )
         """
     )
+    # Por dónde va la mediación. **El comprador no ve nada de esto**: su pantalla
+    # sigue diciendo «oferta presentada» hasta que el asesor le cuente algo. Que el
+    # propietario haya dicho que sí no es un dato suyo hasta que la agencia lo
+    # convierte en un paso —la reserva—.
+    for columna in ("mediacion", "mediacion_at", "mediacion_nota", "mediacion_por"):
+        ensure_column(conn, "inmueble_ofertas", columna, f"{columna} TEXT")
     for sql in (
         "CREATE INDEX IF NOT EXISTS idx_ofertas_demanda ON inmueble_ofertas (demanda_id, inmueble_id)",
         "CREATE INDEX IF NOT EXISTS idx_ofertas_inmueble ON inmueble_ofertas (inmueble_id, estado)",
@@ -32483,6 +32489,88 @@ def ensure_ofertas_schema(conn):
         conn.commit()
     except Exception as _fallo_tragado:
         apunta_escritura_tragada("ensure_ofertas_schema/commit", _fallo_tragado)
+
+
+def presenta_oferta_al_propietario(conn, oferta, nota, quien, now=None):
+    """Lleva la oferta al expediente para que la vea el propietario.
+
+    **Esto no pasa solo, y es el punto.** Una oferta que salta del comprador al
+    vendedor sin que nadie la trabaje deja a la agencia fuera de su propia
+    operación. Aquí la dispara el asesor con un clic, cuando él decide, y lo que
+    llega al propietario es el importe y la nota que escribe el asesor —no el
+    comentario que escribió el comprador, ni su nombre—.
+
+    Lo que hace: sella el precio en `operaciones_inmobiliarias` y mueve la etapa a
+    Propuesta, que es lo que enciende el bloque de la oferta en el portal del
+    propietario. Antes había que teclearlo a mano en dos sitios.
+
+    Devuelve (ok, motivo).
+    """
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    inmueble_id = str(row_value(oferta, "inmueble_id", "") or "")
+    empresa_id = str(row_value(oferta, "empresa_id", "") or "")
+    importe = round(parse_money_value(row_value(oferta, "importe", 0)) or 0, 2)
+    inmueble = conn.execute(
+        "SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+    if not inmueble:
+        return False, "inmueble_no_encontrado"
+    etapa = normalize_lookup_text(row_value(inmueble, "estado", ""))
+    if etapa in {"VENDIDO", "COMPRAVENTA", "ALQUILER", "CERRADO NEGATIVAMENTE"}:
+        return False, "operacion_cerrada"
+
+    cols = table_columns(conn, "operaciones_inmobiliarias") or set()
+    fila = conn.execute(
+        "SELECT id FROM operaciones_inmobiliarias WHERE inmueble_id = ? "
+        "ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 1", (inmueble_id,)).fetchone()
+    campos = {"precio_propuesta": importe, "fecha_propuesta": now[:10], "updated_at": now}
+    if fila:
+        usables = [c for c in campos if c in cols]
+        conn.execute(
+            f"UPDATE operaciones_inmobiliarias SET {', '.join(f'{c} = ?' for c in usables)} WHERE id = ?",
+            [campos[c] for c in usables] + [str(row_value(fila, "id", "") or "")])
+    else:
+        # Sin expediente todavía: se abre uno mínimo. **Sin datos de la
+        # contraparte**: quién compra no es asunto del vendedor mientras la
+        # operación no se formalice, y esta fila alimenta documentos suyos.
+        nueva = {
+            "id": os.urandom(16).hex(),
+            "empresa_id": empresa_id,
+            "workspace_id": str(row_value(inmueble, "workspace_id", "") or ""),
+            "tipo_operacion": str(row_value(inmueble, "tipo_operacion", "") or "venta"),
+            "estado": "En curso",
+            "origen": "portal_comprador",
+            "inmueble_id": inmueble_id,
+            "direccion": str(row_value(inmueble, "direccion", "") or ""),
+            "precio_propuesta": importe,
+            "fecha_propuesta": now[:10],
+            "created_at": now,
+            "updated_at": now,
+        }
+        claves = [k for k in nueva if k in cols] or list(nueva)
+        conn.execute(
+            f"INSERT INTO operaciones_inmobiliarias ({', '.join(claves)}) "
+            f"VALUES ({', '.join(['?'] * len(claves))})",
+            [nueva[k] for k in claves])
+
+    # La etapa sólo sube desde Encargo. Si ya está en arras o reservado, presentar
+    # una oferta nueva no puede echar la ficha atrás.
+    if etapa == "ENCARGO":
+        conn.execute("UPDATE inmuebles SET estado = 'Propuesta', updated_at = datetime(?) WHERE id = ?",
+                     (now, inmueble_id))
+        try:
+            log_crm_stage_event(conn, empresa_id, inmueble_id, None, "Propuesta",
+                                now=now, from_etapa=str(row_value(inmueble, "estado", "") or ""))
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("presenta_oferta_al_propietario/etapa", _fallo_tragado)
+
+    conn.execute(
+        "UPDATE inmueble_ofertas SET mediacion = 'presentada_al_propietario', mediacion_at = ?, "
+        "mediacion_nota = ?, mediacion_por = ?, updated_at = ? WHERE id = ?",
+        (now, str(nota or "")[:600], str(quien or ""), now, str(row_value(oferta, "id", "") or "")))
+    apunta_evento_de_oferta(conn, row_value(oferta, "id", ""), str(quien or "la agencia"),
+                            "presenta la oferta al propietario", detalle=str(nota or "")[:600],
+                            importe=f"{importe:.2f}", now=now)
+    return True, ""
 
 
 def _payload_de_evento_de_oferta(fila, prev_hash):
@@ -68551,6 +68639,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_busqueda_oferta_decision",
             "/api/portal_busqueda_justificante",
             "/api/inmueble_oferta_responder",
+            "/api/inmueble_oferta_presentar",
             "/api/inmueble_oferta_verificar",
             "/api/inmueble_renovar",
             "/api/renta_campaign_document",
@@ -69443,6 +69532,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_busqueda_oferta_decision",
             "/api/portal_busqueda_justificante",
             "/api/inmueble_oferta_responder",
+            "/api/inmueble_oferta_presentar",
             "/api/inmueble_oferta_verificar",
             "/api/demanda_portal_acceso",
             "/api/demanda_portal_acceso_revoke",
@@ -69843,6 +69933,29 @@ class Handler(BaseHTTPRequestHandler):
                     [fila[k] for k in claves])
             except Exception as _fallo_tragado:
                 apunta_escritura_tragada("portal_venta_propuesta/acciones", _fallo_tragado)
+            # Si esa propuesta venía de una oferta del portal del comprador, se
+            # anota ahí por dónde va. **No se le enseña a él**: su pantalla sigue
+            # diciendo «oferta presentada» hasta que la agencia decida qué le
+            # cuenta y cuándo. Que el vendedor haya dicho que sí no es un dato del
+            # comprador; el paso siguiente —la reserva— lo abre el asesor.
+            try:
+                ensure_ofertas_schema(conn)
+                pendiente = conn.execute(
+                    "SELECT id FROM inmueble_ofertas WHERE inmueble_id = ? AND estado = 'presentada' "
+                    "AND COALESCE(mediacion,'') = 'presentada_al_propietario' "
+                    "ORDER BY mediacion_at DESC LIMIT 1", (inmueble_id,)).fetchone()
+                if pendiente:
+                    destino = "propietario_acepta" if decision == "ACEPTO" else "propietario_rechaza"
+                    conn.execute(
+                        "UPDATE inmueble_ofertas SET mediacion = ?, mediacion_at = ?, updated_at = ? "
+                        "WHERE id = ?",
+                        (destino, ahora_iso, ahora_iso, str(row_value(pendiente, "id", "") or "")))
+                    apunta_evento_de_oferta(
+                        conn, row_value(pendiente, "id", ""), "propietario",
+                        "acepta la propuesta" if decision == "ACEPTO" else "rechaza la propuesta",
+                        importe=str(importe or ""), now=ahora_iso)
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("portal_venta_propuesta/mediacion", _fallo_tragado)
             audit_event(conn, str(row_value(acceso, "empresa_id", "") or ""), "inmueble", inmueble_id,
                         "Decisión del propietario sobre la propuesta",
                         usuario=str(row_value(acceso, "nombre", "") or "propietario"),
@@ -69977,7 +70090,8 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "visible": bool(visible)})
             return
 
-        if parsed.path in ("/api/inmueble_oferta_responder", "/api/inmueble_oferta_verificar"):
+        if parsed.path in ("/api/inmueble_oferta_responder", "/api/inmueble_oferta_verificar",
+                           "/api/inmueble_oferta_presentar"):
             # El lado del asesor. La oferta la escribe el comprador; la respuesta,
             # la señal y el visto bueno del ingreso los pone la agencia.
             oferta_id = str(payload.get("oferta_id") or "").strip()
@@ -69997,6 +70111,41 @@ class Handler(BaseHTTPRequestHandler):
             ahora_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             quien = str((session or {}).get("nombre") or (session or {}).get("usuario") or "la agencia")
             estado_actual = str(row_value(fila, "estado", "") or "")
+
+            if parsed.path == "/api/inmueble_oferta_presentar":
+                # La puerta. Del comprador al propietario no se pasa solo: lo
+                # decide el asesor, y lo que llega es el importe y la nota que él
+                # escribe. Sin esto había que teclear la cifra otra vez en el
+                # expediente para que apareciera en el portal del propietario.
+                if estado_actual != "presentada":
+                    json_response(self, {"error": f"Una oferta en «{estado_actual}» no se presenta"},
+                                  status=409)
+                    return
+                if str(row_value(fila, "mediacion", "") or "") == "presentada_al_propietario":
+                    json_response(self, {"error": "Ya está presentada al propietario"}, status=409)
+                    return
+                ok_pres, motivo = presenta_oferta_al_propietario(
+                    conn, fila, payload.get("nota"), quien, now=ahora_iso)
+                if not ok_pres:
+                    textos = {"inmueble_no_encontrado": "Inmueble no encontrado",
+                              "operacion_cerrada": "Esa operación ya está cerrada"}
+                    json_response(self, {"error": textos.get(motivo, motivo)},
+                                  status=404 if motivo == "inmueble_no_encontrado" else 409)
+                    return
+                audit_event(conn, str(row_value(fila, "empresa_id", "") or ""), "inmueble", inmueble_id,
+                            "Oferta presentada al propietario", usuario=quien,
+                            detalles={"oferta": oferta_id,
+                                      "importe": str(row_value(fila, "importe", "") or "")},
+                            now=ahora_iso)
+                conn.commit()
+                # Y al propietario se le avisa de que tiene algo que mirar. Al
+                # comprador NO: para él no ha cambiado nada hasta que la agencia se
+                # lo diga.
+                avisa_al_propietario(conn, inmueble_id, "propuesta",
+                                     "Tienes una oferta sobre tu inmueble en tu seguimiento.",
+                                     referencia=oferta_id, now=ahora_iso)
+                json_response(self, {"ok": True, "mediacion": "presentada_al_propietario"})
+                return
 
             if parsed.path == "/api/inmueble_oferta_verificar":
                 if estado_actual != "reserva_justificada":
@@ -98088,6 +98237,40 @@ class Handler(BaseHTTPRequestHandler):
                 binary_response(self, base64.b64decode(crudo), content_type="application/pdf")
             except Exception:
                 json_response(self, {"error": "No hay documento"}, status=404)
+            return
+
+        if path == "/api/inmueble_ofertas":
+            # Para la ficha del inmueble: las ofertas con su estado y por dónde va
+            # la mediación, que es justo lo que el comprador no ve.
+            inmueble_id = str(params.get("inmueble_id", [""])[0] or "").strip()
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _f = enforce_inmueble_access(conn, session, inmueble_id)
+            if not ok_acc:
+                json_response(self, {"error": err_acc},
+                              status=404 if "no encontrado" in str(err_acc) else 403)
+                return
+            ensure_ofertas_schema(conn)
+            filas = conn.execute(
+                "SELECT o.*, c.nombre AS comprador FROM inmueble_ofertas o "
+                "LEFT JOIN clientes c ON c.id = o.cliente_id WHERE o.inmueble_id = ? "
+                "ORDER BY o.created_at DESC LIMIT 40", (inmueble_id,)).fetchall()
+            ofertas = []
+            for f in filas:
+                vista = vista_de_la_oferta(f) or {}
+                vista.update({
+                    "id": str(row_value(f, "id", "") or ""),
+                    # Sólo aquí dentro: en el portal del comprador no sale ni el
+                    # nombre de nadie ni por dónde va la mediación.
+                    "comprador": str(row_value(f, "comprador", "") or ""),
+                    "mediacion": str(row_value(f, "mediacion", "") or ""),
+                    "mediacion_at": str(row_value(f, "mediacion_at", "") or "")[:16].replace("T", " "),
+                    "mediacion_nota": str(row_value(f, "mediacion_nota", "") or ""),
+                    "comentario": str(row_value(f, "comentario", "") or ""),
+                    "puede_presentar": (str(row_value(f, "estado", "") or "") == "presentada"
+                                        and not str(row_value(f, "mediacion", "") or "")),
+                })
+                ofertas.append(vista)
+            json_response(self, {"ofertas": ofertas})
             return
 
         if path == "/api/demanda_portal_accesos":
