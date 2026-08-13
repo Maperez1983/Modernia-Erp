@@ -21,6 +21,7 @@ const SHELL_URLS = [
   "/app-routing.js?v=13",
   "/app_shared.js?v=2",
   "/app.js?v=895",
+  "/inmo_operacion.js?v=1",
   "/manifest.webmanifest?v=18",
   "/assets/verifika2/verifika2_wordmark_dark.svg",
   "/icons/catastro.png?v=28",

@@ -32597,6 +32597,123 @@ def presenta_oferta_al_propietario(conn, oferta, nota, quien, now=None):
     return True, ""
 
 
+# El camino de una hipoteca contado para quien la pide. Cerrado y en orden: son
+# hitos, no un campo de texto donde cada asesor escriba lo que le parezca, y el
+# orden es lo que permite pintarlo como una barra de progreso.
+#
+# Sólo se le enseña al comprador **si la hipoteca la llevamos nosotros**. Si se la
+# lleva su banco, aquí no hay nada que contar y no se inventa.
+FASES_DE_HIPOTECA = [
+    ("estudio", "En estudio"),
+    ("presentada", "Presentada al banco"),
+    ("preaprobada", "Pre-aprobada económicamente"),
+    ("tasacion_pendiente", "Pendiente de tasación"),
+    ("tasada", "Tasada"),
+    ("aprobada", "Aprobada"),
+    ("firmada", "Firmada"),
+    ("denegada", "Denegada"),
+]
+FASES_DE_HIPOTECA_POR_CLAVE = dict(FASES_DE_HIPOTECA)
+# «Denegada» no está en la barra: no es un paso más adelante, es el final.
+_FASES_EN_ORDEN = [c for c, _ in FASES_DE_HIPOTECA if c != "denegada"]
+
+
+def ensure_hipoteca_fases_schema(conn):
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS hipoteca_fases (
+          id TEXT PRIMARY KEY,
+          hipoteca_id TEXT NOT NULL,
+          fase TEXT NOT NULL,
+          nota TEXT,
+          por TEXT,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_hipoteca_fases ON hipoteca_fases (hipoteca_id, created_at)")
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_hipoteca_fases_schema/indice", _fallo_tragado)
+    # La fase actual, en la propia hipoteca, para no recalcularla en cada listado.
+    ensure_column(conn, "hipotecas", "fase", "fase TEXT")
+    try:
+        conn.commit()
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_hipoteca_fases_schema/commit", _fallo_tragado)
+
+
+def apunta_fase_de_hipoteca(conn, hipoteca_id, fase, *, nota="", por="", now=None):
+    """Un hito más en el camino de la hipoteca.
+
+    Se guarda el histórico y además la fase actual en la ficha: lo primero es lo
+    que el comprador ve como seguimiento y lo segundo es lo que se filtra en el
+    embudo. La misma fase dos veces no se apunta dos veces.
+    """
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    fase = str(fase or "").strip().lower()
+    if fase not in FASES_DE_HIPOTECA_POR_CLAVE:
+        return False, "fase_no_valida"
+    ensure_hipoteca_fases_schema(conn)
+    try:
+        ultima = conn.execute(
+            "SELECT fase FROM hipoteca_fases WHERE hipoteca_id = ? ORDER BY created_at DESC LIMIT 1",
+            (str(hipoteca_id or ""),)).fetchone()
+        if ultima and str(row_value(ultima, "fase", "") or "") == fase:
+            return True, ""
+        conn.execute(
+            "INSERT INTO hipoteca_fases (id, hipoteca_id, fase, nota, por, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (os.urandom(16).hex(), str(hipoteca_id or ""), fase, str(nota or "")[:500],
+             str(por or ""), now))
+        conn.execute("UPDATE hipotecas SET fase = ?, updated_at = ? WHERE id = ?",
+                     (fase, now, str(hipoteca_id or "")))
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("apunta_fase_de_hipoteca", _fallo_tragado)
+        return False, "no_se_pudo_apuntar"
+    return True, ""
+
+
+def seguimiento_de_la_hipoteca(conn, hipoteca_id):
+    """Lo que ve el comprador de SU hipoteca: los hitos por los que ha pasado.
+
+    Sin la nota interna, sin el banco y sin importes. Son hitos con fecha, que es
+    lo que él pregunta —«¿por dónde va?»—; lo demás se lo cuenta su asesor.
+    """
+    hipoteca_id = str(hipoteca_id or "")
+    if not hipoteca_id:
+        return None
+    try:
+        ensure_hipoteca_fases_schema(conn)
+        filas = conn.execute(
+            "SELECT fase, created_at FROM hipoteca_fases WHERE hipoteca_id = ? "
+            "ORDER BY created_at ASC LIMIT 30", (hipoteca_id,)).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return None
+    if not filas:
+        return None
+    hechas = []
+    vistas = set()
+    for f in filas:
+        clave = str(row_value(f, "fase", "") or "")
+        if clave in vistas:
+            continue
+        vistas.add(clave)
+        hechas.append({"clave": clave,
+                       "etiqueta": FASES_DE_HIPOTECA_POR_CLAVE.get(clave, clave),
+                       "fecha": _fecha_corta(row_value(f, "created_at", ""))})
+    actual = str(row_value(filas[-1], "fase", "") or "")
+    return {
+        "actual": actual,
+        "etiqueta": FASES_DE_HIPOTECA_POR_CLAVE.get(actual, actual),
+        "paso": (_FASES_EN_ORDEN.index(actual) + 1) if actual in _FASES_EN_ORDEN else 0,
+        "pasos": [FASES_DE_HIPOTECA_POR_CLAVE[c] for c in _FASES_EN_ORDEN],
+        "denegada": actual == "denegada",
+        "hitos": hechas,
+    }
+
+
 def empresa_de_financiaciones(conn):
     """Qué empresa lleva las hipotecas.
 
@@ -32743,6 +32860,7 @@ def alta_de_hipoteca_en_estudio(conn, oferta, datos, quien, now=None):
         "UPDATE inmueble_ofertas SET hipoteca_id = ?, financiacion_at = ?, "
         "financiacion_estado = 'estudio', updated_at = ? WHERE id = ?",
         (hipoteca_id, now, now, str(row_value(oferta, "id", "") or "")))
+    apunta_fase_de_hipoteca(conn, hipoteca_id, "estudio", por=str(quien or ""), now=now)
     apunta_evento_de_oferta(conn, row_value(oferta, "id", ""), str(quien or "la agencia"),
                             "vincula al cliente con Financiaciones",
                             detalle=f"estudio por {format_eur_short(importe)}",
@@ -32779,6 +32897,9 @@ def cierra_la_financiacion(conn, oferta, motivo, quien, now=None):
     except Exception as _fallo_tragado:
         apunta_escritura_tragada("cierra_la_financiacion", _fallo_tragado)
         return False, "no_se_pudo_cerrar"
+    apunta_fase_de_hipoteca(conn, hipoteca_id,
+                            "firmada" if motivo == "firmada" else "denegada",
+                            por=str(quien or ""), now=now)
     conn.execute(
         "UPDATE inmueble_ofertas SET financiacion_estado = ?, updated_at = ? WHERE id = ?",
         (motivo, now, str(row_value(oferta, "id", "") or "")))
@@ -33324,6 +33445,12 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
         estado_inm = normalize_lookup_text(row_value(fila, "estado", ""))
         novedades = novedades_del_inmueble(conn, inmueble_id, desde=ultima_entrada)
         oferta = vista_de_la_oferta(oferta_del_comprador(conn, demanda_id, inmueble_id))
+        if oferta and oferta.get("financiacion_en_estudio"):
+            # Sólo si la hipoteca la llevamos nosotros. Si se la lleva su banco,
+            # aquí no hay nada que contar.
+            cruda = oferta_del_comprador(conn, demanda_id, inmueble_id)
+            oferta["hipoteca"] = seguimiento_de_la_hipoteca(
+                conn, row_value(cruda, "hipoteca_id", ""))
         inmuebles.append({
             # `i` es la posición en ESTA lista. No hay ningún id por medio: con el
             # enlace no se puede pedir la foto de un inmueble que no te han enseñado.
@@ -67866,6 +67993,12 @@ class Handler(BaseHTTPRequestHandler):
     /* Cifras tabulares y espaciado, no una monoespaciada: sólo se sirven dos
        familias y una pila `monospace` caería a la del sistema, que es justo lo que
        hacía que la página no pareciera de nadie. Un IBAN se lee igual de bien. */
+    .hipoteca { display: grid; gap: 6px; border-top: 1px solid var(--linea); padding-top: 10px; }
+    .hipoteca .barra { display: flex; gap: 3px; }
+    .hipoteca .barra i { flex: 1; height: 5px; border-radius: 99px; background: var(--linea); }
+    .hipoteca .barra i.hecho { background: var(--verde); }
+    .hipoteca .hito { font-size: 12.5px; color: var(--suave); }
+    .hipoteca .hito b { color: var(--tinta); font-weight: 500; }
     .cuenta { font-family: var(--texto); font-variant-numeric: tabular-nums; letter-spacing: .06em;
       font-size: 14px; font-weight: 600; background: var(--tarjeta); border: 1px dashed var(--linea);
       border-radius: 8px; padding: 9px 11px; word-break: break-all; }
@@ -68325,6 +68458,20 @@ class Handler(BaseHTTPRequestHandler):
             partes.push(`<div class="campos">
               <button class="boton decidir" data-d="aceptar">Acepto ${eur(o.contraoferta)}</button>
               <button class="boton plano decidir" data-d="rechazar">No me encaja</button></div>`);
+          }
+          // El seguimiento de la hipoteca, si se la llevamos nosotros. Hitos con
+          // fecha y una barra: es lo que pregunta, «¿por dónde va?».
+          const h = o.hipoteca;
+          if (h) {
+            const barra = h.denegada ? "" :
+              `<div class="barra">${(h.pasos || []).map((_, n) =>
+                `<i class="${n < h.paso ? "hecho" : ""}"></i>`).join("")}</div>`;
+            partes.push(`<div class="hipoteca">
+              <div class="cual">Tu financiación: <strong>${esc(h.etiqueta)}</strong></div>
+              ${barra}
+              ${(h.hitos || []).map((x) =>
+                `<div class="hito"><b>${esc(x.etiqueta)}</b> · ${esc(x.fecha)}</div>`).join("")}
+            </div>`);
           }
           partes.push(`</div>`);
           cajaOferta.innerHTML = partes.join("");
@@ -68929,6 +69076,7 @@ class Handler(BaseHTTPRequestHandler):
             "app-routing.js",
             "app_shared.js",
             "app.js",
+            "inmo_operacion.js",
             "manifest.webmanifest",
             "sw.js",
         }
@@ -69418,6 +69566,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_encargo_firma",
             "/api/inmueble_oferta_financiacion",
             "/api/inmueble_oferta_financiacion_cerrar",
+            "/api/inmueble_oferta_financiacion_fase",
             "/api/inmueble_oferta_verificar",
             "/api/inmueble_renovar",
             "/api/renta_campaign_document",
@@ -70321,6 +70470,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_encargo_firma",
             "/api/inmueble_oferta_financiacion",
             "/api/inmueble_oferta_financiacion_cerrar",
+            "/api/inmueble_oferta_financiacion_fase",
             "/api/inmueble_oferta_verificar",
             "/api/demanda_portal_acceso",
             "/api/demanda_portal_acceso_revoke",
@@ -70913,7 +71063,8 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path in ("/api/inmueble_oferta_responder", "/api/inmueble_oferta_verificar",
                            "/api/inmueble_oferta_presentar", "/api/inmueble_arras_preparar",
                            "/api/inmueble_oferta_financiacion",
-                           "/api/inmueble_oferta_financiacion_cerrar"):
+                           "/api/inmueble_oferta_financiacion_cerrar",
+                           "/api/inmueble_oferta_financiacion_fase"):
             # El lado del asesor. La oferta la escribe el comprador; la respuesta,
             # la señal y el visto bueno del ingreso los pone la agencia.
             oferta_id = str(payload.get("oferta_id") or "").strip()
@@ -70971,6 +71122,31 @@ class Handler(BaseHTTPRequestHandler):
                             detalles={"hipoteca": hipoteca_id, "oferta": oferta_id}, now=ahora_iso)
                 conn.commit()
                 json_response(self, {"ok": True, "hipoteca_id": hipoteca_id, "estado": "estudio"})
+                return
+
+            if parsed.path == "/api/inmueble_oferta_financiacion_fase":
+                # Lo mueve el equipo financiero. Cada hito que marcan aquí lo ve el
+                # comprador en su portal: es su hipoteca y lo que pregunta siempre
+                # es por dónde va.
+                hipoteca_id = str(row_value(fila, "hipoteca_id", "") or "")
+                if not hipoteca_id:
+                    json_response(self, {"error": "Este cliente no tiene ningún estudio en marcha"},
+                                  status=409)
+                    return
+                ok_fase, motivo = apunta_fase_de_hipoteca(
+                    conn, hipoteca_id, payload.get("fase"),
+                    nota=payload.get("nota"), por=quien, now=ahora_iso)
+                if not ok_fase:
+                    json_response(self, {"error": "Fase no válida" if motivo == "fase_no_valida"
+                                         else "No se ha podido apuntar la fase",
+                                         "opciones": [c for c, _ in FASES_DE_HIPOTECA]}, status=400)
+                    return
+                audit_event(conn, str(row_value(fila, "empresa_id", "") or ""), "cliente",
+                            str(row_value(fila, "cliente_id", "") or ""),
+                            f"Hipoteca: {payload.get('fase')}", usuario=quien,
+                            detalles={"hipoteca": hipoteca_id}, now=ahora_iso)
+                conn.commit()
+                json_response(self, {"ok": True, "fase": str(payload.get("fase") or "").lower()})
                 return
 
             if parsed.path == "/api/inmueble_oferta_financiacion_cerrar":
@@ -99400,6 +99576,7 @@ class Handler(BaseHTTPRequestHandler):
                                         and not str(row_value(f, "mediacion", "") or "")),
                     "hipoteca_id": str(row_value(f, "hipoteca_id", "") or ""),
                     "financiacion_estado": str(row_value(f, "financiacion_estado", "") or ""),
+                    "fases": [{"clave": c, "etiqueta": e} for c, e in FASES_DE_HIPOTECA],
                     # La alerta: él dijo que necesitaba financiación, está reservado
                     # y todavía no se ha vinculado con Financiaciones. Es un aviso,
                     # no un automatismo: vincular a alguien con otra empresa del
