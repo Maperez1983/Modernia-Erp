@@ -57962,6 +57962,10 @@ const refreshCurrentInmuebleProfile = () => {
   };
 
   if (inmuebleSummaryCard) {
+    // Qué inmueble hay abierto, en el propio DOM. El id vive en el closure de
+    // esta función y no salía a ninguna parte, así que nada de fuera podía saber
+    // de qué ficha se trata. Lo lee el panel de la operación.
+    inmuebleSummaryCard.dataset.inmuebleId = String(inmueble.id || "");
     const address = inmueble.direccion || "Sin dirección";
     const locality = [inmueble.poblacion, inmueble.provincia].filter(Boolean).join(" · ");
     const isVerified = String(captacion.noticia_verificada ?? "").trim() === "1";

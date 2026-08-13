@@ -275,17 +275,20 @@
     return panel;
   }
 
-  /* Se engancha a la ficha del inmueble sin que `app.js` tenga que saber que
-   * existimos: se busca el contenedor y, cuando cambia de inmueble, se repinta.
-   * Si algún día la ficha se llama de otra forma, esto no rompe nada: no se monta
-   * y ya está. */
-  const SELECTORES = ["#inmuebleSummaryCard", "[data-inmueble-id]", "#inmuebleDetalle"];
+  /* Se engancha a la ficha del inmueble, y sólo a ella.
+   *
+   * El selector era `[data-inmueble-id]` a secas, y ese atributo lo llevan también
+   * las tarjetas de los listados: el panel habría aparecido colgando de un
+   * resultado de búsqueda cualquiera, con el id de otro inmueble. Aquí se exige la
+   * ficha —que estampa el id que tiene abierto— y si algún día se llama de otra
+   * forma, esto no rompe nada: no se monta y ya está. */
+  const SELECTORES = ["#inmuebleSummaryCard[data-inmueble-id]", "#inmuebleDetalle[data-inmueble-id]"];
 
   function inmuebleVisible() {
     for (const selector of SELECTORES) {
       const nodo = document.querySelector(selector);
       if (!nodo) continue;
-      const id = nodo.dataset.inmuebleId || nodo.dataset.id || "";
+      const id = String(nodo.dataset.inmuebleId || "").trim();
       if (id) return { nodo, id };
     }
     return null;
