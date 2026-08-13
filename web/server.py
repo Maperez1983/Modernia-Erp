@@ -32413,6 +32413,11 @@ _SQL_DOCS_DEL_COMPRADOR = (
     "SELECT nombre, url, created_at FROM inmueble_docs WHERE inmueble_id = ? AND ("
     "  COALESCE(visible_comprador,0) = 1"
     "  OR (COALESCE(origen_tipo,'') = 'portal_hoja_visita' AND COALESCE(origen_id,'') = ?)"
+    # Y el contrato que ha firmado él. Se ató a su oferta, no al interruptor
+    # general, para que no lo vieran los demás interesados; sin esta línea el
+    # único que no tenía copia de lo firmado era quien lo firmó.
+    "  OR (COALESCE(origen_tipo,'') = 'portal_arras' AND COALESCE(origen_id,'') IN ("
+    "       SELECT id FROM inmueble_ofertas WHERE demanda_id = ?))"
     ") AND COALESCE(estado,'') <> 'Reemplazado' "
     "ORDER BY COALESCE(created_at,'') DESC, id DESC LIMIT 12"
 )
@@ -33430,7 +33435,7 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
         if hay_flag_comprador:
             try:
                 for n, d in enumerate(conn.execute(
-                    _SQL_DOCS_DEL_COMPRADOR, (inmueble_id, demanda_id),
+                    _SQL_DOCS_DEL_COMPRADOR, (inmueble_id, demanda_id, demanda_id),
                 ).fetchall()):
                     url = str(row_value(d, "url", "") or "")
                     if not url.startswith("/uploads/"):
@@ -99513,7 +99518,8 @@ class Handler(BaseHTTPRequestHandler):
             inmueble_id = _inmueble_de_la_seleccion(conn, row_value(acceso, "demanda_id", ""), pos)
             candidatos = conn.execute(
                 _SQL_DOCS_DEL_COMPRADOR,
-                (inmueble_id, str(row_value(acceso, "demanda_id", "") or ""))).fetchall()
+                (inmueble_id, str(row_value(acceso, "demanda_id", "") or ""),
+                 str(row_value(acceso, "demanda_id", "") or ""))).fetchall()
             if n >= len(candidatos):
                 # Se lo han dejado de compartir entre que cargó la página y pinchó.
                 json_response(self, {"error": "Documento no disponible"}, status=404)
