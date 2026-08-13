@@ -1587,3 +1587,156 @@ class LasArrasYElEncargoTests(BaseComprador):
         self._arras(oferta_id)
         firmas = [f for f in self._vista(self.token)["firmas"] if f["pendiente"]]
         self.assertEqual(len(firmas), 1, [f["documento"] for f in firmas])
+
+
+class LaVinculacionConFinanciacionesTests(BaseComprador):
+    """El mismo cliente en los dos CRM, nunca dos fichas. Y si la hipoteca no
+    sale, vuelve a la inmobiliaria y en Financiaciones queda el histórico."""
+
+    def setUp(self):
+        super().setUp()
+        S.ensure_ofertas_schema(self.conn)
+        self._ins("empresas", {"id": "empfin", "nombre": "Financiaciones Modernia", "activo": 1,
+                               "created_at": AHORA, "updated_at": AHORA})
+        self._ins("workspace_empresas", {"id": "we2", "workspace_id": self.ws, "empresa_id": "empfin",
+                                         "created_at": AHORA, "updated_at": AHORA})
+        self._ins("clientes_empresas", {"id": "ce0", "cliente_id": "cli2", "empresa_id": "empfin",
+                                        "servicio": "financiaciones", "estado": "Activo",
+                                        "fecha_inicio": "2026-01-01",
+                                        "created_at": AHORA, "updated_at": AHORA})
+        self.conn.execute("UPDATE empresas SET iban = 'ES91 2100 0418 4502 0005 1332' WHERE id='emp1'")
+        self.conn.commit()
+        self.token = self._abre()
+        self.i = self._posicion(self.token, "Calle Uno 1")
+        self.oferta_id = self._hasta_reservada()
+
+    def _hasta_reservada(self):
+        self._post("/api/portal_busqueda_oferta",
+                   {"token": self.token, "i": self.i, "importe": 242000, "financiacion": True},
+                   con_sesion=False)
+        oferta_id = self.conn.execute("SELECT id FROM inmueble_ofertas LIMIT 1").fetchone()["id"]
+        self._post("/api/inmueble_oferta_responder",
+                   {"oferta_id": oferta_id, "decision": "aceptar", "senal": 6000})
+        self._post("/api/portal_busqueda_justificante",
+                   {"token": self.token, "i": self.i, "nombre": "t.pdf",
+                    "file_base64": base64.b64encode(b"%PDF").decode()}, con_sesion=False)
+        self._post("/api/inmueble_oferta_verificar", {"oferta_id": oferta_id})
+        return oferta_id
+
+    def _vincular(self, **extra):
+        cuerpo = {"oferta_id": self.oferta_id}
+        cuerpo.update(extra)
+        return self._post("/api/inmueble_oferta_financiacion", cuerpo)
+
+    def test_la_alerta_sale_en_la_ficha_pero_no_hace_nada_sola(self):
+        """Que él marcara «necesito financiación» es una pista, no una orden de dar
+        de alta a nadie en otra empresa."""
+        estado, cuerpo = self._get("/api/inmueble_ofertas?inmueble_id=inm1", con_sesion=True)
+        oferta = json.loads(cuerpo)["ofertas"][0]
+        self.assertTrue(oferta["sugerir_financiacion"])
+        self.assertEqual(oferta["hipoteca_id"], "")
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) c FROM hipotecas").fetchone()["c"], 0)
+
+    def test_al_vincular_se_da_de_alta_el_estudio(self):
+        estado, d = self._vincular()
+        self.assertEqual(estado, 200, d)
+        h = self.conn.execute("SELECT * FROM hipotecas").fetchone()
+        self.assertEqual(h["estado"], "Estudio")
+        self.assertEqual(h["empresa_id"], "empfin")
+        self.assertEqual(float(h["precio"]), 242000.0)
+        self.assertEqual(float(h["entrada"]), 6000.0)
+        self.assertEqual(float(h["importe_hipoteca"]), 236000.0)
+        self.assertEqual(h["inmobiliaria_compra"], "Agencia Propia")
+
+    def test_es_el_mismo_cliente_no_uno_nuevo(self):
+        """Si cada CRM se hiciera su ficha, el mismo señor acabaría con tres
+        teléfonos distintos y ninguno al día."""
+        antes = self.conn.execute("SELECT COUNT(*) c FROM clientes").fetchone()["c"]
+        self._vincular()
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) c FROM clientes").fetchone()["c"], antes)
+        h = self.conn.execute("SELECT cliente_id, cliente FROM hipotecas").fetchone()
+        self.assertEqual(h["cliente_id"], "cli1")
+        self.assertEqual(h["cliente"], "Carlos Comprador")
+
+    def test_se_crea_el_vinculo_con_la_empresa_de_financiaciones(self):
+        self._vincular()
+        v = self.conn.execute(
+            "SELECT * FROM clientes_empresas WHERE cliente_id = 'cli1' AND empresa_id = 'empfin'"
+        ).fetchone()
+        self.assertEqual(v["servicio"], "financiaciones")
+        self.assertEqual(v["estado"], "Activo")
+        self.assertEqual(v["procedencia_canal"], "CRM inmobiliario")
+
+    def test_un_vinculo_que_ya_existia_no_se_duplica(self):
+        self._ins("clientes_empresas", {"id": "ce1", "cliente_id": "cli1", "empresa_id": "empfin",
+                                        "servicio": "financiaciones", "estado": "Activo",
+                                        "fecha_inicio": "2025-05-05",
+                                        "created_at": AHORA, "updated_at": AHORA})
+        self._vincular()
+        self.assertEqual(self.conn.execute(
+            "SELECT COUNT(*) c FROM clientes_empresas WHERE cliente_id='cli1' AND empresa_id='empfin'"
+        ).fetchone()["c"], 1)
+
+    def test_no_se_vincula_dos_veces(self):
+        self._vincular()
+        self.assertEqual(self._vincular()[0], 409)
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) c FROM hipotecas").fetchone()["c"], 1)
+
+    def test_no_se_vincula_antes_de_la_reserva(self):
+        self.conn.execute("UPDATE inmueble_ofertas SET estado = 'presentada', hipoteca_id = NULL")
+        self.conn.commit()
+        self.assertEqual(self._vincular()[0], 409)
+
+    def test_el_comprador_sabe_que_esta_en_estudio_y_nada_mas(self):
+        self._vincular(banco="Banco Ejemplo", importe=200000)
+        o = self._vista(self.token)["inmuebles"][self.i]["oferta"]
+        self.assertTrue(o["financiacion_en_estudio"])
+        crudo = self._get(f"/api/portal_busqueda?token={self.token}")[1]
+        self.assertNotIn("Banco Ejemplo", crudo)
+        self.assertNotIn("hipoteca", crudo.lower())
+
+    def test_si_la_deniegan_vuelve_a_la_inmobiliaria(self):
+        self._vincular()
+        estado, d = self._post("/api/inmueble_oferta_financiacion_cerrar",
+                               {"oferta_id": self.oferta_id, "motivo": "denegada"})
+        self.assertEqual(estado, 200, d)
+        # Por contenido y no por «la última»: todas las tareas caen en el mismo
+        # segundo y ordenar por `created_at` devuelve cualquiera de ellas.
+        asuntos = [r["asunto"] for r in self.conn.execute("SELECT asunto FROM acciones").fetchall()]
+        self.assertTrue(any("vuelve a la inmobiliaria" in a for a in asuntos), asuntos)
+        self.assertFalse(self._vista(self.token)["inmuebles"][self.i]["oferta"]["financiacion_en_estudio"])
+
+    def test_y_en_financiaciones_se_queda_el_historico(self):
+        """No se borra nada: es lo que evita volver a llamar dentro de seis meses a
+        alguien a quien ya le dijeron que no."""
+        self._vincular()
+        self._post("/api/inmueble_oferta_financiacion_cerrar",
+                   {"oferta_id": self.oferta_id, "motivo": "denegada"})
+        h = self.conn.execute("SELECT estado FROM hipotecas").fetchone()
+        self.assertEqual(h["estado"], "Cancelada")
+        v = self.conn.execute(
+            "SELECT fecha_fin FROM clientes_empresas WHERE cliente_id='cli1' AND empresa_id='empfin'"
+        ).fetchone()
+        self.assertIsNotNone(v, "el vínculo no se borra: es el histórico")
+        self.assertTrue(v["fecha_fin"], "se cierra con fecha de fin, no se elimina")
+
+    def test_si_sale_adelante_el_vinculo_sigue_vivo(self):
+        self._vincular()
+        self._post("/api/inmueble_oferta_financiacion_cerrar",
+                   {"oferta_id": self.oferta_id, "motivo": "firmada"})
+        self.assertEqual(self.conn.execute("SELECT estado FROM hipotecas").fetchone()["estado"],
+                         "Firmada")
+        v = self.conn.execute(
+            "SELECT fecha_fin FROM clientes_empresas WHERE cliente_id='cli1'AND empresa_id='empfin'"
+        ).fetchone()
+        self.assertFalse(v["fecha_fin"], "sigue siendo cliente de Financiaciones")
+
+    def test_un_motivo_inventado_no_cuela(self):
+        self._vincular()
+        self.assertEqual(self._post("/api/inmueble_oferta_financiacion_cerrar",
+                                    {"oferta_id": self.oferta_id, "motivo": "lo_que_sea"})[0], 400)
+
+    def test_la_empresa_se_deduce_de_los_vinculos_que_ya_hay(self):
+        """Por el dato real —quién tiene clientes con servicio financiaciones—, no
+        por un nombre escrito a mano en el código."""
+        self.assertEqual(S.empresa_de_financiaciones(self.conn), "empfin")
