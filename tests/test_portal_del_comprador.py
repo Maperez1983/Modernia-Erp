@@ -1577,6 +1577,30 @@ class LasArrasYElEncargoTests(BaseComprador):
         self.assertIn("o.arras.fecha_escritura", html)
         self.assertIn("Fecha límite para escriturar", html)
 
+    def test_se_queda_con_una_copia_de_lo_que_firma(self):
+        """El contrato se ató a su oferta para que no lo vieran los demás
+        interesados, y el resultado era que el único sin copia de lo firmado era
+        justo quien lo firmaba."""
+        oferta_id = self._hasta_reservada()
+        self._arras(oferta_id)
+        docs = [d["nombre"] for d in self._vista(self.token)["inmuebles"][self.i]["documentos"]]
+        self.assertTrue(any("Contrato de arras" in d for d in docs), docs)
+
+    def test_pero_no_el_contrato_de_otro_comprador(self):
+        self._ins("demandas", {"id": "dem4", "empresa_id": "emp1", "workspace_id": self.ws,
+                               "cliente_id": "cli2", "tipo": "Piso", "estado": "Activa",
+                               "created_at": AHORA, "updated_at": AHORA})
+        self._ins("inmueble_compradores", {"id": "ic7", "empresa_id": "emp1", "inmueble_id": "inm1",
+                                           "demanda_id": "dem4", "cliente_id": "cli2",
+                                           "estado": "Interesado", "created_at": AHORA,
+                                           "updated_at": AHORA})
+        oferta_id = self._hasta_reservada()
+        self._arras(oferta_id)
+        token2 = self._abre("dem4")
+        docs = [d["nombre"] for d in
+                self._vista(token2)["inmuebles"][self._posicion(token2, "Calle Uno 1")]["documentos"]]
+        self.assertFalse(any("Contrato de arras" in d for d in docs), docs)
+
     def test_no_le_salen_dos_botones_del_mismo_contrato(self):
         """De unas arras salen dos solicitudes, una por parte. Si la misma persona
         figura en las dos —se vende entre familia, o hay permuta— le aparecían dos
