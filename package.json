@@ -4,9 +4,9 @@
   "version": "1.0.0",
   "description": "Development tooling for CRM Modernia Limpio",
   "scripts": {
-    "lint:js": "eslint web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js",
-    "lint:js:quiet": "eslint --quiet web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js",
-    "lint:js:fix": "eslint --fix web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js",
+    "lint:js": "eslint web/inmo_operacion.js web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js",
+    "lint:js:quiet": "eslint --quiet web/inmo_operacion.js web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js",
+    "lint:js:fix": "eslint --fix web/inmo_operacion.js web/app.js web/app-auth.js web/app-routing.js web/app_shared.js web/ui-foundation.js web/sw.js",
     "test:js": "vitest run",
     "test:js:watch": "vitest",
     "test:tooling": "python -m pytest -n auto tests/test_tooling_integration.py",
