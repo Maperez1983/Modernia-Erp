@@ -108,6 +108,24 @@ class ElPanelSeMontaSoloTests(unittest.TestCase):
         self.assertIn("Carlos Comprador", r["html"])
         self.assertIn("242.000", r["html"].replace("&nbsp;", " "))
 
+    def test_no_se_cuelga_de_una_tarjeta_de_listado(self):
+        """`data-inmueble-id` lo llevan también las tarjetas de los listados: con el
+        selector genérico el panel aparecía dentro de un resultado de búsqueda, con
+        el id de otro inmueble."""
+        r = corre("""document.getElementById("inmuebleSummaryCard").remove();
+                     const t = document.createElement("div");
+                     t.className = "crm-mini-card";
+                     t.dataset.inmuebleId = "OTRO-9";
+                     document.body.appendChild(t);
+                     await new Promise((ok) => setTimeout(ok, 60)); return 1;""", [_oferta()])
+        self.assertNotIn("op-panel", r["html"])
+
+    def test_la_ficha_estampa_el_inmueble_que_tiene_abierto(self):
+        """El id vive en el closure de `app.js` y no llegaba al DOM, así que el
+        panel no tenía de dónde sacarlo y no se montaba nunca."""
+        app = (RAIZ / "web" / "app.js").read_text(encoding="utf-8")
+        self.assertIn("inmuebleSummaryCard.dataset.inmuebleId", app)
+
     def test_sin_ficha_de_inmueble_no_se_monta_nada(self):
         r = corre("""document.getElementById("inmuebleSummaryCard").remove();
                      window.InmoOperacion.revisa();
