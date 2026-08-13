@@ -35455,7 +35455,16 @@ def portal_inmueble_row_to_public(row):
     }
 
 
-def fetch_portal_inmuebles_public(conn, *, listing_id="", limit=100):
+ORDENES_DEL_PORTAL = {
+    "reciente": "COALESCE(NULLIF(i.portal_publicado_at, ''), i.updated_at, i.created_at) DESC",
+    "precio_asc": "COALESCE(i.precio_objetivo, i.precio_encargo, i.precio_pedido_cliente, 0) ASC",
+    "precio_desc": "COALESCE(i.precio_objetivo, i.precio_encargo, i.precio_pedido_cliente, 0) DESC",
+    "superficie": "COALESCE(i.m2, 0) DESC",
+}
+
+
+def fetch_portal_inmuebles_public(conn, *, listing_id="", limit=100, filtros=None,
+                                  orden="reciente", desde=0, con_galeria=False):
     try:
         ensure_column(conn, "inmuebles", "portal_publicado", "portal_publicado INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "inmuebles", "portal_publicado_at", "portal_publicado_at TEXT")
@@ -35466,6 +35475,10 @@ def fetch_portal_inmuebles_public(conn, *, listing_id="", limit=100):
         ensure_column(conn, "inmuebles", "descripcion_larga", "descripcion_larga TEXT")
         ensure_column(conn, "inmuebles", "destacados", "destacados TEXT")
         ensure_column(conn, "inmuebles", "seo_slug", "seo_slug TEXT")
+        # Y las del anuncio ampliado. Van aquí y no sólo en el endpoint porque a
+        # esta función la llaman también los leads del portal: sin las columnas, un
+        # lead sobre un anuncio publicado moría con «no such column».
+        ensure_anuncio_schema(conn)
     except Exception:
         pass
     photo_expr = _portal_inmueble_photo_expr(conn, "i")
@@ -35485,7 +35498,54 @@ def fetch_portal_inmuebles_public(conn, *, listing_id="", limit=100):
     if listing_id:
         where.append("i.id = ?")
         values.append(str(listing_id).strip())
+
+    # Un portal sin filtros no es un portal: con seis anuncios da igual, con
+    # sesenta no hay forma de encontrar nada. Todo lo que llega de fuera va a
+    # parámetro, nunca concatenado.
+    f = dict(filtros or {})
+
+    def numero(clave):
+        try:
+            valor = float(str(f.get(clave) or "").replace(",", "."))
+            return valor if valor > 0 else None
+        except Exception:
+            return None
+
+    operacion = normalize_lookup_text(f.get("operacion") or "")
+    if operacion in {"VENTA", "ALQUILER"}:
+        where.append("UPPER(TRIM(COALESCE(i.tipo_operacion, ''))) = ?")
+        values.append(operacion)
+    tipo = str(f.get("tipo") or "").strip()
+    if tipo:
+        where.append("LOWER(TRIM(COALESCE(i.tipo_inmueble, ''))) = ?")
+        values.append(tipo.lower())
+    _precio = "COALESCE(i.precio_objetivo, i.precio_encargo, i.precio_pedido_cliente, 0)"
+    if numero("precio_min") is not None:
+        where.append(f"{_precio} >= ?")
+        values.append(numero("precio_min"))
+    if numero("precio_max") is not None:
+        where.append(f"{_precio} <= ?")
+        values.append(numero("precio_max"))
+    for clave, columna in (("m2_min", "i.m2"), ("habitaciones_min", "i.habitaciones"),
+                           ("banos_min", "i.banos")):
+        if numero(clave) is not None:
+            where.append(f"COALESCE({columna}, 0) >= ?")
+            values.append(numero(clave))
+    donde = str(f.get("donde") or "").strip()
+    if donde:
+        where.append("(LOWER(COALESCE(i.zona,'')) LIKE ? OR LOWER(COALESCE(i.poblacion,'')) LIKE ? "
+                     "OR LOWER(COALESCE(i.provincia,'')) LIKE ?)")
+        values += [f"%{donde.lower()}%"] * 3
+    for clave in CARACTERISTICAS_DEL_ANUNCIO:
+        if str(f.get(clave) or "").strip().lower() in {"1", "true", "si", "sí", "on"}:
+            where.append(f"COALESCE(i.{clave}, 0) = 1")
+
     limit_val = max(1, min(int(limit or 100), 300))
+    try:
+        desde_val = max(0, int(desde or 0))
+    except Exception:
+        desde_val = 0
+    orden_sql = ORDENES_DEL_PORTAL.get(str(orden or "reciente"), ORDENES_DEL_PORTAL["reciente"])
     rows = conn.execute(
         f"""
         SELECT
@@ -35494,6 +35554,10 @@ def fetch_portal_inmuebles_public(conn, *, listing_id="", limit=100):
           i.precio_objetivo, i.precio_encargo, i.precio_pedido_cliente, i.precio_valoracion,
           i.estado, i.descripcion, i.lat, i.lon, i.certificado, i.portal_publicado_at,
           i.titulo_anuncio, i.descripcion_corta, i.descripcion_larga, i.destacados, i.seo_slug,
+          i.energia_letra, i.energia_consumo, i.energia_emisiones, i.gastos_comunidad,
+          i.orientacion, i.video_url, i.planta, i.anio_construccion,
+          i.ascensor, i.garaje, i.trastero, i.terraza, i.piscina, i.amueblado,
+          i.exterior, i.aire_acondicionado, i.calefaccion, i.accesible,
           MAX(e.nombre) AS empresa_nombre, MAX(e.logo_url) AS empresa_logo,
           MAX(COALESCE(c.noticia_verificada, 0)) AS noticia_verificada,
           ({photo_expr}) AS foto
@@ -35502,12 +35566,52 @@ def fetch_portal_inmuebles_public(conn, *, listing_id="", limit=100):
         LEFT JOIN empresas e ON e.id = i.empresa_id
         WHERE {' AND '.join(where)}
         GROUP BY i.id
-        ORDER BY COALESCE(NULLIF(i.portal_publicado_at, ''), i.updated_at, i.created_at) DESC
-        LIMIT ?
+        ORDER BY {orden_sql}
+        LIMIT ? OFFSET ?
         """,
-        (*values, limit_val),
+        (*values, limit_val, desde_val),
     ).fetchall()
-    return [portal_inmueble_row_to_public(row) for row in rows]
+    salida = []
+    for row in rows:
+        publico = portal_inmueble_row_to_public(row)
+        publico.update(datos_extra_del_anuncio(conn, row, con_galeria=con_galeria))
+        salida.append(publico)
+    return salida
+
+
+def cuenta_portal_inmuebles_public(conn, **kwargs):
+    """Cuántos hay en total con esos filtros. Sin esto no se puede paginar."""
+    kwargs.pop("limit", None)
+    kwargs.pop("desde", None)
+    kwargs.pop("con_galeria", None)
+    return len(fetch_portal_inmuebles_public(conn, limit=300, **kwargs))
+
+
+def datos_extra_del_anuncio(conn, fila, *, con_galeria=False):
+    """Lo que el anuncio no contaba y ya estaba en la ficha.
+
+    La galería va aparte porque son doce consultas para doce anuncios: en el
+    listado basta la foto de portada, y el detalle la pide.
+    """
+    inmueble_id = str(row_value(fila, "id", "") or "")
+    precio = parse_money_value(row_value(fila, "precio_objetivo", 0)) or \
+        parse_money_value(row_value(fila, "precio_encargo", 0)) or 0
+    m2 = parse_money_value(row_value(fila, "m2", 0)) or 0
+    extra = {
+        "energia": etiqueta_energetica(fila),
+        "caracteristicas": caracteristicas_del_anuncio(fila),
+        "planta": row_value(fila, "planta", None),
+        "anio_construccion": row_value(fila, "anio_construccion", None),
+        "orientacion": str(row_value(fila, "orientacion", "") or "") or None,
+        "gastos_comunidad": round(parse_money_value(row_value(fila, "gastos_comunidad", 0)) or 0, 2) or None,
+        "video_url": str(row_value(fila, "video_url", "") or "") or None,
+        # Dos cifras que ya se podían calcular y que nadie enseñaba.
+        "precio_m2": round(precio / m2, 2) if precio and m2 else None,
+        "bajada_precio": bajada_de_precio_del_anuncio(conn, inmueble_id),
+    }
+    if con_galeria:
+        extra["fotos"] = fotos_del_inmueble(conn, inmueble_id, limite=20)
+    return extra
 
 
 def build_inmueble_anuncio_copy(inmueble):
@@ -35624,6 +35728,116 @@ def build_inmueble_anuncio_copy(inmueble):
     }
 
 
+# La etiqueta de eficiencia energética. No es un adorno: la normativa exige que
+# aparezca en **toda** publicidad de venta o alquiler de vivienda, y de los trece
+# encargos no había ni uno con ella. «Exento» existe porque hay casos que no la
+# necesitan —un garaje suelto, un local sin uso de vivienda—, y decirlo es
+# distinto de dejarlo en blanco.
+LETRAS_ENERGIA = ("A", "B", "C", "D", "E", "F", "G", "exento", "en_tramite")
+ETIQUETAS_ENERGIA = {
+    "A": "A", "B": "B", "C": "C", "D": "D", "E": "E", "F": "F", "G": "G",
+    "exento": "Exento", "en_tramite": "En trámite",
+}
+
+# Lo que pregunta cualquiera antes de pedir cita, y que no se podía ni guardar ni
+# filtrar. Son sí/no salvo los dos últimos.
+CARACTERISTICAS_DEL_ANUNCIO = {
+    "ascensor": "Ascensor",
+    "garaje": "Garaje",
+    "trastero": "Trastero",
+    "terraza": "Terraza",
+    "piscina": "Piscina",
+    "amueblado": "Amueblado",
+    "exterior": "Exterior",
+    "aire_acondicionado": "Aire acondicionado",
+    "calefaccion": "Calefacción",
+    "accesible": "Accesible",
+}
+
+
+def ensure_anuncio_schema(conn):
+    """Las columnas del anuncio. Se crean donde ya viven los datos del inmueble."""
+    for columna, sql in (
+        ("energia_letra", "energia_letra TEXT"),
+        ("energia_consumo", "energia_consumo REAL"),
+        ("energia_emisiones", "energia_emisiones REAL"),
+        ("gastos_comunidad", "gastos_comunidad REAL"),
+        ("orientacion", "orientacion TEXT"),
+        ("video_url", "video_url TEXT"),
+    ):
+        ensure_column(conn, "inmuebles", columna, sql)
+    for clave in CARACTERISTICAS_DEL_ANUNCIO:
+        ensure_column(conn, "inmuebles", clave, f"{clave} INTEGER DEFAULT 0")
+    try:
+        conn.commit()
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("ensure_anuncio_schema/commit", _fallo_tragado)
+
+
+def etiqueta_energetica(fila):
+    """Lo que se publica de la energía. Devuelve None si no hay nada que decir."""
+    letra = str(row_value(fila, "energia_letra", "") or "").strip()
+    if not letra:
+        return None
+    clave = letra if letra in ETIQUETAS_ENERGIA else letra.upper()
+    if clave not in ETIQUETAS_ENERGIA:
+        return None
+    consumo = parse_money_value(row_value(fila, "energia_consumo", 0)) or 0
+    emisiones = parse_money_value(row_value(fila, "energia_emisiones", 0)) or 0
+    return {
+        "letra": clave,
+        "etiqueta": ETIQUETAS_ENERGIA[clave],
+        "consumo": round(consumo, 2) or None,
+        "emisiones": round(emisiones, 2) or None,
+        "exento": clave in {"exento", "en_tramite"},
+    }
+
+
+def caracteristicas_del_anuncio(fila):
+    return [
+        {"clave": clave, "etiqueta": texto}
+        for clave, texto in CARACTERISTICAS_DEL_ANUNCIO.items()
+        if int(row_value(fila, clave, 0) or 0) == 1
+    ]
+
+
+def bajada_de_precio_del_anuncio(conn, inmueble_id, *, meses=6):
+    """«Ha bajado de precio» en el anuncio, con el dato que ya existe.
+
+    Sale de la misma bitácora que alimenta el portal del comprador. Es de las
+    pocas cosas que hacen abrir un anuncio que ya se había visto, y no costaba
+    nada porque el histórico llevaba ahí desde siempre.
+    """
+    try:
+        desde = (datetime.now(timezone.utc) - timedelta(days=31 * int(meses))).strftime("%Y-%m-%d")
+        filas = conn.execute(
+            "SELECT detalles, created_at FROM auditoria WHERE entidad = 'inmueble' "
+            "AND entidad_id = ? AND created_at >= ? ORDER BY created_at DESC LIMIT 40",
+            (str(inmueble_id or ""), desde),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return None
+    for f in filas:
+        crudo = row_value(f, "detalles", "") or ""
+        if "precio" not in str(crudo).lower():
+            continue
+        try:
+            datos = json.loads(crudo) if isinstance(crudo, str) else dict(crudo)
+        except Exception:
+            continue
+        if not str(datos.get("campo") or "").startswith("precio"):
+            continue
+        antes = parse_money_value(datos.get("from")) or 0
+        despues = parse_money_value(datos.get("to")) or 0
+        # Sin un «antes» no es una bajada: es la primera vez que se pone precio.
+        if antes and despues and despues < antes:
+            return {"desde": round(antes, 2), "hasta": round(despues, 2),
+                    "rebaja": round(antes - despues, 2),
+                    "fecha": _fecha_corta(row_value(f, "created_at", ""))}
+    return None
+
+
 def validate_portal_publication_requirements(conn, inmueble_id):
     inmueble_id = str(inmueble_id or "").strip()
     if not inmueble_id:
@@ -35641,6 +35855,10 @@ def validate_portal_publication_requirements(conn, inmueble_id):
             ensure_column(conn, "inmuebles", col_name, col_sql)
     except Exception:
         pass
+    try:
+        ensure_anuncio_schema(conn)
+    except Exception:
+        _rollback_best_effort(conn)
     row = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
     if not row:
         return {"ok": False, "missing": ["inmueble"], "checks": {}, "row": None}
@@ -35690,6 +35908,10 @@ def validate_portal_publication_requirements(conn, inmueble_id):
         "tipo": bool(str(row["tipo_inmueble"] or "").strip()),
         "descripcion": bool(description),
         "foto": bool(photo),
+        # La etiqueta energética es requisito legal en cualquier anuncio de venta o
+        # alquiler de vivienda. Vale «exento» o «en trámite» —hay casos que no la
+        # necesitan y decirlo es distinto de dejarlo en blanco—, pero no vale nada.
+        "energia": bool(etiqueta_energetica(row)),
     }
     labels = {
         "verificado": "Noticia verificada",
@@ -35699,6 +35921,7 @@ def validate_portal_publication_requirements(conn, inmueble_id):
         "tipo": "Tipo de inmueble",
         "descripcion": "Texto/descripción de anuncio",
         "foto": "Foto principal",
+        "energia": "Etiqueta de eficiencia energética",
     }
     missing = [labels[key] for key, ok in checks.items() if not ok]
     return {"ok": not missing, "missing": missing, "checks": checks, "row": row}
@@ -107288,8 +107511,29 @@ class Handler(BaseHTTPRequestHandler):
                 limit_val = int(str(limit or "100").strip())
             except Exception:
                 limit_val = 100
-            rows = fetch_portal_inmuebles_public(conn, limit=limit_val)
-            json_response(self, {"rows": rows, "count": len(rows)})
+            try:
+                ensure_anuncio_schema(conn)
+            except Exception:
+                _rollback_best_effort(conn)
+            filtros = {clave: params.get(clave, [""])[0] for clave in
+                       ("operacion", "tipo", "precio_min", "precio_max", "m2_min",
+                        "habitaciones_min", "banos_min", "donde")}
+            filtros.update({clave: params.get(clave, [""])[0]
+                            for clave in CARACTERISTICAS_DEL_ANUNCIO})
+            uno = str(params.get("id", [""])[0] or "").strip()
+            rows = fetch_portal_inmuebles_public(
+                conn, listing_id=uno, limit=limit_val, filtros=filtros,
+                orden=params.get("orden", ["reciente"])[0],
+                desde=params.get("desde", ["0"])[0],
+                # La galería sólo cuando se pide un anuncio concreto o se pide
+                # expresamente: en un listado son una consulta por ficha.
+                con_galeria=bool(uno) or str(params.get("galeria", [""])[0]).strip() == "1")
+            total = len(rows) if uno else cuenta_portal_inmuebles_public(
+                conn, filtros=filtros, orden=params.get("orden", ["reciente"])[0])
+            json_response(self, {"rows": rows, "count": len(rows), "total": total,
+                                 "orden": params.get("orden", ["reciente"])[0],
+                                 "ordenes": sorted(ORDENES_DEL_PORTAL),
+                                 "filtros_disponibles": sorted(CARACTERISTICAS_DEL_ANUNCIO)})
             return
 
         if path == "/api/portal_empresa_logo":
