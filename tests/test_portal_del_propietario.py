@@ -1483,6 +1483,32 @@ class LaImagenDeLaPaginaTests(BasePortal):
         oscuro = css[css.index("@media (prefers-color-scheme: dark)"):]
         self.assertNotIn("--verde-solido", oscuro[:oscuro.index("}\n    }")])
 
+    def test_una_firma_pendiente_no_borra_la_oferta_de_la_pantalla(self):
+        """El bucle de firmas usaba una variable llamada `estado`, igual que la
+        etapa del inmueble. Con **una sola** solicitud de firma, `estado` pasaba a
+        valer «pending» y el bloque de la oferta —que sólo se pinta si la etapa es
+        PROPUESTA— desaparecía. Nadie lo vio porque en todo el histórico había una
+        firma; salió montando una operación de prueba de principio a fin."""
+        S.ensure_inmueble_signature_schema(self.conn)
+        self._ins("operaciones_inmobiliarias", {
+            "id": "op1", "empresa_id": "emp1", "inmueble_id": "inm1", "tipo_operacion": "venta",
+            "estado": "En curso", "precio_propuesta": 240000, "fecha_propuesta": "2026-08-13",
+            "created_at": AHORA, "updated_at": AHORA})
+        self.conn.execute("UPDATE inmuebles SET estado = 'Propuesta' WHERE id = 'inm1'")
+        self.conn.commit()
+        token = self._token(self._abre_portal()["enlace"])
+        self.assertEqual(self._vista(token)["propuesta"]["importe"], 240000)
+
+        S.create_inmueble_signature_request(
+            self.conn, empresa_id="emp1", inmueble_id="inm1", doc_url="/uploads/x.pdf",
+            doc_nombre="Contrato de arras", signer_nombre="Lucía Vendedora",
+            signer_telefono="600999888", purpose="Contrato de arras")
+        self.conn.commit()
+        d = self._vista(token)
+        self.assertTrue([f for f in d["firmas"] if f["pendiente"]], "la firma tiene que salir")
+        self.assertIsNotNone(d["propuesta"], "y la oferta no puede desaparecer por eso")
+        self.assertEqual(d["propuesta"]["importe"], 240000)
+
     def test_los_titulares_van_en_la_serif(self):
         _, html = self._get("/portal-venta")
         css = html[html.index("<style>"):html.index("</style>")]
