@@ -30922,13 +30922,20 @@ def build_portal_de_venta(conn, acceso, *, registrar=True):
         ).fetchall():
             if not solicitud_de_firma_es_suya(f, acceso):
                 continue
-            estado = str(row_value(f, "status", "") or "")
+            # `estado_firma`, no `estado`: esta variable se llamaba igual que la
+            # etapa del inmueble, que se lee doscientas líneas antes y se usa
+            # doscientas después. En cuanto el inmueble tenía **una** solicitud de
+            # firma, `estado` pasaba a valer «pending» y el bloque de la oferta
+            # —que sólo se pinta si la etapa es PROPUESTA— desaparecía del portal
+            # del propietario. No se había visto porque en todo el histórico había
+            # una sola firma; salió montando una operación de prueba entera.
+            estado_firma = str(row_value(f, "status", "") or "")
             firmas.append({
                 "id": str(row_value(f, "id", "") or ""),
                 "documento": str(row_value(f, "doc_nombre", "") or ""),
-                "estado": estado,
+                "estado": estado_firma,
                 "fecha": _fecha_corta(row_value(f, "signed_at", "") or row_value(f, "created_at", "")),
-                "pendiente": estado not in {"signed", "rejected"},
+                "pendiente": estado_firma not in {"signed", "rejected"},
             })
     except Exception:
         _rollback_best_effort(conn)
