@@ -1408,3 +1408,182 @@ class LaMediacionDeLaAgenciaTests(BaseComprador):
             "SELECT quien FROM inmueble_oferta_eventos ORDER BY created_at ASC").fetchall()]
         self.assertEqual(quienes[0], "comprador")
         self.assertIn("Ana Asesora", quienes[1])
+
+
+class LasArrasYElEncargoTests(BaseComprador):
+    """Los dos documentos que se firman de verdad. Reutilizan la firma electrónica
+    que ya existía y que en todo el histórico se había usado una sola vez."""
+
+    def setUp(self):
+        super().setUp()
+        S.ensure_ofertas_schema(self.conn)
+        S.ensure_inmueble_portal_schema(self.conn)
+        S.ensure_inmueble_signature_schema(self.conn)
+        self._ins("inmueble_propietarios", {"id": "ip1", "inmueble_id": "inm1", "cliente_id": "cli2",
+                                            "created_at": AHORA, "updated_at": AHORA})
+        self.conn.execute("UPDATE empresas SET iban = 'ES91 2100 0418 4502 0005 1332' WHERE id='emp1'")
+        self.conn.execute("UPDATE clientes SET nif = '44556677H' WHERE id = 'cli1'")
+        self.conn.commit()
+        self.token = self._abre()
+        self.i = self._posicion(self.token, "Calle Uno 1")
+
+    def _hasta_reservada(self):
+        self._post("/api/portal_busqueda_oferta",
+                   {"token": self.token, "i": self.i, "importe": 242000}, con_sesion=False)
+        oferta_id = self.conn.execute("SELECT id FROM inmueble_ofertas LIMIT 1").fetchone()["id"]
+        self._post("/api/inmueble_oferta_responder",
+                   {"oferta_id": oferta_id, "decision": "aceptar", "senal": 6000})
+        self._post("/api/portal_busqueda_justificante",
+                   {"token": self.token, "i": self.i, "nombre": "t.pdf",
+                    "file_base64": base64.b64encode(b"%PDF").decode()}, con_sesion=False)
+        self._post("/api/inmueble_oferta_verificar", {"oferta_id": oferta_id})
+        return oferta_id
+
+    def _arras(self, oferta_id, **extra):
+        cuerpo = {"oferta_id": oferta_id, "arras": 18000, "fecha_escritura": "2099-06-30",
+                  "notaria": "Notaría de Málaga, D. Luis Pérez"}
+        cuerpo.update(extra)
+        return self._post("/api/inmueble_arras_preparar", cuerpo)
+
+    def test_no_hay_arras_sin_reserva(self):
+        """El orden es lo que da valor a los pasos: unas arras sin señal ingresada
+        no se sostienen."""
+        self._post("/api/portal_busqueda_oferta",
+                   {"token": self.token, "i": self.i, "importe": 242000}, con_sesion=False)
+        oferta_id = self.conn.execute("SELECT id FROM inmueble_ofertas LIMIT 1").fetchone()["id"]
+        self.assertEqual(self._arras(oferta_id)[0], 409)
+
+    def test_sin_fecha_limite_para_escriturar_no(self):
+        """Unas arras sin fecha tope no son arras: es lo que se penaliza."""
+        oferta_id = self._hasta_reservada()
+        self.assertEqual(self._arras(oferta_id, fecha_escritura="")[0], 400)
+
+    def test_se_genera_el_contrato_y_dos_firmas(self):
+        oferta_id = self._hasta_reservada()
+        estado, d = self._arras(oferta_id)
+        self.assertEqual(estado, 200, d)
+        self.assertEqual(d["firmas"], 2, "una firma sola no es un contrato de arras")
+        doc = self.conn.execute(
+            "SELECT id, nombre, tipo FROM inmueble_docs WHERE tipo = 'Contrato de arras'").fetchone()
+        self.assertIsNotNone(doc)
+        firmantes = [r["signer_nombre"] for r in self.conn.execute(
+            "SELECT signer_nombre FROM inmueble_signature_requests WHERE purpose = 'Contrato de arras' "
+            "ORDER BY signer_nombre").fetchall()]
+        self.assertEqual(firmantes, ["Carlos Comprador", "Pilar Propietaria"])
+
+    def test_el_contrato_lleva_las_cifras_del_expediente(self):
+        oferta_id = self._hasta_reservada()
+        self._arras(oferta_id)
+        doc = self.conn.execute(
+            "SELECT url FROM inmueble_docs WHERE tipo = 'Contrato de arras'").fetchone()
+        ruta = S._signature_url_to_local_path(doc["url"])
+        import io
+        from pypdf import PdfReader
+        texto = "\n".join(p.extract_text() or "" for p in PdfReader(io.BytesIO(ruta.read_bytes())).pages)
+        self.assertIn("242.000", texto)      # precio
+        self.assertIn("6.000", texto)        # señal ya entregada
+        self.assertIn("18.000", texto)       # arras
+        self.assertIn("218.000", texto)      # resto en la escritura
+        self.assertIn("1.454", texto)        # arras penitenciales
+        self.assertIn("2099-06-30", texto)
+
+    def test_una_firma_sola_no_cierra_nada(self):
+        oferta_id = self._hasta_reservada()
+        self._arras(oferta_id)
+        pedido = self.conn.execute(
+            "SELECT id FROM inmueble_signature_requests WHERE signer_nombre = 'Carlos Comprador'"
+        ).fetchone()
+        S.al_completar_una_firma(self.conn, self.conn.execute(
+            "SELECT * FROM inmueble_signature_requests WHERE id = ?", (pedido["id"],)).fetchone())
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM inmueble_ofertas WHERE id = ?", (oferta_id,)).fetchone()["estado"],
+            "arras_preparadas")
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM inmuebles WHERE id='inm1'").fetchone()["estado"], "Encargo")
+
+    def test_cuando_firman_los_dos_se_sella_el_expediente(self):
+        oferta_id = self._hasta_reservada()
+        self._arras(oferta_id)
+        self.conn.execute("UPDATE inmueble_signature_requests SET status = 'signed' "
+                          "WHERE purpose = 'Contrato de arras'")
+        self.conn.commit()
+        ultima = self.conn.execute(
+            "SELECT * FROM inmueble_signature_requests WHERE purpose = 'Contrato de arras' LIMIT 1"
+        ).fetchone()
+        self.assertEqual(S.al_completar_una_firma(self.conn, ultima), "arras_firmadas")
+        self.conn.commit()
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM inmueble_ofertas WHERE id = ?", (oferta_id,)).fetchone()["estado"],
+            "arras_firmadas")
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM inmuebles WHERE id='inm1'").fetchone()["estado"], "Contrato de arras")
+
+    def test_el_comprador_ve_el_paso_y_la_notaria(self):
+        oferta_id = self._hasta_reservada()
+        self._arras(oferta_id)
+        o = self._vista(self.token)["inmuebles"][self.i]["oferta"]
+        self.assertEqual(o["estado"], "arras_preparadas")
+        self.assertEqual(o["arras"]["importe"], 18000)
+        self.assertEqual(o["arras"]["fecha_escritura"], "2099-06-30")
+        self.assertIn("Luis Pérez", o["arras"]["notaria"])
+
+    def test_y_le_sale_la_firma_pendiente(self):
+        oferta_id = self._hasta_reservada()
+        self._arras(oferta_id)
+        firmas = self._vista(self.token)["firmas"]
+        self.assertTrue(any(f["pendiente"] and "arras" in f["documento"].lower() for f in firmas),
+                        firmas)
+
+    def test_la_nota_de_encargo_se_manda_a_firmar(self):
+        estado, d = self._post("/api/inmueble_encargo_firma", {"inmueble_id": "inm1"})
+        self.assertEqual(estado, 200, d)
+        self.assertEqual(d["firmas"], 1)
+        doc = self.conn.execute(
+            "SELECT nombre FROM inmueble_docs WHERE tipo = 'Nota de encargo'").fetchone()
+        self.assertIsNotNone(doc)
+        firma = self.conn.execute(
+            "SELECT signer_nombre, status FROM inmueble_signature_requests "
+            "WHERE purpose = 'Nota de encargo'").fetchone()
+        self.assertEqual(firma["signer_nombre"], "Pilar Propietaria")
+        self.assertEqual(firma["status"], "pending")
+
+    def test_firmar_el_encargo_convierte_la_noticia_en_encargo(self):
+        """Firmarlo ES lo que lo convierte en encargo; antes era un cambio a mano."""
+        self.conn.execute("UPDATE inmuebles SET estado = 'Noticia' WHERE id = 'inm1'")
+        self.conn.commit()
+        self._post("/api/inmueble_encargo_firma", {"inmueble_id": "inm1"})
+        self.conn.execute("UPDATE inmueble_signature_requests SET status = 'signed' "
+                          "WHERE purpose = 'Nota de encargo'")
+        self.conn.commit()
+        fila = self.conn.execute(
+            "SELECT * FROM inmueble_signature_requests WHERE purpose = 'Nota de encargo'").fetchone()
+        self.assertEqual(S.al_completar_una_firma(self.conn, fila), "encargo_firmado")
+        self.conn.commit()
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM inmuebles WHERE id='inm1'").fetchone()["estado"], "Encargo")
+
+    def test_sin_propietario_enlazado_se_dice(self):
+        estado, d = self._post("/api/inmueble_encargo_firma", {"inmueble_id": "inm2"})
+        self.assertEqual(estado, 409, d)
+        self.assertIn("propietarios", d["error"])
+
+    def test_una_firma_de_otro_documento_no_dispara_nada(self):
+        fila = {"purpose": "Firma electrónica interna", "doc_id": "x", "inmueble_id": "inm1",
+                "empresa_id": "emp1"}
+        self.assertEqual(S.al_completar_una_firma(self.conn, fila), "")
+
+    def test_la_pantalla_pinta_el_bloque_de_arras(self):
+        _, html = self._get("/portal-busqueda")
+        self.assertIn("o.arras.fecha_escritura", html)
+        self.assertIn("Fecha límite para escriturar", html)
+
+    def test_no_le_salen_dos_botones_del_mismo_contrato(self):
+        """De unas arras salen dos solicitudes, una por parte. Si la misma persona
+        figura en las dos —se vende entre familia, o hay permuta— le aparecían dos
+        veces el mismo papel."""
+        oferta_id = self._hasta_reservada()
+        self.conn.execute("UPDATE inmueble_propietarios SET cliente_id = 'cli1' WHERE id = 'ip1'")
+        self.conn.commit()
+        self._arras(oferta_id)
+        firmas = [f for f in self._vista(self.token)["firmas"] if f["pendiente"]]
+        self.assertEqual(len(firmas), 1, [f["documento"] for f in firmas])

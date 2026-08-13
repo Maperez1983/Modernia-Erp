@@ -28252,6 +28252,13 @@ def sign_inmueble_signature_request(conn, token, payload, *, handler=None, now=N
         ),
     )
     row_after = conn.execute("SELECT * FROM inmueble_signature_requests WHERE id = ? LIMIT 1", (data["id"],)).fetchone()
+    # Y lo que haya que cerrar detrás: unas arras firmadas por las dos partes
+    # sellan el expediente y mueven la etapa; un encargo firmado convierte una
+    # noticia en encargo. Una firma suelta no hace nada.
+    try:
+        al_completar_una_firma(conn, row_after, now=now_value)
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("firma/al_completar", _fallo_tragado)
     pdf_bytes = build_signature_evidence_pdf(row_after, evidence)
     doc = persist_generated_inmueble_pdf(
         conn,
@@ -32379,14 +32386,14 @@ def genera_hoja_de_visita(conn, inmueble_id, demanda_id, comprador, now=None):
         return ""
     direccion = str(row_value(inmueble, "direccion", "") or "")
     base = slugify_text(direccion or inmueble_id)[:50] or inmueble_id
-    doc_id = persist_generated_inmueble_pdf(
+    archivado = persist_generated_inmueble_pdf(
         conn, inmueble_id, "Hoja de visita",
         f"Hoja de visita · {direccion or base}", pdf, f"hoja_visita_{base}", now,
         empresa_id=str(row_value(inmueble, "empresa_id", "") or ""),
         plantilla_clave="hoja_visita",
         origen_tipo="portal_hoja_visita", origen_id=demanda_id,
     )
-    return str(doc_id or "")
+    return str((archivado or {}).get("id") or "")
 
 
 # Dos formas de que un documento llegue al comprador, y la segunda no puede ser el
@@ -32413,10 +32420,17 @@ ESTADOS_DE_OFERTA = {
     "aceptada": ("Oferta aceptada", "La agencia prepara la reserva"),
     "reserva_pendiente": ("Pendiente de la señal", "Haz la transferencia y sube el justificante"),
     "reserva_justificada": ("Justificante recibido", "La agencia lo está comprobando"),
-    "reservada": ("Reservado a tu nombre", ""),
+    "reservada": ("Reservado a tu nombre", "Preparamos el contrato de arras"),
+    "arras_preparadas": ("Contrato de arras listo", "Fírmalo desde aquí"),
+    "arras_firmadas": ("Arras firmadas", "Siguiente paso: la notaría"),
 }
 # Desde estos ya no se puede tocar: son finales o le toca a la agencia.
-_OFERTA_CERRADA = {"rechazada", "retirada", "reservada"}
+_OFERTA_CERRADA = {"rechazada", "retirada", "reservada", "arras_preparadas", "arras_firmadas"}
+
+# El propósito con el que se crea la solicitud de firma. Es lo que permite saber,
+# cuando alguien firma, qué hay que cerrar detrás.
+PROPOSITO_ARRAS = "Contrato de arras"
+PROPOSITO_ENCARGO = "Nota de encargo"
 
 
 def ensure_ofertas_schema(conn):
@@ -32474,7 +32488,9 @@ def ensure_ofertas_schema(conn):
     # sigue diciendo «oferta presentada» hasta que el asesor le cuente algo. Que el
     # propietario haya dicho que sí no es un dato suyo hasta que la agencia lo
     # convierte en un paso —la reserva—.
-    for columna in ("mediacion", "mediacion_at", "mediacion_nota", "mediacion_por"):
+    for columna in ("mediacion", "mediacion_at", "mediacion_nota", "mediacion_por",
+                    "arras_doc", "arras_importe", "arras_fecha_firma", "arras_fecha_escritura",
+                    "arras_notaria"):
         ensure_column(conn, "inmueble_ofertas", columna, f"{columna} TEXT")
     for sql in (
         "CREATE INDEX IF NOT EXISTS idx_ofertas_demanda ON inmueble_ofertas (demanda_id, inmueble_id)",
@@ -32571,6 +32587,288 @@ def presenta_oferta_al_propietario(conn, oferta, nota, quien, now=None):
                             "presenta la oferta al propietario", detalle=str(nota or "")[:600],
                             importe=f"{importe:.2f}", now=now)
     return True, ""
+
+
+def build_contrato_de_arras_pdf(company, inmueble, comprador, propietarios, datos):
+    """El contrato de arras, con las cifras del expediente y no a mano.
+
+    **Es un modelo, no un contrato revisado.** Recoge lo que las partes ya han
+    acordado en el CRM —precio, señal entregada, arras, plazo y notaría— y lo pone
+    por escrito con el clausulado corriente de las arras penitenciales del artículo
+    1.454 del Código Civil, que es el que se usa por defecto en una compraventa de
+    vivienda. Cualquier operación con particularidades —proindiviso, herencia,
+    cargas, subrogación— pide que lo revise vuestro asesor antes de firmarlo.
+    """
+    precio = round(parse_money_value(datos.get("precio")) or 0, 2)
+    senal = round(parse_money_value(datos.get("senal")) or 0, 2)
+    arras = round(parse_money_value(datos.get("arras")) or 0, 2)
+    resto = round(max(precio - senal - arras, 0), 2)
+    vendedores = ", ".join(
+        p for p in (str((x or {}).get("nombre") or "").strip() for x in (propietarios or [])) if p
+    ) or "—"
+    nifs = ", ".join(
+        p for p in (str((x or {}).get("nif") or "").strip() for x in (propietarios or [])) if p
+    ) or "—"
+    direccion = " · ".join(p for p in (str(inmueble.get("direccion") or ""),
+                                       str(inmueble.get("poblacion") or "")) if p)
+    secciones = [
+        ("Partes", [
+            ("Parte vendedora", vendedores),
+            ("NIF", nifs),
+            ("Parte compradora", str((comprador or {}).get("nombre") or "—")),
+            ("NIF", str((comprador or {}).get("nif") or "—")),
+        ]),
+        ("Vivienda objeto del contrato", [
+            ("Dirección", direccion or "—"),
+            ("Referencia catastral", str(inmueble.get("referencia_catastral") or "—")),
+            ("Superficie construida", f"{inmueble.get('m2')} m²" if inmueble.get("m2") else "—"),
+        ]),
+        ("Precio y entregas", [
+            ("Precio total de la compraventa", format_eur_short(precio)),
+            ("Señal ya entregada a la reserva", format_eur_short(senal)),
+            ("Arras que se entregan en este acto", format_eur_short(arras)),
+            ("Resto a pagar en la escritura", format_eur_short(resto)),
+        ]),
+        ("Plazos", [
+            ("Fecha de este contrato", _fecha_corta(datos.get("fecha_firma")) or "—"),
+            ("Fecha límite para escriturar", _fecha_corta(datos.get("fecha_escritura")) or "—"),
+            ("Notaría", str(datos.get("notaria") or "A designar por la parte compradora")),
+        ]),
+        ("Cláusulas", [
+            "PRIMERA. La parte vendedora entrega y la compradora recibe la vivienda descrita, "
+            "libre de arrendatarios y ocupantes, y al corriente de gastos de comunidad, "
+            "suministros e impuestos hasta la fecha de la escritura.",
+            "SEGUNDA. Las cantidades entregadas tienen la condición de ARRAS PENITENCIALES del "
+            "artículo 1.454 del Código Civil. Si la parte compradora desiste, las pierde. Si "
+            "desiste la vendedora, las devuelve duplicadas.",
+            "TERCERA. El otorgamiento de la escritura pública se hará como máximo en la fecha "
+            "indicada arriba, en la notaría señalada. Los gastos se reparten conforme a la ley: "
+            "la plusvalía municipal a cargo de la parte vendedora, y notaría, Registro, gestoría "
+            "e impuesto de transmisiones a cargo de la compradora, salvo pacto en contrario.",
+            "CUARTA. La parte vendedora responde de las cargas que no se hayan declarado. Si "
+            "apareciera alguna no manifestada, la compradora podrá desistir recuperando el doble "
+            "de lo entregado o exigir su cancelación antes de la escritura.",
+            str(datos.get("nota") or "").strip() or "QUINTA. Ambas partes aceptan el contenido de "
+            "este documento y lo firman electrónicamente en la fecha indicada.",
+        ]),
+    ]
+    return build_company_branded_document_pdf(
+        company or {}, "CONTRATO DE ARRAS", direccion or "Compraventa de vivienda", secciones,
+        ["Documento generado por el CRM a partir de las condiciones acordadas en el expediente. "
+         "Modelo de arras penitenciales (art. 1.454 CC): revísalo con vuestro asesor antes de firmarlo."])
+
+
+def _firma_para(conn, *, empresa_id, inmueble_id, doc_id, nombre, nif, telefono, email,
+                proposito, quien, now):
+    """Una solicitud de firma para alguien, con lo que haga falta para que la
+    encuentre en su portal: el teléfono y el nombre, que es por lo que se comprueba
+    que una firma es suya."""
+    try:
+        return create_inmueble_signature_request(
+            conn, empresa_id=empresa_id, inmueble_id=inmueble_id, doc_id=doc_id,
+            signer_nombre=str(nombre or ""), signer_nif=str(nif or ""),
+            signer_email=str(email or ""), signer_telefono=str(telefono or ""),
+            purpose=proposito, created_by=str(quien or ""), now=now)
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada(f"_firma_para/{proposito}", _fallo_tragado)
+        return None
+
+
+def prepara_contrato_de_arras(conn, oferta, datos, quien, now=None):
+    """Genera el contrato y lo pone a firmar a las dos partes.
+
+    Las dos, y a la vez: un contrato de arras firmado por uno solo no es nada, y
+    tener las dos solicitudes desde el principio es lo que permite saber cuándo
+    está cerrado sin que nadie tenga que ir a mirarlo.
+    """
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    inmueble_id = str(row_value(oferta, "inmueble_id", "") or "")
+    empresa_id = str(row_value(oferta, "empresa_id", "") or "")
+    inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+    if not inmueble:
+        return False, "inmueble_no_encontrado", []
+    propietarios = get_inmueble_propietarios(conn, inmueble_id) or []
+    if not propietarios:
+        return False, "sin_propietarios", []
+    comprador = conn.execute(
+        "SELECT nombre, nif, telefono, email FROM clientes WHERE id = ? LIMIT 1",
+        (str(row_value(oferta, "cliente_id", "") or ""),)).fetchone()
+    if not comprador:
+        return False, "sin_comprador", []
+    empresa = conn.execute("SELECT * FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+
+    cuerpo = dict(datos or {})
+    cuerpo.setdefault("precio", row_value(oferta, "importe", 0))
+    cuerpo.setdefault("senal", row_value(oferta, "senal", 0))
+    pdf = build_contrato_de_arras_pdf(
+        dict(empresa) if empresa else {}, dict(inmueble), dict(comprador), propietarios, cuerpo)
+    base = slugify_text(str(row_value(inmueble, "direccion", "") or inmueble_id))[:50] or inmueble_id
+    # Devuelve un dict con id, url y versión —no el id suelto—, y pasarlo tal cual
+    # a un parámetro de SQL revienta con «type 'dict' is not supported».
+    archivado = persist_generated_inmueble_pdf(
+        conn, inmueble_id, PROPOSITO_ARRAS,
+        f"Contrato de arras · {row_value(inmueble, 'direccion', '') or base}", pdf,
+        f"arras_{base}", now, empresa_id=empresa_id, plantilla_clave="arras",
+        origen_tipo="portal_arras", origen_id=str(row_value(oferta, "id", "") or ""))
+    doc_id = str((archivado or {}).get("id") or "")
+    if not doc_id:
+        return False, "sin_documento", []
+
+    firmas = []
+    pedido = _firma_para(conn, empresa_id=empresa_id, inmueble_id=inmueble_id, doc_id=doc_id,
+                         nombre=row_value(comprador, "nombre", ""), nif=row_value(comprador, "nif", ""),
+                         telefono=row_value(comprador, "telefono", ""),
+                         email=row_value(comprador, "email", ""),
+                         proposito=PROPOSITO_ARRAS, quien=quien, now=now)
+    if pedido:
+        firmas.append({"quien": "comprador", "id": pedido["id"]})
+    for propietario in propietarios:
+        pedido = _firma_para(conn, empresa_id=empresa_id, inmueble_id=inmueble_id, doc_id=doc_id,
+                             nombre=propietario.get("nombre"), nif=propietario.get("nif"),
+                             telefono=propietario.get("telefono"), email=propietario.get("email"),
+                             proposito=PROPOSITO_ARRAS, quien=quien, now=now)
+        if pedido:
+            firmas.append({"quien": "propietario", "id": pedido["id"]})
+
+    conn.execute(
+        "UPDATE inmueble_ofertas SET estado = 'arras_preparadas', arras_doc = ?, arras_importe = ?, "
+        "arras_fecha_firma = ?, arras_fecha_escritura = ?, arras_notaria = ?, updated_at = ? "
+        "WHERE id = ?",
+        (doc_id, f"{round(parse_money_value(cuerpo.get('arras')) or 0, 2):.2f}",
+         _fecha_corta(cuerpo.get("fecha_firma")), _fecha_corta(cuerpo.get("fecha_escritura")),
+         str(cuerpo.get("notaria") or ""), now, str(row_value(oferta, "id", "") or "")))
+    apunta_evento_de_oferta(conn, row_value(oferta, "id", ""), str(quien or "la agencia"),
+                            "prepara el contrato de arras",
+                            detalle=f"{len(firmas)} firmas pendientes",
+                            importe=str(cuerpo.get("arras") or ""), now=now)
+    return True, "", firmas
+
+
+def prepara_nota_de_encargo(conn, inmueble, datos, quien, now=None):
+    """La nota de encargo, generada y puesta a firmar al propietario.
+
+    El PDF ya se generaba desde la ficha; lo que no había era el camino para que el
+    propietario lo firmara sin imprimir nada. Se le manda a su portal, donde ya hay
+    un bloque de «pendiente de firmar» que no usaba nadie.
+    """
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    inmueble_id = str(row_value(inmueble, "id", "") or "")
+    empresa_id = str(row_value(inmueble, "empresa_id", "") or "")
+    propietarios = get_inmueble_propietarios(conn, inmueble_id) or []
+    if not propietarios:
+        return False, "sin_propietarios", []
+    empresa = conn.execute("SELECT * FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+    captacion = conn.execute(
+        "SELECT * FROM captaciones WHERE inmueble_id = ? ORDER BY created_at DESC LIMIT 1",
+        (inmueble_id,)).fetchone()
+    try:
+        pdf = build_inmueble_nota_encargo_pdf(
+            dict(empresa) if empresa else {}, dict(inmueble),
+            dict(captacion) if captacion else {}, propietarios, datos or {})
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("prepara_nota_de_encargo/pdf", _fallo_tragado)
+        return False, "sin_documento", []
+    base = slugify_text(str(row_value(inmueble, "direccion", "") or inmueble_id))[:50] or inmueble_id
+    archivado = persist_generated_inmueble_pdf(
+        conn, inmueble_id, PROPOSITO_ENCARGO,
+        f"Nota de encargo · {row_value(inmueble, 'direccion', '') or base}", pdf,
+        f"encargo_{base}", now, empresa_id=empresa_id, plantilla_clave="nota_encargo_final",
+        origen_tipo="portal_encargo", origen_id=inmueble_id)
+    doc_id = str((archivado or {}).get("id") or "")
+    if not doc_id:
+        return False, "sin_documento", []
+    firmas = []
+    for propietario in propietarios:
+        pedido = _firma_para(conn, empresa_id=empresa_id, inmueble_id=inmueble_id, doc_id=doc_id,
+                             nombre=propietario.get("nombre"), nif=propietario.get("nif"),
+                             telefono=propietario.get("telefono"), email=propietario.get("email"),
+                             proposito=PROPOSITO_ENCARGO, quien=quien, now=now)
+        if pedido:
+            firmas.append({"quien": "propietario", "id": pedido["id"]})
+    return True, "", firmas
+
+
+def al_completar_una_firma(conn, fila, now=None):
+    """Lo que hay que cerrar detrás de una firma, cuando ya han firmado todos.
+
+    Una firma suelta no cambia nada: un contrato de arras con la firma del
+    comprador y sin la del vendedor no es un contrato. Aquí se mira si quedan
+    solicitudes pendientes **del mismo documento** y sólo entonces se sella el
+    expediente y se mueve la etapa.
+    """
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    proposito = str(row_value(fila, "purpose", "") or "")
+    if proposito not in (PROPOSITO_ARRAS, PROPOSITO_ENCARGO):
+        return ""
+    doc_id = str(row_value(fila, "doc_id", "") or "")
+    inmueble_id = str(row_value(fila, "inmueble_id", "") or "")
+    empresa_id = str(row_value(fila, "empresa_id", "") or "")
+    if not doc_id or not inmueble_id:
+        return ""
+    try:
+        pendientes = conn.execute(
+            "SELECT COUNT(*) AS n FROM inmueble_signature_requests WHERE doc_id = ? "
+            "AND purpose = ? AND status NOT IN ('signed','rejected')",
+            (doc_id, proposito)).fetchone()
+    except Exception:
+        _rollback_best_effort(conn)
+        return ""
+    if int(row_value(pendientes, "n", 0) or 0) > 0:
+        return "pendiente"
+
+    inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+    etapa = normalize_lookup_text(row_value(inmueble, "estado", "")) if inmueble else ""
+    operacion = conn.execute(
+        "SELECT id FROM operaciones_inmobiliarias WHERE inmueble_id = ? "
+        "ORDER BY COALESCE(updated_at, created_at) DESC LIMIT 1", (inmueble_id,)).fetchone()
+
+    if proposito == PROPOSITO_ENCARGO:
+        if operacion:
+            conn.execute(
+                "UPDATE operaciones_inmobiliarias SET fecha_encargo = ?, updated_at = ? WHERE id = ?",
+                (now[:10], now, str(row_value(operacion, "id", "") or "")))
+        # De Noticia a Encargo: firmar el encargo ES lo que lo convierte en encargo.
+        if etapa in {"NOTICIA", ""}:
+            conn.execute("UPDATE inmuebles SET estado = 'Encargo', updated_at = datetime(?) WHERE id = ?",
+                         (now, inmueble_id))
+            try:
+                log_crm_stage_event(conn, empresa_id, inmueble_id, None, "Encargo", now=now,
+                                    from_etapa=str(row_value(inmueble, "estado", "") or ""))
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("al_completar_una_firma/etapa_encargo", _fallo_tragado)
+        audit_event(conn, empresa_id, "inmueble", inmueble_id, "Nota de encargo firmada",
+                    usuario=str(row_value(fila, "signed_name", "") or ""), now=now)
+        return "encargo_firmado"
+
+    ensure_ofertas_schema(conn)
+    oferta = conn.execute(
+        "SELECT * FROM inmueble_ofertas WHERE arras_doc = ? LIMIT 1", (doc_id,)).fetchone()
+    if oferta:
+        conn.execute(
+            "UPDATE inmueble_ofertas SET estado = 'arras_firmadas', updated_at = ? WHERE id = ?",
+            (now, str(row_value(oferta, "id", "") or "")))
+        apunta_evento_de_oferta(conn, row_value(oferta, "id", ""), "las dos partes",
+                                "firman el contrato de arras",
+                                importe=str(row_value(oferta, "arras_importe", "") or ""), now=now)
+        if operacion:
+            conn.execute(
+                "UPDATE operaciones_inmobiliarias SET fecha_contrato = ?, precio_contrato = ?, "
+                "updated_at = ? WHERE id = ?",
+                (_fecha_corta(row_value(oferta, "arras_fecha_firma", "")) or now[:10],
+                 round(parse_money_value(row_value(oferta, "importe", 0)) or 0, 2),
+                 now, str(row_value(operacion, "id", "") or "")))
+    if etapa not in {"VENDIDO", "COMPRAVENTA", "CERRADO NEGATIVAMENTE"}:
+        conn.execute(
+            "UPDATE inmuebles SET estado = 'Contrato de arras', updated_at = datetime(?) WHERE id = ?",
+            (now, inmueble_id))
+        try:
+            log_crm_stage_event(conn, empresa_id, inmueble_id, None, "Contrato de arras", now=now,
+                                from_etapa=str(row_value(inmueble, "estado", "") or ""))
+        except Exception as _fallo_tragado:
+            apunta_escritura_tragada("al_completar_una_firma/etapa_arras", _fallo_tragado)
+    audit_event(conn, empresa_id, "inmueble", inmueble_id, "Contrato de arras firmado por las dos partes",
+                usuario=str(row_value(fila, "signed_name", "") or ""), now=now)
+    return "arras_firmadas"
 
 
 def _payload_de_evento_de_oferta(fila, prev_hash):
@@ -32713,6 +33011,12 @@ def vista_de_la_oferta(oferta):
         "puede_retirar": estado == "presentada",
         "puede_decidir": estado == "contraoferta",
         "puede_justificar": estado == "reserva_pendiente",
+        "arras": {
+            "importe": round(parse_money_value(row_value(oferta, "arras_importe", 0)) or 0, 2),
+            "fecha_firma": _fecha_corta(row_value(oferta, "arras_fecha_firma", "")),
+            "fecha_escritura": _fecha_corta(row_value(oferta, "arras_fecha_escritura", "")),
+            "notaria": str(row_value(oferta, "arras_notaria", "") or ""),
+        } if estado in {"arras_preparadas", "arras_firmadas"} else None,
     }
 
 
@@ -32868,6 +33172,15 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
                 if not solicitud_de_firma_es_suya(f, acceso):
                     continue
                 estado_f = str(row_value(f, "status", "") or "")
+                # Un documento, una fila. De un contrato de arras salen dos
+                # solicitudes —una por parte— y si la misma persona figura en las
+                # dos (comprador y propietario a la vez, que pasa en un permuta o
+                # cuando se vende entre familia) le salían dos botones «Firmar»
+                # del mismo papel.
+                if any(x["documento"] == str(row_value(f, "doc_nombre", "") or "")
+                       and x["pendiente"] and estado_f not in {"signed", "rejected"}
+                       for x in firmas):
+                    continue
                 firmas.append({
                     "id": str(row_value(f, "id", "") or ""),
                     "documento": str(row_value(f, "doc_nombre", "") or ""),
@@ -57141,7 +57454,11 @@ def fetch_workspace_detail(conn, workspace_id):
             now_ts = datetime.now(timezone.utc).isoformat()
             legacy = conn.execute(
                 """
-                SELECT we.empresa_id, we.rol, e.nombre, e.nif, e.direccion, e.logo_url, e.primary_color, e.accent_color, COALESCE(e.activo, 1) AS activo
+                -- `empresas` no tiene primary_color ni accent_color: nombrarlas hacía
+                -- fallar la consulta entera, el `except` de abajo se tragaba el error y
+                -- este backfill no se ejecutaba nunca. En producción quedaban 17 empresas
+                -- en la tabla vieja y cero migradas, sin que nada lo dijera.
+                SELECT we.empresa_id, we.rol, e.nombre, e.nif, e.direccion, e.logo_url, COALESCE(e.activo, 1) AS activo
                 FROM workspace_empresas we
                 JOIN empresas e ON e.id = we.empresa_id
                 WHERE we.workspace_id = ?
@@ -57172,8 +57489,12 @@ def fetch_workspace_detail(conn, workspace_id):
                         str(row_value(row, "nif") or "").strip(),
                         str(row_value(row, "direccion") or "").strip(),
                         str(row_value(row, "logo_url") or "").strip(),
-                        str(row_value(row, "primary_color") or "").strip(),
-                        str(row_value(row, "accent_color") or "").strip(),
+                        # Vacíos a propósito: la tabla de origen no guarda colores. No se
+                        # pueden leer de la fila porque `row_value`, cuando la clave no
+                        # existe, cae a `row[0]` y colaría el empresa_id como si fuera un
+                        # color.
+                        "",
+                        "",
                         int(row_value(row, "activo") or 1),
                         now_ts,
                         now_ts,
@@ -60380,7 +60701,10 @@ def build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=
     m2_construidos = inmueble.get("m2")
     m2_utiles = extra.get("m2_utiles")
     otros = str(extra.get("otros") or "").strip()
-    cargas = pick_text(extra.get("cargas"), "NADA")
+    # Sin cargas declaradas la frase se cerraba con «a excepción de NADA», que en un
+    # contrato que se firma se lee como un hueco sin rellenar. Si no hay cargas, la
+    # declaración termina donde tiene que terminar; si las hay, se enumeran.
+    cargas = str(extra.get("cargas") or "").strip()
 
     honorarios_pct = extra.get("honorarios_pct")
     iva_pct = extra.get("iva_pct")
@@ -60562,13 +60886,17 @@ def build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=
     precio_venta_words = format_eur_words(precio_venta_value)
     precio_words_suffix = f" ({precio_venta_words})" if precio_venta_words else ""
 
-    fecha_venta_desde = str(extra.get("fecha_venta_desde") or "").strip() or "xx/xx/xxxx"
+    # El resto del documento deja los huecos con puntos suspensivos (ver la renta y el
+    # plazo, más arriba). Aquí se colaba un «xx/xx/xxxx», que parece texto de plantilla
+    # olvidado y no un hueco a rellenar. El formulario no exige esta fecha, así que el
+    # hueco sale impreso en cuanto la asesora no la pone.
+    fecha_venta_desde = str(extra.get("fecha_venta_desde") or "").strip() or "............."
     fecha_venta_antes = str(extra.get("fecha_venta_antes") or "").strip()
     if not fecha_venta_antes:
         try:
             fecha_venta_antes = fmt_ddmmyyyy(_add_months_safe(parse_iso_date(fecha_inicio) or datetime.now(timezone.utc).date(), 12).isoformat())
         except Exception:
-            fecha_venta_antes = "xx/xx/xxxx"
+            fecha_venta_antes = "............."
 
     owners_block = []
     for idx, owner in enumerate(owners[:2], start=1):
@@ -60590,7 +60918,8 @@ def build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=
         *owners_block,
         "",
         "De otra parte, el intermediario identificado en el encabezado, acuerdan, que este asuma la realización de manera exclusiva de labores encaminadas a la búsqueda, localización y aproximación de potenciales compradores con el fin de facilitar la eventual perfección de una promesa de compraventa o contrato de compraventa sobre el Inmueble, obligándose a realizar su labor con diligencia y discreción, así como a informar periódicamente sobre ella al Cliente.",
-        f"El Cliente declara tener la total y exclusiva disponibilidad del Inmueble y afirma, bajo su responsabilidad, que sobre el mismo no existen litigios, evicciones, vicios, así como cargas o gravámenes a excepción de {cargas}.",
+        f"El Cliente declara tener la total y exclusiva disponibilidad del Inmueble y afirma, bajo su responsabilidad, que sobre el mismo no existen litigios, evicciones, vicios, así como cargas o gravámenes"
+        + (f", a excepción de las siguientes: {cargas}." if cargas else "."),
         f"El Cliente fija el precio de venta del inmueble en {precio_venta_text}{precio_words_suffix}.",
         f"El Cliente declara que el contrato de compraventa del inmueble deberá realizarse a partir de {fecha_venta_desde} y en todo caso, antes de (momento/fecha) {fecha_venta_antes}.",
         "El Cliente autoriza al Intermediario a ofertar y publicitar el Inmueble, así como a realizar visitas acompañado de potenciales compradores, obligándose a facilitar las mismas, así como a proporcionar cuanta información y colaboración sean necesarias para desarrollar la labor de intermediación.",
@@ -67630,6 +67959,15 @@ class Handler(BaseHTTPRequestHandler):
             partes.push(`<div class="cuenta">${esc(o.iban)}</div>`);
             partes.push(`<div class="cual">Cuando lo tengas hecho, sube aquí el justificante.</div>`);
             partes.push(`<input type="file" class="justificante" accept=".pdf,.jpg,.jpeg,.png,.webp" />`);
+          } else if (o.arras) {
+            partes.push(`<div class="cual">Arras: <strong>${eur(o.arras.importe)}</strong>${
+              o.arras.fecha_firma ? " · firmadas el " + esc(o.arras.fecha_firma) : ""}</div>`);
+            if (o.arras.fecha_escritura) {
+              partes.push(`<div class="cual">Fecha límite para escriturar:
+                <strong>${esc(o.arras.fecha_escritura)}</strong></div>`);
+            }
+            if (o.arras.notaria) partes.push(`<div class="cual">Notaría: ${esc(o.arras.notaria)}</div>`);
+            if (o.siguiente) partes.push(`<div class="cual">${esc(o.siguiente)}</div>`);
           } else if (o.siguiente) {
             partes.push(`<div class="cual">${esc(o.siguiente)}</div>`);
           }
@@ -68640,6 +68978,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_busqueda_justificante",
             "/api/inmueble_oferta_responder",
             "/api/inmueble_oferta_presentar",
+            "/api/inmueble_arras_preparar",
+            "/api/inmueble_encargo_firma",
             "/api/inmueble_oferta_verificar",
             "/api/inmueble_renovar",
             "/api/renta_campaign_document",
@@ -69533,6 +69873,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/portal_busqueda_justificante",
             "/api/inmueble_oferta_responder",
             "/api/inmueble_oferta_presentar",
+            "/api/inmueble_arras_preparar",
+            "/api/inmueble_encargo_firma",
             "/api/inmueble_oferta_verificar",
             "/api/demanda_portal_acceso",
             "/api/demanda_portal_acceso_revoke",
@@ -70090,8 +70432,40 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "visible": bool(visible)})
             return
 
+        if parsed.path == "/api/inmueble_encargo_firma":
+            # La nota de encargo, al portal del propietario para que la firme sin
+            # imprimir nada. El PDF ya se generaba desde la ficha; lo que faltaba
+            # era el camino.
+            inmueble_id = str(payload.get("inmueble_id") or "").strip()
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_acc, err_acc, _f = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+            if not ok_acc:
+                json_response(self, {"error": err_acc},
+                              status=404 if "no encontrado" in str(err_acc) else 403)
+                return
+            inmueble = conn.execute(
+                "SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
+            ahora_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            quien = str((session or {}).get("nombre") or (session or {}).get("usuario") or "la agencia")
+            ok_enc, motivo, firmas = prepara_nota_de_encargo(
+                conn, inmueble, payload.get("extra") or {}, quien, now=ahora_iso)
+            if not ok_enc:
+                textos = {"sin_propietarios": "El inmueble no tiene propietarios enlazados",
+                          "sin_documento": "No se ha podido generar la nota de encargo"}
+                json_response(self, {"error": textos.get(motivo, motivo)}, status=409)
+                return
+            audit_event(conn, str(row_value(inmueble, "empresa_id", "") or ""), "inmueble", inmueble_id,
+                        "Nota de encargo enviada a firmar", usuario=quien,
+                        detalles={"firmas": len(firmas)}, now=ahora_iso)
+            conn.commit()
+            avisa_al_propietario(conn, inmueble_id, "encargo",
+                                 "Tienes la nota de encargo lista para firmar en tu seguimiento.",
+                                 referencia=ahora_iso[:10], now=ahora_iso)
+            json_response(self, {"ok": True, "firmas": len(firmas)})
+            return
+
         if parsed.path in ("/api/inmueble_oferta_responder", "/api/inmueble_oferta_verificar",
-                           "/api/inmueble_oferta_presentar"):
+                           "/api/inmueble_oferta_presentar", "/api/inmueble_arras_preparar"):
             # El lado del asesor. La oferta la escribe el comprador; la respuesta,
             # la señal y el visto bueno del ingreso los pone la agencia.
             oferta_id = str(payload.get("oferta_id") or "").strip()
@@ -70111,6 +70485,62 @@ class Handler(BaseHTTPRequestHandler):
             ahora_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             quien = str((session or {}).get("nombre") or (session or {}).get("usuario") or "la agencia")
             estado_actual = str(row_value(fila, "estado", "") or "")
+
+            if parsed.path == "/api/inmueble_arras_preparar":
+                # Sólo después de la reserva: unas arras sin señal ingresada no se
+                # sostienen, y el orden es justo lo que da valor a los pasos.
+                if estado_actual != "reservada":
+                    json_response(self, {"error": "Primero tiene que estar reservado"}, status=409)
+                    return
+                arras = round(parse_money_value(payload.get("arras")) or 0, 2)
+                if arras <= 0:
+                    json_response(self, {"error": "Indica el importe de las arras"}, status=400)
+                    return
+                fechas = {}
+                for campo in ("fecha_firma", "fecha_escritura"):
+                    crudo = str(payload.get(campo) or "").strip()[:10]
+                    dia = parse_iso_date(crudo) if re.match(r"^\d{4}-\d{2}-\d{2}$", crudo) else None
+                    if crudo and not dia:
+                        json_response(self, {"error": f"La fecha de {campo.split('_')[1]} no existe"},
+                                      status=400)
+                        return
+                    fechas[campo] = dia.isoformat() if dia else ""
+                if not fechas["fecha_escritura"]:
+                    # Unas arras sin fecha tope no son arras: es lo que se penaliza.
+                    json_response(self, {"error": "Pon la fecha límite para escriturar"}, status=400)
+                    return
+                ok_arras, motivo, firmas = prepara_contrato_de_arras(
+                    conn, fila, {
+                        "arras": arras,
+                        "precio": payload.get("precio") or row_value(fila, "importe", 0),
+                        "senal": row_value(fila, "senal", 0),
+                        "fecha_firma": fechas["fecha_firma"] or ahora_iso[:10],
+                        "fecha_escritura": fechas["fecha_escritura"],
+                        "notaria": payload.get("notaria"),
+                        "nota": payload.get("nota"),
+                    }, quien, now=ahora_iso)
+                if not ok_arras:
+                    textos = {
+                        "sin_propietarios": "El inmueble no tiene propietarios enlazados",
+                        "sin_comprador": "La oferta no tiene ficha de cliente",
+                        "sin_documento": "No se ha podido generar el contrato",
+                        "inmueble_no_encontrado": "Inmueble no encontrado",
+                    }
+                    json_response(self, {"error": textos.get(motivo, motivo)}, status=409)
+                    return
+                audit_event(conn, str(row_value(fila, "empresa_id", "") or ""), "inmueble", inmueble_id,
+                            "Contrato de arras preparado", usuario=quien,
+                            detalles={"oferta": oferta_id, "arras": arras,
+                                      "firmas": len(firmas)}, now=ahora_iso)
+                conn.commit()
+                avisa_al_comprador(conn, str(row_value(fila, "demanda_id", "") or ""), "arras",
+                                   "Ya tienes el contrato de arras en tu portal para firmarlo.",
+                                   referencia=oferta_id, now=ahora_iso)
+                avisa_al_propietario(conn, inmueble_id, "arras",
+                                     "Tienes el contrato de arras listo para firmar en tu seguimiento.",
+                                     referencia=oferta_id, now=ahora_iso)
+                json_response(self, {"ok": True, "estado": "arras_preparadas", "firmas": len(firmas)})
+                return
 
             if parsed.path == "/api/inmueble_oferta_presentar":
                 # La puerta. Del comprador al propietario no se pasa solo: lo
@@ -98277,10 +98707,17 @@ class Handler(BaseHTTPRequestHandler):
             # Para la ficha: quién tiene enlace vivo, cuándo entró y cuántas veces.
             # Nunca el token; sólo se guarda su hash y no hay forma de recuperarlo.
             demanda_id = str(params.get("demanda_id", [""])[0] or "").strip()
+            # Sin demanda_id no es que falte permiso: falta el dato. Salía un 403 con el
+            # texto «inmueble_id requerido» en una pantalla de demandas, y el front no
+            # puede distinguir «no tienes acceso» de «te has dejado un parámetro».
+            if not demanda_id:
+                json_response(self, {"error": "demanda_id requerido"}, status=400)
+                return
             session = getattr(self, "auth_session", None) or self._current_session()
             ok_acc, err_acc, _d = enforce_inmueble_access(conn, session, demanda_id, tabla="demandas")
             if not ok_acc:
-                json_response(self, {"error": str(err_acc).replace("Inmueble", "Demanda")},
+                json_response(self, {"error": str(err_acc).replace("Inmueble", "Demanda")
+                                                          .replace("inmueble_id", "demanda_id")},
                               status=404 if "no encontrado" in str(err_acc) else 403)
                 return
             ensure_demanda_portal_schema(conn)
