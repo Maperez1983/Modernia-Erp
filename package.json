@@ -26,6 +26,6 @@
     "globals": "^17.7.0",
     "jsdom": "^26.1.0",
     "puppeteer-core": "^22.15.0",
-    "vitest": "^3.2.0"
+    "vitest": "^4.1.10"
   }
 }
