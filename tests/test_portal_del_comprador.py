@@ -1687,13 +1687,17 @@ class LaVinculacionConFinanciacionesTests(BaseComprador):
         self.conn.commit()
         self.assertEqual(self._vincular()[0], 409)
 
-    def test_el_comprador_sabe_que_esta_en_estudio_y_nada_mas(self):
+    def test_ve_por_donde_va_pero_no_el_banco_ni_los_importes(self):
+        """Los hitos sí —es su hipoteca y es lo que pregunta—; con qué banco se
+        está trabajando y por cuánto, no."""
         self._vincular(banco="Banco Ejemplo", importe=200000)
         o = self._vista(self.token)["inmuebles"][self.i]["oferta"]
         self.assertTrue(o["financiacion_en_estudio"])
+        self.assertEqual(o["hipoteca"]["etiqueta"], "En estudio")
         crudo = self._get(f"/api/portal_busqueda?token={self.token}")[1]
         self.assertNotIn("Banco Ejemplo", crudo)
-        self.assertNotIn("hipoteca", crudo.lower())
+        self.assertNotIn("200000", crudo)
+        self.assertNotIn("236000", crudo)
 
     def test_si_la_deniegan_vuelve_a_la_inmobiliaria(self):
         self._vincular()
@@ -1740,3 +1744,8 @@ class LaVinculacionConFinanciacionesTests(BaseComprador):
         """Por el dato real —quién tiene clientes con servicio financiaciones—, no
         por un nombre escrito a mano en el código."""
         self.assertEqual(S.empresa_de_financiaciones(self.conn), "empfin")
+
+    def test_la_pantalla_pinta_el_seguimiento(self):
+        _, html = self._get("/portal-busqueda")
+        self.assertIn("Tu financiación:", html)
+        self.assertIn("h.pasos", html)
