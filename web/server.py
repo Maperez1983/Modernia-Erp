@@ -32498,7 +32498,7 @@ def ensure_ofertas_schema(conn):
     # convierte en un paso —la reserva—.
     for columna in ("mediacion", "mediacion_at", "mediacion_nota", "mediacion_por",
                     "arras_doc", "arras_importe", "arras_fecha_firma", "arras_fecha_escritura",
-                    "arras_notaria"):
+                    "arras_notaria", "hipoteca_id", "financiacion_at", "financiacion_estado"):
         ensure_column(conn, "inmueble_ofertas", columna, f"{columna} TEXT")
     for sql in (
         "CREATE INDEX IF NOT EXISTS idx_ofertas_demanda ON inmueble_ofertas (demanda_id, inmueble_id)",
@@ -32594,6 +32594,196 @@ def presenta_oferta_al_propietario(conn, oferta, nota, quien, now=None):
     apunta_evento_de_oferta(conn, row_value(oferta, "id", ""), str(quien or "la agencia"),
                             "presenta la oferta al propietario", detalle=str(nota or "")[:600],
                             importe=f"{importe:.2f}", now=now)
+    return True, ""
+
+
+def empresa_de_financiaciones(conn):
+    """Qué empresa lleva las hipotecas.
+
+    Por id en `FINANCIACIONES_EMPRESA_ID` si alguien lo fija; si no, la que ya
+    tiene clientes vinculados con servicio «financiaciones», que es el dato real y
+    no un nombre escrito a mano. En última instancia, por nombre.
+    """
+    forzada = str(os.environ.get("FINANCIACIONES_EMPRESA_ID") or "").strip()
+    if forzada:
+        return forzada
+    try:
+        fila = conn.execute(
+            "SELECT empresa_id, COUNT(*) AS n FROM clientes_empresas "
+            "WHERE lower(COALESCE(servicio,'')) = 'financiaciones' "
+            "GROUP BY empresa_id ORDER BY n DESC LIMIT 1").fetchone()
+        if fila and str(row_value(fila, "empresa_id", "") or ""):
+            return str(row_value(fila, "empresa_id", ""))
+        fila = conn.execute(
+            "SELECT id FROM empresas WHERE lower(nombre) LIKE '%financiacion%' LIMIT 1").fetchone()
+        return str(row_value(fila, "id", "") or "") if fila else ""
+    except Exception:
+        _rollback_best_effort(conn)
+        return ""
+
+
+def vincula_cliente_con_empresa(conn, cliente_id, empresa_id, servicio, *, procedencia="", now=None):
+    """Ata un cliente que YA EXISTE a otra empresa del grupo.
+
+    **No se crea una ficha nueva.** El mismo cliente que compra el piso es el que
+    pide la hipoteca: si cada CRM se hiciera la suya, el mismo señor acabaría con
+    tres teléfonos distintos y ninguna de las tres al día. Aquí sólo se añade el
+    vínculo, y si ya estaba no se toca.
+
+    Devuelve (vinculo_id, creado).
+    """
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    cliente_id, empresa_id = str(cliente_id or ""), str(empresa_id or "")
+    if not cliente_id or not empresa_id:
+        return "", False
+    try:
+        ya = conn.execute(
+            "SELECT id FROM clientes_empresas WHERE cliente_id = ? AND empresa_id = ? "
+            "AND lower(COALESCE(servicio,'')) = ? LIMIT 1",
+            (cliente_id, empresa_id, str(servicio or "").lower())).fetchone()
+    except Exception:
+        _rollback_best_effort(conn)
+        return "", False
+    if ya:
+        return str(row_value(ya, "id", "") or ""), False
+    fila = {
+        "id": os.urandom(16).hex(),
+        "cliente_id": cliente_id,
+        "empresa_id": empresa_id,
+        "servicio": str(servicio or ""),
+        "estado": "Activo",
+        "fecha_inicio": now[:10],
+        "procedencia_canal": str(procedencia or ""),
+        "created_at": now,
+        "updated_at": now,
+    }
+    columnas = table_columns(conn, "clientes_empresas") or set()
+    claves = [k for k in fila if k in columnas] or list(fila)
+    try:
+        conn.execute(
+            f"INSERT INTO clientes_empresas ({', '.join(claves)}) "
+            f"VALUES ({', '.join(['?'] * len(claves))})",
+            [fila[k] for k in claves])
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("vincula_cliente_con_empresa", _fallo_tragado)
+        return "", False
+    return fila["id"], True
+
+
+def alta_de_hipoteca_en_estudio(conn, oferta, datos, quien, now=None):
+    """Da de alta el estudio en el CRM de Financiaciones, con el mismo cliente.
+
+    Una hipoteca en «Estudio» ES la alerta: aparece en su embudo, con el cliente
+    ya vinculado, el precio de la compra y lo que hace falta financiar. No se
+    manda ningún aviso aparte porque lo que hay que mirar es el embudo.
+    """
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    cliente_id = str(row_value(oferta, "cliente_id", "") or "")
+    if not cliente_id:
+        return "", "sin_cliente"
+    destino = empresa_de_financiaciones(conn)
+    if not destino:
+        return "", "sin_empresa_de_financiaciones"
+    cliente = conn.execute(
+        "SELECT nombre FROM clientes WHERE id = ? LIMIT 1", (cliente_id,)).fetchone()
+    if not cliente:
+        return "", "sin_cliente"
+    inmueble_id = str(row_value(oferta, "inmueble_id", "") or "")
+    inmueble = conn.execute(
+        "SELECT direccion, empresa_id, workspace_id, asesor FROM inmuebles WHERE id = ? LIMIT 1",
+        (inmueble_id,)).fetchone()
+    inmobiliaria = conn.execute(
+        "SELECT nombre FROM empresas WHERE id = ? LIMIT 1",
+        (str(row_value(inmueble, "empresa_id", "") or ""),)).fetchone()
+
+    vincula_cliente_con_empresa(conn, cliente_id, destino, "financiaciones",
+                                procedencia="CRM inmobiliario", now=now)
+
+    precio = round(parse_money_value(row_value(oferta, "importe", 0)) or 0, 2)
+    entrada = round((parse_money_value(row_value(oferta, "senal", 0)) or 0)
+                    + (parse_money_value(row_value(oferta, "arras_importe", 0)) or 0), 2)
+    importe = round(parse_money_value(datos.get("importe")) or 0, 2) or round(max(precio - entrada, 0), 2)
+    hipoteca_id = os.urandom(16).hex()
+    fila = {
+        "id": hipoteca_id,
+        "empresa_id": destino,
+        # El MISMO cliente. Ni una ficha nueva ni un nombre suelto.
+        "cliente_id": cliente_id,
+        "cliente": str(row_value(cliente, "nombre", "") or ""),
+        "banco": str(datos.get("banco") or ""),
+        "precio": precio,
+        "importe_hipoteca": importe,
+        "porcentaje": round(importe / precio * 100, 2) if precio else 0,
+        "entrada": entrada,
+        "estado": "Estudio",
+        "tipo_hipoteca": str(datos.get("tipo") or ""),
+        "fecha_encargo": now[:10],
+        "anio": int(now[:4]),
+        "inmobiliaria_compra": str(row_value(inmobiliaria, "nombre", "") or ""),
+        "asesor": str(quien or ""),
+        "cliente_inmueble_json": json.dumps({
+            "inmueble_id": inmueble_id,
+            "direccion": str(row_value(inmueble, "direccion", "") or ""),
+            "oferta_id": str(row_value(oferta, "id", "") or ""),
+        }, ensure_ascii=False),
+        "workspace_id": str(row_value(inmueble, "workspace_id", "") or ""),
+        "created_at": now,
+        "updated_at": now,
+    }
+    columnas = table_columns(conn, "hipotecas") or set()
+    claves = [k for k in fila if k in columnas] or list(fila)
+    try:
+        conn.execute(
+            f"INSERT INTO hipotecas ({', '.join(claves)}) VALUES ({', '.join(['?'] * len(claves))})",
+            [fila[k] for k in claves])
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("alta_de_hipoteca_en_estudio", _fallo_tragado)
+        return "", "no_se_pudo_dar_de_alta"
+    conn.execute(
+        "UPDATE inmueble_ofertas SET hipoteca_id = ?, financiacion_at = ?, "
+        "financiacion_estado = 'estudio', updated_at = ? WHERE id = ?",
+        (hipoteca_id, now, now, str(row_value(oferta, "id", "") or "")))
+    apunta_evento_de_oferta(conn, row_value(oferta, "id", ""), str(quien or "la agencia"),
+                            "vincula al cliente con Financiaciones",
+                            detalle=f"estudio por {format_eur_short(importe)}",
+                            importe=f"{importe:.2f}", now=now)
+    return hipoteca_id, ""
+
+
+def cierra_la_financiacion(conn, oferta, motivo, quien, now=None):
+    """Cierra el estudio. Si no sale, el cliente vuelve a la inmobiliaria.
+
+    Lo que **no** se hace es borrar nada: la hipoteca se queda en Financiaciones
+    con su estado y el vínculo del cliente sigue ahí con fecha de fin. Eso es el
+    histórico —de quién vino, qué se estudió y en qué acabó—, y es lo que evita
+    volver a llamar dentro de seis meses a alguien a quien ya le dijeron que no.
+    """
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    hipoteca_id = str(row_value(oferta, "hipoteca_id", "") or "")
+    if not hipoteca_id:
+        return False, "sin_estudio"
+    estados = {"denegada": "Cancelada", "no_interesa": "Cancelada", "firmada": "Firmada"}
+    if motivo not in estados:
+        return False, "motivo_no_valido"
+    try:
+        conn.execute("UPDATE hipotecas SET estado = ?, updated_at = ? WHERE id = ?",
+                     (estados[motivo], now, hipoteca_id))
+        if motivo != "firmada":
+            # El vínculo se queda: con fecha de fin, que es lo que lo convierte en
+            # histórico en vez de en un cliente activo al que seguir llamando.
+            destino = empresa_de_financiaciones(conn)
+            conn.execute(
+                "UPDATE clientes_empresas SET fecha_fin = ?, updated_at = ? "
+                "WHERE cliente_id = ? AND empresa_id = ? AND lower(COALESCE(servicio,'')) = 'financiaciones'",
+                (now[:10], now, str(row_value(oferta, "cliente_id", "") or ""), destino))
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("cierra_la_financiacion", _fallo_tragado)
+        return False, "no_se_pudo_cerrar"
+    conn.execute(
+        "UPDATE inmueble_ofertas SET financiacion_estado = ?, updated_at = ? WHERE id = ?",
+        (motivo, now, str(row_value(oferta, "id", "") or "")))
+    apunta_evento_de_oferta(conn, row_value(oferta, "id", ""), str(quien or "la agencia"),
+                            f"cierra el estudio de financiación: {motivo}", now=now)
     return True, ""
 
 
@@ -33019,6 +33209,10 @@ def vista_de_la_oferta(oferta):
         "puede_retirar": estado == "presentada",
         "puede_decidir": estado == "contraoferta",
         "puede_justificar": estado == "reserva_pendiente",
+        # De la financiación sólo se le dice que está en marcha. Ni el banco, ni el
+        # importe que la agencia haya puesto en el estudio, ni si se ha denegado:
+        # eso se lo cuenta su asesor, no una pantalla.
+        "financiacion_en_estudio": str(row_value(oferta, "financiacion_estado", "") or "") == "estudio",
         "arras": {
             "importe": round(parse_money_value(row_value(oferta, "arras_importe", 0)) or 0, 2),
             "fecha_firma": _fecha_corta(row_value(oferta, "arras_fecha_firma", "")),
@@ -69222,6 +69416,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_oferta_presentar",
             "/api/inmueble_arras_preparar",
             "/api/inmueble_encargo_firma",
+            "/api/inmueble_oferta_financiacion",
+            "/api/inmueble_oferta_financiacion_cerrar",
             "/api/inmueble_oferta_verificar",
             "/api/inmueble_renovar",
             "/api/renta_campaign_document",
@@ -70123,6 +70319,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/inmueble_oferta_presentar",
             "/api/inmueble_arras_preparar",
             "/api/inmueble_encargo_firma",
+            "/api/inmueble_oferta_financiacion",
+            "/api/inmueble_oferta_financiacion_cerrar",
             "/api/inmueble_oferta_verificar",
             "/api/demanda_portal_acceso",
             "/api/demanda_portal_acceso_revoke",
@@ -70713,7 +70911,9 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path in ("/api/inmueble_oferta_responder", "/api/inmueble_oferta_verificar",
-                           "/api/inmueble_oferta_presentar", "/api/inmueble_arras_preparar"):
+                           "/api/inmueble_oferta_presentar", "/api/inmueble_arras_preparar",
+                           "/api/inmueble_oferta_financiacion",
+                           "/api/inmueble_oferta_financiacion_cerrar"):
             # El lado del asesor. La oferta la escribe el comprador; la respuesta,
             # la señal y el visto bueno del ingreso los pone la agencia.
             oferta_id = str(payload.get("oferta_id") or "").strip()
@@ -70733,6 +70933,73 @@ class Handler(BaseHTTPRequestHandler):
             ahora_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             quien = str((session or {}).get("nombre") or (session or {}).get("usuario") or "la agencia")
             estado_actual = str(row_value(fila, "estado", "") or "")
+
+            if parsed.path == "/api/inmueble_oferta_financiacion":
+                # La vinculación con Financiaciones. Después de la reserva, porque
+                # antes no hay operación que financiar, y **la dispara el asesor**:
+                # que el comprador marcara «necesito financiación» es una pista, no
+                # una orden de dar de alta a nadie en otra empresa.
+                if estado_actual not in {"reservada", "arras_preparadas", "arras_firmadas"}:
+                    json_response(self, {"error": "Primero tiene que estar reservado"}, status=409)
+                    return
+                if str(row_value(fila, "hipoteca_id", "") or ""):
+                    json_response(self, {"error": "Este cliente ya está vinculado a Financiaciones"},
+                                  status=409)
+                    return
+                hipoteca_id, motivo = alta_de_hipoteca_en_estudio(
+                    conn, fila, {"importe": payload.get("importe"), "banco": payload.get("banco"),
+                                 "tipo": payload.get("tipo")}, quien, now=ahora_iso)
+                if not hipoteca_id:
+                    textos = {
+                        "sin_cliente": "La oferta no tiene ficha de cliente",
+                        "sin_empresa_de_financiaciones": "No hay ninguna empresa de financiaciones "
+                                                         "configurada en el grupo",
+                        "no_se_pudo_dar_de_alta": "No se ha podido dar de alta el estudio",
+                    }
+                    json_response(self, {"error": textos.get(motivo, motivo)}, status=409)
+                    return
+                _tarea_para_el_asesor(
+                    conn, {"empresa_id": str(row_value(fila, "empresa_id", "") or ""),
+                           "workspace_id": str(row_value(fila, "workspace_id", "") or ""),
+                           "cliente_id": str(row_value(fila, "cliente_id", "") or ""),
+                           "nombre": ""},
+                    inmueble_id, "Cliente vinculado a Financiaciones · pendiente de estudio",
+                    str(payload.get("notas") or "")[:500], ahora_iso)
+                audit_event(conn, str(row_value(fila, "empresa_id", "") or ""), "cliente",
+                            str(row_value(fila, "cliente_id", "") or ""),
+                            "Vinculación con Financiaciones para estudio", usuario=quien,
+                            detalles={"hipoteca": hipoteca_id, "oferta": oferta_id}, now=ahora_iso)
+                conn.commit()
+                json_response(self, {"ok": True, "hipoteca_id": hipoteca_id, "estado": "estudio"})
+                return
+
+            if parsed.path == "/api/inmueble_oferta_financiacion_cerrar":
+                ok_cierre, motivo = cierra_la_financiacion(
+                    conn, fila, str(payload.get("motivo") or "").strip().lower(), quien, now=ahora_iso)
+                if not ok_cierre:
+                    textos = {"sin_estudio": "Este cliente no tiene ningún estudio en marcha",
+                              "motivo_no_valido": "Motivo no válido",
+                              "no_se_pudo_cerrar": "No se ha podido cerrar el estudio"}
+                    json_response(self, {"error": textos.get(motivo, motivo),
+                                         "opciones": ["denegada", "no_interesa", "firmada"]},
+                                  status=400 if motivo == "motivo_no_valido" else 409)
+                    return
+                if str(payload.get("motivo") or "").strip().lower() != "firmada":
+                    _tarea_para_el_asesor(
+                        conn, {"empresa_id": str(row_value(fila, "empresa_id", "") or ""),
+                               "workspace_id": str(row_value(fila, "workspace_id", "") or ""),
+                               "cliente_id": str(row_value(fila, "cliente_id", "") or ""),
+                               "nombre": ""},
+                        inmueble_id,
+                        "Financiación no sale: el cliente vuelve a la inmobiliaria",
+                        str(payload.get("notas") or "")[:500], ahora_iso)
+                audit_event(conn, str(row_value(fila, "empresa_id", "") or ""), "cliente",
+                            str(row_value(fila, "cliente_id", "") or ""),
+                            f"Estudio de financiación cerrado: {payload.get('motivo')}",
+                            usuario=quien, detalles={"oferta": oferta_id}, now=ahora_iso)
+                conn.commit()
+                json_response(self, {"ok": True, "estado": str(payload.get("motivo") or "").lower()})
+                return
 
             if parsed.path == "/api/inmueble_arras_preparar":
                 # Sólo después de la reserva: unas arras sin señal ingresada no se
@@ -99131,6 +99398,17 @@ class Handler(BaseHTTPRequestHandler):
                     "comentario": str(row_value(f, "comentario", "") or ""),
                     "puede_presentar": (str(row_value(f, "estado", "") or "") == "presentada"
                                         and not str(row_value(f, "mediacion", "") or "")),
+                    "hipoteca_id": str(row_value(f, "hipoteca_id", "") or ""),
+                    "financiacion_estado": str(row_value(f, "financiacion_estado", "") or ""),
+                    # La alerta: él dijo que necesitaba financiación, está reservado
+                    # y todavía no se ha vinculado con Financiaciones. Es un aviso,
+                    # no un automatismo: vincular a alguien con otra empresa del
+                    # grupo lo decide una persona.
+                    "sugerir_financiacion": (
+                        bool(int(row_value(f, "financiacion", 0) or 0))
+                        and str(row_value(f, "estado", "") or "") in
+                        {"reservada", "arras_preparadas", "arras_firmadas"}
+                        and not str(row_value(f, "hipoteca_id", "") or "")),
                 })
                 ofertas.append(vista)
             json_response(self, {"ofertas": ofertas})
