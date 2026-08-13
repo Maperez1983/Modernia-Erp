@@ -460,9 +460,10 @@ class LaMigracionDeEmpresasNoSeQuedaAMediasTests(Agencia):
 
 
 class TodaVistaTieneComoLlegarseAEllaTests(unittest.TestCase):
-    """Una pantalla a la que no se puede llegar es trabajo hecho que nadie usa. El CRM
-    tiene 19 paneles y una barra de 9 pestañas; el resto se abren desde tarjetas y
-    atajos del código. Esta prueba compara las dos listas."""
+    """Una pantalla a la que no se puede llegar es maquetación que se arrastra. Los
+    paneles del CRM se abren desde la barra, desde tarjetas del panel y desde atajos
+    del código; esta prueba compara la lista de paneles con la de sitios que llevan a
+    ellos, y exige que no sobre ninguno por ningún lado."""
 
     def _vistas_alcanzables(self):
         import re
@@ -481,20 +482,39 @@ class TodaVistaTieneComoLlegarseAEllaTests(unittest.TestCase):
                        if self._panel(v) not in paneles and v != "inmueble_ficha")
         self.assertEqual(rotos, [], f"enlaces a paneles inexistentes: {rotos}")
 
-    def test_se_documentan_las_vistas_sin_camino(self):
-        """Estas cuatro no tienen ni pestaña, ni tarjeta, ni una sola llamada que las
-        abra: sólo figuran en la lista de permitidas y en el mapa de paneles, que es
-        justo lo que hace que parezcan vivas al leer el código.
+    def test_no_queda_ningun_panel_sin_camino(self):
+        """Análisis, Edificios, Informadores y Relaciones se retiraron del CRM en su día,
+        pero sólo se les quitó la entrada: quedaban los paneles en el HTML, sus nombres en
+        el mapa de vistas y en las listas de permitidas, y —salvo Análisis, que era un
+        cascarón— los cargadores, las tablas, los buscadores y hasta un botón de imprimir.
+        Código completo que no ejecutaba nadie y que parecía vivo al leerlo.
 
-        La prueba las fija: si alguien les pone entrada, esto salta y se quita de la
-        lista; si alguien añade una vista nueva y se olvida del enlace, también."""
+        Ya no están. Esta prueba impide que vuelva a quedarse a medias: si se retira una
+        vista y se olvida la maquetación, o si se añade una y se olvida el enlace, salta."""
         import re
         paneles = set(re.findall(r'id="(crmView[A-Za-z]+)"', HTML))
         alcanzables = {self._panel(v) for v in self._vistas_alcanzables()}
         sin_camino = sorted(p for p in paneles if p not in alcanzables)
-        self.assertEqual(sin_camino, ["crmViewAnalisis", "crmViewEdificios",
-                                      "crmViewInformadores", "crmViewRelaciones"])
+        self.assertEqual(sin_camino, [], f"paneles a los que no se puede llegar: {sin_camino}")
 
+    def test_no_quedan_restos_de_las_vistas_retiradas(self):
+        """Los restos de una retirada a medias no dan error: dan peso muerto. Se vigilan
+        por nombre porque «relaciones» sigue existiendo, y con razón, en la ficha del
+        cliente y en la del inmueble: eso es otra cosa y no se toca."""
+        for resto in ("crmViewAnalisis", "crmViewEdificios", "crmViewInformadores",
+                      "crmViewRelaciones", "crmRelacionesTable", "crmEdificiosTable",
+                      "crmInformadoresTable", "loadCrmRelacionesCruce", "loadCrmEdificios",
+                      "loadCrmInformadores"):
+            with self.subTest(resto):
+                self.assertNotIn(resto, HTML)
+                self.assertNotIn(resto, APP)
+
+    def test_la_ficha_del_cliente_conserva_sus_relaciones(self):
+        """La pestaña «Relaciones» de la ficha de un cliente no tiene nada que ver con la
+        vista retirada del CRM más allá del nombre. Si una limpieza se la lleva por
+        delante, esto lo dice."""
+        self.assertIn('data-tab="relaciones"', APP + HTML)
+        self.assertIn("clienteTabRelaciones", APP)
 
 if __name__ == "__main__":
     unittest.main()
