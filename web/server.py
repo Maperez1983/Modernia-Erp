@@ -57285,7 +57285,11 @@ def fetch_workspace_detail(conn, workspace_id):
             now_ts = datetime.now(timezone.utc).isoformat()
             legacy = conn.execute(
                 """
-                SELECT we.empresa_id, we.rol, e.nombre, e.nif, e.direccion, e.logo_url, e.primary_color, e.accent_color, COALESCE(e.activo, 1) AS activo
+                -- `empresas` no tiene primary_color ni accent_color: nombrarlas hacía
+                -- fallar la consulta entera, el `except` de abajo se tragaba el error y
+                -- este backfill no se ejecutaba nunca. En producción quedaban 17 empresas
+                -- en la tabla vieja y cero migradas, sin que nada lo dijera.
+                SELECT we.empresa_id, we.rol, e.nombre, e.nif, e.direccion, e.logo_url, COALESCE(e.activo, 1) AS activo
                 FROM workspace_empresas we
                 JOIN empresas e ON e.id = we.empresa_id
                 WHERE we.workspace_id = ?
@@ -57316,8 +57320,12 @@ def fetch_workspace_detail(conn, workspace_id):
                         str(row_value(row, "nif") or "").strip(),
                         str(row_value(row, "direccion") or "").strip(),
                         str(row_value(row, "logo_url") or "").strip(),
-                        str(row_value(row, "primary_color") or "").strip(),
-                        str(row_value(row, "accent_color") or "").strip(),
+                        # Vacíos a propósito: la tabla de origen no guarda colores. No se
+                        # pueden leer de la fila porque `row_value`, cuando la clave no
+                        # existe, cae a `row[0]` y colaría el empresa_id como si fuera un
+                        # color.
+                        "",
+                        "",
                         int(row_value(row, "activo") or 1),
                         now_ts,
                         now_ts,
@@ -60535,7 +60543,10 @@ def build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=
     m2_construidos = inmueble.get("m2")
     m2_utiles = extra.get("m2_utiles")
     otros = str(extra.get("otros") or "").strip()
-    cargas = pick_text(extra.get("cargas"), "NADA")
+    # Sin cargas declaradas la frase se cerraba con «a excepción de NADA», que en un
+    # contrato que se firma se lee como un hueco sin rellenar. Si no hay cargas, la
+    # declaración termina donde tiene que terminar; si las hay, se enumeran.
+    cargas = str(extra.get("cargas") or "").strip()
 
     honorarios_pct = extra.get("honorarios_pct")
     iva_pct = extra.get("iva_pct")
@@ -60717,13 +60728,17 @@ def build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=
     precio_venta_words = format_eur_words(precio_venta_value)
     precio_words_suffix = f" ({precio_venta_words})" if precio_venta_words else ""
 
-    fecha_venta_desde = str(extra.get("fecha_venta_desde") or "").strip() or "xx/xx/xxxx"
+    # El resto del documento deja los huecos con puntos suspensivos (ver la renta y el
+    # plazo, más arriba). Aquí se colaba un «xx/xx/xxxx», que parece texto de plantilla
+    # olvidado y no un hueco a rellenar. El formulario no exige esta fecha, así que el
+    # hueco sale impreso en cuanto la asesora no la pone.
+    fecha_venta_desde = str(extra.get("fecha_venta_desde") or "").strip() or "............."
     fecha_venta_antes = str(extra.get("fecha_venta_antes") or "").strip()
     if not fecha_venta_antes:
         try:
             fecha_venta_antes = fmt_ddmmyyyy(_add_months_safe(parse_iso_date(fecha_inicio) or datetime.now(timezone.utc).date(), 12).isoformat())
         except Exception:
-            fecha_venta_antes = "xx/xx/xxxx"
+            fecha_venta_antes = "............."
 
     owners_block = []
     for idx, owner in enumerate(owners[:2], start=1):
@@ -60745,7 +60760,8 @@ def build_inmueble_nota_encargo_pdf(company, inmueble, captacion, owners, extra=
         *owners_block,
         "",
         "De otra parte, el intermediario identificado en el encabezado, acuerdan, que este asuma la realización de manera exclusiva de labores encaminadas a la búsqueda, localización y aproximación de potenciales compradores con el fin de facilitar la eventual perfección de una promesa de compraventa o contrato de compraventa sobre el Inmueble, obligándose a realizar su labor con diligencia y discreción, así como a informar periódicamente sobre ella al Cliente.",
-        f"El Cliente declara tener la total y exclusiva disponibilidad del Inmueble y afirma, bajo su responsabilidad, que sobre el mismo no existen litigios, evicciones, vicios, así como cargas o gravámenes a excepción de {cargas}.",
+        f"El Cliente declara tener la total y exclusiva disponibilidad del Inmueble y afirma, bajo su responsabilidad, que sobre el mismo no existen litigios, evicciones, vicios, así como cargas o gravámenes"
+        + (f", a excepción de las siguientes: {cargas}." if cargas else "."),
         f"El Cliente fija el precio de venta del inmueble en {precio_venta_text}{precio_words_suffix}.",
         f"El Cliente declara que el contrato de compraventa del inmueble deberá realizarse a partir de {fecha_venta_desde} y en todo caso, antes de (momento/fecha) {fecha_venta_antes}.",
         "El Cliente autoriza al Intermediario a ofertar y publicitar el Inmueble, así como a realizar visitas acompañado de potenciales compradores, obligándose a facilitar las mismas, así como a proporcionar cuanta información y colaboración sean necesarias para desarrollar la labor de intermediación.",
@@ -98710,10 +98726,17 @@ class Handler(BaseHTTPRequestHandler):
             # Para la ficha: quién tiene enlace vivo, cuándo entró y cuántas veces.
             # Nunca el token; sólo se guarda su hash y no hay forma de recuperarlo.
             demanda_id = str(params.get("demanda_id", [""])[0] or "").strip()
+            # Sin demanda_id no es que falte permiso: falta el dato. Salía un 403 con el
+            # texto «inmueble_id requerido» en una pantalla de demandas, y el front no
+            # puede distinguir «no tienes acceso» de «te has dejado un parámetro».
+            if not demanda_id:
+                json_response(self, {"error": "demanda_id requerido"}, status=400)
+                return
             session = getattr(self, "auth_session", None) or self._current_session()
             ok_acc, err_acc, _d = enforce_inmueble_access(conn, session, demanda_id, tabla="demandas")
             if not ok_acc:
-                json_response(self, {"error": str(err_acc).replace("Inmueble", "Demanda")},
+                json_response(self, {"error": str(err_acc).replace("Inmueble", "Demanda")
+                                                          .replace("inmueble_id", "demanda_id")},
                               status=404 if "no encontrado" in str(err_acc) else 403)
                 return
             ensure_demanda_portal_schema(conn)
