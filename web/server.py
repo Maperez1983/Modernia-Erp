@@ -45008,6 +45008,21 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_fincas_comunidades", "num_trasteros", "num_trasteros INTEGER")
     ensure_column(conn, "workspace_fincas_comunidades", "num_aparcamientos", "num_aparcamientos INTEGER")
     ensure_column(conn, "workspace_fincas_comunidades", "cuota_sugerida", "cuota_sugerida REAL")
+    # `cuota_mensual` guardaba el honorario mensual del administrador —lo rellena el
+    # subtotal del presupuesto que la comunidad acepta—, y el nombre invitaba a
+    # leerlo como la cuota que paga cada vecino. Son cosas distintas y de orden de
+    # magnitud distinto. La columna vieja se deja estar, sin borrar, hasta que no
+    # queden lecturas antiguas en circulación.
+    ensure_column(conn, "workspace_fincas_comunidades", "honorario_mensual", "honorario_mensual REAL")
+    try:
+        conn.execute(
+            "UPDATE workspace_fincas_comunidades SET honorario_mensual = cuota_mensual "
+            "WHERE honorario_mensual IS NULL AND cuota_mensual IS NOT NULL"
+        )
+    except Exception as fallo:
+        # Si este traspaso falla en silencio, las comunidades se quedan con el
+        # honorario en la columna vieja y la ficha lo enseña vacío.
+        apunta_escritura_tragada("ensure_workspace_product_tables/honorario_mensual", fallo)
     ensure_column(conn, "workspace_fincas_comunidades", "referencia_catastral", "referencia_catastral TEXT")
     ensure_column(conn, "workspace_fincas_comunidades", "foto_edificio_key", "foto_edificio_key TEXT")
     ensure_column(conn, "workspace_fincas_comunidades", "activo", "activo INTEGER")
@@ -53293,6 +53308,7 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
           c.num_aparcamientos,
           c.cuota_sugerida,
           c.cuota_mensual,
+          COALESCE(c.honorario_mensual, c.cuota_mensual) AS honorario_mensual,
           COALESCE(c.iban, '') AS iban,
           COALESCE(c.acreedor_sepa, '') AS acreedor_sepa,
           COALESCE(c.activo, 1) AS activo,
@@ -55047,6 +55063,11 @@ FINCAS_TIPOS_ACUERDO_DEFECTO = [
 #: (LPH art. 9.1.f). Es un mínimo legal: la junta puede acordar uno mayor.
 FINCAS_FONDO_RESERVA_MINIMO = 10.0
 
+#: Los coeficientes se guardan con cuatro decimales y en las escrituras rara vez
+#: suman 100 clavado. Un céntimo de porcentaje sobre el presupuesto de una
+#: comunidad es calderilla; medio punto ya no lo es.
+FINCAS_COEFICIENTE_TOLERANCIA = 0.05
+
 
 def fetch_workspace_fincas_tipos_acuerdo(conn, workspace_id, *, sembrar=True):
     """Catálogo de tipos de acuerdo del workspace, con su mayoría y su artículo."""
@@ -56145,10 +56166,6 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
     workspace_id = row_value(fila, "workspace_id", "")
     vecino_id = row_value(fila, "vecino_id", "")
     comunidad_id = row_value(fila, "comunidad_id", "")
-    comunidad_fila = conn.execute(
-        "SELECT cuota_mensual FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
-        (comunidad_id, workspace_id),
-    ).fetchone()
 
     recibos = []
     deuda = 0.0
@@ -56241,10 +56258,23 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
         ).fetchall()
     ]
     coef_vecino = float(row_value(fila, "coeficiente", 0) or 0)
-    cuota_comunidad = round(parse_money_value(row_value(comunidad_fila, "cuota_mensual", 0)), 2) if comunidad_fila else 0.0
+    # La estimación tiene que salir de donde sale el recibo, o el propietario descubre
+    # la diferencia en el banco. Se mensualiza el presupuesto que aprobó la junta; el
+    # honorario del administrador es una partida dentro de él, no la base del reparto.
+    ejercicio_avance = fetch_workspace_fincas_ejercicio(
+        conn, workspace_id, comunidad_id, hoy_periodo[:4])
+    cabecera_avance = ejercicio_avance.get("presupuesto") or {}
+    base_mensual = 0.0
+    if str(row_value(cabecera_avance, "estado", "") or "").strip().lower() == "aprobado":
+        anual = round(parse_money_value(ejercicio_avance["resumen"].get("presupuestado")), 2)
+        base_mensual = round(anual / 12.0, 2) if anual > 0 else 0.0
     avance = {
         "emitidos": proximos,
-        "estimacion": round(cuota_comunidad * coef_vecino / 100.0, 2) if (cuota_comunidad and coef_vecino) else 0.0,
+        "estimacion": round(base_mensual * coef_vecino / 100.0, 2) if (base_mensual and coef_vecino) else 0.0,
+        # Sin presupuesto aprobado no se estima nada: una cifra inventada en el portal
+        # del propietario se da por buena, y luego no coincide con el recibo.
+        "estimacion_origen": (f"presupuesto {hoy_periodo[:4]} aprobado, mensualizado"
+                              if base_mensual else "sin presupuesto aprobado"),
     }
 
     # El certificado del art. 9.1.e: se cobra siempre, así que el vecino ve el precio
@@ -57388,7 +57418,15 @@ def fetch_workspace_fincas_comunidad_dashboard(conn, workspace_id, comunidad_id,
             "nombre": row_value(comunidad, "nombre", ""),
             "direccion": row_value(comunidad, "direccion", "") or "",
             "estado": row_value(comunidad, "estado", "") or "",
-            "cuota_mensual": round(parse_money_value(row_value(comunidad, "cuota_mensual", 0)), 2),
+            # `honorario_mensual` es lo que la comunidad paga al administrador. Se
+            # sigue enviando `cuota_mensual` con el mismo valor mientras queden
+            # pantallas leyendo el nombre viejo.
+            "honorario_mensual": round(parse_money_value(
+                row_value(comunidad, "honorario_mensual", 0)
+                or row_value(comunidad, "cuota_mensual", 0)), 2),
+            "cuota_mensual": round(parse_money_value(
+                row_value(comunidad, "honorario_mensual", 0)
+                or row_value(comunidad, "cuota_mensual", 0)), 2),
         },
         "periodo": periodo,
         "ejercicio": ejercicio,
@@ -82805,7 +82843,10 @@ class Handler(BaseHTTPRequestHandler):
                 num_trasteros,
                 num_aparcamientos,
                 cuota_sugerida,
-                round(parse_money_value(payload.get("cuota_mensual")), 2) or cuota_sugerida,
+                round(parse_money_value(payload.get("honorario_mensual")
+                                        or payload.get("cuota_mensual")), 2) or cuota_sugerida,
+                round(parse_money_value(payload.get("honorario_mensual")
+                                        or payload.get("cuota_mensual")), 2) or cuota_sugerida,
                 normalizar_iban(payload.get("iban")) or None,
                 (payload.get("acreedor_sepa") or "").strip().upper() or None,
             )
@@ -82816,6 +82857,7 @@ class Handler(BaseHTTPRequestHandler):
                     SET workspace_id = ?, empresa_id = ?, nombre = ?, referencia_catastral = ?, cif = ?, direccion = ?, foto_edificio_key = ?, presidente = ?,
                         secretario = ?, estado = ?, num_vecinos = ?, num_locales = ?, num_trasteros = ?,
                         num_aparcamientos = ?, cuota_sugerida = ?, cuota_mensual = ?,
+                        honorario_mensual = ?,
                         iban = ?, acreedor_sepa = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
@@ -82828,8 +82870,9 @@ class Handler(BaseHTTPRequestHandler):
                     INSERT INTO workspace_fincas_comunidades (
                       id, workspace_id, empresa_id, nombre, referencia_catastral, cif, direccion, foto_edificio_key, presidente, secretario,
                       estado, num_vecinos, num_locales, num_trasteros, num_aparcamientos, cuota_sugerida, cuota_mensual,
+                      honorario_mensual,
                       iban, acreedor_sepa, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
@@ -83775,11 +83818,46 @@ class Handler(BaseHTTPRequestHandler):
             if not propietarios:
                 json_response(self, {"error": "La comunidad no tiene censo: cárgalo antes de emitir recibos"}, status=400)
                 return
+
+            # El reparto se hace por coeficiente (LPH art. 9.1.e), así que si los
+            # coeficientes no suman 100 el recibo no se sostiene: o se cobra de más
+            # entre todos, o se deja parte del presupuesto sin repartir. Antes sólo se
+            # exigía que hubiera censo, y con los coeficientes a cero salían recibos de
+            # cero euros sin que nada lo dijera.
+            suma_coef = round(sum(parse_money_value(row_value(v, "coeficiente", 0)) for v in propietarios), 2)
+            if abs(suma_coef - 100.0) > FINCAS_COEFICIENTE_TOLERANCIA:
+                json_response(self, {
+                    "error": (f"Los coeficientes suman {format_pct(suma_coef)} y deben sumar 100 % "
+                              f"para repartir por cuota de participación (LPH art. 5). "
+                              f"Revisa el censo antes de emitir."),
+                    "code": "coeficientes_no_suman_cien",
+                    "suma_coeficientes": suma_coef,
+                }, status=400)
+                return
+
             total = round(parse_money_value(payload.get("importe")), 2)
+            origen_importe = "indicado"
             if total <= 0:
-                total = round(parse_money_value(row_value(comunidad, "cuota_mensual", 0)), 2)
+                # Lo que se reparte entre los propietarios es el presupuesto que aprobó
+                # la junta, mensualizado; no el honorario del administrador, que es sólo
+                # una partida más dentro de ese presupuesto. Antes caía a
+                # `cuota_mensual`, que guarda la minuta: repartirla habría cobrado a la
+                # comunidad su propia administración y nada de sus gastos.
+                ejercicio_recibo = fetch_workspace_fincas_ejercicio(
+                    conn, workspace_id, comunidad_id, periodo[:4])
+                cabecera_pre = ejercicio_recibo.get("presupuesto") or {}
+                if str(row_value(cabecera_pre, "estado", "") or "").strip().lower() == "aprobado":
+                    anual = round(parse_money_value(
+                        ejercicio_recibo["resumen"].get("presupuestado")), 2)
+                    if anual > 0:
+                        total = round(anual / 12.0, 2)
+                        origen_importe = f"presupuesto {periodo[:4]} aprobado, mensualizado"
             if total <= 0:
-                json_response(self, {"error": "No hay importe que repartir"}, status=400)
+                json_response(self, {
+                    "error": (f"No hay importe que repartir: indica uno, o aprueba el presupuesto "
+                              f"anual de {periodo[:4]} para que la cuota salga de él."),
+                    "code": "sin_importe",
+                }, status=400)
                 return
             ya_emitidos = conn.execute(
                 "SELECT COUNT(*) AS n FROM workspace_fincas_recibos WHERE comunidad_id = ? AND periodo = ?",
@@ -83828,6 +83906,9 @@ class Handler(BaseHTTPRequestHandler):
                 "ok": True,
                 "creados": creados,
                 "total": total,
+                # De dónde salió el importe: quien emite tiene que poder ver si repartió
+                # lo que tecleó o lo que aprobó la junta, sin abrir la ficha.
+                "origen_importe": origen_importe,
                 "reparto_por_partes": por_partes,
                 "sin_iban": sin_iban[:50],
             })

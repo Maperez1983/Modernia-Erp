@@ -29,6 +29,7 @@ sys.path.insert(0, str(RAIZ))
 from web import server  # noqa: E402
 
 WS = "ws1"
+AHORA = "2026-08-12T10:00:00"
 
 
 class BaseDePruebaTests(unittest.TestCase):
@@ -378,13 +379,35 @@ class SuCoeficienteYLoQueLeVieneTests(BaseDePruebaTests):
         avance = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))["avance"]
         self.assertEqual([r["periodo"] for r in avance["emitidos"]], ["2099-01"])   # el cobrado no
 
-    def test_sin_recibos_futuros_estima_con_la_cuota_y_su_coeficiente(self):
+    def test_sin_recibos_futuros_estima_con_el_presupuesto_y_su_coeficiente(self):
+        """La estimación salía de `cuota_mensual`, que guarda el honorario del
+        administrador, no el gasto de la comunidad: le anunciaba al vecino una cifra que
+        no era la del recibo. Ahora se mensualiza el presupuesto que aprobó la junta."""
+        from datetime import datetime as _dt
+        ejercicio = _dt.now().strftime("%Y")
+        self.conn.execute("UPDATE workspace_fincas_vecinos SET coeficiente = 2.5 WHERE id = 'v1'")
+        self.conn.execute(
+            "INSERT INTO workspace_fincas_presupuesto_anual "
+            "(id, workspace_id, comunidad_id, ejercicio, estado, fondo_reserva_pct, created_at, updated_at) "
+            "VALUES ('pa_est', ?, 'c1', ?, 'Aprobado', 10, ?, ?)", (WS, ejercicio, AHORA, AHORA))
+        self.conn.execute(
+            "INSERT INTO workspace_fincas_presupuesto_partidas "
+            "(id, workspace_id, presupuesto_id, orden, concepto, importe, created_at, updated_at) "
+            "VALUES ('pp_est', ?, 'pa_est', 1, 'Gastos generales', 4800, ?, ?)", (WS, AHORA, AHORA))
+        self.conn.commit()
+        avance = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))["avance"]
+        self.assertEqual(avance["emitidos"], [])
+        self.assertEqual(avance["estimacion"], 10.0)     # 4.800 ÷ 12 = 400; 400 × 2,5 %
+
+    def test_sin_presupuesto_aprobado_no_se_estima_nada(self):
+        """Antes bastaba con que la ficha tuviera una cuota. Una cifra inventada en el
+        portal del propietario se da por buena y luego no coincide con el recibo."""
         self.conn.execute("UPDATE workspace_fincas_vecinos SET coeficiente = 2.5 WHERE id = 'v1'")
         self.conn.execute("UPDATE workspace_fincas_comunidades SET cuota_mensual = 400 WHERE id = 'c1'")
         self.conn.commit()
         avance = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))["avance"]
-        self.assertEqual(avance["emitidos"], [])
-        self.assertEqual(avance["estimacion"], 10.0)     # 400 × 2,5 %
+        self.assertEqual(avance["estimacion"], 0.0)
+        self.assertEqual(avance["estimacion_origen"], "sin presupuesto aprobado")
 
     def test_la_estimacion_se_dice_que_lo_es(self):
         """Dar una cifra como si fuera un recibo emitido es la forma de que alguien la

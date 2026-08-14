@@ -23658,11 +23658,11 @@ const fillWorkspaceFincasCommunityForm = (record = null) => {
     num_trasteros: "",
     num_aparcamientos: "",
     cuota_sugerida: "",
-    cuota_mensual: "",
+    honorario_mensual: "",
     foto_edificio_key: "",
     ...(record || {}),
   };
-  ["id", "workspace_id", "empresa_id", "nombre", "referencia_catastral", "cif", "direccion", "presidente", "secretario", "estado", "num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos", "cuota_sugerida", "cuota_mensual", "foto_edificio_key"].forEach((field) => {
+  ["id", "workspace_id", "empresa_id", "nombre", "referencia_catastral", "cif", "direccion", "presidente", "secretario", "estado", "num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos", "cuota_sugerida", "honorario_mensual", "foto_edificio_key"].forEach((field) => {
     const input = workspaceFincasCommunityForm.querySelector(`[name="${field}"]`);
     if (input) input.value = payload[field] ?? "";
   });
@@ -23678,7 +23678,7 @@ const fillWorkspaceFincasCommunityForm = (record = null) => {
     suggestedInput.value = formatEurosCompact(suggested);
   }
   try {
-    const cuotaInput = workspaceFincasCommunityForm.querySelector('[name="cuota_mensual"]');
+    const cuotaInput = workspaceFincasCommunityForm.querySelector('[name="honorario_mensual"]');
     if (cuotaInput && String(cuotaInput.value || "").trim()) {
       cuotaInput.value = formatEurosCompact(parseMoneyValue(cuotaInput.value));
     }
@@ -23821,8 +23821,9 @@ const renderWorkspaceFincasCommunityFicha = async () => {
           <input name="num_aparcamientos" inputmode="numeric" value="${escapeHtml(String(record.num_aparcamientos ?? ""))}" />
         </label>
         <label>
-          Cuota mensual
-          <input name="cuota_mensual" inputmode="decimal" value="${escapeHtml(String(record.cuota_mensual ?? ""))}" />
+          Honorario mensual (nuestra minuta)
+          <input name="honorario_mensual" inputmode="decimal"
+                 value="${escapeHtml(String(record.honorario_mensual ?? record.cuota_mensual ?? ""))}" />
         </label>
         <div class="form-grid-section span-all">Domiciliación (SEPA)</div>
         <label class="span-2">
@@ -23894,7 +23895,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
         <div class="workspace-mini-kpis">
           <div class="workspace-mini-kpi"><span>Propietarios</span><strong>${numberFormatter.format(c.propietarios || 0)}</strong></div>
           <div class="workspace-mini-kpi"><span>Coeficientes</span><strong>${pct(c.suma_coeficientes)}</strong></div>
-          <div class="workspace-mini-kpi"><span>Cuota mensual</span><strong>${euroFormatter.format(d.comunidad?.cuota_mensual || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Honorario mensual</span><strong>${euroFormatter.format(d.comunidad?.honorario_mensual ?? d.comunidad?.cuota_mensual ?? 0)}</strong></div>
           <div class="workspace-mini-kpi"><span>Con portal</span><strong>${d.portal?.con_acceso || 0} / ${d.portal?.de || 0}</strong></div>
         </div>
 
@@ -24162,7 +24163,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
     workspaceFincasCommunityFichaPanel.innerHTML = `
       <div class="form-grid" style="align-items:end;">
         <label>Periodo <input type="month" data-recibos-periodo value="${mesActual}" /></label>
-        <label>Importe a repartir (€) <input data-recibos-importe inputmode="decimal" placeholder="Cuota mensual de la ficha" /></label>
+        <label>Importe a repartir (€) <input data-recibos-importe inputmode="decimal" placeholder="Presupuesto anual aprobado ÷ 12" /></label>
         <label class="span-2">Concepto <input data-recibos-concepto placeholder="Cuota de comunidad" /></label>
         <div class="form-actions span-all">
           <button type="button" data-recibos-emitir>Emitir recibos</button>
@@ -25554,8 +25555,8 @@ const openFincasCommunityFichaModal = (record) => {
             </select>
           </div>
           <div>
-            <label>Cuota mensual</label>
-            <input name="cuota_mensual" value="${escapeHtml(String(record.cuota_mensual || ""))}" />
+            <label>Honorario mensual (nuestra minuta)</label>
+            <input name="honorario_mensual" value="${escapeHtml(String(record.honorario_mensual || record.cuota_mensual || ""))}" />
           </div>
           <div>
             <label>Viviendas</label>
@@ -26371,7 +26372,7 @@ const renderWorkspaceFincasCommunityList = (rows = []) => {
         const aparcamientos = numberFormatter.format(Number(row.num_aparcamientos || 0));
         const abiertas = numberFormatter.format(Number(row.incidencias_abiertas || 0));
         const cuotaSug = formatEurosCompact(Number(row.cuota_sugerida || 0));
-        const cuota = formatEurosCompact(Number(row.cuota_mensual || 0));
+        const cuota = formatEurosCompact(Number(row.honorario_mensual ?? row.cuota_mensual ?? 0));
         const subtitleParts = [];
         if (empresa) subtitleParts.push(escapeHtml(empresa));
         if (cif) subtitleParts.push(`CIF: ${escapeHtml(cif)}`);
@@ -26662,7 +26663,8 @@ const renderWorkspaceFincasDashboard = () => {
   const communities = filterWorkspaceFincasRowsByCompany(raw.fincasCommunities || []);
   const communityIds = new Set(communities.map((row) => String(row.id || "")).filter(Boolean));
   const comuneros = communities.reduce((acc, row) => acc + (Number(row.num_vecinos || 0) || 0), 0);
-  const cuotaMensual = communities.reduce((acc, row) => acc + (Number(row.cuota_mensual || 0) || 0), 0);
+  // La suma de lo que nos pagan las comunidades, no de lo que pagan sus vecinos.
+  const cuotaMensual = communities.reduce((acc, row) => acc + (Number(row.honorario_mensual ?? row.cuota_mensual ?? 0) || 0), 0);
   const budgetsBase = shouldScopeFincasByCompany()
     ? filterWorkspaceRowsByCompany(raw.budgetRows || [])
     : (Array.isArray(raw.budgetRows) ? raw.budgetRows : []);
@@ -26693,7 +26695,7 @@ const renderWorkspaceFincasDashboard = () => {
   const kpis = [
     { label: "Comunidades", value: numberFormatter.format(communities.length || 0), note: `Contexto: ${ctxLabel}` },
     { label: "Comuneros", value: numberFormatter.format(comuneros || 0), note: "Suma de viviendas" },
-    { label: "Cuota mensual", value: euroFormatter.format(cuotaMensual || 0), note: "Suma de cuotas por comunidad" },
+    { label: "Honorario mensual", value: euroFormatter.format(cuotaMensual || 0), note: "Lo que nos pagan las comunidades" },
     { label: "Ingresos", value: euroFormatter.format(ingresos || 0), note: "Desde contabilidad (ingresos)" },
     { label: "Gastos", value: euroFormatter.format(gastos || 0), note: "Desde contabilidad (gastos)" },
     {
@@ -88359,7 +88361,7 @@ if (workspaceFincasCommunityForm) {
           + (Number(workspaceFincasCommunityForm.querySelector('[name="num_aparcamientos"]')?.value || 0) || 0)
       );
       const suggestedInput = workspaceFincasCommunityForm.querySelector('[name="cuota_sugerida"]');
-      const cuotaInput = workspaceFincasCommunityForm.querySelector('[name="cuota_mensual"]');
+      const cuotaInput = workspaceFincasCommunityForm.querySelector('[name="honorario_mensual"]');
       if (suggestedInput) suggestedInput.value = formatEurosCompact(suggested);
       if (cuotaInput && !String(cuotaInput.value || "").trim()) cuotaInput.value = formatEurosCompact(suggested);
     });

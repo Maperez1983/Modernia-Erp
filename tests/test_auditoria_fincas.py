@@ -62,6 +62,15 @@ VECINOS = [
 CUOTA = 60.0
 PERIODOS = ["2026-05", "2026-06", "2026-07"]
 IMPAGADOS = {("v5", p) for p in PERIODOS} | {("v8", "2026-07")}
+# Presupuesto anual aprobado por la junta: es de aquí de donde tiene que salir la cuota
+# de cada propietario (art. 14.b), no del honorario del administrador. 14.400 al año son
+# 1.200 al mes a repartir por coeficiente.
+PARTIDAS = [("Limpieza y portería", 6000.0), ("Electricidad zonas comunes", 1800.0),
+            ("Ascensor: mantenimiento", 3000.0), ("Seguro del edificio", 2880.0),
+            ("Honorarios de administración", 720.0)]
+PRESUPUESTO_ANUAL = sum(i for _, i in PARTIDAS)      # 14.400
+MENSUAL_A_REPARTIR = round(PRESUPUESTO_ANUAL / 12, 2)  # 1.200
+
 GASTOS = [("Limpieza portal", 320.0), ("Electricidad zonas comunes", 145.50),
           ("Seguro del edificio", 780.0), ("Ascensor: mantenimiento", 410.0)]
 INGRESOS = [("Derrama obras fachada", 2400.0)]
@@ -169,6 +178,10 @@ class Comunidad(unittest.TestCase):
         self._ins("workspace_fincas_presupuesto_anual", dict(
             id="pa1", workspace_id=ws, comunidad_id=self.com, ejercicio=2026, estado="Aprobado",
             fondo_reserva_pct=10.0, fecha_aprobacion="2026-01-15", **base))
+        for k, (concepto, importe) in enumerate(PARTIDAS, start=1):
+            self._ins("workspace_fincas_presupuesto_partidas", dict(
+                id=f"pp{k}", workspace_id=ws, presupuesto_id="pa1", orden=k,
+                concepto=concepto, importe=importe, **base))
 
     # --- HTTP ---------------------------------------------------------------
     def _get(self, ruta, cookie=True):
@@ -345,35 +358,185 @@ class LasCuentasSonLasCuentasTests(Comunidad):
         self.assertAlmostEqual(d["recibos"]["emitido"], len(VECINOS) * CUOTA, places=2)
 
 
-class ElRepartoPorCoeficienteTests(Comunidad):
-    def test_la_cuota_mensual_se_reparte_no_se_cobra_a_cada_uno(self):
-        """`cuota_mensual` es el importe que se reparte entre todos por coeficiente, no
-        lo que paga cada vecino. Con 60 € y un coeficiente del 13,5 %, a ese propietario
-        le tocan 8,10 €. Quien lea el campo como «cuota por vecino» multiplicará por
-        ocho el recibo de la comunidad."""
-        r = self._post("/api/workspace_fincas_recibos_emitir",
-                       {"workspace_id": self.ws, "comunidad_id": self.com, "periodo": "2026-08",
-                        "concepto": "Cuota ordinaria 2026-08"})
-        self.assertEqual(r["estado"], 200, r["json"])
-        self.assertEqual(r["json"]["creados"], len(VECINOS))
-        filas = self.conn.execute(
-            "SELECT vecino_id, importe FROM workspace_fincas_recibos WHERE periodo='2026-08'"
-        ).fetchall()
-        importes = {f["vecino_id"]: f["importe"] for f in filas}
-        self.assertAlmostEqual(importes["v1"], round(CUOTA * 13.50 / 100, 2), places=2)
-        self.assertAlmostEqual(sum(importes.values()), CUOTA, places=2)
+class LaCuotaSaleDelPresupuestoTests(Comunidad):
+    """El reparto se hacía sobre `cuota_mensual`, que guarda el honorario mensual del
+    administrador —lo rellena el subtotal del presupuesto que la comunidad acepta—. Es
+    decir: emitir sin teclear importe repartía entre los vecinos la minuta de quien les
+    administra, y ni un euro de sus gastos. Ahora sale del presupuesto que aprobó la
+    junta, mensualizado, donde ese honorario es una partida más."""
 
-    def test_el_portal_anuncia_lo_que_de_verdad_se_le_va_a_cobrar(self):
-        """El aviso de próximos recibos y el emisor tienen que decir lo mismo, o el
-        propietario descubre la diferencia en el banco."""
-        avance = self._get(f"/api/workspace_fincas_portal_public?token={self._token_portal('v1')}",
-                           cookie=False)["json"]["avance"]
+    def test_sin_importe_reparte_el_presupuesto_aprobado_entre_doce(self):
+        r = self._post("/api/workspace_fincas_recibos_emitir",
+                       {"workspace_id": self.ws, "comunidad_id": self.com, "periodo": "2026-08"})
+        self.assertEqual(r["estado"], 200, r["json"])
+        self.assertAlmostEqual(r["json"]["total"], MENSUAL_A_REPARTIR, places=2)
+        self.assertIn("presupuesto", r["json"]["origen_importe"])
+
+    def test_no_reparte_el_honorario_del_administrador(self):
+        """La comprobación que da nombre a todo esto: 1.200 € de gasto mensual frente a
+        los 60 € de minuta que hay en la ficha."""
+        r = self._post("/api/workspace_fincas_recibos_emitir",
+                       {"workspace_id": self.ws, "comunidad_id": self.com, "periodo": "2026-08"})
+        self.assertNotAlmostEqual(r["json"]["total"], CUOTA, places=2)
+
+    def test_cada_uno_paga_su_coeficiente(self):
         self._post("/api/workspace_fincas_recibos_emitir",
                    {"workspace_id": self.ws, "comunidad_id": self.com, "periodo": "2026-08"})
-        emitido = self.conn.execute(
-            "SELECT importe FROM workspace_fincas_recibos WHERE periodo='2026-08' AND vecino_id='v1'"
-        ).fetchone()["importe"]
-        self.assertAlmostEqual(avance["estimacion"], emitido, places=2)
+        importes = {f["vecino_id"]: f["importe"] for f in self.conn.execute(
+            "SELECT vecino_id, importe FROM workspace_fincas_recibos WHERE periodo='2026-08'")}
+        self.assertAlmostEqual(importes["v1"], round(MENSUAL_A_REPARTIR * 13.50 / 100, 2), places=2)
+        self.assertAlmostEqual(sum(importes.values()), MENSUAL_A_REPARTIR, places=2)
+
+    def test_un_importe_indicado_a_mano_sigue_mandando(self):
+        """Las derramas y los meses atípicos se siguen pudiendo emitir."""
+        r = self._post("/api/workspace_fincas_recibos_emitir",
+                       {"workspace_id": self.ws, "comunidad_id": self.com,
+                        "periodo": "2026-08", "importe": "3000"})
+        self.assertAlmostEqual(r["json"]["total"], 3000.0, places=2)
+        self.assertEqual(r["json"]["origen_importe"], "indicado")
+
+    def test_un_presupuesto_en_borrador_no_sirve_para_cobrar(self):
+        """Mientras la junta no lo apruebe no hay cuota que girar (art. 14.b)."""
+        self.conn.execute("UPDATE workspace_fincas_presupuesto_anual SET estado='Borrador'")
+        self.conn.commit()
+        r = self._post("/api/workspace_fincas_recibos_emitir",
+                       {"workspace_id": self.ws, "comunidad_id": self.com, "periodo": "2026-08"})
+        self.assertEqual(r["estado"], 400, r["json"])
+        self.assertEqual(r["json"]["code"], "sin_importe")
+        self.assertIn("aprueba el presupuesto anual", r["json"]["error"])
+
+
+class LosCoeficientesTienenQueSumarCienTests(Comunidad):
+    """Antes sólo se exigía que hubiera censo. Con los coeficientes a cero —que es como
+    están hoy las trece comunidades— salían recibos de cero euros sin que nada lo dijera,
+    y con coeficientes a medio cargar se repartía de más o de menos entre todos."""
+
+    def _emitir(self):
+        return self._post("/api/workspace_fincas_recibos_emitir",
+                          {"workspace_id": self.ws, "comunidad_id": self.com, "periodo": "2026-08"})
+
+    def test_con_los_coeficientes_bien_se_emite(self):
+        self.assertEqual(self._emitir()["estado"], 200)
+
+    def test_sin_coeficientes_no_se_emite(self):
+        self.conn.execute("UPDATE workspace_fincas_vecinos SET coeficiente = 0")
+        self.conn.commit()
+        r = self._emitir()
+        self.assertEqual(r["estado"], 400, r["json"])
+        self.assertEqual(r["json"]["code"], "coeficientes_no_suman_cien")
+
+    def test_a_medio_cargar_tampoco(self):
+        """El caso peligroso: la mitad del censo con coeficiente y la otra mitad sin él.
+        Emitir así reparte el presupuesto entero entre media comunidad."""
+        self.conn.execute("UPDATE workspace_fincas_vecinos SET coeficiente = 0 "
+                          "WHERE id IN ('v5','v6','v7','v8')")
+        self.conn.commit()
+        r = self._emitir()
+        self.assertEqual(r["estado"], 400)
+        self.assertAlmostEqual(r["json"]["suma_coeficientes"], 51.5, places=2)
+
+    def test_el_mensaje_dice_cuanto_suman_y_por_que_importa(self):
+        self.conn.execute("UPDATE workspace_fincas_vecinos SET coeficiente = 0 WHERE id='v8'")
+        self.conn.commit()
+        err = self._emitir()["json"]["error"]
+        self.assertIn("88,75 %", err)      # con coma decimal, que es un documento en castellano
+        self.assertIn("art. 5", err)
+
+    def test_un_redondeo_de_escritura_no_bloquea_el_cobro(self):
+        """Las escrituras rara vez suman 100 clavado. Un céntimo de porcentaje no puede
+        impedir que una comunidad gire sus recibos."""
+        self.assertEqual(S.FINCAS_COEFICIENTE_TOLERANCIA, 0.05)
+        self.conn.execute("UPDATE workspace_fincas_vecinos SET coeficiente = 11.28 WHERE id='v8'")
+        self.conn.commit()
+        self.assertEqual(self._emitir()["estado"], 200)
+
+
+class ElHonorarioNoSeLlamaCuotaTests(Comunidad):
+    """El campo se llamaba `cuota_mensual` y guardaba nuestra minuta —la rellena el
+    subtotal del presupuesto que la comunidad acepta—. Con ese nombre invitaba a leerlo
+    como la cuota que paga cada vecino, que es otra cosa y de otro orden de magnitud.
+    Ahora se llama `honorario_mensual`. La columna vieja se mantiene escrita y servida
+    con el mismo valor mientras queden lecturas antiguas en circulación; no se borra."""
+
+    APP = (RAIZ / "web" / "app.js").read_text(encoding="utf-8")
+    HTML = (RAIZ / "web" / "index.html").read_text(encoding="utf-8")
+
+    def test_el_alta_guarda_el_honorario_en_las_dos_columnas(self):
+        r = self._post("/api/workspace_fincas_comunidades", {
+            "workspace_id": self.ws, "empresa_id": "emp1", "nombre": "C.P Alta de Prueba",
+            "direccion": "Calle Nueva 1", "num_vecinos": 10, "honorario_mensual": "95"})
+        self.assertEqual(r["estado"], 200, r["json"])
+        fila = self.conn.execute(
+            "SELECT cuota_mensual, honorario_mensual FROM workspace_fincas_comunidades "
+            "WHERE id = ?", (r["json"]["id"],)).fetchone()
+        self.assertAlmostEqual(fila["honorario_mensual"], 95.0, places=2)
+        self.assertAlmostEqual(fila["cuota_mensual"], 95.0, places=2)
+
+    def test_la_edicion_tambien(self):
+        nid = self._post("/api/workspace_fincas_comunidades", {
+            "workspace_id": self.ws, "empresa_id": "emp1", "nombre": "C.P Alta de Prueba",
+            "direccion": "Calle Nueva 1", "honorario_mensual": "95"})["json"]["id"]
+        self._post("/api/workspace_fincas_comunidades", {
+            "id": nid, "workspace_id": self.ws, "empresa_id": "emp1",
+            "nombre": "C.P Alta de Prueba", "honorario_mensual": "110"})
+        fila = self.conn.execute(
+            "SELECT cuota_mensual, honorario_mensual FROM workspace_fincas_comunidades "
+            "WHERE id = ?", (nid,)).fetchone()
+        self.assertAlmostEqual(fila["honorario_mensual"], 110.0, places=2)
+        self.assertAlmostEqual(fila["cuota_mensual"], 110.0, places=2)
+
+    def test_el_nombre_viejo_sigue_aceptandose_al_guardar(self):
+        """Una pantalla sin actualizar no puede dejar de guardar."""
+        r = self._post("/api/workspace_fincas_comunidades", {
+            "workspace_id": self.ws, "empresa_id": "emp1", "nombre": "C.P Nombre Viejo",
+            "cuota_mensual": "77"})
+        fila = self.conn.execute(
+            "SELECT honorario_mensual FROM workspace_fincas_comunidades WHERE id = ?",
+            (r["json"]["id"],)).fetchone()
+        self.assertAlmostEqual(fila["honorario_mensual"], 77.0, places=2)
+
+    def test_lo_ya_guardado_se_traspasa_al_arrancar(self):
+        """Las trece comunidades de producción tienen su honorario en la columna vieja y
+        la nueva a nulo. El traspaso va dentro de `ensure_tables`, que corre al arrancar:
+        esto comprueba que una fila anterior al cambio queda migrada sola, que es
+        exactamente lo que tiene que pasar en el próximo despliegue."""
+        self.conn.execute(
+            "INSERT INTO workspace_fincas_comunidades "
+            "(id, workspace_id, nombre, estado, cuota_mensual, created_at, updated_at) "
+            "VALUES ('vieja', ?, 'C.P De Antes', 'Activa', 123.45, ?, ?)",
+            (self.ws, AHORA, AHORA))
+        self.conn.execute("UPDATE workspace_fincas_comunidades SET honorario_mensual = NULL")
+        self.conn.commit()
+
+        S.ensure_tables(self.db)          # el arranque
+
+        filas = dict(self.conn.execute(
+            "SELECT id, honorario_mensual FROM workspace_fincas_comunidades").fetchall())
+        self.assertAlmostEqual(filas["vieja"], 123.45, places=2)
+        self.assertAlmostEqual(filas[self.com], CUOTA, places=2)
+
+    def test_el_panel_lo_sirve_con_su_nombre(self):
+        d = self._get(f"/api/workspace_fincas_comunidad_dashboard?workspace_id={self.ws}"
+                      f"&comunidad_id={self.com}&periodo=2026-07")["json"]
+        self.assertAlmostEqual(d["comunidad"]["honorario_mensual"], CUOTA, places=2)
+
+    def test_la_pantalla_ya_no_lo_llama_cuota(self):
+        """Es el nombre lo que causaba la confusión, así que la etiqueta importa tanto
+        como la columna."""
+        # Acotado a fincas: «Cuota mensual» sigue siendo un concepto legítimo en el
+        # presupuesto que se le manda a la comunidad y en los desplegables de gestoría.
+        self.assertIn('name="honorario_mensual"', self.HTML)
+        self.assertNotIn('name="cuota_mensual"', self.HTML)
+        self.assertIn("Honorario mensual", self.APP)
+        for etiqueta in ("<label>Cuota mensual</label>", "<span>Cuota mensual</span>",
+                         'label: "Cuota mensual"'):
+            with self.subTest(etiqueta):
+                self.assertNotIn(etiqueta, self.APP)
+
+    def test_la_pista_del_importe_no_promete_la_ficha(self):
+        """Decía «Cuota mensual de la ficha», que es de donde ya no sale."""
+        self.assertNotIn("Cuota mensual de la ficha", self.APP)
+        self.assertIn("Presupuesto anual aprobado", self.APP)
 
 
 class ElPortalDelComuneroTests(Comunidad):
