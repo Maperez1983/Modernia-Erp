@@ -1172,6 +1172,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/session_state",
     "/api/auth_invite_status",
     "/api/portal_inmuebles",
+    "/api/portal_inmueble_foto",
     "/api/portal_inmueble",
     "/api/inmueble_portal_feed",
     "/api/inmueble_signature_public",
@@ -31528,12 +31529,34 @@ def hilo_del_propietario(conn, inmueble_id, *, limite=60):
     ]
 
 
-def fotos_del_inmueble(conn, inmueble_id, *, limite=12):
+def asegura_la_marca_de_visible(conn):
+    """`visible_portal` existe desde el portal del propietario, pero la crea su
+    `ensure_*` y el escaparate no pasa por ahí: filtrar por ella a secas reventaba
+    el feed entero con «no such column» en una base recién creada."""
+    try:
+        ensure_column(conn, "inmueble_docs", "visible_portal", "visible_portal INTEGER DEFAULT 0")
+        conn.commit()
+    except Exception as _fallo_tragado:
+        _rollback_best_effort(conn)
+        apunta_escritura_tragada("asegura_la_marca_de_visible", _fallo_tragado)
+
+
+def fotos_del_inmueble(conn, inmueble_id, *, limite=12, solo_publicas=False):
     """Las fotos del expediente, en orden. Se sirven por endpoint con token: la
-    carpeta `/uploads` pide sesión y desde el portal no hay ninguna."""
+    carpeta `/uploads` pide sesión y desde el portal no hay ninguna.
+
+    `solo_publicas` es para el escaparate, que es el único sitio donde las ve
+    cualquiera. La marca `visible_portal` existía y la respetaba el portal del
+    propietario, pero aquí no se miraba: una foto desmarcada salía igual. Hoy no
+    se notaba porque la imagen ni siquiera llegaba a cargar, y en cuanto empieza
+    a servirse deja de ser un detalle.
+    """
+    if solo_publicas:
+        asegura_la_marca_de_visible(conn)
+    filtro = " AND COALESCE(visible_portal, 0) = 1" if solo_publicas else ""
     try:
         filas = conn.execute(
-            "SELECT url FROM inmueble_docs WHERE inmueble_id = ? "
+            f"SELECT url FROM inmueble_docs WHERE inmueble_id = ?{filtro} "
             "ORDER BY COALESCE(created_at, '') ASC LIMIT 200",
             (str(inmueble_id or ""),),
         ).fetchall()
@@ -35398,12 +35421,26 @@ def fetch_demanda_matches_for_inmueble(conn, inmueble_id, limit=100):
     return out[:limit_val]
 
 
+def foto_publica_del_anuncio(inmueble_id, n=0):
+    """La dirección con la que un visitante puede ver la foto.
+
+    El feed repartía `/uploads/inmuebles/<id>/fotos/<hash>.jpg`, que responde
+    **401** sin sesión del CRM: quien recibía el anuncio tenía la referencia y no
+    podía descargar la imagen. Va por posición y no por ruta, como en el portal
+    del comprador, para que no se pueda pedir un fichero cualquiera del disco.
+    """
+    return f"/api/portal_inmueble_foto?id={urllib.parse.quote(str(inmueble_id or ''))}&n={int(n)}"
+
+
 def _portal_inmueble_photo_expr(conn, alias="i"):
     # Primera foto vigente del inmueble. Funciona en SQLite y Postgres con subquery escalar.
     return (
         "SELECT d.url FROM inmueble_docs d "
         f"WHERE d.inmueble_id = {alias}.id "
         "AND LOWER(COALESCE(d.estado, 'Vigente')) != 'reemplazado' "
+        # Sin esto la portada del anuncio podía ser una foto que el asesor había
+        # desmarcado a mano.
+        "AND COALESCE(d.visible_portal, 0) = 1 "
         "AND (LOWER(COALESCE(d.tipo, '')) LIKE '%foto%' OR LOWER(COALESCE(d.url, '')) LIKE '%.jpg' "
         "OR LOWER(COALESCE(d.url, '')) LIKE '%.jpeg' OR LOWER(COALESCE(d.url, '')) LIKE '%.png' "
         "OR LOWER(COALESCE(d.url, '')) LIKE '%.webp') "
@@ -35443,7 +35480,9 @@ def portal_inmueble_row_to_public(row):
         "seo_slug": data.get("seo_slug"),
         "lat": data.get("lat"),
         "lon": data.get("lon"),
-        "foto": data.get("foto"),
+        # La portada, por su endpoint público. En la consulta `foto` sale como la
+        # ruta en disco y sirve para saber *si* hay; la que se publica es ésta.
+        "foto": foto_publica_del_anuncio(data.get("id")) if data.get("foto") else None,
         "empresa_id": empresa_id,
         "empresa_nombre": empresa_nombre_publico,
         "empresa_logo": empresa_logo_publico,
@@ -35481,6 +35520,7 @@ def fetch_portal_inmuebles_public(conn, *, listing_id="", limit=100, filtros=Non
         ensure_anuncio_schema(conn)
     except Exception:
         pass
+    asegura_la_marca_de_visible(conn)
     photo_expr = _portal_inmueble_photo_expr(conn, "i")
     where = [
         "COALESCE(i.portal_publicado, 0) = 1",
@@ -35610,7 +35650,9 @@ def datos_extra_del_anuncio(conn, fila, *, con_galeria=False):
         "bajada_precio": bajada_de_precio_del_anuncio(conn, inmueble_id),
     }
     if con_galeria:
-        extra["fotos"] = fotos_del_inmueble(conn, inmueble_id, limite=20)
+        extra["fotos"] = [foto_publica_del_anuncio(inmueble_id, n) for n, _ in
+                          enumerate(fotos_del_inmueble(conn, inmueble_id, limite=20,
+                                                       solo_publicas=True))]
     return extra
 
 
@@ -67032,6 +67074,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/me",
             "/api/auth_invite_status",
             "/api/portal_inmuebles",
+            "/api/portal_inmueble_foto",
             "/api/portal_inmueble",
             "/api/inmueble_portal_feed",
             "/api/leads",
@@ -99776,6 +99819,35 @@ class Handler(BaseHTTPRequestHandler):
             datos["estado"] = "ok"
             datos["segundo_factor"] = hay_canal_para_avisar()
             json_response(self, datos)
+            return
+
+        if path == "/api/portal_inmueble_foto":
+            # La foto de un anuncio del escaparate, para cualquiera. La llave no es
+            # un token: es que el inmueble esté publicado, y se comprueba con la
+            # misma consulta que arma el feed —no con una condición parecida— para
+            # que no puedan separarse nunca. `n` es la posición entre sus fotos
+            # visibles, así que no hay forma de pedir un fichero arbitrario.
+            inmueble_id = str(params.get("id", [""])[0] or "").strip()
+            publicados = fetch_portal_inmuebles_public(conn, listing_id=inmueble_id, limit=1) \
+                if inmueble_id else []
+            if not publicados:
+                json_response(self, {"error": "No hay foto"}, status=404)
+                return
+            fotos = fotos_del_inmueble(conn, inmueble_id, limite=40, solo_publicas=True)
+            try:
+                indice = max(0, int(params.get("n", ["0"])[0] or 0))
+            except Exception:
+                indice = 0
+            if indice >= len(fotos):
+                json_response(self, {"error": "No hay foto"}, status=404)
+                return
+            ruta = _signature_url_to_local_path(fotos[indice])
+            if not ruta or not ruta.exists():
+                json_response(self, {"error": "No hay foto"}, status=404)
+                return
+            tipo = {"png": "image/png", "webp": "image/webp"}.get(
+                ruta.suffix.lower().lstrip("."), "image/jpeg")
+            binary_response(self, ruta.read_bytes(), content_type=tipo)
             return
 
         if path == "/api/portal_busqueda_foto":
