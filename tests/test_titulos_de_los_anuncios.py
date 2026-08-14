@@ -70,13 +70,13 @@ class LaSubtipologiaTests(unittest.TestCase):
 class ElTituloTests(unittest.TestCase):
     def test_lleva_el_tamaño(self):
         """«Local en Málaga» era lo que se publicaba y no dice nada."""
-        self.assertEqual(copia()["titulo_anuncio"], "Piso de 3 dormitorios en Málaga")
+        self.assertEqual(copia()["titulo_anuncio"], "Piso en venta de 3 dormitorios en Málaga")
 
     def test_en_lo_que_no_es_vivienda_manda_el_metro(self):
         """Un local con `habitaciones = 1` salía como «Local comercial de 1
         dormitorio»: es lo que tenía la ficha, pero no lo que significa."""
         t = copia(tipo_inmueble="Local", subtipologia="COMERCIAL", habitaciones=1, m2=142)
-        self.assertEqual(t["titulo_anuncio"], "Local comercial de 142 m² en Málaga")
+        self.assertEqual(t["titulo_anuncio"], "Local comercial en venta de 142 m² en Málaga")
         self.assertNotIn("dormitorio", t["titulo_anuncio"])
 
     def test_el_tipo_no_se_dice_dos_veces(self):
@@ -84,10 +84,10 @@ class ElTituloTests(unittest.TestCase):
         contiene al tipo, el que sobra es el tipo."""
         self.assertEqual(
             copia(tipo_inmueble="Casa", subtipologia="CASA MATA", habitaciones=None,
-                  m2=80)["titulo_anuncio"], "Casa mata de 80 m² en Málaga")
+                  m2=80)["titulo_anuncio"], "Casa mata en venta de 80 m² en Málaga")
         self.assertEqual(
             copia(tipo_inmueble="Nave", subtipologia="Nave industrial", habitaciones=None,
-                  m2=80)["titulo_anuncio"], "Nave industrial de 80 m² en Málaga")
+                  m2=80)["titulo_anuncio"], "Nave industrial en venta de 80 m² en Málaga")
 
     def test_un_garaje_tampoco_tiene_dormitorios(self):
         self.assertIn("de 36 m²", copia(tipo_inmueble="Garaje", habitaciones=None,
@@ -99,7 +99,14 @@ class ElTituloTests(unittest.TestCase):
 
     def test_sin_metros_ni_dormitorios_no_inventa(self):
         t = copia(habitaciones=None, m2=None)["titulo_anuncio"]
-        self.assertEqual(t, "Piso en Málaga")
+        self.assertEqual(t, "Piso en venta en Málaga")
+
+    def test_dice_si_se_vende_o_se_alquila(self):
+        """El local de Puerto Oncala está en las dos cosas —145.000 € y 750 €/mes—
+        y salían dos tarjetas con el mismo título: sólo el precio las distinguía."""
+        self.assertIn("Piso en venta de", copia()["titulo_anuncio"])
+        self.assertIn("Piso en alquiler de", copia(tipo_operacion="alquiler")["titulo_anuncio"])
+        self.assertIn("en alquiler", copia(tipo_operacion="ARRENDAMIENTO")["titulo_anuncio"])
 
     def test_la_zona_afina_donde_esta(self):
         self.assertIn("Las Delicias, Málaga", copia(zona="Las Delicias")["titulo_anuncio"])
@@ -227,8 +234,8 @@ class ElEndpointTests(unittest.TestCase):
     def test_rellena_el_que_no_tiene(self):
         r = self._post("/api/inmueble_anuncio_generate", {"inmueble_id": "vacio"})
         self.assertEqual(r["estado"], 200)
-        self.assertEqual(r["json"]["titulo_anuncio"], "Piso de 3 dormitorios en Málaga")
-        self.assertEqual(self._titulo("vacio"), "Piso de 3 dormitorios en Málaga")
+        self.assertEqual(r["json"]["titulo_anuncio"], "Piso en venta de 3 dormitorios en Málaga")
+        self.assertEqual(self._titulo("vacio"), "Piso en venta de 3 dormitorios en Málaga")
 
     def test_respeta_el_escrito_a_mano(self):
         r = self._post("/api/inmueble_anuncio_generate", {"inmueble_id": "aMano"})
@@ -239,7 +246,7 @@ class ElEndpointTests(unittest.TestCase):
         r = self._post("/api/inmueble_anuncio_generate",
                        {"inmueble_id": "aMano", "sobrescribir": True})
         self.assertEqual(r["estado"], 200)
-        self.assertEqual(self._titulo("aMano"), "Piso de 3 dormitorios en Málaga")
+        self.assertEqual(self._titulo("aMano"), "Piso en venta de 3 dormitorios en Málaga")
 
     def test_y_una_vez_generado_se_puede_rehacer(self):
         self._post("/api/inmueble_anuncio_generate", {"inmueble_id": "vacio"})
