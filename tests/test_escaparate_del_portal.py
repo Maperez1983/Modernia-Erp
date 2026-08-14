@@ -287,6 +287,43 @@ class LasFotosDelEscaparateTests(BaseEscaparate):
             "created_at": f"{AHORA[:-1]}{len(nombre)}", "updated_at": AHORA})
         self.addCleanup(lambda p=carpeta / nombre: p.unlink(missing_ok=True))
 
+    def test_un_dni_no_es_una_foto_del_inmueble(self):
+        """Las fotos se escogían por la extensión del fichero, y en la cartera real
+        había **«DNI arrendatario.jpeg»** y **«certificado cuenta.jpg»** archivados
+        como «Otros» y «Certificado». Con ese criterio se habrían publicado como
+        fotos del inmueble."""
+        self._publica("uno")
+        self._foto("uno", "casa.jpg", contenido=b"la casa")
+        for tipo, nombre in (("Otros", "DNI arrendatario.jpeg"),
+                             ("Certificado", "certificado cuenta.jpg")):
+            carpeta = Path(S.UPLOADS) / "inmuebles" / "uno" / "fotos"
+            carpeta.mkdir(parents=True, exist_ok=True)
+            (carpeta / nombre).write_bytes(b"personal")
+            self.addCleanup(lambda p=carpeta / nombre: p.unlink(missing_ok=True))
+            self._ins("inmueble_docs", {
+                "id": f"x-{nombre}", "inmueble_id": "uno", "nombre": nombre, "tipo": tipo,
+                "url": f"/uploads/inmuebles/uno/fotos/{nombre}", "estado": "Vigente",
+                "visible_portal": 1, "created_at": AHORA, "updated_at": AHORA})
+        x = self._feed("?id=uno&galeria=1")["rows"][0]
+        self.assertEqual(len(x["fotos"]), 1)
+        self.assertEqual(self._pide("?id=uno&n=0")[1], b"la casa")
+        self.assertEqual(self._pide("?id=uno&n=1")[0], 404)
+
+    def test_ni_aunque_sea_la_primera_de_la_ficha(self):
+        """La portada la elegía la misma condición."""
+        self._publica("uno")
+        carpeta = Path(S.UPLOADS) / "inmuebles" / "uno" / "fotos"
+        carpeta.mkdir(parents=True, exist_ok=True)
+        (carpeta / "dni.jpeg").write_bytes(b"personal")
+        self.addCleanup(lambda p=carpeta / "dni.jpeg": p.unlink(missing_ok=True))
+        self._ins("inmueble_docs", {
+            "id": "solo-dni", "inmueble_id": "uno", "nombre": "DNI arrendatario.jpeg",
+            "tipo": "Otros", "url": "/uploads/inmuebles/uno/fotos/dni.jpeg",
+            "estado": "Vigente", "visible_portal": 1,
+            "created_at": AHORA, "updated_at": AHORA})
+        self.assertIsNone(self._feed()["rows"][0]["foto"])
+        self.assertEqual(self._pide("?id=uno&n=0")[0], 404)
+
     def _pide(self, consulta):
         req = urllib.request.Request(self.base + "/api/portal_inmueble_foto" + consulta)
         try:
