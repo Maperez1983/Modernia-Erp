@@ -35710,7 +35710,11 @@ def build_inmueble_anuncio_copy(inmueble):
         medida = f"de {m2} m²"
     else:
         medida = ""
-    title_parts = [tipo_label, medida, location_phrase.strip()]
+    # Y si se vende o se alquila, que es lo primero que se filtra. El local de
+    # Puerto Oncala está en las dos cosas —145.000 € y 750 €/mes— y salían dos
+    # tarjetas con el mismo título: sólo el precio las distinguía. Va detrás del
+    # tipo, como en cualquier portal: «Local comercial en alquiler de 110 m²…».
+    title_parts = [tipo_label, f"en {op_label}", medida, location_phrase.strip()]
     title = " ".join([part for part in title_parts if part]).strip()
     if not title:
         title = text("titulo") or text("direccion") or "Inmueble Verifika2"
