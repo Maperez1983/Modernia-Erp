@@ -16,6 +16,7 @@ import tempfile
 import threading
 import unittest
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -34,6 +35,7 @@ class BaseEscaparate(unittest.TestCase):
         S.ensure_tables(self.db)
         self.conn = S.open_sqlite_conn(str(self.db), with_row_factory=True)
         S.ensure_anuncio_schema(self.conn)
+        S.asegura_la_marca_de_visible(self.conn)
         self.ws = self.conn.execute("SELECT id FROM workspaces LIMIT 1").fetchone()["id"]
         self._ins("empresas", {"id": "emp1", "nombre": "Agencia", "activo": 1,
                                "created_at": AHORA, "updated_at": AHORA})
@@ -84,6 +86,7 @@ class LaEtiquetaEnergeticaTests(BaseEscaparate):
         self._publica("sin", energia_letra=None, portal_publicado=0)
         self._ins("inmueble_docs", {"id": "d1", "inmueble_id": "sin", "nombre": "foto.jpg",
                                     "tipo": "Foto", "url": "/uploads/x.jpg",
+                                    "visible_portal": 1,
                                     "created_at": AHORA, "updated_at": AHORA})
         v = S.validate_portal_publication_requirements(self.conn, "sin")
         self.assertFalse(v["ok"])
@@ -93,6 +96,7 @@ class LaEtiquetaEnergeticaTests(BaseEscaparate):
         self._publica("con", portal_publicado=0)
         self._ins("inmueble_docs", {"id": "d2", "inmueble_id": "con", "nombre": "foto.jpg",
                                     "tipo": "Foto", "url": "/uploads/x.jpg",
+                                    "visible_portal": 1,
                                     "created_at": AHORA, "updated_at": AHORA})
         v = S.validate_portal_publication_requirements(self.conn, "con")
         self.assertTrue(v["ok"], v["missing"])
@@ -185,7 +189,7 @@ class LaGaleriaYLosDatosTests(BaseEscaparate):
         for n in range(4):
             self._ins("inmueble_docs", {"id": f"f{n}", "inmueble_id": "piso",
                                         "nombre": f"foto{n}.jpg", "tipo": "Foto",
-                                        "url": f"/uploads/f{n}.jpg",
+                                        "url": f"/uploads/f{n}.jpg", "visible_portal": 1,
                                         "created_at": AHORA, "updated_at": AHORA})
 
     def test_el_listado_no_carga_las_galerias(self):
@@ -258,3 +262,96 @@ class LaBajadaDePrecioTests(BaseEscaparate):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LasFotosDelEscaparateTests(BaseEscaparate):
+    """La foto del anuncio no la podía ver nadie.
+
+    El feed repartía `/uploads/inmuebles/<id>/fotos/<hash>.jpg`, y esa ruta pide
+    sesión del CRM: contra producción responde **401**. Quien recibía el anuncio
+    tenía la referencia de la imagen y no podía descargarla.
+
+    Y la marca `visible_portal`, que el portal del propietario sí respeta, aquí no
+    se miraba: una foto desmarcada a mano salía igual. No se notaba porque la
+    imagen no llegaba a cargar.
+    """
+
+    def _foto(self, inmueble_id, nombre, *, visible=1, contenido=b"\xff\xd8\xff\xe0jpeg"):
+        carpeta = Path(S.UPLOADS) / "inmuebles" / inmueble_id / "fotos"
+        carpeta.mkdir(parents=True, exist_ok=True)
+        (carpeta / nombre).write_bytes(contenido)
+        self._ins("inmueble_docs", {
+            "id": f"d-{inmueble_id}-{nombre}", "inmueble_id": inmueble_id, "nombre": nombre,
+            "tipo": "Fotos", "url": f"/uploads/inmuebles/{inmueble_id}/fotos/{nombre}",
+            "estado": "Vigente", "visible_portal": visible,
+            "created_at": f"{AHORA[:-1]}{len(nombre)}", "updated_at": AHORA})
+        self.addCleanup(lambda p=carpeta / nombre: p.unlink(missing_ok=True))
+
+    def _pide(self, consulta):
+        req = urllib.request.Request(self.base + "/api/portal_inmueble_foto" + consulta)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return r.status, r.read(), r.headers.get("Content-Type")
+        except urllib.error.HTTPError as e:
+            return e.code, e.read(), None
+
+    def test_se_ve_sin_sesion(self):
+        """Es lo que arregla: antes esta descarga era un 401."""
+        self._publica("uno")
+        self._foto("uno", "a.jpg")
+        estado, cuerpo, tipo = self._pide("?id=uno&n=0")
+        self.assertEqual(estado, 200)
+        self.assertEqual(cuerpo, b"\xff\xd8\xff\xe0jpeg")
+        self.assertEqual(tipo, "image/jpeg")
+
+    def test_el_feed_publica_esa_direccion_y_no_la_del_disco(self):
+        self._publica("uno")
+        self._foto("uno", "a.jpg")
+        x = self._feed()["rows"][0]
+        self.assertEqual(x["foto"], "/api/portal_inmueble_foto?id=uno&n=0")
+        self.assertNotIn("/uploads/", str(x["foto"]))
+
+    def test_una_foto_desmarcada_no_se_sirve(self):
+        """`visible_portal` la respetaba el portal del propietario y el escaparate
+        no."""
+        self._publica("uno")
+        self._foto("uno", "a.jpg", visible=0)
+        self.assertIsNone(self._feed()["rows"][0]["foto"])
+        self.assertEqual(self._pide("?id=uno&n=0")[0], 404)
+
+    def test_ni_colandose_por_el_numero_de_otra(self):
+        """La desmarcada no puede pedirse corriendo el índice."""
+        self._publica("uno")
+        self._foto("uno", "a.jpg", visible=1, contenido=b"visible")
+        self._foto("uno", "bb.jpg", visible=0, contenido=b"secreta")
+        self.assertEqual(self._pide("?id=uno&n=0")[1], b"visible")
+        self.assertEqual(self._pide("?id=uno&n=1")[0], 404)
+
+    def test_de_un_inmueble_sin_publicar_no(self):
+        """La llave es la misma consulta que arma el feed, no una condición
+        parecida."""
+        self._publica("oculto", portal_publicado=0)
+        self._foto("oculto", "a.jpg")
+        self.assertEqual(self._pide("?id=oculto&n=0")[0], 404)
+
+    def test_ni_de_uno_que_no_existe(self):
+        self.assertEqual(self._pide("?id=noexiste&n=0")[0], 404)
+        self.assertEqual(self._pide("?id=&n=0")[0], 404)
+
+    def test_no_se_puede_pedir_un_fichero_cualquiera(self):
+        """Va por posición, no por ruta: no hay parámetro con el que nombrar un
+        fichero del disco."""
+        self._publica("uno")
+        self._foto("uno", "a.jpg")
+        for n in ("../../../etc/passwd", "-1", "99", "hola"):
+            estado, _c, _t = self._pide(f"?id=uno&n={urllib.parse.quote(str(n))}")
+            self.assertIn(estado, (200, 404), n)
+        self.assertEqual(self._pide("?id=uno&n=0")[1], b"\xff\xd8\xff\xe0jpeg")
+
+    def test_la_galeria_va_por_posiciones(self):
+        self._publica("uno")
+        self._foto("uno", "a.jpg")
+        self._foto("uno", "bb.jpg")
+        x = self._feed("?id=uno&galeria=1")["rows"][0]
+        self.assertEqual(x["fotos"], ["/api/portal_inmueble_foto?id=uno&n=0",
+                                      "/api/portal_inmueble_foto?id=uno&n=1"])
