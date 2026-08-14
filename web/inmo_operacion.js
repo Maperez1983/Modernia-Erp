@@ -52,6 +52,7 @@
     financiar: "/api/inmueble_oferta_financiacion",
     fase: "/api/inmueble_oferta_financiacion_fase",
     cerrarFinanciacion: "/api/inmueble_oferta_financiacion_cerrar",
+    textos: "/api/inmueble_anuncio_generate",
   };
 
   const eur = (n) =>
@@ -254,6 +255,9 @@
     panel.innerHTML = `
       <div class="op-titulo">
         <h3>Operación</h3>
+        <button type="button" class="secondary ghost button-inline" data-accion="textos">
+          Redactar el anuncio
+        </button>
         <button type="button" class="secondary ghost button-inline" data-accion="encargo">
           Mandar la nota de encargo a firmar
         </button>
@@ -267,6 +271,27 @@
       try {
         const r = await pide(RUTA.encargo, { inmueble_id: inmuebleId });
         window.alert(`Enviada. Pendiente de ${r.firmas} firma(s).`);
+      } catch (e) {
+        window.alert(e.message);
+      }
+      boton.disabled = false;
+    });
+    /* El título y la descripción del portal, sacados de la ficha. Si el anuncio
+     * ya tiene un texto escrito a mano el servidor no lo pisa: contesta
+     * `respetado` y aquí se pregunta antes de insistir. */
+    panel.querySelector('[data-accion="textos"]').addEventListener("click", async (ev) => {
+      const boton = ev.currentTarget;
+      boton.disabled = true;
+      try {
+        let r = await pide(RUTA.textos, { inmueble_id: inmuebleId });
+        if (r.respetado) {
+          if (!window.confirm(`Este anuncio ya tiene un texto escrito a mano:\n\n«${r.titulo_anuncio}»\n\n¿Lo reemplazo?`)) {
+            boton.disabled = false;
+            return;
+          }
+          r = await pide(RUTA.textos, { inmueble_id: inmuebleId, sobrescribir: true });
+        }
+        window.alert(`Anuncio redactado:\n\n${r.titulo_anuncio}\n\n${r.descripcion_corta}`);
       } catch (e) {
         window.alert(e.message);
       }
