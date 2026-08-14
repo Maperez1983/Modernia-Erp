@@ -35614,6 +35614,41 @@ def datos_extra_del_anuncio(conn, fila, *, con_galeria=False):
     return extra
 
 
+def subtipo_publicable(valor):
+    """El subtipo, sólo si dice algo.
+
+    `subtipologia` es un cajón de sastre: hay subtipos de verdad —«BAJO»,
+    «Estudio», «planta media», «Nave industrial»— y hay números sueltos: «3»,
+    «4», «6». Esos son dormitorios escritos en el campo equivocado, y pegados al
+    tipo salían títulos como **«Piso 2 en Madrid»** o **«Villa 6 en Coín»**, que
+    se leen como una errata. Lo mismo con «3 dormitorios», que además ya va en su
+    propia columna y acababa repetido: «Piso 3 dormitorios en Málaga con 3
+    dormitorios».
+    """
+    crudo = str(valor or "").strip()
+    if not crudo:
+        return ""
+    if re.fullmatch(r"[\d\s.,-]+", crudo):
+        return ""
+    if re.match(r"^\d+\s*(dormitorio|habitaci|hab\b)", crudo, re.I):
+        return ""
+    return crudo
+
+
+def texto_del_anuncio_es_nuestro(fila):
+    """¿El texto que hay lo escribimos nosotros o lo escribió alguien?
+
+    `anuncio_generado_at` sólo lo sella este generador, así que sirve de firma: si
+    está, el texto es nuestro y se puede rehacer; si no está y hay título, lo
+    tecleó un asesor —«VENTA DE APARCAMIENTO EN LAS DELICIAS»— y no se toca sin
+    que lo pidan. En producción no está sellado ninguno: los seis títulos
+    publicados son de la casa.
+    """
+    if str(row_value(fila, "anuncio_generado_at", "") or "").strip():
+        return True
+    return not str(row_value(fila, "titulo_anuncio", "") or "").strip()
+
+
 def build_inmueble_anuncio_copy(inmueble):
     data = dict(inmueble or {})
 
@@ -35632,7 +35667,7 @@ def build_inmueble_anuncio_copy(inmueble):
         return int(value) if value and value.is_integer() else value
 
     tipo = text("tipo_inmueble") or "Inmueble"
-    subtipo = text("subtipologia")
+    subtipo = subtipo_publicable(text("subtipologia"))
     operacion = normalize_lookup_text(text("tipo_operacion") or "venta")
     zona = text("zona")
     poblacion = text("poblacion", "localidad")
@@ -35655,14 +35690,37 @@ def build_inmueble_anuncio_copy(inmueble):
 
     # «BAJO Local» se lee como un error de plantilla; el tipo va delante y el subtipo
     # lo matiza, que es como se nombra un inmueble en castellano.
-    tipo_label = f"{tipo} {subtipo.lower()}".strip() if subtipo and subtipo.lower() not in tipo.lower() else tipo
+    # El solape se miraba en un solo sentido y salía **«Casa casa mata»** y **«Nave
+    # nave industrial»**: cuando el subtipo ya contiene al tipo, el que sobra es el
+    # tipo, no el subtipo.
+    if not subtipo or subtipo.lower() in tipo.lower():
+        tipo_label = tipo
+    elif tipo.lower() in subtipo.lower():
+        tipo_label = subtipo[:1].upper() + subtipo[1:].lower()
+    else:
+        tipo_label = f"{tipo} {subtipo.lower()}".strip()
     # `normalize_lookup_text` devuelve MAYÚSCULAS, así que esta comparación contra
     # minúsculas no se cumplía nunca: **todos** los anuncios se generaban como venta,
     # también los alquileres. Con el texto anterior no se notaba porque hablaba de
     # «una operación de venta» en una frase larga; al escribir «Se alquila / Se vende»
     # delante del todo, saltó a la vista.
     op_label = "alquiler" if operacion in {"ALQUILER", "ARRENDAMIENTO", "RENTA"} else "venta"
-    title_parts = [tipo_label, location_phrase.strip()]
+    # Un tamaño en el título. «Local en Málaga» no dice nada y es lo que salía en
+    # la mitad de la cartera; «Local de 142 m² en Las Delicias» ya deja decidir si
+    # merece la pena abrirlo. Se prefieren los dormitorios cuando los hay —es por
+    # lo que busca quien busca casa— y los metros en lo demás.
+    # Y los dormitorios sólo donde se duerme: un local con `habitaciones = 1`
+    # salía como «Local comercial de 1 dormitorio», que es lo que tenía la ficha
+    # pero no lo que significa. En lo que no es vivienda mandan los metros.
+    ES_VIVIENDA = {"PISO", "CASA", "CHALET", "ADOSADO", "PAREADO", "ATICO", "ÁTICO", "DUPLEX",
+                   "DÚPLEX", "VILLA", "BAJO", "APARTAMENTO", "ESTUDIO", "FINCA", "CORTIJO"}
+    if habitaciones and normalize_lookup_text(tipo) in ES_VIVIENDA:
+        medida = f"de {habitaciones} dormitorio{'s' if int(habitaciones) != 1 else ''}"
+    elif m2:
+        medida = f"de {m2} m²"
+    else:
+        medida = ""
+    title_parts = [tipo_label, medida, location_phrase.strip()]
     title = " ".join([part for part in title_parts if part]).strip()
     if not title:
         title = text("titulo") or text("direccion") or "Inmueble Verifika2"
@@ -35686,15 +35744,19 @@ def build_inmueble_anuncio_copy(inmueble):
     # trazabilidad»: palabras que le importan a quien contrata el software y a nadie
     # más. Y estaba escrito sin tildes —«operacion», «informacion», «banos»—, que en
     # un portal público se lee como descuido.
-    short = f"{tipo_label}{location_phrase}"
-    if feature_bits:
-        short = f"{short} con {', '.join(feature_bits[:3])}"
+    # Sin repetir lo que el título acaba de decir: «Piso de 3 dormitorios en Málaga
+    # con 3 dormitorios» era el texto que se publicaba.
+    resto = [bit for bit in feature_bits if bit.lower() not in medida.lower()]
+    short = f"{tipo_label} {medida}".strip() + location_phrase
+    if resto:
+        short = f"{short} con {', '.join(resto[:3])}"
     short = f"{short}. Consulta el precio y concierta una visita."
 
+    cuerpo_apertura = f"{tipo_label.lower()} {medida}".strip() + location_phrase
     if op_label == "alquiler":
-        apertura = f"Se alquila {tipo_label.lower()}{location_phrase}."
+        apertura = f"Se alquila {cuerpo_apertura}."
     else:
-        apertura = f"Se vende {tipo_label.lower()}{location_phrase}."
+        apertura = f"Se vende {cuerpo_apertura}."
     paragraphs = [apertura]
     if feature_bits:
         paragraphs.append(f"Cuenta con {', '.join(feature_bits)}.")
@@ -92529,9 +92591,14 @@ class Handler(BaseHTTPRequestHandler):
                 return
         elif parsed.path == "/api/inmueble_anuncio_generate":
             inmueble_id = str(payload.get("inmueble_id") or payload.get("id") or "").strip()
-            if not inmueble_id:
+            # Uno, o toda la cartera en encargo de una vez: siete de trece fichas no
+            # tenían título y el portal las anunciaba como «Local en Málaga». Ir de
+            # una en una es la razón de que nunca se hiciera.
+            varios = [str(x).strip() for x in (payload.get("inmueble_ids") or []) if str(x).strip()]
+            if not inmueble_id and not varios:
                 json_response(self, {"error": "inmueble_id requerido"}, status=400)
                 return
+            sobrescribir = str(payload.get("sobrescribir") or "").strip().lower() in {"1", "true", "si", "sí"}
             try:
                 for col_name, col_sql in {
                     "titulo_anuncio": "titulo_anuncio TEXT",
@@ -92544,6 +92611,40 @@ class Handler(BaseHTTPRequestHandler):
                     ensure_column(conn, "inmuebles", col_name, col_sql)
             except Exception:
                 pass
+            if varios:
+                hechos, respetados, fallidos = [], [], []
+                for uno in varios:
+                    fila = conn.execute(
+                        "SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (uno,)).fetchone()
+                    if not fila:
+                        fallidos.append({"id": uno, "motivo": "no encontrado"})
+                        continue
+                    session = getattr(self, "auth_session", None) or self._current_session()
+                    ok_uno, err_uno = enforce_empresa_membership(conn, session, fila["empresa_id"])
+                    if not ok_uno:
+                        fallidos.append({"id": uno, "motivo": err_uno or "no autorizado"})
+                        continue
+                    if not sobrescribir and not texto_del_anuncio_es_nuestro(fila):
+                        respetados.append({"id": uno,
+                                           "titulo": row_value(fila, "titulo_anuncio", "")})
+                        continue
+                    copia = build_inmueble_anuncio_copy(fila)
+                    sello = datetime.now(timezone.utc).isoformat()
+                    conn.execute(
+                        "UPDATE inmuebles SET titulo_anuncio = ?, descripcion_corta = ?, "
+                        "descripcion_larga = ?, destacados = ?, seo_slug = ?, "
+                        "anuncio_generado_at = ?, updated_at = datetime(?) WHERE id = ?",
+                        (copia["titulo_anuncio"], copia["descripcion_corta"],
+                         copia["descripcion_larga"], copia["destacados"], copia["seo_slug"],
+                         sello, now, uno))
+                    audit_event(conn, fila["empresa_id"], "inmuebles", uno,
+                                "Generar texto anuncio", usuario=payload.get("usuario"),
+                                detalles={"seo_slug": copia.get("seo_slug"), "lote": True}, now=now)
+                    hechos.append({"id": uno, "titulo": copia["titulo_anuncio"]})
+                conn.commit()
+                json_response(self, {"ok": True, "generados": hechos, "respetados": respetados,
+                                     "fallidos": fallidos, "total": len(varios)})
+                return
             inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
@@ -92556,6 +92657,12 @@ class Handler(BaseHTTPRequestHandler):
                     return
             except Exception:
                 pass
+            if not sobrescribir and not texto_del_anuncio_es_nuestro(inmueble):
+                json_response(self, {"ok": False, "respetado": True, "id": inmueble_id,
+                                     "titulo_anuncio": row_value(inmueble, "titulo_anuncio", ""),
+                                     "aviso": "Este anuncio tiene un texto escrito a mano. "
+                                              "Envía sobrescribir para reemplazarlo."})
+                return
             copy_payload = build_inmueble_anuncio_copy(inmueble)
             now_value = datetime.now(timezone.utc).isoformat()
             conn.execute(
