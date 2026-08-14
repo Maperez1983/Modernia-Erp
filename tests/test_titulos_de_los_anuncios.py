@@ -126,6 +126,14 @@ class LaDescripcionTests(unittest.TestCase):
         self.assertIn("de 59 m²", c["descripcion_corta"])
         self.assertNotIn("con 59 m²", c["descripcion_corta"])
 
+    def test_un_local_no_tiene_dormitorios_tampoco_aqui(self):
+        """El local de Las Delicias llegó a publicarse como «Local comercial de
+        142 m² … con 1 dormitorio»: el título ya sabía que no era vivienda y la
+        descripción no."""
+        c = copia(tipo_inmueble="Local", subtipologia="COMERCIAL", habitaciones=1, m2=142)
+        self.assertNotIn("dormitorio", c["descripcion_corta"])
+        self.assertNotIn("dormitorio", c["descripcion_larga"])
+
     def test_la_descripcion_larga_abre_con_la_medida(self):
         self.assertIn("Se vende piso de 3 dormitorios en Málaga",
                       copia()["descripcion_larga"])

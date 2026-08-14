@@ -35703,7 +35703,8 @@ def build_inmueble_anuncio_copy(inmueble):
     # pero no lo que significa. En lo que no es vivienda mandan los metros.
     ES_VIVIENDA = {"PISO", "CASA", "CHALET", "ADOSADO", "PAREADO", "ATICO", "ÁTICO", "DUPLEX",
                    "DÚPLEX", "VILLA", "BAJO", "APARTAMENTO", "ESTUDIO", "FINCA", "CORTIJO"}
-    if habitaciones and normalize_lookup_text(tipo) in ES_VIVIENDA:
+    se_duerme_ahi = normalize_lookup_text(tipo) in ES_VIVIENDA
+    if habitaciones and se_duerme_ahi:
         medida = f"de {habitaciones} dormitorio{'s' if int(habitaciones) != 1 else ''}"
     elif m2:
         medida = f"de {m2} m²"
@@ -35718,7 +35719,10 @@ def build_inmueble_anuncio_copy(inmueble):
     feature_bits = []
     if m2:
         feature_bits.append(f"{m2} m²")
-    if habitaciones:
+    # La misma regla que en el título: el local de Las Delicias se publicó como
+    # «Local comercial de 142 m² … con 1 dormitorio» porque el título ya sabía que
+    # no era vivienda y la descripción no.
+    if habitaciones and se_duerme_ahi:
         feature_bits.append(f"{habitaciones} dormitorio{'s' if int(habitaciones) != 1 else ''}")
     if banos:
         feature_bits.append(f"{banos} baño{'s' if int(banos) != 1 else ''}")
