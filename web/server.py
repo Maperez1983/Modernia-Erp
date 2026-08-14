@@ -31545,7 +31545,14 @@ def fotos_del_inmueble(conn, inmueble_id, *, limite=12, solo_publicas=False):
     """
     if solo_publicas:
         asegura_la_marca_de_visible(conn)
-    filtro = " AND COALESCE(visible_portal, 0) = 1" if solo_publicas else ""
+    # Una foto es un documento archivado como foto, no cualquier fichero con
+    # extensión de imagen. Escogiendo por extensión, en la cartera real entraban
+    # **«DNI arrendatario.jpeg»** y **«certificado cuenta.jpg»** —el documento de
+    # identidad de un inquilino y un certificado bancario, archivados como «Otros»
+    # y «Certificado»— y se habrían enseñado como fotos del inmueble.
+    filtro = " AND LOWER(COALESCE(tipo, '')) LIKE '%foto%'"
+    if solo_publicas:
+        filtro += " AND COALESCE(visible_portal, 0) = 1"
     try:
         filas = conn.execute(
             f"SELECT url FROM inmueble_docs WHERE inmueble_id = ?{filtro} "
@@ -35430,9 +35437,11 @@ def _portal_inmueble_photo_expr(conn, alias="i"):
         # Sin esto la portada del anuncio podía ser una foto que el asesor había
         # desmarcado a mano.
         "AND COALESCE(d.visible_portal, 0) = 1 "
-        "AND (LOWER(COALESCE(d.tipo, '')) LIKE '%foto%' OR LOWER(COALESCE(d.url, '')) LIKE '%.jpg' "
-        "OR LOWER(COALESCE(d.url, '')) LIKE '%.jpeg' OR LOWER(COALESCE(d.url, '')) LIKE '%.png' "
-        "OR LOWER(COALESCE(d.url, '')) LIKE '%.webp') "
+        # Por tipo y además por extensión, no por cualquiera de las dos: la `O`
+        # metía en la portada del anuncio cualquier imagen del expediente.
+        "AND LOWER(COALESCE(d.tipo, '')) LIKE '%foto%' "
+        "AND (LOWER(COALESCE(d.url, '')) LIKE '%.jpg' OR LOWER(COALESCE(d.url, '')) LIKE '%.jpeg' "
+        "OR LOWER(COALESCE(d.url, '')) LIKE '%.png' OR LOWER(COALESCE(d.url, '')) LIKE '%.webp') "
         "ORDER BY d.created_at ASC LIMIT 1"
     )
 

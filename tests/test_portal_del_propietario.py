@@ -1104,8 +1104,14 @@ class LasFotosYLaMarcaTests(BasePortal):
         carpeta.mkdir(parents=True, exist_ok=True)
         self.foto = carpeta / "portada.jpg"
         self.foto.write_bytes(b"\xff\xd8\xff\xe0 falsa pero suficiente")
+        # Con su tipo: una foto es un documento archivado como foto, no cualquier
+        # fichero con extensión de imagen. Escogiendo por extensión entraban en el
+        # anuncio «DNI arrendatario.jpeg» y «certificado cuenta.jpg», que están en
+        # la cartera real. En producción no hay ni una imagen sin tipo: 71 de 75
+        # son «Fotos» y las otras cuatro son justo esos documentos personales.
         self._ins("inmueble_docs", {"id": "foto1", "inmueble_id": "inm1", "empresa_id": "emp1",
-                                    "nombre": "Salón", "url": "/uploads/inmuebles/inm1/fotos/portada.jpg",
+                                    "nombre": "Salón", "tipo": "Fotos",
+                                    "url": "/uploads/inmuebles/inm1/fotos/portada.jpg",
                                     "created_at": AHORA, "updated_at": AHORA})
         self.token = self._token(self._abre_portal()["enlace"])
 
