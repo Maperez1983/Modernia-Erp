@@ -56732,13 +56732,20 @@ def fetch_memoria_fincas(conn, workspace_id, comunidad_id, ejercicio):
                for f in movimiento}
     ingresos = round(-sum(v for c, v in del_ano.items() if c[:1] == "7"), 2)
     gastos = round(sum(v for c, v in del_ano.items() if c[:1] == "6"), 2)
+    # El gasto caía a la contabilidad simple cuando no hay asientos, pero el ingreso no:
+    # una comunidad que lleve las cuentas sin partida doble veía su gasto y un ingreso de
+    # cero. Y el resultado se calculaba con los del libro, no con los dos números que la
+    # memoria acababa de dar, así que podía decir «gastado 1.655,50 · ingresado 0 ·
+    # resultado 0». Los tres salen ahora de la misma fuente.
+    gastado_memoria = gastos or cuentas.get("gastado", 0.0)
+    ingresado_memoria = ingresos or cuentas.get("ingresado", 0.0)
     return {
         "ejercicio": ejercicio,
         "presupuestado": cuentas.get("presupuestado", 0.0),
-        "gastado": gastos or cuentas.get("gastado", 0.0),
-        "ingresado": ingresos,
-        "resultado": round(ingresos - gastos, 2),
-        "desviacion": round(cuentas.get("presupuestado", 0.0) - (gastos or cuentas.get("gastado", 0.0)), 2),
+        "gastado": gastado_memoria,
+        "ingresado": ingresado_memoria,
+        "resultado": round(ingresado_memoria - gastado_memoria, 2),
+        "desviacion": round(cuentas.get("presupuestado", 0.0) - gastado_memoria, 2),
         "fondo_reserva": round(-saldos.get(CUENTA_FONDO_RESERVA, 0.0), 2),
         "fondo_reserva_pct": cuentas.get("fondo_reserva_pct", 0.0),
         "recibos_cobrados": cuentas.get("recibos_cobrados", 0.0),
