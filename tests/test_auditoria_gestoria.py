@@ -466,3 +466,24 @@ class ElDetectorDeIbanTests(unittest.TestCase):
     def test_ni_un_numero_corto_ni_uno_largo(self):
         self.assertEqual(S.extraer_ibans_de_texto("ES112100041845020005"), [])
         self.assertEqual(S.extraer_ibans_de_texto("ES112100041845020005133299"), [])
+
+
+class ElExpedienteYSuClienteTests(unittest.TestCase):
+    """`gestoria` guardaba el cliente como texto libre y nada más.
+
+    548 expedientes en producción, sin `cliente_id`: no se podían cruzar con la
+    ficha, ni saber si dos son de la misma persona. Tampoco tienen precio ni
+    cuota en ninguna fila, y la tabla no se escribe desde el 26 de enero.
+    """
+
+    def test_la_columna_existe_en_una_base_nueva(self):
+        import tempfile
+        from pathlib import Path as P
+        with tempfile.TemporaryDirectory() as tmp:
+            db = P(tmp) / "n.sqlite"
+            S.ensure_tables(db)
+            conn = S.open_sqlite_conn(str(db), with_row_factory=True)
+            cols = {r[1] for r in conn.execute("pragma table_info(gestoria)")}
+            self.assertIn("cliente_id", cols)
+            self.assertIn("cliente", cols)
+            conn.close()

@@ -42489,6 +42489,10 @@ def ensure_tables(db_path):
         """
     )
     try:
+        # El expediente guardaba el cliente sólo por nombre, así que no se podía
+        # cruzar con su ficha. En una base que ya existe el CREATE de arriba no
+        # añade la columna: hace falta decirlo aquí.
+        ensure_column(conn, "gestoria", "cliente_id", "cliente_id TEXT")
         ensure_column(conn, "gestoria_docs", "doc_key", "doc_key TEXT")
         ensure_column(conn, "gestoria_docs", "doc_url", "doc_url TEXT")
         ensure_column(conn, "gestoria_docs", "repo_key", "repo_key TEXT")
