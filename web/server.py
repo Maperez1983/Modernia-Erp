@@ -50709,6 +50709,94 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
     return True, ""
 
 
+def empresas_del_cliente(conn, cliente_id):
+    """Todas las empresas por las que se llega a un cliente.
+
+    Son dos sitios, no uno: la columna `clientes.empresa_id` y la tabla de
+    vínculos `clientes_empresas`. En producción **1.170 de 2.261 clientes tienen
+    la columna vacía** y 1.166 de ellos están vinculados por la tabla —1.154 a
+    Fincas Velazquez—, así que mirar sólo la columna deja fuera a media cartera,
+    y con ella las 754 declaraciones de la renta que cuelgan de esos clientes.
+    """
+    cid = str(cliente_id or "").strip()
+    if not cid:
+        return []
+    ids = []
+    try:
+        fila = conn.execute("SELECT empresa_id FROM clientes WHERE id = ? LIMIT 1", (cid,)).fetchone()
+        propia = str(row_value(fila, "empresa_id", "") or "").strip() if fila else ""
+        if propia:
+            ids.append(propia)
+        for f in conn.execute(
+                "SELECT empresa_id FROM clientes_empresas WHERE cliente_id = ?", (cid,)).fetchall():
+            eid = str(row_value(f, "empresa_id", "") or "").strip()
+            if eid and eid not in ids:
+                ids.append(eid)
+    except Exception:
+        _rollback_best_effort(conn)
+    return ids
+
+
+def enforce_gestoria_cliente_access(conn, session, cliente_id, *, write=False):
+    """El expediente de gestoría de un cliente, sólo para quien lo lleva.
+
+    `/api/gestoria_docs` filtraba por el `cliente_id` que llegara en la petición
+    y en sus 252 líneas no miraba la sesión ni una vez; lo mismo
+    `/api/gestoria_modelos` y `/api/cliente_gestoria`. Con cuatro workspaces y
+    nueve empresas en producción eso no es un detalle: bastaba con saberse un id.
+    """
+    cid = str(cliente_id or "").strip()
+    if not cid:
+        return False, "cliente_id requerido"
+    empresas = empresas_del_cliente(conn, cid)
+    if not empresas:
+        # Sin empresa por ningún lado no hay a quién preguntar. Son cuatro fichas
+        # en producción y ninguna tiene documentos ni trabajos.
+        return False, "Cliente sin empresa"
+    for eid in empresas:
+        ok, _err = enforce_empresa_membership(conn, session, eid, write=write)
+        if ok:
+            return True, ""
+    return False, "Cliente fuera de tu ámbito"
+
+
+def enforce_gestoria_row_access(conn, session, tabla, row_id, *, write=False):
+    """La misma pregunta, para una fila concreta que se va a tocar.
+
+    Los borrados eran `DELETE FROM ... WHERE id = ?` a secas —trabajos,
+    documentos y apuntes contables—, y el de documentos además se lleva por
+    delante el objeto de S3. Con el id bastaba, viniera de donde viniera.
+    """
+    rid = str(row_id or "").strip()
+    if not rid:
+        return False, "id requerido"
+    if tabla not in {"gestoria_docs", "gestoria_trabajos", "gestoria_contabilidad",
+                     "gestoria_modelos", "gestoria_facturas", "gestoria_asientos"}:
+        return False, "Tabla no permitida"
+    columnas = table_columns(conn, tabla)
+    campos = [c for c in ("empresa_id", "cliente_id") if c in columnas]
+    if not campos:
+        return False, "Tabla sin ámbito"
+    try:
+        fila = conn.execute(
+            f"SELECT {', '.join(campos)} FROM {tabla} WHERE id = ? LIMIT 1", (rid,)).fetchone()
+    except Exception:
+        _rollback_best_effort(conn)
+        return False, "No encontrado"
+    if not fila:
+        return False, "No encontrado"
+    empresa_id = str(row_value(fila, "empresa_id", "") or "").strip() if "empresa_id" in campos else ""
+    if empresa_id:
+        ok, err = enforce_empresa_membership(conn, session, empresa_id, write=write)
+        return (True, "") if ok else (False, err or "No autorizado")
+    # Sin empresa en la fila se pregunta por su cliente: así siguen alcanzables
+    # los 754 documentos de renta que la tienen vacía.
+    cliente_id = str(row_value(fila, "cliente_id", "") or "").strip() if "cliente_id" in campos else ""
+    if cliente_id:
+        return enforce_gestoria_cliente_access(conn, session, cliente_id, write=write)
+    return False, "Registro sin ámbito"
+
+
 def enforce_empresa_membership(conn, session, empresa_id, *, write=False):
     """
     Enforce that the authenticated user belongs to at least one workspace linked
@@ -54045,8 +54133,38 @@ def upsert_gestoria_banco_regla_from_match(conn, movement_row, asiento_row=None,
 
 
 def record_gestoria_conciliacion_validacion(conn, movimiento_id, asiento_id, factura_id, empresa_id, estado, confianza, regla_id, validado_por, notas, now):
+    """Deja constancia de una conciliación, pero sólo cuando dice algo nuevo.
+
+    Era un INSERT a secas con id aleatorio, y la conciliación convergente
+    reprocesa **todos** los movimientos —cinco pasadas— cuando el histórico está
+    cerrado. Resultado en producción: **214.583 validaciones para 342
+    movimientos**, con 894 filas idénticas del mismo movimiento contra el mismo
+    asiento y la misma confianza, repetidas durante un mes; 80.057 en un solo día.
+    Un registro de auditoría que anota 894 veces lo mismo no es un registro.
+    """
     if not empresa_id:
         return None
+    if movimiento_id:
+        try:
+            ultima = conn.execute(
+                "SELECT asiento_id, factura_id, estado, confianza FROM gestoria_conciliacion_validaciones "
+                "WHERE movimiento_id = ? ORDER BY created_at DESC LIMIT 1",
+                (movimiento_id,),
+            ).fetchone()
+        except Exception:
+            _rollback_best_effort(conn)
+            ultima = None
+        if ultima:
+            def _mismo(a, b):
+                return str(a or "") == str(b or "")
+            conf_nueva = float(confianza or 0) if confianza is not None else None
+            conf_vieja = row_value(ultima, "confianza", None)
+            conf_vieja = float(conf_vieja) if conf_vieja is not None else None
+            if (_mismo(row_value(ultima, "asiento_id", ""), asiento_id)
+                    and _mismo(row_value(ultima, "factura_id", ""), factura_id)
+                    and _mismo(row_value(ultima, "estado", ""), estado or "pendiente")
+                    and conf_vieja == conf_nueva):
+                return None
     validacion_id = os.urandom(16).hex()
     conn.execute(
         """
@@ -74791,6 +74909,13 @@ class Handler(BaseHTTPRequestHandler):
             if not trabajo_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            ok_amb, err_amb = enforce_gestoria_row_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                "gestoria_trabajos", trabajo_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb},
+                              status=404 if err_amb == "No encontrado" else 403)
+                return
             if "tipo_categoria" in payload:
                 payload["tipo_categoria"] = normalize_gestoria_trabajo_category(payload.get("tipo_categoria")) or classify_gestoria_trabajo_category(
                     payload.get("tipo_trabajo")
@@ -74830,6 +74955,13 @@ class Handler(BaseHTTPRequestHandler):
             trabajo_id = payload.get("id")
             if not trabajo_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            ok_amb, err_amb = enforce_gestoria_row_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                "gestoria_trabajos", trabajo_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb},
+                              status=404 if err_amb == "No encontrado" else 403)
                 return
             try:
                 trash_backup_row(
@@ -75015,6 +75147,13 @@ class Handler(BaseHTTPRequestHandler):
             if not doc_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            ok_amb, err_amb = enforce_gestoria_row_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                "gestoria_docs", doc_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb},
+                              status=404 if err_amb == "No encontrado" else 403)
+                return
             allowed = (
                 "repo_key",
                 "nombre",
@@ -75051,6 +75190,13 @@ class Handler(BaseHTTPRequestHandler):
             doc_id = payload.get("id")
             if not doc_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            ok_amb, err_amb = enforce_gestoria_row_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                "gestoria_docs", doc_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb},
+                              status=404 if err_amb == "No encontrado" else 403)
                 return
             try:
                 trash_backup_row(
@@ -84830,6 +84976,13 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            ok_amb, err_amb = enforce_gestoria_row_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                "gestoria_contabilidad", record_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb},
+                              status=404 if err_amb == "No encontrado" else 403)
+                return
             allowed = (
                 "fecha",
                 "concepto",
@@ -84959,6 +85112,13 @@ class Handler(BaseHTTPRequestHandler):
             record_id = payload.get("id")
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            ok_amb, err_amb = enforce_gestoria_row_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                "gestoria_contabilidad", record_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb},
+                              status=404 if err_amb == "No encontrado" else 403)
                 return
             if not delete_gestoria_contabilidad_record(conn, record_id, now=now):
                 json_response(self, {"error": "registro no encontrado"}, status=404)
@@ -101452,6 +101612,12 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
+            # Con saberse un id se leía la ficha de cualquier cliente.
+            ok_amb, err_amb = enforce_gestoria_cliente_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(), cliente_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             row = conn.execute(
                 """
                 SELECT tipo_cliente, mod_fiscal, mod_laboral, mod_contable,
@@ -103722,6 +103888,15 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/gestoria_modelos":
             cliente_id = params.get("cliente_id", [""])[0]
+            # `gestoria_modelos` no tiene ni columna de empresa: su único ámbito
+            # es el cliente, así que es aquí donde hay que preguntar.
+            if cliente_id:
+                ok_amb, err_amb = enforce_gestoria_cliente_access(
+                    conn, getattr(self, "auth_session", None) or self._current_session(),
+                    cliente_id)
+                if not ok_amb:
+                    json_response(self, {"error": err_amb}, status=403)
+                    return
             empresa_id = params.get("empresa_id", [""])[0]
             workspace_id = str(params.get("workspace_id", [""])[0] or "").strip()
             scope = params.get("scope", [""])[0]
@@ -103878,6 +104053,16 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id and not empresa_id and not workspace_id:
                 json_response(self, {"error": "cliente_id, empresa_id o workspace_id requerido"}, status=400)
                 return
+            # 252 líneas que no miraban la sesión ni una vez. La rama de cliente
+            # es la que llegaba a los 754 documentos de renta con la empresa
+            # vacía, así que se pregunta por el cliente y no por la columna.
+            if cliente_id:
+                ok_amb, err_amb = enforce_gestoria_cliente_access(
+                    conn, getattr(self, "auth_session", None) or self._current_session(),
+                    cliente_id)
+                if not ok_amb:
+                    json_response(self, {"error": err_amb}, status=403)
+                    return
 
             if cliente_id:
                 # Enriquecimiento: si hay campañas de renta con doc_key/doc_url, pero el registro `gestoria_docs`
