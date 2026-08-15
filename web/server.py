@@ -6686,16 +6686,28 @@ def normalize_hipoteca_estado(value):
 # borrar de más tampoco tiene vuelta atrás.
 
 # Datos personales sin obligación de conservación: se borran.
+# El orden importa: `inmueble_compradores` apunta a `demandas`, así que borrar la
+# demanda primero rompía la clave ajena y tumbaba la supresión entera. Los hijos van
+# antes que sus padres.
 RGPD_TABLAS_A_BORRAR = (
     ("cliente_profesional", "cliente_id"),      # actividad, IAE
+    ("inmueble_compradores", "cliente_id"),     # cruces: cuelgan de `demandas`
+    ("inmueble_propietarios", "cliente_id"),
     ("demandas", "cliente_id"),                 # preferencias de búsqueda
     ("acciones", "cliente_id"),                 # notas de seguimiento comercial
     ("seguros_eventos", "cliente_id"),          # trazas de gestión
-    ("inmueble_compradores", "cliente_id"),
-    ("inmueble_propietarios", "cliente_id"),
     ("fiscal_scenarios", "cliente_id"),         # simulaciones fiscales
     ("gestoria_import_reglas", "cliente_id"),   # reglas de conciliación por cliente
     ("gestoria_docs", "cliente_id"),            # documentación aportada (DNI, nóminas...)
+)
+
+# Filas que se conservan pero apuntan a algo que sí se borra. No se tocan sus datos:
+# sólo se suelta el vínculo, porque si no la clave ajena impide la supresión. Una visita
+# se queda —no está listada para borrar— pero deja de señalar a una demanda que ya no
+# existe; el cliente al que apunta habrá quedado anónimo, que es el criterio de arriba.
+RGPD_VINCULOS_A_SOLTAR = (
+    ("visitas", "demanda_id", "demandas", "cliente_id"),
+    ("gestoria_import_documentos", "gestoria_doc_id", "gestoria_docs", "cliente_id"),
 )
 
 # Obligación legal de conservación: se quedan, apuntando a una ficha ya anónima.
@@ -65020,7 +65032,10 @@ def build_inmueble_consumo_sale_price_note_pdf(company, inmueble, captacion):
             direccion_full = ", ".join([p for p in [direccion, locality, provincia] if p]).strip() or direccion
 
             price_value = parse_money_value((inmueble or {}).get("precio_objetivo") or (captacion or {}).get("precio_objetivo") or 0) or 0.0
-            price = format_eur(price_value)
+            # Sin precio en la ficha salía «0,00 €», que en una nota de precio que se
+            # entrega al comprador no es un cero: es un hueco sin rellenar disfrazado de
+            # cifra. Se deja el hueco a la vista, como en el resto de documentos.
+            price = format_eur(price_value) if price_value > 0 else "................."
 
             # Anejos (si se modela explícito, se rellena; si no, por defecto "NO" como en el manual)
             plaza = str((inmueble or {}).get("plaza_aparcamiento") or (captacion or {}).get("plaza_aparcamiento") or "").strip()
@@ -65163,7 +65178,10 @@ def build_inmueble_consumo_sale_price_note_pdf(company, inmueble, captacion):
         (
             "a) Precio de venta",
             [
-                ("Precio de venta de la vivienda", format_eur(precio_valor)),
+                # Igual que arriba: sin precio, hueco a la vista y no un «0,00 €» que
+                # el comprador leería como el precio de la vivienda.
+                ("Precio de venta de la vivienda",
+                 format_eur(precio_valor) if precio_valor > 0 else "................."),
                 ("Anejos y servicios accesorios", _texto_o(captacion.get("precio_anejos"),
                                                            "Incluidos en el precio anterior")),
                 "El precio indicado no incluye los tributos ni los gastos que se detallan a continuación.",
@@ -89377,10 +89395,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             set_clause = ", ".join([f"{key} = ?" for key in updates])
             values = list(updates.values()) + [now, record_id]
-            conn.execute(
+            cur = conn.execute(
                 f"UPDATE fin_checklist SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
+            # Faltaban las dos líneas siguientes: sin `commit` el cambio se perdía al
+            # devolver la conexión al pool, y sin `json_response` el servidor cerraba la
+            # conexión sin contestar nada —el navegador se queda colgado, que es peor
+            # que un error.
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id,
+                                 "actualizado": int(getattr(cur, "rowcount", 0) or 0)})
             return
         elif parsed.path == "/api/ai_seguros_copilot":
             if not openai_available():
@@ -89545,6 +89570,11 @@ class Handler(BaseHTTPRequestHandler):
                     operacion = dict(operacion)
                 except Exception:
                     pass
+            # `inmueble` y `captacion` salen de la base tal cual. En Postgres llegan como
+            # diccionario y `.get` funciona; en SQLite son `sqlite3.Row` y revienta con
+            # AttributeError en la primera línea que las lee. Se normalizan las tres igual.
+            inmueble = dict(inmueble) if inmueble is not None else {}
+            captacion = dict(captacion) if captacion is not None else {}
 
             def suggested_defaults():
                 today = datetime.now(timezone.utc).date().isoformat()
@@ -94022,6 +94052,33 @@ class Handler(BaseHTTPRequestHandler):
             nombre_previo = str(row_value(fila, "nombre", "") or "")
 
             columnas = table_columns(conn, "clientes") or set()
+
+            # Antes de borrar nada, soltar las referencias de tablas que se conservan.
+            # Sin esto la clave ajena aborta la supresión —y en Postgres deja la
+            # transacción envenenada, así que todo lo que venga después en la misma
+            # petición también revienta.
+            soltados = {}
+            for tabla, col_fk, tabla_padre, col_cliente in RGPD_VINCULOS_A_SOLTAR:
+                cols_hijo = table_columns(conn, tabla) or set()
+                cols_padre = table_columns(conn, tabla_padre) or set()
+                if col_fk not in cols_hijo or col_cliente not in cols_padre:
+                    continue
+                # Se cuenta antes de actualizar: `rowcount` no es fiable con todos los
+                # envoltorios de conexión y devolvía -1, así que el acuse salía vacío
+                # aunque el vínculo sí se hubiera soltado.
+                n = int(row_value(conn.execute(
+                    f"SELECT COUNT(*) AS total FROM {tabla} WHERE {col_fk} IN "
+                    f"(SELECT id FROM {tabla_padre} WHERE {col_cliente} = ?)",
+                    (cliente_id,),
+                ).fetchone(), "total", 0) or 0)
+                if n > 0:
+                    conn.execute(
+                        f"UPDATE {tabla} SET {col_fk} = NULL WHERE {col_fk} IN "
+                        f"(SELECT id FROM {tabla_padre} WHERE {col_cliente} = ?)",
+                        (cliente_id,),
+                    )
+                    soltados[tabla] = n
+
             borrados = {}
             for tabla, columna in RGPD_TABLAS_A_BORRAR:
                 cols = table_columns(conn, tabla) or set()
@@ -94072,6 +94129,9 @@ class Handler(BaseHTTPRequestHandler):
                 "cliente_id": cliente_id,
                 "motivo": motivo,
                 "borrado": borrados,
+                # Qué referencias se soltaron: la fila se queda, sólo deja de apuntar a
+                # algo que se ha suprimido.
+                "desvinculado": soltados,
                 "conservado": conservados,
                 "columnas_vaciadas": [c for c in RGPD_COLUMNAS_IDENTIFICATIVAS if c in columnas],
             }
@@ -94094,6 +94154,9 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": True,
                     "nombre_previo": nombre_previo,
                     "borrado": borrados,
+                    # Quien pide el acuse de la supresión también tiene derecho a saber
+                    # qué se conservó y dejó de apuntar a lo suprimido.
+                    "desvinculado": soltados,
                     "conservado": conservados,
                     "aviso": (
                         "La ficha ya no identifica a nadie. Se conservan los registros con "

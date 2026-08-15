@@ -263,6 +263,104 @@ class NingunEndpointRevientaTests(Agencia):
         self.assertNotIn("inmueble_id", str(r["json"]))
 
 
+class NingunaEscrituraRevientaTests(Agencia):
+    """La primera auditoría barrió sólo los GET: 189 endpoints contestaron 404 porque
+    son POST y no se probó ni uno, o sea el 32 % del módulo. Al barrer las escrituras
+    salieron tres fallos en el primer minuto, uno de ellos cerrando la conexión sin
+    contestar nada."""
+
+    OTROS_MODULOS = NingunEndpointRevientaTests.OTROS_MODULOS
+
+    def test_ningun_post_revienta_ni_deja_al_cliente_colgado(self):
+        import re
+        import urllib.error
+        rutas = sorted({r for r in re.findall(r'"(/api/[a-z_0-9]+)"', SERVER)
+                        if not any(o in r for o in self.OTROS_MODULOS)
+                        and "catastro" not in r})   # el Catastro es un servicio externo
+        cuerpo = {
+            "workspace_id": self.ws, "empresa_id": "emp1", "id": "inm1",
+            "inmueble_id": "inm1", "cliente_id": "cli1", "demanda_id": "dem1",
+            "nombre": "Prueba", "telefono": "600111222", "email": "p@x.test",
+            "direccion": "Calle 1", "precio": 200000, "estado": "Activa", "tipo": "Piso",
+        }
+        rotos = []
+        for ruta in rutas:
+            try:
+                r = self._post(ruta, cuerpo)
+            except Exception as e:
+                rotos.append((ruta, f"conexión cortada: {type(e).__name__}")); continue
+            if r["estado"] >= 500:
+                rotos.append((ruta, f'{r["estado"]} {str(r["json"])[:90]}'))
+        self.assertEqual(rotos, [], f"escrituras que revientan: {rotos}")
+
+
+class ElDerechoDeSupresionFuncionaTests(Agencia):
+    """`cliente_suprimir` es el artículo 17 del RGPD y estaba roto: borraba las demandas
+    antes que los cruces que apuntan a ellas, la clave ajena saltaba y la supresión se
+    caía entera. En Postgres, además, ese fallo deja la transacción abortada, así que
+    todo lo que viniera después en la misma petición reventaba también —eso es el
+    `InFailedSqlTransaction` que se veía en pantalla."""
+
+    def test_se_suprime_sin_romper_las_claves_ajenas(self):
+        r = self._post("/api/cliente_suprimir",
+                       {"workspace_id": self.ws, "cliente_id": "cli1"})
+        self.assertEqual(r["estado"], 200, r["json"])
+        self.assertTrue(r["json"]["ok"])
+
+    def test_la_ficha_deja_de_identificar_a_nadie(self):
+        self._post("/api/cliente_suprimir", {"workspace_id": self.ws, "cliente_id": "cli1"})
+        fila = self.conn.execute(
+            "SELECT nombre, telefono, email FROM clientes WHERE id = 'cli1'").fetchone()
+        self.assertNotIn("Carlos", fila["nombre"])
+        self.assertFalse(fila["telefono"])
+        self.assertFalse(fila["email"])
+
+    def test_lo_que_se_conserva_suelta_el_vinculo_pero_no_se_borra(self):
+        """Una visita no está en la lista de lo que se borra, así que se queda. Lo que no
+        puede es seguir apuntando a una demanda suprimida: la clave ajena lo impediría."""
+        antes = self.conn.execute("SELECT COUNT(*) c FROM visitas").fetchone()["c"]
+        self.assertGreater(antes, 0)
+        r = self._post("/api/cliente_suprimir", {"workspace_id": self.ws, "cliente_id": "cli1"})
+        self.assertEqual(self.conn.execute("SELECT COUNT(*) c FROM visitas").fetchone()["c"], antes)
+        self.assertEqual(r["json"]["desvinculado"].get("visitas"), antes)
+        self.assertIsNone(self.conn.execute(
+            "SELECT demanda_id FROM visitas LIMIT 1").fetchone()["demanda_id"])
+
+    def test_los_hijos_se_borran_antes_que_sus_padres(self):
+        """El orden de la lista es la corrección: si alguien vuelve a poner `demandas`
+        por delante de `inmueble_compradores`, esto lo dice antes que producción."""
+        tablas = [t for t, _ in S.RGPD_TABLAS_A_BORRAR]
+        self.assertLess(tablas.index("inmueble_compradores"), tablas.index("demandas"))
+
+
+class LasRespuestasLleganTests(Agencia):
+    """`fin_checklist_update` hacía el UPDATE y volvía sin `commit` y sin responder: el
+    cambio se perdía al devolver la conexión al pool y el navegador se quedaba colgado
+    esperando una respuesta que no llegaba nunca. Un fallo silencioso es malo; una
+    petición que no contesta lo es más, porque ni siquiera se puede reintentar."""
+
+    def _con_checklist(self):
+        self._ins("asesoramientos_financiacion",
+                  dict(id="fa1", empresa_id="emp1", workspace_id=self.ws, cliente_id="cli2",
+                       created_at=AHORA, updated_at=AHORA))
+        self._ins("fin_checklist", dict(id="fc1", asesoramiento_id="fa1", tarea="Nóminas",
+                                        estado="Pendiente", created_at=AHORA, updated_at=AHORA))
+
+    def test_contesta_y_guarda(self):
+        self._con_checklist()
+        r = self._post("/api/fin_checklist_update", {"id": "fc1", "estado": "Hecho"})
+        self.assertEqual(r["estado"], 200, r["json"])
+        self.assertTrue(r["json"]["ok"])
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM fin_checklist WHERE id = 'fc1'").fetchone()["estado"], "Hecho")
+
+    def test_el_copiloto_del_encargo_no_revienta_con_una_fila_de_sqlite(self):
+        """Leía las filas de la base con `.get`, que en Postgres funciona y en SQLite
+        lanza AttributeError. Ahora contesta lo que falta en vez de caerse."""
+        r = self._post("/api/ai_inmo_encargo_copilot", {"inmueble_id": "inm1", "task": "rellenar"})
+        self.assertLess(r["estado"], 500, r["json"])
+
+
 class LosDocumentosSalenYSalenLlenosTests(Agencia):
     DOCUMENTOS = [
         ("Nota de encargo (venta)", "/api/inmueble_encargo_pdf?id=inm1&tipo_operacion=venta"),
@@ -314,6 +412,22 @@ class LosDocumentosSalenYSalenLlenosTests(Agencia):
             "/api/inmueble_encargo_pdf?id=inm1&precio_venta=285000&honorarios_pct=3&iva_pct=21"
             "&cargas=Hipoteca%20con%20Unicaja")["cuerpo"])
         self.assertIn("a excepción de las siguientes: Hipoteca con Unicaja", texto)
+
+    def test_la_nota_de_precio_no_inventa_un_cero(self):
+        """Sin precio en la ficha imprimía «Precio de venta de la vivienda: 0,00 €». En
+        un papel que se entrega al comprador eso no es un cero: es un hueco disfrazado
+        de cifra."""
+        self.conn.execute("UPDATE inmuebles SET precio_objetivo = NULL WHERE id = 'inm1'")
+        self.conn.commit()
+        texto = self._frase_pdf(self._get(
+            "/api/inmueble_consumo_pdf?id=inm1&kind=venta_precio")["cuerpo"])
+        self.assertNotIn("Precio de venta de la vivienda: 0,00 €", texto)
+        self.assertIn("Precio de venta de la vivienda: ....", texto)
+
+    def test_con_precio_lo_dice(self):
+        texto = self._frase_pdf(self._get(
+            "/api/inmueble_consumo_pdf?id=inm1&kind=venta_precio")["cuerpo"])
+        self.assertIn("Precio de venta de la vivienda: 285.000,00 €", texto)
 
     def test_no_se_imprime_un_xx_xx_xxxx_en_un_contrato(self):
         """El resto del documento deja los huecos con puntos suspensivos. Aquí salía un
