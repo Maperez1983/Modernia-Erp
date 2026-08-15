@@ -379,3 +379,90 @@ class ElRegistroDeConciliacionTests(BaseGestoria):
         self._valida(movimiento_id="mov-1")
         self._valida(movimiento_id="mov-2")
         self.assertEqual(self._cuantas(), 2)
+
+
+class ElRolDeLecturaTests(BaseGestoria):
+    """Quien sólo puede mirar, que no escriba.
+
+    Ya pasó en otro módulo —el rol «Lectura» escribía igual— y en Gestoría hay
+    834 trabajos, 5.041 documentos y 656 apuntes contables, con dinero: los
+    trabajos suman 352.921,40 € y los apuntes 757.234,29 €.
+    """
+
+    def setUp(self):
+        super().setUp()
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("usuarios", dict(id="u-lec", nombre="Sólo Mira", usuario="mirona",
+                                   email="lec@x.test", rol="Lectura", servicio="Gestoría",
+                                   activo=1, password_hash=S.hash_password(CLAVE), **base))
+        self._ins("workspace_miembros", dict(id="wm-lec", workspace_id=self.ws_a,
+                                             usuario_id="u-lec", rol="Miembro", **base))
+        self.cookie_lec = self._login("mirona")
+
+    def test_puede_leer(self):
+        """El control: si no lee, el test de escritura no probaría nada."""
+        r = self._get("/api/gestoria_docs?cliente_id=cli-a", self.cookie_lec)
+        self.assertEqual(r["estado"], 200)
+
+    def test_no_borra_un_trabajo(self):
+        self._post("/api/gestoria_trabajos_delete", {"id": "tra-a"}, self.cookie_lec)
+        self.assertTrue(self._existe("gestoria_trabajos", "tra-a"))
+
+    def test_no_borra_un_documento(self):
+        self._post("/api/gestoria_docs_delete", {"id": "doc-a"}, self.cookie_lec)
+        self.assertTrue(self._existe("gestoria_docs", "doc-a"))
+
+    def test_no_borra_un_apunte_contable(self):
+        self._post("/api/gestoria_contabilidad_delete", {"id": "con-a"}, self.cookie_lec)
+        self.assertTrue(self._existe("gestoria_contabilidad", "con-a"))
+
+    def test_no_cambia_el_importe_de_un_trabajo(self):
+        self._post("/api/gestoria_trabajos_update",
+                   {"id": "tra-a", "importe": 99999}, self.cookie_lec)
+        self.assertEqual(self.conn.execute(
+            "SELECT importe FROM gestoria_trabajos WHERE id='tra-a'").fetchone()["importe"], 150.0)
+
+    def test_no_cambia_un_apunte_contable(self):
+        self._post("/api/gestoria_contabilidad_update",
+                   {"id": "con-a", "importe": 99999, "concepto": "Colado"}, self.cookie_lec)
+        f = self.conn.execute(
+            "SELECT importe, concepto FROM gestoria_contabilidad WHERE id='con-a'").fetchone()
+        self.assertEqual(f["importe"], 300.0)
+        self.assertEqual(f["concepto"], "Minuta A")
+
+
+class ElDetectorDeIbanTests(unittest.TestCase):
+    """Un IBAN escrito como se imprime.
+
+    De las 3.165 cadenas guardadas como «cuenta detectada» en las declaraciones de
+    renta, 2.158 no son un IBAN —«ESTATALCORRESPONDIENTEAL», «ESIMPUESTOSOBRELA-
+    RENTADE»—, pero eso viene de la importación masiva y el detector de hoy ya no
+    las produce. Lo que sí fallaba hoy es el caso contrario: `ES 11 2100 …`, con un
+    espacio entre el país y los dígitos de control, no se reconocía.
+    """
+
+    FORMATOS = (
+        "ES1121000418450200051332",
+        "ES11 2100 0418 4502 0005 1332",
+        "ES 11 2100 0418 4502 0005 1332",
+        "ES11-2100-0418-4502-0005-1332",
+        "Domiciliación en ES1121000418450200051332.",
+        "IBAN ES 11 2100 0418 4502 0005 1332 del titular",
+    )
+
+    def test_todos_los_formatos_habituales(self):
+        for texto in self.FORMATOS:
+            with self.subTest(texto=texto):
+                self.assertIn("ES1121000418450200051332",
+                              S.extraer_ibans_de_texto(texto), texto)
+
+    def test_no_se_inventa_cuentas_con_palabras_que_empiezan_por_es(self):
+        """Lo que llenó la base: texto del propio modelo 100 leído como cuenta."""
+        for texto in ("IMPUESTO SOBRE LA RENTA DE LAS PERSONAS FISICAS EJERCICIO 2024",
+                      "ESTATAL CORRESPONDIENTE AL EJERCICIO 2024",
+                      "ESPECIE INGRESOS A CUENTA DE"):
+            self.assertEqual(S.extraer_ibans_de_texto(texto), [], texto)
+
+    def test_ni_un_numero_corto_ni_uno_largo(self):
+        self.assertEqual(S.extraer_ibans_de_texto("ES112100041845020005"), [])
+        self.assertEqual(S.extraer_ibans_de_texto("ES112100041845020005133299"), [])
