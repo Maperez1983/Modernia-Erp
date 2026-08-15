@@ -68616,6 +68616,15 @@ class Handler(BaseHTTPRequestHandler):
       (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     const eur = (n) => (Number(n) || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR",
       maximumFractionDigits: 0 });
+    // Las fechas viajan en ISO porque el servidor las ordena y compara con ellas
+    // («¿esta cita es futura?»). Aquí se pintan como se escriben en España: un
+    // comprador que lee «2026-08-28» en la ficha de su casa piensa que el portal
+    // está a medio hacer. Si no viene con la forma esperada, se deja tal cual.
+    const fecha = (v) => {
+      const t = String(v == null ? "" : v).trim();
+      const m = t.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/);
+      return m ? `${m[3]}/${m[2]}/${m[1]}` + (m[4] ? ` ${m[4]}` : "") : t;
+    };
     const clave = "portal_busqueda_sesion";
     const sesion = () => { try { return sessionStorage.getItem(clave) || localStorage.getItem(clave) || ""; }
       catch (e) { return ""; } };
@@ -68727,12 +68736,12 @@ class Handler(BaseHTTPRequestHandler):
       const pedida = x.cita && String(x.cita.estado || "").toLowerCase() === "solicitada";
       const cita = x.cita && x.cita.futura
         ? `<div class="etiqueta${pedida ? " aviso" : ""}">${pedida
-            ? "Visita pedida para el " + esc(x.cita.fecha) + " · pendiente de confirmar"
-            : "Visita el " + esc(x.cita.fecha) + (x.cita.hora ? " a las " + esc(x.cita.hora) : "")}</div>`
+            ? "Visita pedida para el " + esc(fecha(x.cita.fecha)) + " · pendiente de confirmar"
+            : "Visita el " + esc(fecha(x.cita.fecha)) + (x.cita.hora ? " a las " + esc(x.cita.hora) : "")}</div>`
         : "";
       const novedades = (x.novedades || []).length
         ? `<div class="novedades">` + x.novedades.map((n) =>
-            `<div><b>${esc(n.texto)}</b> · ${esc(n.fecha)}${n.nuevo ? '<span class="marca">nuevo</span>' : ""}</div>`
+            `<div><b>${esc(n.texto)}</b> · ${esc(fecha(n.fecha))}${n.nuevo ? '<span class="marca">nuevo</span>' : ""}</div>`
           ).join("") + `</div>`
         : "";
       const docs = (x.documentos || []).map((d) =>
@@ -68860,7 +68869,7 @@ class Handler(BaseHTTPRequestHandler):
       const agenda = document.getElementById("agenda");
       agenda.innerHTML = (d.agenda || []).length
         ? d.agenda.map((c) => `<div class="item"><span>${esc(c.donde || "Visita")}</span>
-            <span class="suave">${esc(c.fecha)}${c.hora ? " · " + esc(c.hora) : ""}</span></div>`).join("")
+            <span class="suave">${esc(fecha(c.fecha))}${c.hora ? " · " + esc(c.hora) : ""}</span></div>`).join("")
         : '<div class="suave">Todavía no tienes ninguna visita concertada.</div>';
       if (d.agenda_es_pasado && (d.agenda || []).length) {
         agenda.insertAdjacentHTML("afterbegin",
@@ -68871,14 +68880,14 @@ class Handler(BaseHTTPRequestHandler):
       hilo.innerHTML = (d.mensajes || []).length
         ? d.mensajes.map((m) => `<div class="sobre ${m.mio ? "mio" : ""}">
             <div>${esc(m.texto)}</div>
-            <div class="suave" style="font-size:12px">${esc(m.quien)} · ${esc(m.fecha)}</div></div>`).join("")
+            <div class="suave" style="font-size:12px">${esc(m.quien)} · ${esc(fecha(m.fecha))}</div></div>`).join("")
         : '<div class="suave">Escríbele lo que necesites.</div>';
 
       if ((d.pendiente_de_ti || []).length) {
         document.getElementById("cajaPendiente").style.display = "";
         document.getElementById("pendiente").innerHTML = d.pendiente_de_ti.map((p) =>
           `<div class="item"><span>${esc(p.tarea)}${p.donde ? " · " + esc(p.donde) : ""}</span>
-             <span class="suave">${esc(p.fecha_limite || "")}</span></div>`).join("");
+             <span class="suave">${esc(fecha(p.fecha_limite || ""))}</span></div>`).join("");
       }
 
       const firmas = (d.firmas || []).filter((f) => f.pendiente);
@@ -68990,16 +68999,16 @@ class Handler(BaseHTTPRequestHandler):
           if (o.nota) partes.push(`<div class="cual">${esc(o.nota)}</div>`);
           if (o.estado === "reserva_pendiente") {
             partes.push(`<div class="cual">Ingresa <strong>${eur(o.senal)}</strong>${
-              o.limite ? " antes del <strong>" + esc(o.limite) + "</strong>" : ""} en esta cuenta:</div>`);
+              o.limite ? " antes del <strong>" + esc(fecha(o.limite)) + "</strong>" : ""} en esta cuenta:</div>`);
             partes.push(`<div class="cuenta">${esc(o.iban)}</div>`);
             partes.push(`<div class="cual">Cuando lo tengas hecho, sube aquí el justificante.</div>`);
             partes.push(`<input type="file" class="justificante" accept=".pdf,.jpg,.jpeg,.png,.webp" />`);
           } else if (o.arras) {
             partes.push(`<div class="cual">Arras: <strong>${eur(o.arras.importe)}</strong>${
-              o.arras.fecha_firma ? " · firmadas el " + esc(o.arras.fecha_firma) : ""}</div>`);
+              o.arras.fecha_firma ? " · firmadas el " + esc(fecha(o.arras.fecha_firma)) : ""}</div>`);
             if (o.arras.fecha_escritura) {
               partes.push(`<div class="cual">Fecha límite para escriturar:
-                <strong>${esc(o.arras.fecha_escritura)}</strong></div>`);
+                <strong>${esc(fecha(o.arras.fecha_escritura))}</strong></div>`);
             }
             if (o.arras.notaria) partes.push(`<div class="cual">Notaría: ${esc(o.arras.notaria)}</div>`);
             if (o.siguiente) partes.push(`<div class="cual">${esc(o.siguiente)}</div>`);
@@ -69023,7 +69032,7 @@ class Handler(BaseHTTPRequestHandler):
               <div class="cual">Tu financiación: <strong>${esc(h.etiqueta)}</strong></div>
               ${barra}
               ${(h.hitos || []).map((x) =>
-                `<div class="hito"><b>${esc(x.etiqueta)}</b> · ${esc(x.fecha)}</div>`).join("")}
+                `<div class="hito"><b>${esc(x.etiqueta)}</b> · ${esc(fecha(x.fecha))}</div>`).join("")}
             </div>`);
           }
           partes.push(`</div>`);
@@ -69198,6 +69207,13 @@ class Handler(BaseHTTPRequestHandler):
     const eur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
     const pct = new Intl.NumberFormat("es-ES", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
     const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    // Las fechas llegan en ISO porque el servidor ordena y compara con ellas. Al
+    // comunero se le enseñan como se escriben aquí: «12/09/2026», no «2026-09-12».
+    const fecha = (x) => {
+      const t = String(x ?? "").trim();
+      const m = t.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/);
+      return m ? `${m[3]}/${m[2]}/${m[1]}` + (m[4] ? ` ${m[4]}` : "") : t;
+    };
     const app = document.getElementById("app");
     const token = new URLSearchParams(location.search).get("token") || "";
     // Se saca de la barra en cuanto lo tenemos: el enlace lleva la llave dentro y
@@ -69260,7 +69276,7 @@ class Handler(BaseHTTPRequestHandler):
             ${(d.juntas || []).length ? `<div class="card">
               <h2 style="font-size:16px;margin:0 0 8px;">Juntas</h2>
               <table><tbody>${d.juntas.map((x) => `<tr>
-                <td>${esc(x.fecha)}</td><td class="muted">${esc(x.tipo)}</td>
+                <td>${esc(fecha(x.fecha))}</td><td class="muted">${esc(x.tipo)}</td>
                 <td class="num"><a href="/api/workspace_fincas_portal_junta?tipo=convocatoria&ref=${encodeURIComponent(x.ref)}&token=${encodeURIComponent(token)}">Convocatoria</a>
                   · <a href="/api/workspace_fincas_portal_junta?tipo=acta&ref=${encodeURIComponent(x.ref)}&token=${encodeURIComponent(token)}">Acta</a></td>
               </tr>`).join("")}</tbody></table>
@@ -69270,7 +69286,7 @@ class Handler(BaseHTTPRequestHandler):
               <table><tbody>${d.documentos.map((x) => `<tr>
                 <td>${x.ref ? `<a href="/api/workspace_fincas_portal_doc?ref=${encodeURIComponent(x.ref)}&token=${encodeURIComponent(token)}">${esc(x.titulo)}</a>` : esc(x.titulo)}</td>
                 <td class="muted">${esc(x.tipo)}</td>
-                <td class="num muted">${x.ref ? esc(x.fecha) : esc(x.fecha) + " · sin fichero"}</td></tr>`).join("")}</tbody></table>
+                <td class="num muted">${x.ref ? esc(fecha(x.fecha)) : esc(fecha(x.fecha)) + " · sin fichero"}</td></tr>`).join("")}</tbody></table>
             </div>` : ""}
             <div class="card">
               <h2 style="font-size:16px;margin:0 0 8px;">Certificado de estar al corriente</h2>
@@ -69278,7 +69294,7 @@ class Handler(BaseHTTPRequestHandler):
               ${d.certificado.ref
                 ? `<p><a href="/api/workspace_fincas_portal_certificado_pdf?ref=${encodeURIComponent(d.certificado.ref)}&token=${encodeURIComponent(token)}">Descargar el certificado</a></p>`
                 : d.certificado.estado === "Solicitado"
-                ? `<div class="aviso">Solicitado el ${esc(d.certificado.fecha)}. Estará disponible en cuanto la administración confirme el pago${d.certificado.precio ? " de " + eur.format(d.certificado.precio) : ""}.</div>`
+                ? `<div class="aviso">Solicitado el ${esc(fecha(d.certificado.fecha))}. Estará disponible en cuanto la administración confirme el pago${d.certificado.precio ? " de " + eur.format(d.certificado.precio) : ""}.</div>`
                 : `<p>${d.certificado.precio ? "Precio: <strong>" + eur.format(d.certificado.precio) + "</strong>." : "Consulta el precio con tu administrador."}</p>
                    <button id="cert-pedir">Solicitar</button>
                    <div id="cert-aviso" style="margin-top:10px;"></div>`}
@@ -69286,7 +69302,7 @@ class Handler(BaseHTTPRequestHandler):
             <div class="card">
               <h2 style="font-size:16px;margin:0 0 8px;">Comunicar una incidencia</h2>
               ${(d.incidencias || []).length ? `<table><tbody>${d.incidencias.map((x) => `<tr>
-                <td>${esc(x.titulo)}</td><td class="muted">${esc(x.fecha)}</td>
+                <td>${esc(x.titulo)}</td><td class="muted">${esc(fecha(x.fecha))}</td>
                 <td class="num"><span class="estado" data-e="${esc(x.estado)}">${esc(x.estado)}</span></td>
               </tr>`).join("")}</tbody></table><p class="muted" style="margin-top:10px;">Estas son las que has comunicado tú.</p>` : ""}
               <label for="inc-titulo">Qué pasa</label>
@@ -69296,7 +69312,7 @@ class Handler(BaseHTTPRequestHandler):
               <button id="inc-enviar">Comunicar</button>
               <div id="inc-aviso" style="margin-top:10px;"></div>
             </div>
-            <p class="muted">Enlace válido hasta ${esc(d.caduca || "-")}. Si tienes dudas sobre algún recibo, habla con tu administrador.</p>`;
+            <p class="muted">Enlace válido hasta ${esc(fecha(d.caduca || "-"))}. Si tienes dudas sobre algún recibo, habla con tu administrador.</p>`;
           const pedirCert = document.getElementById("cert-pedir");
           if (pedirCert) pedirCert.addEventListener("click", async () => {
             const av = document.getElementById("cert-aviso");

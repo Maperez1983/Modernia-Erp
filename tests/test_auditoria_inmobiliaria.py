@@ -439,6 +439,53 @@ class LosDocumentosSalenYSalenLlenosTests(Agencia):
         self.assertNotIn("xx/xx/xxxx", texto)
 
 
+class LosPortalesEscribenLasFechasEnCastellanoTests(unittest.TestCase):
+    """Los tres portales los abre un cliente, no un informático. Las fechas viajan en
+    ISO porque el servidor ordena y compara con ellas —«¿esta cita es futura?»— pero al
+    llegar a la pantalla tienen que leerse como se escriben aquí.
+
+    El arreglo va en la capa que pinta, no en `_fecha_corta`: ese ayudante alimenta
+    ordenaciones (`key=lambda x: x["fecha"]`) y comparaciones (`fecha >= hoy`), y
+    cambiarlo a dd/mm/aaaa habría ordenado mal la agenda y clasificado como pasadas
+    citas futuras, sin que nada lo dijera."""
+
+    PORTALES = {
+        "comprador": 'if parsed.path == "/portal-busqueda":',
+        "propietario": 'if parsed.path == "/portal-venta":',
+        "comunero": 'if parsed.path == "/portal-comunidad":',
+    }
+
+    def _cuerpo(self, portal):
+        i = SERVER.index(self.PORTALES[portal])
+        siguientes = [SERVER.index(m) for m in self.PORTALES.values() if SERVER.index(m) > i]
+        return SERVER[i: min(siguientes) if siguientes else i + 60000]
+
+    def test_cada_portal_sabe_dar_formato_a_una_fecha(self):
+        for portal in self.PORTALES:
+            with self.subTest(portal=portal):
+                cuerpo = self._cuerpo(portal)
+                self.assertTrue(
+                    "const fecha = (" in cuerpo or "const fechaCorta = (" in cuerpo,
+                    f"el portal del {portal} no tiene con qué formatear una fecha")
+
+    def test_ninguna_fecha_se_pinta_en_crudo(self):
+        """`esc(x.fecha)` manda a la pantalla el ISO tal cual. Tiene que pasar por el
+        formateador."""
+        import re
+        for portal in self.PORTALES:
+            cuerpo = self._cuerpo(portal)
+            crudas = re.findall(
+                r'esc\(\s*(?!fecha\(|fechaCorta\(|haceCuanto\()[a-zA-Z_.]*\.'
+                r'(?:fecha|fecha_limite|caduca|fecha_firma|fecha_escritura)\b[^)]*\)', cuerpo)
+            with self.subTest(portal=portal):
+                self.assertEqual(crudas, [], f"fechas sin formatear en el portal del {portal}: {crudas}")
+
+    def test_el_ayudante_del_servidor_sigue_dando_iso(self):
+        """Si alguien «arregla» esto en `_fecha_corta`, la agenda se ordena mal."""
+        self.assertEqual(S._fecha_corta("2026-09-05T18:00:00"), "2026-09-05")
+        self.assertEqual(S._fecha_corta("2026-09-05 18:00"), "2026-09-05")
+
+
 class ElDashboardCalculaLoQueDiceTests(Agencia):
     """Que el panel pinte números no es que los números estén bien."""
 
