@@ -19197,24 +19197,7 @@ def _parse_renta_pdf_fields(text: str) -> dict:
         return " ".join(str(value or "").strip().split())
 
     def _find_ibans(text_value: str) -> list[str]:
-        raw_value = str(text_value or "")
-        if not raw_value:
-            return []
-        # IBAN España: ES + 22 dígitos (total 24 chars). Aceptamos separadores y espacios.
-        candidates = re.findall(r"\bES[0-9][0-9 \-]{20,32}\b", raw_value, flags=re.IGNORECASE)
-        out = []
-        seen = set()
-        for cand in candidates:
-            iban = re.sub(r"[^A-Z0-9]", "", cand.upper())
-            if not re.fullmatch(r"ES[0-9]{22}", iban):
-                continue
-            if iban in seen:
-                continue
-            seen.add(iban)
-            out.append(iban)
-            if len(out) >= 8:
-                break
-        return out
+        return extraer_ibans_de_texto(text_value)
 
     def _extract_date_after(label_pat: str, *, max_distance: int = 320) -> str:
         """
@@ -35710,6 +35693,34 @@ def texto_del_anuncio_es_nuestro(fila):
     if str(row_value(fila, "anuncio_generado_at", "") or "").strip():
         return True
     return not str(row_value(fila, "titulo_anuncio", "") or "").strip()
+
+
+def extraer_ibans_de_texto(text_value, *, limite=8):
+    """Los IBAN españoles que haya en un texto de OCR.
+
+    Estaba metida dentro de otra función, así que no había forma de probarla, y se
+    le escapaba **«ES 11 2100 0418 4502 0005 1332»** —con un separador entre el país
+    y los dígitos de control—, que es justo como se imprime en media documentación.
+
+    Lo que no hace es inventarse cuentas: en las declaraciones de renta importadas
+    hay 2.158 cadenas guardadas como cuenta que no lo son —«ESTATALCORRESPONDIENTEAL»,
+    «ESIMPUESTOSOBRELARENTADE»—, texto del propio modelo 100 que empieza por «ES».
+    Eso viene de la importación masiva; esta comprobación no lo deja pasar.
+    """
+    raw_value = str(text_value or "")
+    if not raw_value:
+        return []
+    candidatos = re.findall(r"\bES[ \-]?[0-9][0-9 \-]{20,32}\b", raw_value, flags=re.IGNORECASE)
+    salida, vistos = [], set()
+    for cand in candidatos:
+        iban = re.sub(r"[^A-Z0-9]", "", cand.upper())
+        if not re.fullmatch(r"ES[0-9]{22}", iban) or iban in vistos:
+            continue
+        vistos.add(iban)
+        salida.append(iban)
+        if len(salida) >= limite:
+            break
+    return salida
 
 
 def build_inmueble_anuncio_copy(inmueble):
