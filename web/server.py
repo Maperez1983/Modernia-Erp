@@ -105011,6 +105011,18 @@ class Handler(BaseHTTPRequestHandler):
             if not asiento_id:
                 json_response(self, {"error": "asiento_id requerido"}, status=400)
                 return
+            # Con el id bastaba: devolvía el asiento entero —empresa, cliente,
+            # concepto e importes— y todas sus líneas, de cualquier workspace. Se
+            # escapó en la primera pasada porque la prueba lo pedía por `id` y el
+            # endpoint lo llama `asiento_id`, así que contestaba 400 y parecía
+            # cerrado.
+            ok_amb, err_amb = enforce_gestoria_row_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                "gestoria_asientos", asiento_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb},
+                              status=404 if err_amb == "No encontrado" else 403)
+                return
             row = conn.execute(
                 """
                 SELECT a.*, COALESCE(f.numero, '') AS factura_numero, COALESCE(f.doc_key, '') AS factura_doc_key
