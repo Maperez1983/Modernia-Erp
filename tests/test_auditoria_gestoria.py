@@ -487,3 +487,90 @@ class ElExpedienteYSuClienteTests(unittest.TestCase):
             self.assertIn("cliente_id", cols)
             self.assertIn("cliente", cols)
             conn.close()
+
+
+class LoQueEntraEnUnaDeclaracionTests(unittest.TestCase):
+    """La limpieza, en el embudo de escritura y no a mano.
+
+    Los tres destrozos que había en producción entraron porque nadie miraba lo
+    que se guardaba en `renta_detalles`. `sanitize_renta_entry` es el sitio por el
+    que pasan todas las escrituras —pantalla, OCR e importación masiva—, así que
+    es ahí donde se comprueba.
+    """
+
+    def _entrada(self, **campos):
+        base = {"id": "renta-2024-declarante", "ejercicio": "2024"}
+        base.update(campos)
+        return S.sanitize_renta_entry(base)
+
+    # --- el estado civil ----------------------------------------------------
+    def test_el_volcado_del_ocr_no_se_guarda(self):
+        """77 declaraciones lo tenían; la mayor, 10.286 caracteres, con NIF de
+        hijos y cónyuges dentro."""
+        volcado = ("Casado/a 0007 Fecha de nacimiento 18/11/1971 0010 Cónyuge NIF 25060974J "
+                   "0013 Apellidos y nombre NUÑEZ BALLESTEROS JOAQUIN 0014 Sexo del cónyuge "
+                   "Hombre 0059 Hijos NIF 10217856Z 0075 NUÑEZ BEJAR JOAQUIN")
+        e = self._entrada(estado_civil=volcado)
+        self.assertEqual(e["estado_civil"], "Casado/a")
+        self.assertNotIn("25060974J", e["estado_civil"])
+        self.assertNotIn("NUÑEZ", e["estado_civil"])
+
+    def test_ni_el_ruido_pequeno(self):
+        for crudo, limpio in (("Casado/a [ooo7]", "Casado/a"),
+                              ("Soltero/a [ooos|", "Soltero/a"),
+                              ("Viudo/a 0008", "Viudo/a"),
+                              ("Divorciado/a 0 separado/a legalmente [ooo9]",
+                               "Divorciado/a o separado/a legalmente")):
+            with self.subTest(crudo=crudo):
+                self.assertEqual(self._entrada(estado_civil=crudo)["estado_civil"], limpio)
+
+    def test_el_largo_gana_al_corto_que_lleva_dentro(self):
+        """«Divorciado/a o separado/a legalmente» empieza por «Divorciado/a»."""
+        self.assertEqual(
+            self._entrada(estado_civil="Divorciado/a o separado/a legalmente")["estado_civil"],
+            "Divorciado/a o separado/a legalmente")
+
+    def test_un_valor_corto_que_no_conocemos_se_respeta(self):
+        """Puede ser algo escrito a mano; no lo tiramos."""
+        self.assertEqual(self._entrada(estado_civil="Pareja de hecho")["estado_civil"],
+                         "Pareja de hecho")
+
+    def test_uno_largo_que_no_es_un_estado_civil_no_se_guarda(self):
+        self.assertEqual(self._entrada(estado_civil="x" * 200)["estado_civil"], "")
+
+    # --- las cuentas --------------------------------------------------------
+    def test_el_texto_del_modelo_100_no_es_una_cuenta(self):
+        """2.158 de 3.165 «cuentas detectadas» eran esto."""
+        e = self._entrada(cuentas_detectadas=[
+            "ESTATALCORRESPONDIENTEAL", "ESIMPUESTOSOBRELARENTADE",
+            "ES1121000418450200051332"])
+        self.assertEqual(e["cuentas_detectadas"], ["ES1121000418450200051332"])
+
+    def test_la_cuenta_se_guarda_normalizada_y_sin_repetir(self):
+        e = self._entrada(cuentas_detectadas=[
+            "ES11 2100 0418 4502 0005 1332", "ES1121000418450200051332"])
+        self.assertEqual(e["cuentas_detectadas"], ["ES1121000418450200051332"])
+
+    # --- las rutas ----------------------------------------------------------
+    def test_no_se_guarda_la_ruta_del_ordenador_de_nadie(self):
+        """Las 1.091 rutas de producción eran de un disco local."""
+        e = self._entrada(source_files=["/Volumes/Mac Satecchi/Mac/x/Renta 2025.pdf",
+                                        "/Users/alguien/Downloads/Otra.pdf"],
+                          notas_ocr={"source_files": ["/Volumes/z/Tercera.pdf"], "score": 85})
+        self.assertEqual(e["source_files"], ["Renta 2025.pdf", "Otra.pdf"])
+        self.assertEqual(e["notas_ocr"]["source_files"], ["Tercera.pdf"])
+        self.assertEqual(e["notas_ocr"]["score"], 85, "lo demás de notas_ocr no se toca")
+
+    def test_un_nombre_suelto_se_queda_como_está(self):
+        self.assertEqual(self._entrada(source_files=["Renta 2025.pdf"])["source_files"],
+                         ["Renta 2025.pdf"])
+
+    # --- y lo que no debe tocar ---------------------------------------------
+    def test_el_dato_bueno_sigue_intacto(self):
+        e = self._entrada(estado_civil="Casado/a [ooo7]", resultado_declaracion=2332.65,
+                          casilla_505=21666.01, cliente_nif="74866767L",
+                          presentacion_fecha="2025-06-13")
+        self.assertEqual(e["resultado_declaracion"], 2332.65)
+        self.assertEqual(e["casilla_505"], 21666.01)
+        self.assertEqual(e["cliente_nif"], "74866767L")
+        self.assertEqual(e["presentacion_fecha"], "2025-06-13")
