@@ -439,6 +439,41 @@ class LosDocumentosSalenYSalenLlenosTests(Agencia):
         self.assertNotIn("xx/xx/xxxx", texto)
 
 
+class AbrirElCrmInmobiliarioNoDejaLaPantallaEnBlancoTests(unittest.TestCase):
+    """Pulsar «Inmobiliaria» en la portada abría la última vista usada, fuera de la
+    vertical que fuera. Quien había estado en Financiaciones aterrizaba en `crmViewFin`
+    —un panel de dos píxeles y vacío— y ahí se quedaba. Se reprodujo en el navegador las
+    tres veces que se intentó, con el perfil limpio.
+
+    No se vio leyendo el código: se vio entrando en el módulo."""
+
+    def _cuerpo(self):
+        i = APP.index("const openCrmInmobiliario = ()")
+        return APP[i: APP.index("\nconst ", i + 10)]
+
+    def test_no_se_reabre_una_vista_de_otra_vertical(self):
+        cuerpo = self._cuerpo()
+        self.assertIn("VISTAS_DE_OTRA_VERTICAL", cuerpo)
+        for vista in ("fin", "seguros", "gestoria"):
+            with self.subTest(vista=vista):
+                self.assertIn(f'"{vista}"', cuerpo)
+
+    def test_la_url_se_fija_antes_de_elegir_la_vista(self):
+        """`setCrmWorkspaceView` deduce la vertical del `?crm=` de la URL; si se escribe
+        después, la deduce de la vista anterior."""
+        cuerpo = self._cuerpo()
+        self.assertLess(cuerpo.index('currentParams.set("crm", "inmo")'),
+                        cuerpo.index("setCrmWorkspaceView("))
+
+    def test_la_version_del_cargador_sube_cuando_cambia_app_js(self):
+        """El navegador cachea `app.js?v=NNN`. Sin subir ese número, un arreglo del
+        front no llega a quien ya tiene la página abierta —ni a quien vuelve mañana."""
+        import re
+        m = re.search(r'"app\.js\?v=(\d+)"', HTML)
+        self.assertIsNotNone(m, "el cargador ya no referencia app.js con versión")
+        self.assertGreaterEqual(int(m.group(1)), 896)
+
+
 class LosPortalesEscribenLasFechasEnCastellanoTests(unittest.TestCase):
     """Los tres portales los abre un cliente, no un informático. Las fechas viajan en
     ISO porque el servidor ordena y compara con ellas —«¿esta cita es futura?»— pero al

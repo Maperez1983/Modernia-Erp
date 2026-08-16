@@ -30347,12 +30347,10 @@ const openCrmInmobiliario = () => {
   setTab("crm");
   updateTableVisibility();
   syncCrmLegalAvailability();
-  setCrmWorkspaceView(state.crmWorkspaceView || "resumen");
-  // Evita lanzar 3 requests grandes a la vez (Render/PG puede estar frío).
-  loadCrmCaptaciones();
-  window.setTimeout(() => loadCrmInmuebles(), 120);
-  window.setTimeout(() => loadCrmCompraventas(), 240);
-  // Mantener URL "crm=inmo" para que los deep-links funcionen aunque `openCompany` haya puesto `?empresa=...`.
+  // La URL, antes de elegir la vista: `setCrmWorkspaceView` deduce la vertical del
+  // `?crm=` y, si no lo encuentra, la deduce de la vista anterior.
+  // Mantener `crm=inmo` sirve además para que los deep-links funcionen aunque
+  // `openCompany` haya puesto `?empresa=...`.
   const currentParams = new URLSearchParams(window.location.search);
   ensureTenantParams(currentParams);
   currentParams.delete("empresa");
@@ -30361,6 +30359,19 @@ const openCrmInmobiliario = () => {
   currentParams.delete("poliza");
   currentParams.set("crm", "inmo");
   setUrlParams(currentParams);
+  // Abrir el CRM inmobiliario volvía a la última vista usada, fuera de la vertical
+  // que fuera: quien había estado en Financiaciones pulsaba «Inmobiliaria» y
+  // aterrizaba en `crmViewFin`, un panel de dos píxeles y vacío. Reproducible las
+  // tres veces que se probó, con el perfil limpio. Una vista de otra vertical no es
+  // «donde lo dejé» en ésta: se entra por la portada del módulo.
+  const VISTAS_DE_OTRA_VERTICAL = new Set(["fin", "seguros", "gestoria"]);
+  const vistaRecordada = String(state.crmWorkspaceView || "").trim();
+  setCrmWorkspaceView(
+    !vistaRecordada || VISTAS_DE_OTRA_VERTICAL.has(vistaRecordada) ? "resumen" : vistaRecordada);
+  // Evita lanzar 3 requests grandes a la vez (Render/PG puede estar frío).
+  loadCrmCaptaciones();
+  window.setTimeout(() => loadCrmInmuebles(), 120);
+  window.setTimeout(() => loadCrmCompraventas(), 240);
   // Asegura navegación base visible incluso si la URL venía sin `crm=inmo` (openCompany puede haberla sobrescrito).
   try {
     ensureCrmForcedInmoNavVisibility();
