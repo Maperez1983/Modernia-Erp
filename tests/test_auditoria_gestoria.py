@@ -574,3 +574,148 @@ class LoQueEntraEnUnaDeclaracionTests(unittest.TestCase):
         self.assertEqual(e["casilla_505"], 21666.01)
         self.assertEqual(e["cliente_nif"], "74866767L")
         self.assertEqual(e["presentacion_fecha"], "2025-06-13")
+
+
+class LaOtraMitadDelModuloTests(BaseGestoria):
+    """Los endpoints que la primera pasada no pudo probar.
+
+    De los 22 bloques sin comprobación de ámbito se demostraron ocho agujeros y se
+    cerraron. Los demás se quedaron sin probar por una razón tonta: sus tablas
+    están **a cero en producción** —sociedades, socios, actas, lotes de
+    importación— y no había con qué probarlos. Que no se usen hoy no significa que
+    no vayan a usarse, y el día que se usen el agujero estaría ahí.
+
+    Aquí se siembran a mano y se prueba lo mismo: que el gestor de un workspace no
+    alcance lo del otro.
+    """
+
+    def setUp(self):
+        super().setUp()
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        for suf in ("a", "b"):
+            emp = f"emp-{suf}"
+            self._ins("gestoria_sociedades", dict(
+                id=f"soc-{suf}", empresa_id=emp, denominacion=f"Sociedad {suf.upper()} SL",
+                cif=f"B1234567{suf}", tipo_social="SL", capital_social=3000, estado="Activa", **base))
+            self._ins("gestoria_socios", dict(
+                id=f"sio-{suf}", sociedad_id=f"soc-{suf}", empresa_id=emp,
+                nombre=f"Socio {suf.upper()}", documento=f"1111111{suf}", rol="Administrador",
+                porcentaje=100, **base))
+            self._ins("gestoria_actas", dict(
+                id=f"act-{suf}", sociedad_id=f"soc-{suf}", empresa_id=emp,
+                titulo=f"Junta {suf.upper()}", tipo_acta="Ordinaria", numero_acta="1",
+                fecha_acta="2026-06-30", estado="Borrador", requiere_firma=1, **base))
+            self._ins("gestoria_acta_firmas", dict(
+                id=f"fir-{suf}", acta_id=f"act-{suf}", empresa_id=emp, sociedad_id=f"soc-{suf}",
+                firmante_nombre=f"Firmante {suf.upper()}", firmante_documento=f"2222222{suf}",
+                firmante_rol="Administrador", metodo_firma="click", acepta_terminos=1, **base))
+            self._ins("gestoria_cuentas_bancarias", dict(
+                id=f"cta-{suf}", empresa_id=emp, iban=f"ES112100041845020005133{suf[0]}",
+                banco_nombre=f"Banco {suf.upper()}", titular=f"Titular {suf.upper()}",
+                es_principal=1, **base))
+            self._ins("gestoria_movimientos_bancarios", dict(
+                id=f"mov-{suf}", empresa_id=emp, cuenta_bancaria_id=f"cta-{suf}",
+                fecha_operacion="2026-07-01", concepto=f"Transferencia {suf.upper()}",
+                importe=1000.0, **base))
+            self._ins("gestoria_asientos", dict(
+                id=f"asi-{suf}", empresa_id=emp, cliente_id=f"cli-{suf}", fecha="2026-07-01",
+                concepto=f"Asiento {suf.upper()}", diario="General",
+                total_debe=1000.0, total_haber=1000.0, punteado_banco=0, **base))
+            # El diario se arma de las líneas, no del asiento: sin ellas
+            # `/api/gestoria_libros` devolvía vacío también para el suyo y el test
+            # no probaba nada.
+            self._ins("gestoria_asiento_lineas", dict(
+                id=f"lin-{suf}", asiento_id=f"asi-{suf}", cuenta="43000000",
+                descripcion=f"Cliente {suf.upper()}", debe=1000.0, haber=0.0, **base))
+            self._ins("gestoria_asiento_lineas", dict(
+                id=f"lin2-{suf}", asiento_id=f"asi-{suf}", cuenta="70500000",
+                descripcion=f"Prestación de servicios {suf.upper()}", debe=0.0, haber=1000.0, **base))
+            self._ins("gestoria_facturas", dict(
+                id=f"fac-{suf}", empresa_id=emp, cliente_id=f"cli-{suf}", tipo="Emitida",
+                numero=f"F-{suf}-1", fecha_emision="2026-07-01", descripcion=f"Minuta {suf.upper()}",
+                base_imponible=1000.0, cuota_iva=210.0, total=1210.0, **base))
+            self._ins("gestoria_import_lotes", dict(
+                id=f"lot-{suf}", empresa_id=emp, cliente_id=f"cli-{suf}", origen="excel",
+                estado="Pendiente", periodo="2026-T2", total_documentos=1, total_ok=1,
+                total_revisar=0, total_duplicado=0, total_error=0, **base))
+
+    def _no_ve(self, ruta, ajeno, que):
+        r = self._get(ruta, self.cookie_a)
+        crudo = json.dumps(r["json"], ensure_ascii=False)
+        self.assertNotIn(ajeno, crudo, f"{que}: el gestor A ha visto {ajeno} en {ruta}")
+
+    def test_las_sociedades(self):
+        self._no_ve("/api/gestoria_sociedades?empresa_id=emp-b", "Sociedad B SL", "sociedades")
+
+    def test_los_socios(self):
+        self._no_ve("/api/gestoria_socios?empresa_id=emp-b&sociedad_id=soc-b", "Socio B", "socios")
+
+    def test_las_actas(self):
+        self._no_ve("/api/gestoria_actas?empresa_id=emp-b&sociedad_id=soc-b", "Junta B", "actas")
+
+    def test_las_firmas_de_un_acta(self):
+        self._no_ve("/api/gestoria_acta_firmas?empresa_id=emp-b&acta_id=act-b",
+                    "Firmante B", "firmas")
+
+    def test_las_cuentas_bancarias(self):
+        """Un IBAN ajeno es de lo peor que se puede filtrar."""
+        self._no_ve("/api/gestoria_cuentas_bancarias?empresa_id=emp-b",
+                    "ES112100041845020005133b", "cuentas")
+
+    def test_los_movimientos_bancarios(self):
+        self._no_ve("/api/gestoria_movimientos_bancarios?empresa_id=emp-b",
+                    "Transferencia B", "movimientos")
+
+    def test_los_asientos(self):
+        self._no_ve("/api/gestoria_asientos?empresa_id=emp-b", "Asiento B", "asientos")
+
+    def test_un_asiento_suelto(self):
+        self._no_ve("/api/gestoria_asiento?asiento_id=asi-b", "Asiento B", "asiento")
+
+    def test_las_facturas(self):
+        self._no_ve("/api/gestoria_facturas?empresa_id=emp-b&cliente_id=cli-b",
+                    "F-b-1", "facturas")
+
+    def test_los_lotes_de_importacion(self):
+        self._no_ve("/api/gestoria_import_lotes?empresa_id=emp-b", "lot-b", "lotes")
+
+    def test_los_libros(self):
+        self._no_ve("/api/gestoria_libros?empresa_id=emp-b&cliente_id=cli-b"
+                    "&desde=2026-01-01&hasta=2026-12-31", "Asiento B", "libros")
+
+    def test_la_plantilla_de_excel(self):
+        """Ésta no se puede mirar por su contenido: devuelve un Excel binario, así
+        que buscar un texto dentro pasaría siempre y no probaría nada. Se mira lo
+        que sí dice: 403 para lo ajeno, y para lo propio no."""
+        ajena = self._get("/api/gestoria_excel_plantilla?empresa_id=emp-b&cliente_id=cli-b",
+                          self.cookie_a)
+        self.assertEqual(ajena["estado"], 403)
+        propia = self._get("/api/gestoria_excel_plantilla?empresa_id=emp-a&cliente_id=cli-a",
+                           self.cookie_a)
+        self.assertEqual(propia["estado"], 200)
+
+    CONTROLES = (
+        ("/api/gestoria_sociedades?empresa_id=emp-a", "Sociedad A SL"),
+        ("/api/gestoria_socios?empresa_id=emp-a&sociedad_id=soc-a", "Socio A"),
+        ("/api/gestoria_actas?empresa_id=emp-a&sociedad_id=soc-a", "Junta A"),
+        ("/api/gestoria_acta_firmas?empresa_id=emp-a&acta_id=act-a", "Firmante A"),
+        ("/api/gestoria_cuentas_bancarias?empresa_id=emp-a", "ES112100041845020005133a"),
+        ("/api/gestoria_movimientos_bancarios?empresa_id=emp-a", "Transferencia A"),
+        ("/api/gestoria_asientos?empresa_id=emp-a", "Asiento A"),
+        ("/api/gestoria_asiento?asiento_id=asi-a", "Asiento A"),
+        ("/api/gestoria_facturas?empresa_id=emp-a&cliente_id=cli-a", "F-a-1"),
+        ("/api/gestoria_import_lotes?empresa_id=emp-a", "lot-a"),
+        ("/api/gestoria_libros?empresa_id=emp-a&cliente_id=cli-a"
+         "&desde=2026-01-01&hasta=2026-12-31", "Asiento A"),
+    )
+
+    def test_lo_propio_sí_se_ve(self):
+        """El control, y no es un adorno: cuatro de las pruebas de arriba pasaban
+        porque el endpoint devolvía vacío también para el suyo —una firma que no
+        sembré, un parámetro que se llamaba `asiento_id` y no `id`, unas fechas que
+        faltaban—. Un test negativo que pasa por vacío es peor que no tenerlo."""
+        for ruta, esperado in self.CONTROLES:
+            with self.subTest(ruta=ruta):
+                r = self._get(ruta, self.cookie_a)
+                self.assertIn(esperado, json.dumps(r["json"], ensure_ascii=False),
+                              f"{ruta} no devuelve ni lo propio")
