@@ -43,7 +43,7 @@ try:
 except Exception:  # pragma: no cover
     ZoneInfo = None
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PurePath
 import unicodedata
 from email.message import EmailMessage
 from email.header import decode_header
@@ -36671,6 +36671,83 @@ def first_reasonable_renta_amount(values, reference=None, allow_zero=True):
     return None
 
 
+#: Los únicos estados civiles que declara el modelo 100. El orden importa: el
+#: largo va primero para que no lo corte el corto que lleva dentro.
+ESTADOS_CIVILES = (
+    "Divorciado/a o separado/a legalmente",
+    "Divorciado/a",
+    "Separado/a",
+    "Soltero/a",
+    "Casado/a",
+    "Viudo/a",
+)
+
+
+def estado_civil_publicable(valor):
+    """El estado civil, y sólo el estado civil.
+
+    En producción había **77 declaraciones cuyo `estado_civil` era el volcado
+    entero del OCR** —la mayor, 10.286 caracteres—: NIF del cónyuge, nombres y NIF
+    de los hijos, fechas de nacimiento, grados de discapacidad, referencias
+    catastrales e importes. Y ese campo se pinta en la ficha, así que abrir una de
+    esas declaraciones enseñaba la vida de otra familia en la línea del estado
+    civil. **88 NIF de terceros** llegaron ahí por ese camino.
+
+    También llegaban restos más pequeños —«Casado/a [ooo7]», «Soltero/a [ooos|»—
+    y el «o» leído como cero: «Divorciado/a 0 separado/a legalmente».
+    """
+    crudo = str(valor or "").strip()
+    if not crudo:
+        return ""
+    normalizado = re.sub(r"(?<=[a-zA-Z])\s0\s(?=[a-zA-Z])", " o ", crudo)
+    for canonico in ESTADOS_CIVILES:
+        if normalizado.lower().startswith(canonico.lower()):
+            return canonico
+    # No empieza por ninguno: si es corto puede ser un valor escrito a mano que no
+    # conocemos y se respeta; si es largo es el volcado, y ése no se guarda.
+    return crudo if len(crudo) <= 60 else ""
+
+
+def nombre_de_fichero_sin_ruta(valor):
+    """El nombre del fichero, sin decir dónde vive.
+
+    Las 1.091 rutas guardadas en producción eran absolutas y de un disco local
+    —`/Volumes/Mac Satecchi/…`—: en el servidor no sirven para nada y cuentan cómo
+    está montado el ordenador de quien hizo la importación.
+    """
+    texto = str(valor or "").strip()
+    if not texto:
+        return texto
+    return PurePath(texto).name or texto
+
+
+def sanea_restos_de_ocr(entrada):
+    """Quita del expediente lo que el OCR dejó por el camino.
+
+    Se aplica a la entrada ya normalizada, así que cubre cualquier vía de
+    escritura: la pantalla, el OCR y una importación masiva como la que dejó
+    2.158 cadenas guardadas como cuenta bancaria sin serlo.
+    """
+    if "estado_civil" in entrada:
+        entrada["estado_civil"] = estado_civil_publicable(entrada.get("estado_civil"))
+
+    cuentas = entrada.get("cuentas_detectadas")
+    if isinstance(cuentas, list):
+        limpias = []
+        for candidata in cuentas:
+            for iban in extraer_ibans_de_texto(str(candidata or ""), limite=1):
+                if iban not in limpias:
+                    limpias.append(iban)
+        entrada["cuentas_detectadas"] = limpias
+
+    if isinstance(entrada.get("source_files"), list):
+        entrada["source_files"] = [nombre_de_fichero_sin_ruta(x) for x in entrada["source_files"]]
+    notas = entrada.get("notas_ocr")
+    if isinstance(notas, dict) and isinstance(notas.get("source_files"), list):
+        notas["source_files"] = [nombre_de_fichero_sin_ruta(x) for x in notas["source_files"]]
+    return entrada
+
+
 def sanitize_renta_entry(entry):
     if not isinstance(entry, dict):
         return {}
@@ -36809,7 +36886,7 @@ def sanitize_renta_entry(entry):
     sanitized["precio_servicio"] = coerce_renta_money(entry.get("precio_servicio"))
     sanitized["responsable"] = str(entry.get("responsable") or "").strip()
     sanitized["fecha_cobro"] = str(entry.get("fecha_cobro") or "").strip()
-    return sanitized
+    return sanea_restos_de_ocr(sanitized)
 
 
 def sanitize_renta_entries(entries):
