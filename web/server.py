@@ -96858,7 +96858,14 @@ class Handler(BaseHTTPRequestHandler):
                     ),
                 )
                 # Sin estampar por ahora: ver `stamp_hipoteca_workspace`.
-        else:
+        elif parsed.path == "/api/hipotecas/firmar":
+            # Era un `else` a secas, y por tanto el cajón donde caía **cualquier**
+            # ruta admitida para POST que no tuviera rama propia aquí. Hay quince
+            # así —están implementadas en la vía GET, que es otra función—, seis de
+            # ellas de gestoría: un POST a `/api/gestoria_asiento_update` con `id` y
+            # `fecha_firma` firmaba una hipoteca y contestaba `{"ok": true}`. Sólo
+            # la propia, porque el aislamiento de abajo ya se comprueba, pero
+            # firmarla igual.
             hipoteca_id = payload.get("id")
             fecha_firma = payload.get("fecha_firma")
             estado = canonical_hipoteca_estado(payload.get("estado") or "Firmada")
@@ -96890,6 +96897,12 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (estado, fecha_firma, payload.get("anio"), now, hipoteca_id),
             )
+        else:
+            # Y lo que no encaja en ninguna rama, no pasa: antes seguía hasta el
+            # `commit` de abajo y contestaba `{"ok": true}` sin haber hecho nada,
+            # que es peor que un error porque el que llama se lo cree.
+            json_response(self, {"error": "Ruta no disponible por POST"}, status=404)
+            return
         conn.commit()
         if parsed.path == "/api/hipotecas":
             json_response(self, {"ok": True, "id": out_id, "created": created_flag})

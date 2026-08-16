@@ -719,3 +719,111 @@ class LaOtraMitadDelModuloTests(BaseGestoria):
                 r = self._get(ruta, self.cookie_a)
                 self.assertIn(esperado, json.dumps(r["json"], ensure_ascii=False),
                               f"{ruta} no devuelve ni lo propio")
+
+
+class LasEscriturasContablesTests(LaOtraMitadDelModuloTests):
+    """Los hermanos del asiento que se leía, y lo que salió al buscarlos.
+
+    Si `/api/gestoria_asiento` dejaba **leer** el asiento del otro workspace, lo
+    siguiente era ver si sus hermanos dejan cambiarlo. Resultó que no se les puede
+    ni llegar: `gestoria_asiento_update`, `_punteo_banco` y
+    `cuentas_bancarias_save` están declaradas como rutas POST válidas pero
+    implementadas en `handle_api`, que sólo se llama desde el GET. Ahí no existe
+    `payload`, así que por GET revientan con 500; y por POST no tenían rama propia
+    y caían en el `else` del final de la cadena, que era la firma de hipotecas.
+
+    Un POST a `/api/gestoria_asiento_update` con `id` y `fecha_firma` contestaba
+    `{"ok": true}` y dejaba la hipoteca firmada. Sólo la propia —el aislamiento de
+    esa rama ya se comprobaba— pero firmada igual, desde un botón de gestoría.
+
+    Quince rutas estaban así, seis de gestoría y nueve de otros módulos.
+    """
+
+    HUERFANAS = (
+        "/api/gestoria_asiento_update",
+        "/api/gestoria_asiento_punteo_banco",
+        "/api/gestoria_cuentas_bancarias_save",
+        "/api/gestoria_movimientos_bancarios_import",
+        "/api/gestoria_movimientos_bancarios_import_preview",
+    )
+
+    def _hipoteca(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("hipotecas", dict(id="hip-a", empresa_id="emp-a", cliente="Cliente A",
+                                    estado="Estudio", **base))
+        return lambda: dict(self.conn.execute(
+            "SELECT estado, fecha_firma FROM hipotecas WHERE id = 'hip-a'").fetchone())
+
+    def test_una_ruta_de_gestoria_no_firma_una_hipoteca(self):
+        lee = self._hipoteca()
+        for ruta in self.HUERFANAS:
+            with self.subTest(ruta=ruta):
+                r = self._post(ruta, {"empresa_nombre": "Empresa A", "id": "hip-a",
+                                      "fecha_firma": "2026-08-16", "estado": "Firmada"},
+                               self.cookie_a)
+                self.assertEqual(r["estado"], 404, f"{ruta} sigue entrando por la cadena")
+                self.assertEqual(lee()["estado"], "Estudio",
+                                 f"{ruta} ha firmado la hipoteca")
+
+    def test_y_tampoco_contesta_que_todo_ha_ido_bien(self):
+        """Lo que no se hace, no se dice que se ha hecho."""
+        r = self._post("/api/gestoria_asiento_update",
+                       {"empresa_nombre": "Empresa A", "asiento_id": "asi-a",
+                        "concepto": "X"}, self.cookie_a)
+        self.assertEqual(r["estado"], 404)
+        self.assertNotEqual(r["json"].get("ok"), True)
+        self.assertEqual(self.conn.execute(
+            "SELECT concepto FROM gestoria_asientos WHERE id='asi-a'").fetchone()["concepto"],
+            "Asiento A")
+
+    def test_firmar_una_hipoteca_sigue_funcionando(self):
+        """El control que impide que el arreglo rompa lo que sí debe pasar."""
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        lee = self._hipoteca()
+        self._ins("usuarios", dict(id="u-fin", nombre="Fina", usuario="fina",
+                                   email="f@x.test", rol="Administrador",
+                                   servicio="Financiación", activo=1,
+                                   password_hash=S.hash_password(CLAVE), **base))
+        self._ins("workspace_miembros", dict(id="wm-fin", workspace_id=self.ws_a,
+                                             usuario_id="u-fin", rol="Owner", **base))
+        r = self._post("/api/hipotecas/firmar",
+                       {"empresa_nombre": "Empresa A", "id": "hip-a",
+                        "fecha_firma": "2026-08-16", "estado": "Firmada"},
+                       self._login("fina"))
+        self.assertEqual(r["estado"], 200)
+        self.assertEqual(lee(), {"estado": "Firmada", "fecha_firma": "2026-08-16"})
+
+    def test_una_ruta_inventada_sigue_dando_404(self):
+        r = self._post("/api/esto_no_existe", {"empresa_nombre": "Empresa A"}, self.cookie_a)
+        self.assertEqual(r["estado"], 404)
+
+    # --- y los modelos, que sí tienen rama propia ---------------------------
+    def test_no_se_edita_un_modelo_ajeno(self):
+        self._post("/api/gestoria_modelos_update",
+                   {"empresa_nombre": "Empresa A", "id": "mod-b", "estado": "Presentado"},
+                   self.cookie_a)
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM gestoria_modelos WHERE id='mod-b'").fetchone()["estado"],
+            "Pendiente")
+
+    def test_ni_diciendo_que_uno_es_la_otra_empresa(self):
+        r = self._post("/api/gestoria_modelos_update",
+                       {"empresa_nombre": "Empresa B", "id": "mod-b", "estado": "Presentado"},
+                       self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM gestoria_modelos WHERE id='mod-b'").fetchone()["estado"],
+            "Pendiente")
+
+    def test_el_propio_sí_se_edita(self):
+        self._post("/api/gestoria_modelos_update",
+                   {"empresa_nombre": "Empresa A", "id": "mod-a", "estado": "Presentado"},
+                   self.cookie_a)
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM gestoria_modelos WHERE id='mod-a'").fetchone()["estado"],
+            "Presentado")
+
+    def test_no_se_borra_un_modelo_ajeno(self):
+        self._post("/api/gestoria_modelos_delete",
+                   {"empresa_nombre": "Empresa A", "id": "mod-b"}, self.cookie_a)
+        self.assertTrue(self._existe("gestoria_modelos", "mod-b"))
