@@ -66199,6 +66199,24 @@ def _run_data_continuity_guard(sqlite_db_path: str) -> dict:
     return {"ok": True, "snapshot": snap}
 
 
+def bool_del_cuerpo(payload, key, default=False):
+    """Un sí/no que viene en un JSON, no en la barra de direcciones.
+
+    `_bool_param` hace `params.get(key, [""])[0]`, que sobre un cuerpo JSON con
+    `{"punteado_banco": 1}` revienta, se traga la excepción y devuelve el valor
+    por defecto. Es decir: el endpoint que marcaba un asiento como cuadrado con el
+    banco **nunca podía marcarlo**, dijera lo que dijera la petición.
+    """
+    if key not in (payload or {}):
+        return bool(default)
+    valor = payload.get(key)
+    if isinstance(valor, bool):
+        return valor
+    if isinstance(valor, (int, float)):
+        return valor != 0
+    return str(valor or "").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
+
+
 def _bool_param(params, key, default=False):
     try:
         raw = (params.get(key, [""])[0] or "").strip().lower()
@@ -75378,7 +75396,7 @@ class Handler(BaseHTTPRequestHandler):
                     current_json = {}
             except Exception:
                 current_json = {}
-            cerrar = _bool_param(payload, "cerrar", default=False)
+            cerrar = bool_del_cuerpo(payload, "cerrar", default=False)
             cerrada_at = lote["valoracion_cerrada_at"]
             cerrada_by = lote["valoracion_cerrada_by"]
             if cerrar:
@@ -85169,7 +85187,7 @@ class Handler(BaseHTTPRequestHandler):
                 limit = max(1, int(payload.get("limit") or 100))
             except Exception:
                 limit = 100
-            rebuild_asiento = _bool_param(payload, "rebuild_asiento", default=True)
+            rebuild_asiento = bool_del_cuerpo(payload, "rebuild_asiento", default=True)
             where = ["f.empresa_id = ?", "COALESCE(f.raw_text, '') <> ''"]
             values = [empresa_id]
             if cliente_id:
@@ -96718,6 +96736,477 @@ class Handler(BaseHTTPRequestHandler):
                     return
             conn.execute("DELETE FROM gestoria_modelos WHERE id = ?", (record_id,))
             audit("gestoria_modelo", record_id, "eliminar", None, payload.get("usuario"))
+        elif parsed.path == "/api/gestoria_asiento_punteo_banco":
+            asiento_id = str(payload.get("asiento_id") or "").strip()
+            if not asiento_id:
+                json_response(self, {"error": "asiento_id requerido"}, status=400)
+                return
+            ok_amb, err_amb = enforce_gestoria_row_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                "gestoria_asientos", asiento_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb},
+                              status=404 if err_amb == "No encontrado" else 403)
+                return
+            row = conn.execute("SELECT id FROM gestoria_asientos WHERE id = ? LIMIT 1", (asiento_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "asiento no encontrado"}, status=404)
+                return
+            punteado = 1 if bool_del_cuerpo(payload, "punteado_banco", default=False) else 0
+            notas = str(payload.get("punteado_banco_notas") or "").strip() or None
+            punteado_at = str(payload.get("punteado_banco_at") or "").strip() or (now if punteado else None)
+            punteado_by = str(payload.get("punteado_banco_by") or payload.get("usuario") or "").strip() or None
+            conn.execute(
+                """
+                UPDATE gestoria_asientos
+                SET punteado_banco = ?,
+                    punteado_banco_at = ?,
+                    punteado_banco_by = ?,
+                    punteado_banco_notas = ?,
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (punteado, punteado_at if punteado else None, punteado_by if punteado else None, notas, now, asiento_id),
+            )
+            conn.commit()
+            updated = conn.execute(
+                """
+                SELECT a.*, COALESCE(f.numero, '') AS factura_numero, COALESCE(f.doc_key, '') AS factura_doc_key
+                FROM gestoria_asientos a
+                LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
+                WHERE a.id = ?
+                LIMIT 1
+                """,
+                (asiento_id,),
+            ).fetchone()
+            json_response(self, {"ok": True, "row": dict(updated) if updated else {}})
+            return
+
+        elif parsed.path == "/api/gestoria_asiento_update":
+            asiento_id = str(payload.get("asiento_id") or "").strip()
+            if not asiento_id:
+                json_response(self, {"error": "asiento_id requerido"}, status=400)
+                return
+            ok_amb, err_amb = enforce_gestoria_row_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                "gestoria_asientos", asiento_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb},
+                              status=404 if err_amb == "No encontrado" else 403)
+                return
+            row = conn.execute("SELECT * FROM gestoria_asientos WHERE id = ? LIMIT 1", (asiento_id,)).fetchone()
+            if not row:
+                json_response(self, {"error": "asiento no encontrado"}, status=404)
+                return
+            factura_id = str(payload.get("factura_id") or "").strip() or None
+            fecha = str(payload.get("fecha") or row["fecha"] or "").strip() or None
+            concepto = str(payload.get("concepto") or row["concepto"] or "").strip() or None
+            referencia = str(payload.get("referencia") or row["referencia"] or "").strip() or None
+            lines = payload.get("lineas") or []
+            if not isinstance(lines, list) or not lines:
+                json_response(self, {"error": "lineas requeridas"}, status=400)
+                return
+            has_banco_update = any(key in payload for key in ("punteado_banco", "punteado_banco_at", "punteado_banco_by", "punteado_banco_notas"))
+            punteado_banco = bool_del_cuerpo(payload, "punteado_banco", default=False) if "punteado_banco" in payload else None
+            punteado_banco_at = None
+            punteado_banco_by = None
+            punteado_banco_notas = None
+            if has_banco_update:
+                try:
+                    current_banco = 1 if int(row["punteado_banco"] or 0) == 1 else 0
+                except Exception:
+                    current_banco = 0
+                if punteado_banco is None:
+                    punteado_banco = current_banco
+                if punteado_banco == current_banco:
+                    punteado_banco_at = str(row["punteado_banco_at"] or "").strip() or None
+                    punteado_banco_by = str(row["punteado_banco_by"] or "").strip() or None
+                elif punteado_banco:
+                    punteado_banco_at = str(payload.get("punteado_banco_at") or "").strip() or now
+                    punteado_banco_by = str(payload.get("punteado_banco_by") or payload.get("usuario") or "").strip() or None
+                else:
+                    punteado_banco_at = None
+                    punteado_banco_by = None
+                punteado_banco_notas = str(payload.get("punteado_banco_notas") or row["punteado_banco_notas"] or "").strip() or None
+            normalized_lines = []
+            for item in lines:
+                if not isinstance(item, dict):
+                    continue
+                cuenta = str(item.get("cuenta") or "").strip()
+                descripcion = str(item.get("descripcion") or "").strip() or None
+                if not cuenta:
+                    continue
+                try:
+                    debe = round(parse_money_value(item.get("debe")), 2)
+                    haber = round(parse_money_value(item.get("haber")), 2)
+                except Exception:
+                    debe = 0.0
+                    haber = 0.0
+                impuesto_tipo = str(item.get("impuesto_tipo") or "").strip() or None
+                try:
+                    impuesto_pct = float(item.get("impuesto_pct")) if str(item.get("impuesto_pct") or "").strip() != "" else None
+                except Exception:
+                    impuesto_pct = None
+                normalized_lines.append(
+                    {
+                        "id": str(item.get("id") or os.urandom(16).hex()),
+                        "cuenta": cuenta,
+                        "descripcion": descripcion,
+                        "debe": debe,
+                        "haber": haber,
+                        "impuesto_tipo": impuesto_tipo,
+                        "impuesto_pct": impuesto_pct,
+                        "tercero_id": str(item.get("tercero_id") or "").strip() or None,
+                    }
+                )
+            try:
+                normalized_lines, total_debe, total_haber = ensure_asiento_balanced(normalized_lines, allow_adjustment=True)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            conn.execute(
+                """
+                UPDATE gestoria_asientos
+                SET factura_id = ?, fecha = ?, concepto = ?, referencia = ?, total_debe = ?, total_haber = ?,
+                    punteado_banco = COALESCE(?, punteado_banco),
+                    punteado_banco_at = COALESCE(?, punteado_banco_at),
+                    punteado_banco_by = COALESCE(?, punteado_banco_by),
+                    punteado_banco_notas = COALESCE(?, punteado_banco_notas),
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (
+                    factura_id,
+                    fecha,
+                    concepto,
+                    referencia,
+                    total_debe,
+                    total_haber,
+                    punteado_banco if has_banco_update else None,
+                    punteado_banco_at if has_banco_update else None,
+                    punteado_banco_by if has_banco_update else None,
+                    punteado_banco_notas if has_banco_update else None,
+                    now,
+                    asiento_id,
+                ),
+            )
+            conn.execute("DELETE FROM gestoria_asiento_lineas WHERE asiento_id = ?", (asiento_id,))
+            for item in normalized_lines:
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_asiento_lineas (
+                      id, asiento_id, tercero_id, cuenta, descripcion, debe, haber, impuesto_tipo, impuesto_pct, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (
+                        item["id"],
+                        asiento_id,
+                        item["tercero_id"],
+                        item["cuenta"],
+                        item["descripcion"],
+                        item["debe"],
+                        item["haber"],
+                        item["impuesto_tipo"],
+                        item["impuesto_pct"],
+                        now,
+                        now,
+                    ),
+                )
+            conn.commit()
+            updated = conn.execute(
+                """
+                SELECT a.*, COALESCE(f.numero, '') AS factura_numero, COALESCE(f.doc_key, '') AS factura_doc_key
+                FROM gestoria_asientos a
+                LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
+                WHERE a.id = ?
+                LIMIT 1
+                """,
+                (asiento_id,),
+            ).fetchone()
+            json_response(self, {"ok": True, "row": dict(updated) if updated else {}, "lineas": normalized_lines})
+            return
+
+        elif parsed.path == "/api/gestoria_cuentas_bancarias_save":
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            # La empresa venía en el cuerpo y nadie la contrastaba con la sesión:
+            # mandando el id de una cuenta ajena se le reescribía el IBAN.
+            ok_amb, err_amb = enforce_empresa_membership(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                empresa_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb or "No autorizado"}, status=403)
+                return
+            row_id = str(payload.get("id") or "").strip()
+            iban = normalize_gestoria_bank_account_number(payload.get("iban") or "")
+            banco_nombre = str(payload.get("banco_nombre") or "").strip() or None
+            cuenta_contable = str(payload.get("cuenta_contable") or "").strip() or None
+            titular = str(payload.get("titular") or "").strip() or None
+            es_principal = 1 if bool_del_cuerpo(payload, "es_principal", default=False) else 0
+            if not row_id and not iban:
+                json_response(self, {"error": "iban requerido"}, status=400)
+                return
+            existing = None
+            if row_id:
+                existing = conn.execute("SELECT * FROM gestoria_cuentas_bancarias WHERE id = ? LIMIT 1", (row_id,)).fetchone()
+            elif iban:
+                existing = conn.execute(
+                    "SELECT * FROM gestoria_cuentas_bancarias WHERE empresa_id = ? AND UPPER(COALESCE(iban, '')) = UPPER(?) LIMIT 1",
+                    (empresa_id, iban),
+                ).fetchone()
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE gestoria_cuentas_bancarias
+                    SET iban = ?, banco_nombre = ?, cuenta_contable = ?, titular = ?, es_principal = ?, updated_at = datetime(?)
+                    WHERE id = ?
+                    """,
+                    (iban or existing["iban"], banco_nombre, cuenta_contable, titular, es_principal, now, existing["id"]),
+                )
+                row_id = existing["id"]
+            else:
+                row_id = row_id or os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_cuentas_bancarias (
+                      id, empresa_id, iban, banco_nombre, cuenta_contable, titular, es_principal, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (row_id, empresa_id, iban, banco_nombre, cuenta_contable, titular, es_principal, now, now),
+                )
+            if es_principal:
+                conn.execute(
+                    """
+                    UPDATE gestoria_cuentas_bancarias
+                    SET es_principal = 0, updated_at = datetime(?)
+                    WHERE empresa_id = ? AND id <> ?
+                    """,
+                    (now, empresa_id, row_id),
+                )
+            conn.commit()
+            row = conn.execute("SELECT * FROM gestoria_cuentas_bancarias WHERE id = ? LIMIT 1", (row_id,)).fetchone()
+            json_response(self, {"ok": True, "row": dict(row) if row else {}})
+            return
+
+        elif parsed.path == "/api/gestoria_movimientos_bancarios_import_preview":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, payload.get("workspace_id") or "", write=False)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            try:
+                raw_bytes, _mime, _hint = decode_document_payload(payload, conn=conn, session=session)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            try:
+                movements = parse_gestoria_bank_extract(raw_bytes, filename=payload.get("filename") or "")
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            iban_detectados = detect_gestoria_bank_extract_ibans(raw_bytes, filename=payload.get("filename") or "")
+            preview = []
+            for mv in (movements or [])[:80]:
+                preview.append(
+                    {
+                        "fecha_operacion": mv.get("fecha_operacion") or "",
+                        "fecha_valor": mv.get("fecha_valor") or "",
+                        "concepto": mv.get("concepto") or "",
+                        "importe": mv.get("importe"),
+                        "saldo": mv.get("saldo"),
+                        "divisa": mv.get("divisa") or "EUR",
+                        "numero_documento": mv.get("numero_documento") or "",
+                        "referencia1": mv.get("referencia1") or "",
+                        "referencia2": mv.get("referencia2") or "",
+                    }
+                )
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "total": len(movements or []),
+                    "preview": preview,
+                    "iban_detectados": iban_detectados,
+                },
+            )
+            return
+
+        elif parsed.path == "/api/gestoria_movimientos_bancarios_import":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, payload.get("workspace_id") or "", write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            try:
+                raw_bytes, _mime, _hint = decode_document_payload(payload, conn=conn, session=session)
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            try:
+                movements = parse_gestoria_bank_extract(raw_bytes, filename=payload.get("filename") or "")
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            cuentas = fetch_gestoria_cuentas_bancarias(conn, empresa_id)
+            iban_detectados = detect_gestoria_bank_extract_ibans(raw_bytes, filename=payload.get("filename") or "")
+            cuenta_bancaria = pick_gestoria_cuenta_bancaria_for_extract(cuentas, iban_detectados)
+            cuenta_bancaria_id = cuenta_bancaria["id"] if cuenta_bancaria else None
+            origen_hash = hashlib.sha256(raw_bytes).hexdigest()
+            inserted = 0
+            skipped = 0
+            matched = 0
+            for mv in movements:
+                fecha_operacion = str(mv.get("fecha_operacion") or "").strip()
+                concepto = str(mv.get("concepto") or "").strip()
+                importe = round(parse_money_value(mv.get("importe") or 0), 2)
+                if not fecha_operacion or not concepto:
+                    continue
+                exists = conn.execute(
+                    """
+                    SELECT id FROM gestoria_movimientos_bancarios
+                    WHERE empresa_id = ?
+                      AND COALESCE(fecha_operacion, '') = COALESCE(?, '')
+                      AND ABS(COALESCE(importe, 0) - ?) < 0.009
+                      AND COALESCE(concepto, '') = ?
+                      AND COALESCE(origen_hash, '') = ?
+                    LIMIT 1
+                    """,
+                    (empresa_id, fecha_operacion, float(importe), concepto, origen_hash),
+                ).fetchone()
+                if exists:
+                    skipped += 1
+                    continue
+                mov_id = os.urandom(16).hex()
+                conn.execute(
+                    """
+                    INSERT INTO gestoria_movimientos_bancarios (
+                      id, empresa_id, cuenta_bancaria_id, fecha_operacion, fecha_valor, concepto, importe, saldo, divisa,
+                      codigo, numero_documento, referencia1, referencia2, info_adicional, origen_fichero, origen_hash,
+                      created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (
+                        mov_id,
+                        empresa_id,
+                        cuenta_bancaria_id,
+                        fecha_operacion,
+                        str(mv.get("fecha_valor") or fecha_operacion).strip() or fecha_operacion,
+                        concepto,
+                        float(importe),
+                        round(parse_money_value(mv.get("saldo") or 0), 2) if mv.get("saldo") is not None else None,
+                        str(mv.get("divisa") or "EUR").strip() or "EUR",
+                        str(mv.get("codigo") or "").strip() or None,
+                        str(mv.get("numero_documento") or "").strip() or None,
+                        str(mv.get("referencia1") or "").strip() or None,
+                        str(mv.get("referencia2") or "").strip() or None,
+                        str(mv.get("info_adicional") or "").strip() or None,
+                        str(payload.get("filename") or "").strip() or None,
+                        origen_hash,
+                        now,
+                        now,
+                    ),
+                )
+                result = match_gestoria_movimiento_bancario_asiento(
+                    conn,
+                    {
+                        "id": mov_id,
+                        "empresa_id": empresa_id,
+                        "fecha_operacion": fecha_operacion,
+                        "concepto": concepto,
+                        "importe": float(importe),
+                        "referencia1": mv.get("referencia1") or "",
+                        "referencia2": mv.get("referencia2") or "",
+                        "numero_documento": mv.get("numero_documento") or "",
+                    },
+                    now=now,
+                    lookback_days=10,
+                )
+                if result.get("matched"):
+                    matched += 1
+                    conn.execute(
+                        """
+                        UPDATE gestoria_movimientos_bancarios
+                        SET asiento_id = ?, punteado = 1, punteado_at = datetime(?), punteado_by = ?, matched_score = ?, matched_reason = ?, conciliacion_estado = ?, conciliacion_confianza = ?, regla_aplicada = ?, updated_at = datetime(?)
+                        WHERE id = ?
+                        """,
+                        (
+                            result.get("asiento_id"),
+                            now,
+                            str(payload.get("usuario") or "").strip() or None,
+                            result.get("score") or 0,
+                            result.get("reason") or "auto",
+                            "auto" if (result.get("linked") or result.get("matched")) else "pendiente",
+                            result.get("score") or 0,
+                            result.get("reason") or "",
+                            now,
+                            mov_id,
+                        ),
+                    )
+                inserted += 1
+            try:
+                run_gestoria_conciliacion_convergente(
+                    conn,
+                    empresa_id,
+                    now,
+                    max_passes=4,
+                    lookback_days=10,
+                    historico_cerrado=True,
+                )
+            except Exception:
+                pass
+            final_counts = conn.execute(
+                """
+                SELECT
+                  COUNT(*) AS total_movimientos,
+                  SUM(CASE WHEN COALESCE(asiento_id, '') <> '' THEN 1 ELSE 0 END) AS conciliados,
+                  SUM(CASE WHEN COALESCE(asiento_id, '') = '' THEN 1 ELSE 0 END) AS pendientes,
+                  SUM(CASE WHEN COALESCE(conciliacion_confianza, matched_score, 0) < 55 THEN 1 ELSE 0 END) AS baja_confianza
+                FROM gestoria_movimientos_bancarios
+                WHERE empresa_id = ?
+                """,
+                (empresa_id,),
+            ).fetchone()
+            total_movimientos = int(final_counts["total_movimientos"] or 0) if final_counts else 0
+            conciliados_final = int(final_counts["conciliados"] or 0) if final_counts else 0
+            pendientes_final = int(final_counts["pendientes"] or 0) if final_counts else 0
+            baja_confianza = int(final_counts["baja_confianza"] or 0) if final_counts else 0
+            compatibilidad_pct = round((conciliados_final / total_movimientos) * 100.0, 2) if total_movimientos else 0.0
+            conn.commit()
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "inserted": inserted,
+                    "skipped": skipped,
+                    "matched": matched,
+                    "total_movimientos": total_movimientos,
+                    "conciliados": conciliados_final,
+                    "pendientes": pendientes_final,
+                    "baja_confianza": baja_confianza,
+                    "compatibilidad_pct": compatibilidad_pct,
+                    "cuenta_bancaria_id": cuenta_bancaria_id,
+                    "iban_detectados": iban_detectados,
+                    "cuenta_bancaria_iban": (cuenta_bancaria or {}).get("iban", ""),
+                },
+            )
+            return
+
         elif parsed.path == "/api/hipotecas":
             # try to update existing encargo/estudio instead of creating duplicates
             force_new = bool(payload.get("force_new") or payload.get("forceCreateNew") or payload.get("no_reuse"))
@@ -104704,7 +105193,7 @@ class Handler(BaseHTTPRequestHandler):
                     current_json = {}
             except Exception:
                 current_json = {}
-            cerrar = _bool_param(payload, "cerrar", default=False)
+            cerrar = bool_del_cuerpo(payload, "cerrar", default=False)
             cerrada_at = lote["valoracion_cerrada_at"]
             cerrada_by = lote["valoracion_cerrada_by"]
             if cerrar:
@@ -105062,182 +105551,6 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"row": dict(row), "lineas": [dict(r) for r in lines]})
             return
 
-        if path == "/api/gestoria_asiento_punteo_banco":
-            asiento_id = str(payload.get("asiento_id") or "").strip()
-            if not asiento_id:
-                json_response(self, {"error": "asiento_id requerido"}, status=400)
-                return
-            row = conn.execute("SELECT id FROM gestoria_asientos WHERE id = ? LIMIT 1", (asiento_id,)).fetchone()
-            if not row:
-                json_response(self, {"error": "asiento no encontrado"}, status=404)
-                return
-            punteado = 1 if _bool_param(payload, "punteado_banco", default=False) else 0
-            notas = str(payload.get("punteado_banco_notas") or "").strip() or None
-            punteado_at = str(payload.get("punteado_banco_at") or "").strip() or (now if punteado else None)
-            punteado_by = str(payload.get("punteado_banco_by") or payload.get("usuario") or "").strip() or None
-            conn.execute(
-                """
-                UPDATE gestoria_asientos
-                SET punteado_banco = ?,
-                    punteado_banco_at = ?,
-                    punteado_banco_by = ?,
-                    punteado_banco_notas = ?,
-                    updated_at = datetime(?)
-                WHERE id = ?
-                """,
-                (punteado, punteado_at if punteado else None, punteado_by if punteado else None, notas, now, asiento_id),
-            )
-            conn.commit()
-            updated = conn.execute(
-                """
-                SELECT a.*, COALESCE(f.numero, '') AS factura_numero, COALESCE(f.doc_key, '') AS factura_doc_key
-                FROM gestoria_asientos a
-                LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
-                WHERE a.id = ?
-                LIMIT 1
-                """,
-                (asiento_id,),
-            ).fetchone()
-            json_response(self, {"ok": True, "row": dict(updated) if updated else {}})
-            return
-
-        if path == "/api/gestoria_asiento_update":
-            asiento_id = str(payload.get("asiento_id") or "").strip()
-            if not asiento_id:
-                json_response(self, {"error": "asiento_id requerido"}, status=400)
-                return
-            row = conn.execute("SELECT * FROM gestoria_asientos WHERE id = ? LIMIT 1", (asiento_id,)).fetchone()
-            if not row:
-                json_response(self, {"error": "asiento no encontrado"}, status=404)
-                return
-            factura_id = str(payload.get("factura_id") or "").strip() or None
-            fecha = str(payload.get("fecha") or row["fecha"] or "").strip() or None
-            concepto = str(payload.get("concepto") or row["concepto"] or "").strip() or None
-            referencia = str(payload.get("referencia") or row["referencia"] or "").strip() or None
-            lines = payload.get("lineas") or []
-            if not isinstance(lines, list) or not lines:
-                json_response(self, {"error": "lineas requeridas"}, status=400)
-                return
-            has_banco_update = any(key in payload for key in ("punteado_banco", "punteado_banco_at", "punteado_banco_by", "punteado_banco_notas"))
-            punteado_banco = _bool_param(payload, "punteado_banco", default=False) if "punteado_banco" in payload else None
-            punteado_banco_at = None
-            punteado_banco_by = None
-            punteado_banco_notas = None
-            if has_banco_update:
-                try:
-                    current_banco = 1 if int(row["punteado_banco"] or 0) == 1 else 0
-                except Exception:
-                    current_banco = 0
-                if punteado_banco is None:
-                    punteado_banco = current_banco
-                if punteado_banco == current_banco:
-                    punteado_banco_at = str(row["punteado_banco_at"] or "").strip() or None
-                    punteado_banco_by = str(row["punteado_banco_by"] or "").strip() or None
-                elif punteado_banco:
-                    punteado_banco_at = str(payload.get("punteado_banco_at") or "").strip() or now
-                    punteado_banco_by = str(payload.get("punteado_banco_by") or payload.get("usuario") or "").strip() or None
-                else:
-                    punteado_banco_at = None
-                    punteado_banco_by = None
-                punteado_banco_notas = str(payload.get("punteado_banco_notas") or row["punteado_banco_notas"] or "").strip() or None
-            normalized_lines = []
-            for item in lines:
-                if not isinstance(item, dict):
-                    continue
-                cuenta = str(item.get("cuenta") or "").strip()
-                descripcion = str(item.get("descripcion") or "").strip() or None
-                if not cuenta:
-                    continue
-                try:
-                    debe = round(parse_money_value(item.get("debe")), 2)
-                    haber = round(parse_money_value(item.get("haber")), 2)
-                except Exception:
-                    debe = 0.0
-                    haber = 0.0
-                impuesto_tipo = str(item.get("impuesto_tipo") or "").strip() or None
-                try:
-                    impuesto_pct = float(item.get("impuesto_pct")) if str(item.get("impuesto_pct") or "").strip() != "" else None
-                except Exception:
-                    impuesto_pct = None
-                normalized_lines.append(
-                    {
-                        "id": str(item.get("id") or os.urandom(16).hex()),
-                        "cuenta": cuenta,
-                        "descripcion": descripcion,
-                        "debe": debe,
-                        "haber": haber,
-                        "impuesto_tipo": impuesto_tipo,
-                        "impuesto_pct": impuesto_pct,
-                        "tercero_id": str(item.get("tercero_id") or "").strip() or None,
-                    }
-                )
-            try:
-                normalized_lines, total_debe, total_haber = ensure_asiento_balanced(normalized_lines, allow_adjustment=True)
-            except ValueError as exc:
-                json_response(self, {"error": str(exc)}, status=400)
-                return
-            conn.execute(
-                """
-                UPDATE gestoria_asientos
-                SET factura_id = ?, fecha = ?, concepto = ?, referencia = ?, total_debe = ?, total_haber = ?,
-                    punteado_banco = COALESCE(?, punteado_banco),
-                    punteado_banco_at = COALESCE(?, punteado_banco_at),
-                    punteado_banco_by = COALESCE(?, punteado_banco_by),
-                    punteado_banco_notas = COALESCE(?, punteado_banco_notas),
-                    updated_at = datetime(?)
-                WHERE id = ?
-                """,
-                (
-                    factura_id,
-                    fecha,
-                    concepto,
-                    referencia,
-                    total_debe,
-                    total_haber,
-                    punteado_banco if has_banco_update else None,
-                    punteado_banco_at if has_banco_update else None,
-                    punteado_banco_by if has_banco_update else None,
-                    punteado_banco_notas if has_banco_update else None,
-                    now,
-                    asiento_id,
-                ),
-            )
-            conn.execute("DELETE FROM gestoria_asiento_lineas WHERE asiento_id = ?", (asiento_id,))
-            for item in normalized_lines:
-                conn.execute(
-                    """
-                    INSERT INTO gestoria_asiento_lineas (
-                      id, asiento_id, tercero_id, cuenta, descripcion, debe, haber, impuesto_tipo, impuesto_pct, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
-                    """,
-                    (
-                        item["id"],
-                        asiento_id,
-                        item["tercero_id"],
-                        item["cuenta"],
-                        item["descripcion"],
-                        item["debe"],
-                        item["haber"],
-                        item["impuesto_tipo"],
-                        item["impuesto_pct"],
-                        now,
-                        now,
-                    ),
-                )
-            conn.commit()
-            updated = conn.execute(
-                """
-                SELECT a.*, COALESCE(f.numero, '') AS factura_numero, COALESCE(f.doc_key, '') AS factura_doc_key
-                FROM gestoria_asientos a
-                LEFT JOIN gestoria_facturas f ON f.id = a.factura_id
-                WHERE a.id = ?
-                LIMIT 1
-                """,
-                (asiento_id,),
-            ).fetchone()
-            json_response(self, {"ok": True, "row": dict(updated) if updated else {}, "lineas": normalized_lines})
-            return
-
         if path == "/api/gestoria_cuentas_bancarias":
             empresa_id = params.get("empresa_id", [""])[0]
             empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=params.get("workspace_id", [""])[0])
@@ -105266,62 +105579,6 @@ class Handler(BaseHTTPRequestHandler):
                 tuple(empresa_ids),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
-            return
-
-        if path == "/api/gestoria_cuentas_bancarias_save":
-            empresa_id = str(payload.get("empresa_id") or "").strip()
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
-                return
-            row_id = str(payload.get("id") or "").strip()
-            iban = normalize_gestoria_bank_account_number(payload.get("iban") or "")
-            banco_nombre = str(payload.get("banco_nombre") or "").strip() or None
-            cuenta_contable = str(payload.get("cuenta_contable") or "").strip() or None
-            titular = str(payload.get("titular") or "").strip() or None
-            es_principal = 1 if _bool_param(payload, "es_principal", default=False) else 0
-            if not row_id and not iban:
-                json_response(self, {"error": "iban requerido"}, status=400)
-                return
-            existing = None
-            if row_id:
-                existing = conn.execute("SELECT * FROM gestoria_cuentas_bancarias WHERE id = ? LIMIT 1", (row_id,)).fetchone()
-            elif iban:
-                existing = conn.execute(
-                    "SELECT * FROM gestoria_cuentas_bancarias WHERE empresa_id = ? AND UPPER(COALESCE(iban, '')) = UPPER(?) LIMIT 1",
-                    (empresa_id, iban),
-                ).fetchone()
-            if existing:
-                conn.execute(
-                    """
-                    UPDATE gestoria_cuentas_bancarias
-                    SET iban = ?, banco_nombre = ?, cuenta_contable = ?, titular = ?, es_principal = ?, updated_at = datetime(?)
-                    WHERE id = ?
-                    """,
-                    (iban or existing["iban"], banco_nombre, cuenta_contable, titular, es_principal, now, existing["id"]),
-                )
-                row_id = existing["id"]
-            else:
-                row_id = row_id or os.urandom(16).hex()
-                conn.execute(
-                    """
-                    INSERT INTO gestoria_cuentas_bancarias (
-                      id, empresa_id, iban, banco_nombre, cuenta_contable, titular, es_principal, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
-                    """,
-                    (row_id, empresa_id, iban, banco_nombre, cuenta_contable, titular, es_principal, now, now),
-                )
-            if es_principal:
-                conn.execute(
-                    """
-                    UPDATE gestoria_cuentas_bancarias
-                    SET es_principal = 0, updated_at = datetime(?)
-                    WHERE empresa_id = ? AND id <> ?
-                    """,
-                    (now, empresa_id, row_id),
-                )
-            conn.commit()
-            row = conn.execute("SELECT * FROM gestoria_cuentas_bancarias WHERE id = ? LIMIT 1", (row_id,)).fetchone()
-            json_response(self, {"ok": True, "row": dict(row) if row else {}})
             return
 
         if path == "/api/gestoria_movimientos_bancarios":
@@ -105376,223 +105633,6 @@ class Handler(BaseHTTPRequestHandler):
                 tuple(empresa_ids),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
-            return
-
-        if path == "/api/gestoria_movimientos_bancarios_import_preview":
-            session = getattr(self, "auth_session", None) or self._current_session()
-            empresa_id = str(payload.get("empresa_id") or "").strip()
-            if not session:
-                json_response(self, {"error": "No autenticado"}, status=401)
-                return
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
-                return
-            ok, err = enforce_workspace_membership(conn, session, payload.get("workspace_id") or "", write=False)
-            if not ok:
-                json_response(self, {"error": err or "No autorizado"}, status=403)
-                return
-            try:
-                raw_bytes, _mime, _hint = decode_document_payload(payload, conn=conn, session=session)
-            except ValueError as exc:
-                json_response(self, {"error": str(exc)}, status=400)
-                return
-            try:
-                movements = parse_gestoria_bank_extract(raw_bytes, filename=payload.get("filename") or "")
-            except ValueError as exc:
-                json_response(self, {"error": str(exc)}, status=400)
-                return
-            iban_detectados = detect_gestoria_bank_extract_ibans(raw_bytes, filename=payload.get("filename") or "")
-            preview = []
-            for mv in (movements or [])[:80]:
-                preview.append(
-                    {
-                        "fecha_operacion": mv.get("fecha_operacion") or "",
-                        "fecha_valor": mv.get("fecha_valor") or "",
-                        "concepto": mv.get("concepto") or "",
-                        "importe": mv.get("importe"),
-                        "saldo": mv.get("saldo"),
-                        "divisa": mv.get("divisa") or "EUR",
-                        "numero_documento": mv.get("numero_documento") or "",
-                        "referencia1": mv.get("referencia1") or "",
-                        "referencia2": mv.get("referencia2") or "",
-                    }
-                )
-            json_response(
-                self,
-                {
-                    "ok": True,
-                    "total": len(movements or []),
-                    "preview": preview,
-                    "iban_detectados": iban_detectados,
-                },
-            )
-            return
-
-        if path == "/api/gestoria_movimientos_bancarios_import":
-            session = getattr(self, "auth_session", None) or self._current_session()
-            empresa_id = str(payload.get("empresa_id") or "").strip()
-            if not session:
-                json_response(self, {"error": "No autenticado"}, status=401)
-                return
-            if not empresa_id:
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
-                return
-            ok, err = enforce_workspace_membership(conn, session, payload.get("workspace_id") or "", write=True)
-            if not ok:
-                json_response(self, {"error": err or "No autorizado"}, status=403)
-                return
-            try:
-                raw_bytes, _mime, _hint = decode_document_payload(payload, conn=conn, session=session)
-            except ValueError as exc:
-                json_response(self, {"error": str(exc)}, status=400)
-                return
-            try:
-                movements = parse_gestoria_bank_extract(raw_bytes, filename=payload.get("filename") or "")
-            except ValueError as exc:
-                json_response(self, {"error": str(exc)}, status=400)
-                return
-            cuentas = fetch_gestoria_cuentas_bancarias(conn, empresa_id)
-            iban_detectados = detect_gestoria_bank_extract_ibans(raw_bytes, filename=payload.get("filename") or "")
-            cuenta_bancaria = pick_gestoria_cuenta_bancaria_for_extract(cuentas, iban_detectados)
-            cuenta_bancaria_id = cuenta_bancaria["id"] if cuenta_bancaria else None
-            origen_hash = hashlib.sha256(raw_bytes).hexdigest()
-            inserted = 0
-            skipped = 0
-            matched = 0
-            for mv in movements:
-                fecha_operacion = str(mv.get("fecha_operacion") or "").strip()
-                concepto = str(mv.get("concepto") or "").strip()
-                importe = round(parse_money_value(mv.get("importe") or 0), 2)
-                if not fecha_operacion or not concepto:
-                    continue
-                exists = conn.execute(
-                    """
-                    SELECT id FROM gestoria_movimientos_bancarios
-                    WHERE empresa_id = ?
-                      AND COALESCE(fecha_operacion, '') = COALESCE(?, '')
-                      AND ABS(COALESCE(importe, 0) - ?) < 0.009
-                      AND COALESCE(concepto, '') = ?
-                      AND COALESCE(origen_hash, '') = ?
-                    LIMIT 1
-                    """,
-                    (empresa_id, fecha_operacion, float(importe), concepto, origen_hash),
-                ).fetchone()
-                if exists:
-                    skipped += 1
-                    continue
-                mov_id = os.urandom(16).hex()
-                conn.execute(
-                    """
-                    INSERT INTO gestoria_movimientos_bancarios (
-                      id, empresa_id, cuenta_bancaria_id, fecha_operacion, fecha_valor, concepto, importe, saldo, divisa,
-                      codigo, numero_documento, referencia1, referencia2, info_adicional, origen_fichero, origen_hash,
-                      created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
-                    """,
-                    (
-                        mov_id,
-                        empresa_id,
-                        cuenta_bancaria_id,
-                        fecha_operacion,
-                        str(mv.get("fecha_valor") or fecha_operacion).strip() or fecha_operacion,
-                        concepto,
-                        float(importe),
-                        round(parse_money_value(mv.get("saldo") or 0), 2) if mv.get("saldo") is not None else None,
-                        str(mv.get("divisa") or "EUR").strip() or "EUR",
-                        str(mv.get("codigo") or "").strip() or None,
-                        str(mv.get("numero_documento") or "").strip() or None,
-                        str(mv.get("referencia1") or "").strip() or None,
-                        str(mv.get("referencia2") or "").strip() or None,
-                        str(mv.get("info_adicional") or "").strip() or None,
-                        str(payload.get("filename") or "").strip() or None,
-                        origen_hash,
-                        now,
-                        now,
-                    ),
-                )
-                result = match_gestoria_movimiento_bancario_asiento(
-                    conn,
-                    {
-                        "id": mov_id,
-                        "empresa_id": empresa_id,
-                        "fecha_operacion": fecha_operacion,
-                        "concepto": concepto,
-                        "importe": float(importe),
-                        "referencia1": mv.get("referencia1") or "",
-                        "referencia2": mv.get("referencia2") or "",
-                        "numero_documento": mv.get("numero_documento") or "",
-                    },
-                    now=now,
-                    lookback_days=10,
-                )
-                if result.get("matched"):
-                    matched += 1
-                    conn.execute(
-                        """
-                        UPDATE gestoria_movimientos_bancarios
-                        SET asiento_id = ?, punteado = 1, punteado_at = datetime(?), punteado_by = ?, matched_score = ?, matched_reason = ?, conciliacion_estado = ?, conciliacion_confianza = ?, regla_aplicada = ?, updated_at = datetime(?)
-                        WHERE id = ?
-                        """,
-                        (
-                            result.get("asiento_id"),
-                            now,
-                            str(payload.get("usuario") or "").strip() or None,
-                            result.get("score") or 0,
-                            result.get("reason") or "auto",
-                            "auto" if (result.get("linked") or result.get("matched")) else "pendiente",
-                            result.get("score") or 0,
-                            result.get("reason") or "",
-                            now,
-                            mov_id,
-                        ),
-                    )
-                inserted += 1
-            try:
-                run_gestoria_conciliacion_convergente(
-                    conn,
-                    empresa_id,
-                    now,
-                    max_passes=4,
-                    lookback_days=10,
-                    historico_cerrado=True,
-                )
-            except Exception:
-                pass
-            final_counts = conn.execute(
-                """
-                SELECT
-                  COUNT(*) AS total_movimientos,
-                  SUM(CASE WHEN COALESCE(asiento_id, '') <> '' THEN 1 ELSE 0 END) AS conciliados,
-                  SUM(CASE WHEN COALESCE(asiento_id, '') = '' THEN 1 ELSE 0 END) AS pendientes,
-                  SUM(CASE WHEN COALESCE(conciliacion_confianza, matched_score, 0) < 55 THEN 1 ELSE 0 END) AS baja_confianza
-                FROM gestoria_movimientos_bancarios
-                WHERE empresa_id = ?
-                """,
-                (empresa_id,),
-            ).fetchone()
-            total_movimientos = int(final_counts["total_movimientos"] or 0) if final_counts else 0
-            conciliados_final = int(final_counts["conciliados"] or 0) if final_counts else 0
-            pendientes_final = int(final_counts["pendientes"] or 0) if final_counts else 0
-            baja_confianza = int(final_counts["baja_confianza"] or 0) if final_counts else 0
-            compatibilidad_pct = round((conciliados_final / total_movimientos) * 100.0, 2) if total_movimientos else 0.0
-            conn.commit()
-            json_response(
-                self,
-                {
-                    "ok": True,
-                    "inserted": inserted,
-                    "skipped": skipped,
-                    "matched": matched,
-                    "total_movimientos": total_movimientos,
-                    "conciliados": conciliados_final,
-                    "pendientes": pendientes_final,
-                    "baja_confianza": baja_confianza,
-                    "compatibilidad_pct": compatibilidad_pct,
-                    "cuenta_bancaria_id": cuenta_bancaria_id,
-                    "iban_detectados": iban_detectados,
-                    "cuenta_bancaria_iban": (cuenta_bancaria or {}).get("iban", ""),
-                },
-            )
             return
 
         if path == "/api/gestoria_conciliacion_validar":

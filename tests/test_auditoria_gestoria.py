@@ -739,13 +739,18 @@ class LasEscriturasContablesTests(LaOtraMitadDelModuloTests):
     Quince rutas estaban así, seis de gestoría y nueve de otros módulos.
     """
 
-    HUERFANAS = (
+    # Las cinco de gestoría ya tienen rama propia —se movieron a la cadena de
+    # POST—, así que aquí se vigila lo que sigue importando: que ninguna de ellas
+    # acabe firmando una hipoteca. Y para el 404 se usa una de las nueve que
+    # siguen huérfanas en otros módulos.
+    ANTES_HUERFANAS = (
         "/api/gestoria_asiento_update",
         "/api/gestoria_asiento_punteo_banco",
         "/api/gestoria_cuentas_bancarias_save",
         "/api/gestoria_movimientos_bancarios_import",
         "/api/gestoria_movimientos_bancarios_import_preview",
     )
+    SIGUE_HUERFANA = "/api/legal_radar_counts"
 
     def _hipoteca(self):
         base = dict(created_at=AHORA, updated_at=AHORA)
@@ -754,27 +759,25 @@ class LasEscriturasContablesTests(LaOtraMitadDelModuloTests):
         return lambda: dict(self.conn.execute(
             "SELECT estado, fecha_firma FROM hipotecas WHERE id = 'hip-a'").fetchone())
 
-    def test_una_ruta_de_gestoria_no_firma_una_hipoteca(self):
+    def test_ninguna_ruta_de_gestoria_firma_una_hipoteca(self):
         lee = self._hipoteca()
-        for ruta in self.HUERFANAS:
+        for ruta in self.ANTES_HUERFANAS:
             with self.subTest(ruta=ruta):
-                r = self._post(ruta, {"empresa_nombre": "Empresa A", "id": "hip-a",
-                                      "fecha_firma": "2026-08-16", "estado": "Firmada"},
-                               self.cookie_a)
-                self.assertEqual(r["estado"], 404, f"{ruta} sigue entrando por la cadena")
+                self._post(ruta, {"empresa_nombre": "Empresa A", "id": "hip-a",
+                                  "fecha_firma": "2026-08-16", "estado": "Firmada"},
+                           self.cookie_a)
                 self.assertEqual(lee()["estado"], "Estudio",
                                  f"{ruta} ha firmado la hipoteca")
 
-    def test_y_tampoco_contesta_que_todo_ha_ido_bien(self):
-        """Lo que no se hace, no se dice que se ha hecho."""
-        r = self._post("/api/gestoria_asiento_update",
-                       {"empresa_nombre": "Empresa A", "asiento_id": "asi-a",
-                        "concepto": "X"}, self.cookie_a)
+    def test_una_ruta_sin_rama_propia_da_404_y_no_firma(self):
+        """Quedan nueve así en auditoría, legal, fincas, convenios y copiloto."""
+        lee = self._hipoteca()
+        r = self._post(self.SIGUE_HUERFANA,
+                       {"empresa_nombre": "Empresa A", "id": "hip-a",
+                        "fecha_firma": "2026-08-16", "estado": "Firmada"}, self.cookie_a)
         self.assertEqual(r["estado"], 404)
         self.assertNotEqual(r["json"].get("ok"), True)
-        self.assertEqual(self.conn.execute(
-            "SELECT concepto FROM gestoria_asientos WHERE id='asi-a'").fetchone()["concepto"],
-            "Asiento A")
+        self.assertEqual(lee()["estado"], "Estudio")
 
     def test_firmar_una_hipoteca_sigue_funcionando(self):
         """El control que impide que el arreglo rompa lo que sí debe pasar."""
@@ -827,3 +830,104 @@ class LasEscriturasContablesTests(LaOtraMitadDelModuloTests):
         self._post("/api/gestoria_modelos_delete",
                    {"empresa_nombre": "Empresa A", "id": "mod-b"}, self.cookie_a)
         self.assertTrue(self._existe("gestoria_modelos", "mod-b"))
+
+
+class LosCincoQueNoSeAlcanzabanTests(LaOtraMitadDelModuloTests):
+    """Los endpoints que la interfaz llama y que no llegaban a ninguna parte.
+
+    `gestoria_asiento_update`, `_punteo_banco`, `cuentas_bancarias_save` y los dos
+    de importación de movimientos vivían en `handle_api`, que sólo se llama desde
+    el GET: por ahí reventaban con 500 porque `payload` no existe, y por POST
+    caían en la rama de firmar hipotecas. Cuatro botones de gestoría —editar un
+    asiento, cuadrarlo con el banco, guardar una cuenta e importar movimientos—
+    no hacían lo que decían.
+
+    Movidos a la cadena de POST, con la guarda de ámbito que no tenían.
+    """
+
+    def _punteado(self, id_):
+        return self.conn.execute(
+            "SELECT punteado_banco FROM gestoria_asientos WHERE id = ?", (id_,)).fetchone()[0]
+
+    def _banco(self, id_):
+        return self.conn.execute(
+            "SELECT banco_nombre, es_principal FROM gestoria_cuentas_bancarias WHERE id = ?",
+            (id_,)).fetchone()
+
+    # --- cuadrar un asiento con el banco ------------------------------------
+    def test_se_puede_puntear_el_propio(self):
+        r = self._post("/api/gestoria_asiento_punteo_banco",
+                       {"empresa_nombre": "Empresa A", "asiento_id": "asi-a",
+                        "punteado_banco": 1}, self.cookie_a)
+        self.assertEqual(r["estado"], 200)
+        self.assertEqual(self._punteado("asi-a"), 1)
+
+    def test_y_despuntearlo(self):
+        self._post("/api/gestoria_asiento_punteo_banco",
+                   {"empresa_nombre": "Empresa A", "asiento_id": "asi-a",
+                    "punteado_banco": 1}, self.cookie_a)
+        self._post("/api/gestoria_asiento_punteo_banco",
+                   {"empresa_nombre": "Empresa A", "asiento_id": "asi-a",
+                    "punteado_banco": False}, self.cookie_a)
+        self.assertEqual(self._punteado("asi-a"), 0)
+
+    def test_no_el_del_otro_workspace(self):
+        r = self._post("/api/gestoria_asiento_punteo_banco",
+                       {"empresa_nombre": "Empresa A", "asiento_id": "asi-b",
+                        "punteado_banco": 1}, self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+        self.assertEqual(self._punteado("asi-b"), 0)
+
+    # --- guardar una cuenta bancaria ----------------------------------------
+    def test_se_guarda_la_cuenta_propia(self):
+        r = self._post("/api/gestoria_cuentas_bancarias_save",
+                       {"empresa_nombre": "Empresa A", "id": "cta-a", "empresa_id": "emp-a",
+                        "iban": "ES1121000418450200051332", "banco_nombre": "Banco A renombrado",
+                        "es_principal": True}, self.cookie_a)
+        self.assertEqual(r["estado"], 200)
+        f = self._banco("cta-a")
+        self.assertEqual(f["banco_nombre"], "Banco A renombrado")
+        self.assertEqual(f["es_principal"], 1)
+
+    def test_no_se_reescribe_el_iban_de_otro(self):
+        r = self._post("/api/gestoria_cuentas_bancarias_save",
+                       {"empresa_nombre": "Empresa A", "id": "cta-b", "empresa_id": "emp-b",
+                        "iban": "ES9900000000000000000000", "banco_nombre": "COLADO"},
+                       self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+        self.assertEqual(self._banco("cta-b")["banco_nombre"], "Banco B")
+
+
+class ElSiONoQueVieneEnElCuerpoTests(unittest.TestCase):
+    """Un sí/no de un JSON leído como si viniera en la barra de direcciones.
+
+    `_bool_param` hace `params.get(key, [""])[0]`. Sobre `{"punteado_banco": 1}`
+    eso revienta, la excepción se traga y devuelve el valor por defecto: lo que
+    mandara el cliente daba igual. Estaba así en cinco sitios de gestoría, y el
+    efecto era que no se podía marcar un asiento como cuadrado con el banco, ni
+    cerrar un lote de importación, ni marcar una cuenta como principal.
+    """
+
+    def test_un_entero(self):
+        self.assertTrue(S.bool_del_cuerpo({"x": 1}, "x"))
+        self.assertFalse(S.bool_del_cuerpo({"x": 0}, "x"))
+
+    def test_un_booleano(self):
+        self.assertTrue(S.bool_del_cuerpo({"x": True}, "x"))
+        self.assertFalse(S.bool_del_cuerpo({"x": False}, "x"))
+
+    def test_una_cadena(self):
+        for v in ("1", "true", "si", "sí", "on", "yes", "TRUE"):
+            self.assertTrue(S.bool_del_cuerpo({"x": v}, "x"), v)
+        for v in ("0", "false", "no", "", "cualquier cosa"):
+            self.assertFalse(S.bool_del_cuerpo({"x": v}, "x"), v)
+
+    def test_si_no_viene_manda_el_valor_por_defecto(self):
+        self.assertTrue(S.bool_del_cuerpo({}, "x", default=True))
+        self.assertFalse(S.bool_del_cuerpo({}, "x", default=False))
+
+    def test_pero_si_viene_manda_lo_que_viene(self):
+        """Éste es el caso que fallaba: mandar `False` contra un default `True`."""
+        self.assertFalse(S.bool_del_cuerpo({"x": False}, "x", default=True))
+        self.assertFalse(S.bool_del_cuerpo({"x": 0}, "x", default=True))
+        self.assertTrue(S.bool_del_cuerpo({"x": 1}, "x", default=False))
