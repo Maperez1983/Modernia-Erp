@@ -931,3 +931,58 @@ class ElSiONoQueVieneEnElCuerpoTests(unittest.TestCase):
         self.assertFalse(S.bool_del_cuerpo({"x": False}, "x", default=True))
         self.assertFalse(S.bool_del_cuerpo({"x": 0}, "x", default=True))
         self.assertTrue(S.bool_del_cuerpo({"x": 1}, "x", default=False))
+
+
+class LasNueveDeLosOtrosModulosTests(LaOtraMitadDelModuloTests):
+    """Las otras nueve rutas que caían en la firma de hipotecas.
+
+    Salieron del mismo recuento que las seis de gestoría: declaradas como POST
+    válidas pero implementadas en `handle_api`, la función del GET. La diferencia
+    es que **ninguna de las nueve escribe**: son lecturas —catálogos, contadores,
+    la auditoría, los grupos y las mayorías de fincas—, no usan `payload` y
+    funcionan bien por GET. No hay ningún botón roto detrás, y ninguna se llama
+    por POST desde la interfaz.
+
+    Así que aquí no se arregla nada: se fija. Si alguien vuelve a abrir el cajón
+    del final de la cadena, estas pruebas lo dicen.
+    """
+
+    NUEVE = (
+        "/api/auditoria",
+        "/api/convenios_catalog",
+        "/api/copilot_web_domains",
+        "/api/legal_copilot_catalog",
+        "/api/legal_library_documents",
+        "/api/legal_radar_auto_status",
+        "/api/legal_radar_counts",
+        "/api/workspace_fincas_grupos",
+        "/api/workspace_fincas_mayorias",
+    )
+
+    def test_ninguna_escribe_por_post(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("hipotecas", dict(id="hip-a", empresa_id="emp-a", cliente="Cliente A",
+                                    estado="Estudio", **base))
+        for ruta in self.NUEVE:
+            with self.subTest(ruta=ruta):
+                r = self._post(ruta, {"empresa_nombre": "Empresa A", "id": "hip-a",
+                                      "fecha_firma": "2026-08-17", "estado": "Firmada"},
+                               self.cookie_a)
+                self.assertIn(r["estado"], (403, 404), f"{ruta} contesta {r['estado']}")
+                self.assertNotEqual(r["json"].get("ok"), True)
+                self.assertEqual(self.conn.execute(
+                    "SELECT estado FROM hipotecas WHERE id='hip-a'").fetchone()["estado"],
+                    "Estudio", f"{ruta} ha firmado la hipoteca")
+
+    #: `/api/auditoria` exige que se le diga el ámbito, y hace bien: sin él
+    #: contesta 400, que no es un fallo sino la respuesta correcta.
+    PARAMETROS = {"/api/auditoria": "?empresa_id=emp-a"}
+
+    def test_y_por_get_siguen_respondiendo(self):
+        """El control: que no escriban no puede significar que no sirvan. Un 403
+        es correcto —el usuario es de Gestoría y algunas son de Legal o Fincas—;
+        un 500 no lo sería."""
+        for ruta in self.NUEVE:
+            with self.subTest(ruta=ruta):
+                r = self._get(ruta + self.PARAMETROS.get(ruta, ""), self.cookie_a)
+                self.assertIn(r["estado"], (200, 403), f"{ruta} contesta {r['estado']}")
