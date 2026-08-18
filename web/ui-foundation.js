@@ -695,6 +695,38 @@
   });
   document.addEventListener("keydown", handleGlobalKeydown);
 
+  // Cuatro raíles de navegación —Admin, Portal cliente, Ficha de póliza y Agenda—
+  // tenían su marcado y ningún manejador en ningún fichero: pulsar el icono no hacía
+  // absolutamente nada. Los otros tres de la misma familia (`cliente-tab`,
+  // `explorer-tab`, `workspace-view-tab`) sí tienen el suyo y no se tocan aquí.
+  //
+  // Cada uno de estos cuatro rotula la sección que tiene al lado, así que el clic la
+  // marca como activa y trae su contenido a la vista, que es lo que espera quien
+  // pulsa un raíl. Hoy llevan un solo ítem y el efecto es modesto —el raíl es sobre
+  // todo un rótulo—; en cuanto se le añada un segundo, funciona sin tocar nada más.
+  const RAILES_SIN_MANEJADOR = ["admin-view", "portal-public-view", "seguro-view", "agenda-view"];
+  document.addEventListener("click", (event) => {
+    const selector = RAILES_SIN_MANEJADOR.map((attr) => `[data-${attr}]`).join(",");
+    const item = event.target?.closest?.(selector);
+    if (!item) return;
+    const rail = item.closest(".app-lightning-sidebar");
+    if (!rail) return;
+    rail.querySelectorAll(".app-side-item").forEach((btn) => {
+      const esteEs = btn === item;
+      btn.classList.toggle("active", esteEs);
+      // Un raíl es navegación: quien va con lector de pantalla necesita saber en cuál está.
+      btn.setAttribute("aria-current", esteEs ? "page" : "false");
+    });
+    const principal = rail.parentElement?.querySelector(".app-lightning-main");
+    const destino = principal?.querySelector("h2, h3") || principal;
+    if (!destino) return;
+    try {
+      destino.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (!destino.hasAttribute("tabindex")) destino.setAttribute("tabindex", "-1");
+      destino.focus({ preventScroll: true });
+    } catch (e) {}
+  });
+
   window.CRMUI = {
     boot,
     enhanceFragment: enhance,

@@ -16,7 +16,7 @@ const SHELL_URLS = [
   "/",
   "/index.html",
   "/styles.css?v=337",
-  "/ui-foundation.js?v=10",
+  "/ui-foundation.js?v=11",
   "/app-auth.js?v=18",
   "/app-routing.js?v=13",
   "/app_shared.js?v=2",

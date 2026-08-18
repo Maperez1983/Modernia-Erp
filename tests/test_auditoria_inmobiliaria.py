@@ -439,6 +439,56 @@ class LosDocumentosSalenYSalenLlenosTests(Agencia):
         self.assertNotIn("xx/xx/xxxx", texto)
 
 
+class TodoRailDeNavegacionTieneQuienLoEscucheTests(unittest.TestCase):
+    """Siete raíles de navegación comparten marcado (`.app-side-item`). Tres tenían su
+    manejador —`cliente-tab`, `explorer-tab`, `workspace-view-tab`— y cuatro no lo tenía
+    ninguno: Admin, Portal cliente, Ficha de póliza y Agenda. Pulsar su icono no hacía
+    absolutamente nada.
+
+    La comprobación mira **todos** los ficheros del front, no sólo `app.js`. Es el error
+    que me hizo dar por muertos dos botones de la cabecera que sí funcionaban: su
+    manejador vivía en `ui-foundation.js`, que no había abierto."""
+
+    FICHEROS = ("app.js", "ui-foundation.js", "app-routing.js", "app_shared.js",
+                "app-auth.js", "inmo_operacion.js")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.js = "".join((RAIZ / "web" / f).read_text(encoding="utf-8")
+                         for f in cls.FICHEROS if (RAIZ / "web" / f).exists())
+
+    def test_cada_atributo_de_rail_tiene_manejador(self):
+        import re
+        atributos = set()
+        for m in re.finditer(r'<aside[^>]*class="[^"]*app-lightning-sidebar', HTML):
+            fin = HTML.index("</aside>", m.start())
+            atributos |= set(re.findall(r'data-([a-z-]+)="', HTML[m.start():fin]))
+        atributos = {a for a in atributos if a.endswith(("-view", "-tab"))}
+        self.assertGreaterEqual(len(atributos), 7, f"esperaba los siete raíles: {atributos}")
+        for attr in sorted(atributos):
+            # Vale cualquiera de las dos formas de engancharse: el selector escrito
+            # entero (`[data-cliente-tab]`) o el nombre suelto que se mete en una
+            # plantilla (`\`[data-${attr}]\``, como hace el manejador de los cuatro).
+            enganchado = f"data-{attr}" in self.js or f'"{attr}"' in self.js
+            with self.subTest(attr=attr):
+                self.assertTrue(enganchado, f"nadie escucha data-{attr}: su icono no hace nada")
+
+    def test_los_cuatro_que_faltaban_estan_nombrados(self):
+        """Que no se caiga el manejador nuevo sin que salte nada."""
+        for attr in ("admin-view", "portal-public-view", "seguro-view", "agenda-view"):
+            with self.subTest(attr=attr):
+                self.assertIn(f'"{attr}"', self.js)
+
+    def test_no_pisa_los_railes_que_ya_funcionaban(self):
+        """`cliente-tab`, `explorer-tab` y `workspace-view-tab` tienen el suyo desde
+        antes: el manejador nuevo no debe nombrarlos."""
+        i = self.js.index("RAILES_SIN_MANEJADOR")
+        bloque = self.js[i: i + 900]
+        for ajeno in ("cliente-tab", "explorer-tab", "workspace-view-tab"):
+            with self.subTest(ajeno=ajeno):
+                self.assertNotIn(ajeno, bloque)
+
+
 class AbrirElCrmInmobiliarioNoDejaLaPantallaEnBlancoTests(unittest.TestCase):
     """Pulsar «Inmobiliaria» en la portada abría la última vista usada, fuera de la
     vertical que fuera. Quien había estado en Financiaciones aterrizaba en `crmViewFin`
