@@ -439,6 +439,50 @@ class LosDocumentosSalenYSalenLlenosTests(Agencia):
         self.assertNotIn("xx/xx/xxxx", texto)
 
 
+class LasTarjetasDelHubRespetanSusModulosTests(unittest.TestCase):
+    """Siete tarjetas del Hub declaran de qué módulo dependen —`data-workspace-module`
+    con una clave, o `data-workspace-module-any` con una lista— y **nadie leía ninguno
+    de los dos atributos**: se enseñaban todas siempre. Un workspace sin seguros veía
+    igualmente «Seguros del workspace», vacía.
+
+    Mi primera auditoría dio este atributo por atendido: buscaba `workspace-module` como
+    subcadena y lo encontraba dentro de `workspace-module-health`. Por eso la prueba de
+    abajo comprueba la forma exacta en que se lee un atributo, no que su nombre aparezca
+    en alguna parte."""
+
+    def test_las_siete_tarjetas_declaran_su_modulo(self):
+        import re
+        decl = re.findall(r'data-workspace-module(?:-any)?="([^"]+)"', HTML)
+        self.assertEqual(len(decl), 7, f"esperaba siete tarjetas condicionadas: {decl}")
+
+    def test_alguien_lee_de_verdad_los_dos_atributos(self):
+        """`dataset.workspaceModule` y `dataset.workspaceModuleAny`, no una subcadena."""
+        for lectura in ("dataset.workspaceModule", "dataset.workspaceModuleAny",
+                        "[data-workspace-module]", "[data-workspace-module-any]"):
+            with self.subTest(lectura=lectura):
+                self.assertIn(lectura, APP)
+
+    def test_sin_saber_los_modulos_no_se_esconde_nada(self):
+        """La salvaguarda pesa más que la regla: si la lista no ha cargado —arranque, o
+        una petición que falla— vale más una tarjeta de sobra que un Hub en blanco."""
+        i = APP.index("const sincronizaTarjetasPorModulo")
+        cuerpo = APP[i: APP.index("\n};", i)]
+        self.assertIn("if (!Array.isArray(modulos) || !modulos.length) return;", cuerpo)
+
+    def test_la_lista_del_any_se_cumple_con_uno_solo(self):
+        """«Operativa del workspace» sirve a cinco módulos: basta con tener uno."""
+        i = APP.index("const sincronizaTarjetasPorModulo")
+        cuerpo = APP[i: APP.index("\n};", i)]
+        self.assertIn("claves.some(tiene)", cuerpo)
+
+    def test_se_sincroniza_al_cambiar_de_workspace(self):
+        """Si sólo corriera al arrancar, cambiar de workspace dejaría las tarjetas del
+        anterior."""
+        i = APP.index("const updateWorkspaceEntryChrome")
+        cuerpo = APP[i: APP.index("\nconst ", i + 10)]
+        self.assertIn("sincronizaTarjetasPorModulo()", cuerpo)
+
+
 class UnBotonNoPrometeLoQueNoPuedeCumplirTests(unittest.TestCase):
     """«Ajustes» del workspace se pintaba habilitado —cursor de mano, opacidad plena—
     con un criterio (`canManageWorkspace`) y la navegación sólo dejaba entrar con otro

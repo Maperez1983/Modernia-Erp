@@ -7493,6 +7493,31 @@ const isGrupoModerniaWorkspace = () => {
 const workspaceHasEnabledModule = (moduleKey = "") =>
   new Set(state.currentWorkspaceEnabledModules || []).has(String(moduleKey || "").trim());
 
+// Siete tarjetas del Hub declaran de qué módulo dependen —`data-workspace-module`
+// con una clave, o `data-workspace-module-any` con una lista— y nadie leía ninguno
+// de los dos atributos: se enseñaban todas siempre. Un workspace sin seguros veía
+// igualmente «Seguros del workspace», vacía, y lo mismo con gestoría, financiación,
+// inmobiliaria, contabilidad y facturas recibidas.
+//
+// La salvaguarda pesa más que la regla: mientras no se sepa qué módulos tiene el
+// workspace —al arrancar, o si la petición falla— no se esconde nada. Vale más una
+// tarjeta de sobra que un Hub en blanco porque una lista llegó tarde.
+const sincronizaTarjetasPorModulo = (raiz = document) => {
+  const modulos = state.currentWorkspaceEnabledModules;
+  if (!Array.isArray(modulos) || !modulos.length) return;
+  const activos = new Set(modulos.map((k) => normalizeWorkspaceModuleKey(k)));
+  const tiene = (clave) => activos.has(normalizeWorkspaceModuleKey(clave));
+  raiz.querySelectorAll("[data-workspace-module]").forEach((el) => {
+    const clave = String(el.dataset.workspaceModule || "").trim();
+    if (clave) el.classList.toggle("hidden", !tiene(clave));
+  });
+  raiz.querySelectorAll("[data-workspace-module-any]").forEach((el) => {
+    const claves = String(el.dataset.workspaceModuleAny || "")
+      .split(",").map((k) => k.trim()).filter(Boolean);
+    if (claves.length) el.classList.toggle("hidden", !claves.some(tiene));
+  });
+};
+
 const canUseLegalCopilot = () => isGrupoModerniaWorkspace() || workspaceHasEnabledModule("copilot");
 
 const syncCrmLegalAvailability = () => {
@@ -8381,6 +8406,7 @@ const updateWorkspaceEntryChrome = () => {
     button.classList.remove("hidden");
     button.disabled = false;
   });
+  sincronizaTarjetasPorModulo();
   renderWorkspaceTenantContext();
   renderWorkspaceEntryBanner();
 };
