@@ -51,7 +51,7 @@ def apply_schema_file(conn, schema_path):
             continue
         buff.append(line)
     script = "\n".join(buff)
-    for stmt in script.split(";"):
+    for stmt in _trocea_por_sentencias(script):
         stmt = stmt.strip()
         if not stmt:
             continue
@@ -59,6 +59,59 @@ def apply_schema_file(conn, schema_path):
     for stmt in statements:
         conn.execute(stmt)
     return True
+
+
+def _trocea_por_sentencias(script):
+    """Parte el script por sentencias, sin dejarse engañar por un comentario.
+
+    Era un `script.split(";")` a secas. Un punto y coma dentro de un comentario
+    `--` partía la sentencia por la mitad, y Postgres respondía «syntax error at
+    end of input» sobre la línea del comentario.
+
+    No es hipotético: pasó. Un comentario que explicaba una columna decía «536
+    resuelven a un cliente único por nombre y empresa; 10 nombres no existen», y
+    ese punto y coma cortó el `CREATE TABLE gestoria`. El esquema dejó de
+    aplicarse, el arranque falló en bucle y el CRM estuvo caído. Un comentario no
+    puede tumbar el arranque.
+
+    También se respetan las comillas: un punto y coma dentro de un literal
+    tampoco separa.
+    """
+    sentencias, actual = [], []
+    en_comentario = en_simple = en_doble = False
+    i, n = 0, len(script)
+    while i < n:
+        c = script[i]
+        siguiente = script[i + 1] if i + 1 < n else ""
+        if en_comentario:
+            actual.append(c)
+            if c == "\n":
+                en_comentario = False
+        elif en_simple:
+            actual.append(c)
+            if c == "'":
+                en_simple = False
+        elif en_doble:
+            actual.append(c)
+            if c == '"':
+                en_doble = False
+        elif c == "-" and siguiente == "-":
+            en_comentario = True
+            actual.append(c)
+        elif c == "'":
+            en_simple = True
+            actual.append(c)
+        elif c == '"':
+            en_doble = True
+            actual.append(c)
+        elif c == ";":
+            sentencias.append("".join(actual))
+            actual = []
+        else:
+            actual.append(c)
+        i += 1
+    sentencias.append("".join(actual))
+    return sentencias
 
 
 def table_columns(conn, table_name):

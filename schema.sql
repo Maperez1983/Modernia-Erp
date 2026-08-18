@@ -561,7 +561,7 @@ CREATE TABLE IF NOT EXISTS gestoria (
   -- `cliente` es el nombre tal cual vino en la importación, y era el único
   -- vínculo: sin id no se puede cruzar con la ficha del cliente ni saber si dos
   -- expedientes son de la misma persona. De los 548 de producción, 536 resuelven
-  -- a un cliente único por nombre y empresa; 10 nombres no existen en `clientes`
+  -- a un cliente único por nombre y empresa. Diez nombres no existen en `clientes`
   -- y 2 comparten nombre, así que ésos se quedan sin vincular a propósito:
   -- adivinar cuál de los dos es sería peor que dejarlo en blanco.
   cliente TEXT,
