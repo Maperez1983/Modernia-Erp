@@ -50951,7 +50951,8 @@ def enforce_gestoria_row_access(conn, session, tabla, row_id, *, write=False):
     if not rid:
         return False, "id requerido"
     if tabla not in {"gestoria_docs", "gestoria_trabajos", "gestoria_contabilidad",
-                     "gestoria_modelos", "gestoria_facturas", "gestoria_asientos"}:
+                     "gestoria_modelos", "gestoria_facturas", "gestoria_asientos",
+                     "gestoria_import_lotes", "gestoria_import_documentos"}:
         return False, "Tabla no permitida"
     columnas = table_columns(conn, tabla)
     campos = [c for c in ("empresa_id", "cliente_id") if c in columnas]
@@ -75726,6 +75727,16 @@ class Handler(BaseHTTPRequestHandler):
             if not lote_id:
                 json_response(self, {"error": "lote_id requerido"}, status=400)
                 return
+            # Cerrar la valoración de un lote da por buenos sus documentos, y se
+            # podía cerrar la del lote de otro workspace: contestaba 200 y dejaba
+            # el lote ajeno cerrado, con la nota que le mandaras.
+            ok_amb, err_amb = enforce_gestoria_row_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                "gestoria_import_lotes", lote_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb},
+                              status=404 if err_amb == "No encontrado" else 403)
+                return
             lote = conn.execute("SELECT * FROM gestoria_import_lotes WHERE id = ? LIMIT 1", (lote_id,)).fetchone()
             if not lote:
                 json_response(self, {"error": "lote no encontrado"}, status=404)
@@ -95279,6 +95290,13 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
+            # Se editaba la ficha de gestoría de cualquier cliente por su id.
+            ok_amb, err_amb = enforce_gestoria_cliente_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                cliente_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             allowed = (
                 "tipo_cliente",
                 "mod_fiscal",
@@ -95832,6 +95850,13 @@ class Handler(BaseHTTPRequestHandler):
             ejercicio = str(payload.get("ejercicio") or "").strip()
             estado_presentacion = normalize_renta_presentacion_status(payload.get("estado_presentacion"))
             doc_key = str(payload.get("doc_key") or "").strip()
+            # Se colgaba una declaración en el expediente de otro cliente.
+            ok_amb, err_amb = enforce_gestoria_cliente_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                cliente_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             doc_url = str(payload.get("doc_url") or "").strip()
             archivo_hash = str(payload.get("archivo_hash") or payload.get("file_hash") or "").strip()
             if not cliente_id or not ejercicio:
@@ -96089,6 +96114,16 @@ class Handler(BaseHTTPRequestHandler):
             if not notas:
                 json_response(self, {"error": "notas requeridas"}, status=400)
                 return
+            # Un documento sin cliente asignado sigue siendo de una empresa, y la
+            # consulta de abajo sólo filtra por id: se le escribía la nota a un
+            # documento de otro workspace.
+            ok_amb, err_amb = enforce_gestoria_row_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                "gestoria_docs", doc_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb},
+                              status=404 if err_amb == "No encontrado" else 403)
+                return
             try:
                 cur = conn.execute(
                     """
@@ -96138,6 +96173,13 @@ class Handler(BaseHTTPRequestHandler):
             ejercicio = str(payload.get("ejercicio") or "").strip()
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
+                return
+            # 117 líneas sin una sola comprobación de ámbito.
+            ok_amb, err_amb = enforce_gestoria_cliente_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                cliente_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             if not entry_id and not ejercicio:
                 json_response(self, {"error": "entry_id o ejercicio requerido"}, status=400)
