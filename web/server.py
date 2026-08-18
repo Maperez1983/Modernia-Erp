@@ -41192,6 +41192,32 @@ def open_sqlite_conn(db_path, with_row_factory=False):
 
 
 def ensure_tables(db_path):
+    """Crea y actualiza el esquema, devolviendo SIEMPRE la conexión al pool.
+
+    El cuerpo son 2.600 líneas y tenía **un solo `conn.close()`, al final y sin
+    `finally`**. Cualquier error por el camino —y las últimas llamadas no van
+    protegidas— dejaba la conexión fuera del pool para siempre.
+
+    Eso, con el hilo `db-bootstrap`, que reintenta en bucle mientras la base no
+    esté lista, se comió producción: **una conexión perdida por reintento**, y a
+    las dieciséis el pool murió. A partir de ahí el error pasó a ser «Pool
+    Postgres saturado», que tapa la causa original y ya no deja verla ni al
+    reiniciar: el servidor volvía a caer a los dos segundos de arrancar.
+
+    Seis horas caído, y lo que se veía en pantalla era «DB no disponible».
+    """
+    abiertas = []
+    try:
+        return _ensure_tables_sin_red(db_path, abiertas)
+    finally:
+        for _c in abiertas:
+            try:
+                _c.close()
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("ensure_tables/close", _fallo_tragado)
+
+
+def _ensure_tables_sin_red(db_path, _abiertas):
     force_sqlite = False
     try:
         # En tests y herramientas offline se pasa normalmente un `Path` a un sqlite local,
@@ -41207,6 +41233,7 @@ def ensure_tables(db_path):
         # Si usamos tuple_row durante bootstrap, puede romper con:
         #   TypeError: tuple indices must be integers or slices, not str
         conn = open_postgres_conn(with_row_factory=True)
+        _abiertas.append(conn)
         # En Postgres, muchos "best-effort" (índices, backfills) están envueltos en try/except.
         # En Postgres un error deja la transacción en estado abortado hasta rollback, así que usamos autocommit
         # durante el bootstrap del esquema para no bloquear el arranque por errores no críticos.
@@ -41220,6 +41247,7 @@ def ensure_tables(db_path):
         # Algunas rutinas de bootstrap iteran resultados por nombre de columna.
         # `sqlite3.Row` permite también acceso por índice, así que es seguro activarlo aquí.
         conn = open_sqlite_conn(db_path, with_row_factory=True)
+        _abiertas.append(conn)
 
     def _backend_name(_conn):
         backend = getattr(_conn, "__crm_backend__", "") or ""
