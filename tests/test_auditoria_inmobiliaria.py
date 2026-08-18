@@ -439,6 +439,35 @@ class LosDocumentosSalenYSalenLlenosTests(Agencia):
         self.assertNotIn("xx/xx/xxxx", texto)
 
 
+class UnBotonNoPrometeLoQueNoPuedeCumplirTests(unittest.TestCase):
+    """«Ajustes» del workspace se pintaba habilitado —cursor de mano, opacidad plena—
+    con un criterio (`canManageWorkspace`) y la navegación sólo dejaba entrar con otro
+    (`isPrivilegedUser`). Cuando discrepan, pulsarlo te devuelve a Operativa sin decir
+    nada: desde fuera parece que la aplicación se ha colgado.
+
+    El permiso no se toca. Lo que se arregla es que la pantalla diga la verdad."""
+
+    def test_el_boton_de_ajustes_usa_el_mismo_criterio_que_la_navegacion(self):
+        i = APP.index("const puedeAjustes =")
+        linea = APP[i: APP.index("\n", i)]
+        self.assertIn("canManageWorkspace", linea)
+        self.assertIn("isPrivilegedUser", linea)
+
+    def test_se_oculta_y_se_deshabilita_con_ese_mismo_criterio(self):
+        i = APP.index("const puedeAjustes =")
+        bloque = APP[i: i + 700]
+        self.assertIn('(viewKey === "tenant" && puedeAjustes)', bloque)
+        self.assertIn('button.disabled = viewKey === "tenant" && !puedeAjustes', bloque)
+
+    def test_la_navegacion_sigue_exigiendo_lo_mismo_que_antes(self):
+        """Que nadie «arregle» esto ampliando el acceso: el guardarraíl de
+        `setWorkspaceView` no ha cambiado."""
+        i = APP.index("const setWorkspaceView = (view")
+        cuerpo = APP[i: APP.index("\nconst ", i + 10)]
+        j = cuerpo.index('normalized === "tenant"')
+        self.assertIn("isPrivilegedUser", cuerpo[j: j + 260])
+
+
 class TodoRailDeNavegacionTieneQuienLoEscucheTests(unittest.TestCase):
     """Siete raíles de navegación comparten marcado (`.app-side-item`). Tres tenían su
     manejador —`cliente-tab`, `explorer-tab`, `workspace-view-tab`— y cuatro no lo tenía

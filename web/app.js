@@ -8360,14 +8360,22 @@ const updateWorkspaceEntryChrome = () => {
   workspaceViewButtons.forEach((button) => {
     const viewKey = button.dataset.workspaceViewTab || "";
     if (tenantOperationalMode) {
+      // «Ajustes» (la vista `tenant`) se pintaba habilitado con `canManageWorkspace`,
+      // pero `setWorkspaceView` sólo deja entrar a `isPrivilegedUser`. Cuando los dos
+      // criterios discrepan, el botón parece pulsable —cursor de mano, opacidad
+      // plena— y al pulsarlo te devuelve a Operativa sin decir nada: desde fuera
+      // parece que la aplicación se ha colgado. Aquí se usa el mismo criterio que
+      // decide la navegación, para que el botón no prometa lo que no puede cumplir.
+      // El permiso no se toca: lo que se corrige es que la pantalla mienta.
+      const puedeAjustes = canManageWorkspace && isPrivilegedUser(authUser);
       const shouldShow =
         viewKey === "operations"
         || viewKey === "fincas"
         || viewKey === "rrhh"
         || (viewKey === "motores" && canManageWorkspace)
-        || (viewKey === "tenant" && canManageWorkspace);
+        || (viewKey === "tenant" && puedeAjustes);
       button.classList.toggle("hidden", !shouldShow);
-      button.disabled = viewKey === "tenant" && !canManageWorkspace;
+      button.disabled = viewKey === "tenant" && !puedeAjustes;
       return;
     }
     button.classList.remove("hidden");
