@@ -16506,8 +16506,9 @@ const renderWorkspaceRrhhHub = () => {
 	              </label>
               <label>
                 Rol
-                <select name="rol">
-                  ${roleOptions.map((item) => `<option ${String(selected?.rol || "Lectura") === String(item) ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}
+                <select name="rol" required>
+                  ${selected ? "" : '<option value="" selected>— elige un rol —</option>'}
+                  ${roleOptions.map((item) => `<option ${String(selected?.rol || "") === String(item) ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}
                 </select>
               </label>
               <label>
@@ -17395,7 +17396,8 @@ const renderWorkspaceRrhhHub = () => {
                           <label>
                             Rol
                             <select id="rrhhAccessCreateRol">
-                              ${ADMIN_ROLE_OPTIONS.map((r) => `<option ${r === "Lectura" ? "selected" : ""}>${escapeHtml(r)}</option>`).join("")}
+                              <option value="" selected>— elige un rol —</option>
+                              ${ADMIN_ROLE_OPTIONS.map((r) => `<option>${escapeHtml(r)}</option>`).join("")}
                             </select>
                           </label>
                           <div class="span-2 rrhh-service-grid" data-rrhh-service-scope="new">
@@ -19688,7 +19690,7 @@ const renderWorkspaceRrhhHub = () => {
       }
       const usuario = String(document.getElementById("rrhhAccessCreateUsuario")?.value || "").trim();
       const email = String(document.getElementById("rrhhAccessCreateEmail")?.value || "").trim();
-      const rol = String(document.getElementById("rrhhAccessCreateRol")?.value || "Lectura").trim();
+      const rol = String(document.getElementById("rrhhAccessCreateRol")?.value || "").trim();
       const scope = workspaceRrhhHub.querySelector('[data-rrhh-service-scope="new"]');
       const keys = scope
         ? Array.from(scope.querySelectorAll('input[type="checkbox"][data-rrhh-service-check]'))
@@ -19698,6 +19700,15 @@ const renderWorkspaceRrhhHub = () => {
         : [];
       if (!usuario || !email) {
         if (status) status.textContent = "Usuario y email requeridos.";
+        return;
+      }
+      // El rol venía preseleccionado en «Lectura», que es el único que impide
+      // escribir. Quien daba de alta a un compañero sin fijarse lo creaba sin poder
+      // trabajar, y el rol no daba señales hasta que empezó a aplicarse de verdad:
+      // siete personas de producción acabaron así. Ahora hay que elegirlo, y ningún
+      // valor por defecto decide por nadie —tampoco uno que conceda escritura—.
+      if (!rol) {
+        if (status) status.textContent = "Elige el rol: decide si esta persona puede escribir o sólo leer.";
         return;
       }
       if (!keys.length) {

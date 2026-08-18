@@ -78290,18 +78290,18 @@ class Handler(BaseHTTPRequestHandler):
 
             seed_rows = [
                 # (usuario, email, nombre, apellido, servicio_csv, rol_usuario, workspace_id, rol_miembro)
-                ("SLallana", "", "Sebastian", "Lallana", "Inmobiliaria", "Lectura", ws_modernia, "Lectura"),
-                ("DGarcia", "", "David", "Garcia", "Inmobiliaria", "Lectura", ws_modernia, "Lectura"),
+                ("SLallana", "", "Sebastian", "Lallana", "Inmobiliaria", "Inmobiliaria", ws_modernia, "Miembro"),
+                ("DGarcia", "", "David", "Garcia", "Inmobiliaria", "Inmobiliaria", ws_modernia, "Miembro"),
                 ("Icanamero", "", "I", "Canamero", "Administración", "Administrador", ws_modernia, "Owner"),
-                ("DGallardo", "", "D", "Gallardo", "Fincas, Gestoría", "Lectura", ws_modernia, "Lectura"),
-                ("Rmiera", "", "R", "Miera", "Seguros, Gestoría", "Lectura", ws_modernia, "Lectura"),
-                ("Tramos", "", "T", "Ramos", "Gestoría", "Lectura", ws_modernia, "Lectura"),
-                ("AMostazo", "", "A", "Mostazo", "Gestoría", "Lectura", ws_modernia, "Lectura"),
-                ("Gbartha", "", "G", "Bartha", "Registro horario", "Lectura", ws_modernia, "Lectura"),
-                ("LDianez", "", "L", "Dianez", "Inmobiliaria", "Lectura", ws_modernia, "Lectura"),
-                ("Bsalazar", "", "B", "Salazar", "Seguros, Inmobiliaria", "Lectura", ws_modernia, "Lectura"),
-                ("AMelgar", "", "A", "Melgar", "Gestoría", "Lectura", ws_modernia, "Lectura"),
-                ("JBernal", "", "J", "Bernal", "Financiaciones", "Lectura", ws_modernia, "Lectura"),
+                ("DGallardo", "", "D", "Gallardo", "Fincas, Gestoría", "Gestoría", ws_modernia, "Miembro"),
+                ("Rmiera", "", "R", "Miera", "Seguros, Gestoría", "Gestoría", ws_modernia, "Miembro"),
+                ("Tramos", "", "T", "Ramos", "Gestoría", "Gestoría", ws_modernia, "Miembro"),
+                ("AMostazo", "", "A", "Mostazo", "Gestoría", "Gestoría", ws_modernia, "Miembro"),
+                ("Gbartha", "", "G", "Bartha", "Registro horario", "Gestoría", ws_modernia, "Miembro"),
+                ("LDianez", "", "L", "Dianez", "Inmobiliaria", "Inmobiliaria", ws_modernia, "Miembro"),
+                ("Bsalazar", "", "B", "Salazar", "Seguros, Inmobiliaria", "Seguros", ws_modernia, "Miembro"),
+                ("AMelgar", "", "A", "Melgar", "Gestoría", "Gestoría", ws_modernia, "Miembro"),
+                ("JBernal", "", "J", "Bernal", "Financiaciones", "Financiaciones", ws_modernia, "Miembro"),
                 ("S.sanchez", "sergirex@gmail.com", "S", "Sanchez", "Administración", "Administrador", ws_centro, "Owner"),
                 ("C.anca", "modernia.centro@grupomodernia.es", "C", "Anca", "Administración", "Administrador", ws_centro, "Owner"),
             ]
@@ -78359,7 +78359,15 @@ class Handler(BaseHTTPRequestHandler):
                                 nombre = COALESCE(NULLIF(?, ''), nombre),
                                 apellido = COALESCE(NULLIF(?, ''), apellido),
                                 servicio = COALESCE(NULLIF(?, ''), servicio),
-                                rol = COALESCE(NULLIF(?, ''), rol),
+                                -- El rol del que ya existe NO se toca: manda el que
+                                -- tenga puesto, y esta lista sólo decide con qué nace
+                                -- uno nuevo. Antes era al revés, y volver a sembrar
+                                -- devolvía a «Lectura» —el único rol que impide
+                                -- escribir— a siete trabajadores a los que se les
+                                -- había corregido a mano. Un sembrado que deshace
+                                -- decisiones posteriores no es idempotente: es una
+                                -- regresión con horario.
+                                rol = COALESCE(NULLIF(rol, ''), ?),
                                 registro_horario_activo = CASE WHEN ? = 1 THEN 1 ELSE COALESCE(registro_horario_activo, 0) END,
                                 updated_at = datetime(?)
                             WHERE id = ?

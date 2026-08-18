@@ -439,6 +439,51 @@ class LosDocumentosSalenYSalenLlenosTests(Agencia):
         self.assertNotIn("xx/xx/xxxx", texto)
 
 
+class NadieNaceSinPoderTrabajarTests(unittest.TestCase):
+    """«Lectura» es el único rol que impide escribir, y siete trabajadores de producción
+    lo tenían: no podían crear una actividad, ni subir un documento, ni fichar. No fue
+    una decisión de nadie —venía escrito en dos sitios—.
+
+    1. El alta de usuario traía el rol preseleccionado en «Lectura». Quien daba de alta
+       a un compañero sin fijarse lo creaba bloqueado, y el rol no dio señales hasta que
+       empezó a aplicarse de verdad.
+    2. `/api/admin_seed_modernia_users` lleva la lista de esas personas con «Lectura»
+       escrito a mano, y su UPDATE **reescribía** el rol del que ya existía. Volver a
+       sembrar deshacía cualquier corrección hecha después.
+
+    El valor por defecto no se cambia por otro: se quita. Un valor por defecto que
+    concede escritura sería el mismo error del revés."""
+
+    def test_el_alta_no_preselecciona_ningun_rol(self):
+        self.assertIn('<option value="" selected>— elige un rol —</option>', APP)
+        self.assertNotIn('String(selected?.rol || "Lectura")', APP)
+        self.assertNotIn('r === "Lectura" ? "selected" : ""', APP)
+
+    def test_el_alta_de_acceso_exige_elegirlo(self):
+        i = APP.index('rrhhAccessCreateRol")?.value')
+        bloque = APP[i: i + 1800]
+        self.assertNotIn('|| "Lectura"', APP[i: i + 120])
+        self.assertIn("if (!rol) {", bloque)
+
+    def test_el_sembrado_no_reescribe_el_rol_de_quien_ya_existe(self):
+        """El arreglo de fondo: sembrar no puede deshacer una decisión posterior."""
+        i = SERVER.index("elif parsed.path == \"/api/admin_seed_modernia_users\":")
+        cuerpo = SERVER[i: i + 9000]
+        self.assertIn("rol = COALESCE(NULLIF(rol, ''), ?)", cuerpo)
+        self.assertNotIn("rol = COALESCE(NULLIF(?, ''), rol)", cuerpo)
+
+    def test_nadie_de_la_lista_nace_bloqueado(self):
+        """Si alguien vuelve a añadir a un compañero con «Lectura», esto lo dice."""
+        import re
+        i = SERVER.index("seed_rows = [")
+        fin = SERVER.index("]", SERVER.index("rol_miembro", i))
+        filas = re.findall(r'\("([\w.]+)", "", "[^"]*", "[^"]*", "([^"]*)", "([^"]*)"',
+                           SERVER[i:fin])
+        self.assertGreaterEqual(len(filas), 10, "no reconozco la lista de sembrado")
+        bloqueados = [(u, srv) for u, srv, rol in filas if rol == "Lectura"]
+        self.assertEqual(bloqueados, [], f"nacen sin poder escribir: {bloqueados}")
+
+
 class LasTarjetasDelHubRespetanSusModulosTests(unittest.TestCase):
     """Siete tarjetas del Hub declaran de qué módulo dependen —`data-workspace-module`
     con una clave, o `data-workspace-module-any` con una lista— y **nadie leía ninguno

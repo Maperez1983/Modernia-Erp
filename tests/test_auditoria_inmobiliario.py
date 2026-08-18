@@ -92,10 +92,26 @@ class ElRolDeLecturaMandaTests(unittest.TestCase):
         cuerpo = SERVER[i: SERVER.index("\ndef ", i + 10)]
         self.assertIn("if write and cuenta_es_de_solo_lectura(conn, session):", cuerpo)
 
-    def test_el_alta_ya_no_siembra_a_todos_como_miembro(self):
-        """Era el origen: la pantalla decía «Lectura» y el permiso era de escritura."""
-        self.assertNotIn('"Lectura", ws_modernia, "Miembro")', SERVER)
-        self.assertIn('"Lectura", ws_modernia, "Lectura")', SERVER)
+    def test_el_alta_no_contradice_el_rol_de_la_cuenta(self):
+        """Era el origen: la pantalla decía «Lectura» y el permiso era de escritura.
+
+        La corrección de entonces alineó los dos poniendo «Lectura» en ambos. Después
+        se comprobó con el cliente (2026-08-18) que **las once personas de esa lista son
+        trabajadores en activo**, no cuentas de consulta: llevaban desde junio sin poder
+        crear una actividad ni subir un documento, y a una de ellas se le veían 109
+        acciones y 180 registros de auditoría hechos antes de que el rol empezara a
+        aplicarse de verdad.
+
+        Así que la alineación se mantiene, pero hacia el otro lado: cada uno lleva el rol
+        de su servicio —que permite escribir sin dar administración— y figura como
+        «Miembro» del workspace. Lo que esta prueba vigila no cambia: que el rol de la
+        cuenta y el del workspace no digan cosas distintas."""
+        # Nadie de la lista nace bloqueado…
+        self.assertNotIn('"Lectura", ws_modernia,', SERVER)
+        # …ni figurando como sólo lectura en el workspace mientras puede escribir.
+        for rol in ("Inmobiliaria", "Gestoría", "Seguros", "Financiaciones"):
+            with self.subTest(rol=rol):
+                self.assertNotIn(f'"{rol}", ws_modernia, "Lectura")', SERVER)
 
 
 class LaGuardaDeInmueblesNoSePuedeSaltarTests(unittest.TestCase):
