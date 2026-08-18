@@ -1224,3 +1224,71 @@ class LaImportacionMasivaTests(BaseGestoria):
                         "periodo": "2026-T2", "filename": "diario.xlsx",
                         "xlsx_b64": ""}, self.cookie_a)
         self.assertIn(r["estado"], (400, 403), r["json"])
+
+
+class LasSeisLecturasSueltasTests(ElExpedienteDelClienteTests):
+    """Lo último que quedaba sin probar del módulo.
+
+    Seis lecturas que no encajaban en ningún grupo: las tarjetas y la exportación
+    de renta, el depurador, las tareas contables, los tipos de trabajo y la
+    bandeja de documentos sin asignar. Todas arrancan de un `empresa_id`, un
+    `cliente_id` o un `workspace_id` que llega en la petición.
+    """
+
+    def setUp(self):
+        super().setUp()
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        for suf in ("a", "b"):
+            self._ins("gestoria_trabajo_tipos", dict(
+                id=f"tt-{suf}", empresa_id=f"emp-{suf}", tipo_key=f"secreto_{suf}",
+                nombre=f"Modelo secreto {suf.upper()}", precio_base=99.0, activo=1, **base))
+            self._ins("gestoria_conta_tasks", dict(
+                id=f"tk-{suf}", cliente_id=f"cli-{suf}", periodo="2026-T2",
+                tarea=f"Cerrar trimestre {suf.upper()}", estado="Pendiente", **base))
+            self._ins("gestoria_docs", dict(
+                id=f"pend-{suf}", empresa_id=f"emp-{suf}",
+                nombre=f"Pendiente {suf.upper()}.pdf", tipo="Modelo 100",
+                referencia_tipo="renta", referencia_id=f"renta-pendiente-{suf}",
+                estado="Pendiente asignar", **base))
+
+    def _no_ve(self, ruta, ajeno, que):
+        r = self._get(ruta, self.cookie_a)
+        self.assertNotIn(ajeno, json.dumps(r["json"], ensure_ascii=False),
+                         f"{que}: el gestor A ha visto {ajeno}")
+
+    def test_la_exportacion_de_renta(self):
+        """Entrega un fichero, no JSON, así que se mide por lo que contesta:
+        403 para la empresa ajena y 200 para la suya."""
+        self.assertEqual(
+            self._get("/api/gestoria_renta_export?empresa_id=emp-b", self.cookie_a)["estado"], 403)
+        self.assertEqual(
+            self._get("/api/gestoria_renta_export?empresa_id=emp-a", self.cookie_a)["estado"], 200)
+
+    def test_el_depurador_de_renta(self):
+        self._no_ve("/api/gestoria_renta_debug?empresa_id=emp-b&cliente_id=cli-b",
+                    "Cliente B", "depurador")
+
+    def test_las_tareas_contables(self):
+        self._no_ve("/api/gestoria_conta_tasks?cliente_id=cli-b&empresa_id=emp-b",
+                    "Cerrar trimestre B", "tareas")
+
+    def test_los_tipos_de_trabajo(self):
+        """Llevan el precio del servicio: es tarifa ajena."""
+        self._no_ve("/api/gestoria_trabajo_tipos?empresa_id=emp-b",
+                    "Modelo secreto B", "tipos de trabajo")
+
+    def test_la_bandeja_de_pendientes(self):
+        self._no_ve("/api/renta_quick_pending?empresa_id=emp-b", "Pendiente B.pdf", "bandeja")
+
+    def test_y_las_propias_se_ven(self):
+        """El control, sin el que ninguna de las cinco de arriba prueba nada."""
+        for ruta, esperado in (
+            ("/api/gestoria_trabajo_tipos?empresa_id=emp-a", "Modelo secreto A"),
+            ("/api/gestoria_conta_tasks?cliente_id=cli-a&empresa_id=emp-a", "Cerrar trimestre A"),
+            ("/api/renta_quick_pending?empresa_id=emp-a", "Pendiente A.pdf"),
+            ("/api/gestoria_renta_debug?empresa_id=emp-a&cliente_id=cli-a", "Cliente A"),
+        ):
+            with self.subTest(ruta=ruta):
+                r = self._get(ruta, self.cookie_a)
+                self.assertIn(esperado, json.dumps(r["json"], ensure_ascii=False),
+                              f"{ruta} no devuelve ni lo propio ({r['estado']})")
