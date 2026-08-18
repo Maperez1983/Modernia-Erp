@@ -986,3 +986,241 @@ class LasNueveDeLosOtrosModulosTests(LaOtraMitadDelModuloTests):
             with self.subTest(ruta=ruta):
                 r = self._get(ruta + self.PARAMETROS.get(ruta, ""), self.cookie_a)
                 self.assertIn(r["estado"], (200, 403), f"{ruta} contesta {r['estado']}")
+
+
+class ElExpedienteDelClienteTests(BaseGestoria):
+    """Los seis que cuelgan cosas del expediente de un cliente.
+
+    Es el corazón del módulo: de 1.621 fichas de gestoría, 1.619 son de renta.
+    Aquí se guardan las declaraciones, sus documentos y las notas del gestor, y
+    todos estos endpoints se manejan por `cliente_id`. La pregunta es si aceptan
+    el que les manden.
+    """
+
+    def setUp(self):
+        super().setUp()
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        for suf in ("a", "b"):
+            self._ins("cliente_gestoria", dict(
+                id=f"cg-{suf}", cliente_id=f"cli-{suf}", tipo_cliente="Persona física",
+                mod_renta=1, renta_detalles=json.dumps({"entries": [{
+                    "id": f"renta-2025-{suf}", "ejercicio": "2025",
+                    "cliente_nombre": f"Cliente {suf.upper()}",
+                    "estado_presentacion": "Borrador",
+                    "resultado_declaracion": 100.0}]}), **base))
+            self._ins("gestoria_docs", dict(
+                id=f"rdoc-{suf}", empresa_id=f"emp-{suf}", cliente_id=f"cli-{suf}",
+                nombre=f"Renta 2025 {suf.upper()}.pdf", tipo="Modelo 100",
+                referencia_tipo="gestoria", referencia_id=f"renta-2025-{suf}",
+                estado="Recibido", notas="", doc_key=f"s3/renta-{suf}.pdf", **base))
+            # `renta_quick_note` sólo escribe sobre documentos **sin cliente
+            # asignado** —es la bandeja de lo que llega antes de repartirlo—, así
+            # que hace falta uno así para que la prueba mida algo.
+            self._ins("gestoria_docs", dict(
+                id=f"suelto-{suf}", empresa_id=f"emp-{suf}",
+                nombre=f"Sin asignar {suf.upper()}.pdf", tipo="Modelo 100",
+                referencia_tipo="renta", estado="Pendiente asignar", notas="", **base))
+
+    def _ficha(self, cliente):
+        f = self.conn.execute(
+            "SELECT tipo_cliente, renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
+            (cliente,)).fetchone()
+        return dict(f) if f else None
+
+    def _entradas(self, cliente):
+        d = json.loads(self._ficha(cliente)["renta_detalles"] or "{}")
+        return d.get("entries") or []
+
+    # --- la ficha de gestoría ------------------------------------------------
+    def test_no_se_edita_la_ficha_de_un_cliente_ajeno(self):
+        self._post("/api/cliente_gestoria_update",
+                   {"empresa_nombre": "Empresa A", "cliente_id": "cli-b",
+                    "tipo_cliente": "Sociedad", "mod_laboral": 1}, self.cookie_a)
+        self.assertEqual(self._ficha("cli-b")["tipo_cliente"], "Persona física")
+
+    def test_la_propia_sí(self):
+        self._post("/api/cliente_gestoria_update",
+                   {"empresa_nombre": "Empresa A", "cliente_id": "cli-a",
+                    "tipo_cliente": "Sociedad"}, self.cookie_a)
+        self.assertEqual(self._ficha("cli-a")["tipo_cliente"], "Sociedad")
+
+    # --- las notas del gestor ------------------------------------------------
+    def test_no_se_escribe_una_nota_en_el_documento_de_otro(self):
+        """La consulta filtraba sólo por id, y un documento sin cliente sigue
+        siendo de una empresa."""
+        self._post("/api/renta_quick_note",
+                   {"empresa_nombre": "Empresa A", "doc_id": "suelto-b",
+                    "notas": "Colado"}, self.cookie_a)
+        f = self.conn.execute(
+            "SELECT notas FROM gestoria_docs WHERE id = 'suelto-b'").fetchone()
+        self.assertNotEqual(f["notas"], "Colado")
+
+    def test_la_nota_propia_sí_se_escribe(self):
+        r = self._post("/api/renta_quick_note",
+                       {"empresa_nombre": "Empresa A", "doc_id": "suelto-a",
+                        "notas": "Revisado por Ana"}, self.cookie_a)
+        self.assertEqual(r["estado"], 200, r["json"])
+        f = self.conn.execute(
+            "SELECT notas FROM gestoria_docs WHERE id = 'suelto-a'").fetchone()
+        self.assertEqual(f["notas"], "Revisado por Ana")
+
+    # --- adjuntar una declaración -------------------------------------------
+    def test_no_se_cuelga_una_declaracion_del_expediente_ajeno(self):
+        antes = len(self._entradas("cli-b"))
+        self._post("/api/renta_quick_attach",
+                   {"empresa_nombre": "Empresa A", "cliente_id": "cli-b",
+                    "ejercicio": "2024", "estado_presentacion": "Presentada",
+                    "doc_url": "/uploads/colado.pdf", "doc_nombre": "Colado.pdf"},
+                   self.cookie_a)
+        self.assertEqual(len(self._entradas("cli-b")), antes,
+                         "se ha colado una declaración en el expediente ajeno")
+
+    def test_la_propia_sí_se_cuelga(self):
+        antes = len(self._entradas("cli-a"))
+        r = self._post("/api/renta_quick_attach",
+                       {"empresa_nombre": "Empresa A", "cliente_id": "cli-a",
+                        "ejercicio": "2024", "estado_presentacion": "Presentada",
+                        "doc_url": "/uploads/renta.pdf", "doc_nombre": "Renta 2024.pdf"},
+                       self.cookie_a)
+        self.assertEqual(r["estado"], 200, r["json"])
+        self.assertGreater(len(self._entradas("cli-a")), antes)
+
+    # --- el documento de una campaña ----------------------------------------
+    def test_no_se_toca_la_declaracion_de_otro(self):
+        self._post("/api/renta_campaign_document",
+                   {"empresa_nombre": "Empresa A", "cliente_id": "cli-b",
+                    "entry_id": "renta-2025-b", "ejercicio": "2025",
+                    "estado_presentacion": "Presentada"}, self.cookie_a)
+        e = [x for x in self._entradas("cli-b") if x.get("id") == "renta-2025-b"]
+        self.assertEqual(e[0].get("estado_presentacion"), "Borrador")
+
+    def test_reprocesar_el_ocr_de_otro_tampoco(self):
+        """Antes contestaba 409 «documento sin doc_key»: había pasado la puerta y
+        se paraba por falta de datos, no por permiso. Con el documento completo,
+        lo que tiene que parar es el ámbito."""
+        r = self._post("/api/renta_entry_ocr_reprocess",
+                       {"empresa_nombre": "Empresa A", "cliente_id": "cli-b",
+                        "entry_id": "renta-2025-b", "ejercicio": "2025"}, self.cookie_a)
+        self.assertEqual(r["estado"], 403, r["json"])
+
+    # --- y lo que sí se puede leer -------------------------------------------
+    def test_las_tarjetas_de_renta_son_de_los_suyos(self):
+        r = self._get("/api/gestoria_renta_cards?empresa_id=emp-b", self.cookie_a)
+        self.assertNotIn("Cliente B", json.dumps(r["json"], ensure_ascii=False))
+
+    def test_pero_las_propias_se_ven(self):
+        r = self._get("/api/gestoria_renta_cards?empresa_id=emp-a", self.cookie_a)
+        self.assertEqual(r["estado"], 200)
+        self.assertIn("Cliente A", json.dumps(r["json"], ensure_ascii=False))
+
+
+class LaImportacionMasivaTests(BaseGestoria):
+    """Los ocho de la importación, que es por donde entró todo.
+
+    Esta puerta merece mirarse con cuidado por dos razones. Es la que trajo a
+    producción las 754 declaraciones sin empresa, las 2.158 cuentas que no eran
+    cuentas y los 77 estados civiles con el volcado del OCR dentro. Y es la que
+    mueve documentos en bloque: un fallo aquí no afecta a una fila, afecta a un
+    lote entero.
+
+    De los ocho, `import_upload` sí comprueba empresa y cliente. Los otros seis
+    con rama propia no comprobaban nada.
+    """
+
+    def setUp(self):
+        super().setUp()
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        for suf in ("a", "b"):
+            self._ins("gestoria_import_lotes", dict(
+                id=f"lote-{suf}", empresa_id=f"emp-{suf}", cliente_id=f"cli-{suf}",
+                origen="excel", estado="Pendiente", periodo="2026-T2",
+                total_documentos=1, total_ok=1, total_revisar=0, total_duplicado=0,
+                total_error=0, valoracion_estado="abierta",
+                valoracion_total_asientos=0, valoracion_total_terceros=0,
+                valoracion_total_cuentas=0, valoracion_total_pendientes=0, **base))
+            self._ins("gestoria_import_documentos", dict(
+                id=f"idoc-{suf}", lote_id=f"lote-{suf}", empresa_id=f"emp-{suf}",
+                cliente_id=f"cli-{suf}", archivo_nombre=f"Factura {suf.upper()}.pdf",
+                numero_detectado=f"F-{suf}-1", tercero_detectado=f"Proveedor {suf.upper()}",
+                total_detectado=1210.0, base_detectada=1000.0, cuota_iva_detectada=210.0,
+                estado_revision="revisar", **base))
+
+    def _lote(self, id_):
+        return dict(self.conn.execute(
+            "SELECT estado, valoracion_estado, valoracion_notas FROM gestoria_import_lotes "
+            "WHERE id = ?", (id_,)).fetchone())
+
+    def _doc(self, id_):
+        return dict(self.conn.execute(
+            "SELECT estado_revision, cliente_id, validado_manual_by FROM gestoria_import_documentos "
+            "WHERE id = ?", (id_,)).fetchone())
+
+    # --- aplicar un lote entero ---------------------------------------------
+    def test_no_se_aplica_el_lote_de_otro(self):
+        """Aplicar convierte los documentos del lote en asientos contables."""
+        r = self._post("/api/gestoria_import_aplicar",
+                       {"empresa_nombre": "Empresa A", "lote_id": "lote-b"}, self.cookie_a)
+        self.assertIn(r["estado"], (403, 404), r["json"])
+        self.assertEqual(self._doc("idoc-b")["estado_revision"], "revisar")
+
+    def test_el_propio_sí(self):
+        r = self._post("/api/gestoria_import_aplicar",
+                       {"empresa_nombre": "Empresa A", "lote_id": "lote-a"}, self.cookie_a)
+        self.assertEqual(r["estado"], 200, r["json"])
+
+    # --- valorar y cerrar un lote -------------------------------------------
+    def test_no_se_cierra_la_valoracion_del_lote_de_otro(self):
+        r = self._post("/api/gestoria_import_lote_valoracion",
+                       {"empresa_nombre": "Empresa A", "lote_id": "lote-b",
+                        "valoracion_estado": "cerrada", "cerrar": True,
+                        "valoracion_notas": "Colado"}, self.cookie_a)
+        self.assertIn(r["estado"], (403, 404), r["json"])
+        self.assertNotEqual(self._lote("lote-b")["valoracion_notas"], "Colado")
+
+    def test_la_valoracion_propia_sí(self):
+        r = self._post("/api/gestoria_import_lote_valoracion",
+                       {"empresa_nombre": "Empresa A", "lote_id": "lote-a",
+                        "valoracion_estado": "cerrada", "cerrar": True,
+                        "valoracion_notas": "Revisado"}, self.cookie_a)
+        self.assertEqual(r["estado"], 200, r["json"])
+        self.assertEqual(self._lote("lote-a")["valoracion_notas"], "Revisado")
+
+    # --- documentos, uno a uno y en bloque ----------------------------------
+    def test_no_se_concilia_un_documento_ajeno(self):
+        r = self._post("/api/gestoria_import_documento_conciliar",
+                       {"empresa_nombre": "Empresa A", "id": "idoc-b"}, self.cookie_a)
+        self.assertIn(r["estado"], (403, 404), r["json"])
+
+    def test_no_se_resuelve_un_documento_ajeno(self):
+        r = self._post("/api/gestoria_import_documento_resolver",
+                       {"empresa_nombre": "Empresa A", "id": "idoc-b",
+                        "estado_revision": "ok", "cliente_id": "cli-a"}, self.cookie_a)
+        self.assertIn(r["estado"], (403, 404), r["json"])
+        d = self._doc("idoc-b")
+        self.assertEqual(d["estado_revision"], "revisar")
+        self.assertEqual(d["cliente_id"], "cli-b")
+
+    def test_el_propio_sí_se_resuelve(self):
+        r = self._post("/api/gestoria_import_documento_resolver",
+                       {"empresa_nombre": "Empresa A", "id": "idoc-a",
+                        "estado_revision": "ok"}, self.cookie_a)
+        self.assertEqual(r["estado"], 200, r["json"])
+        # Se guarda normalizado en mayúsculas.
+        self.assertEqual(self._doc("idoc-a")["estado_revision"].upper(), "OK")
+
+    def test_no_se_tocan_en_bloque_los_documentos_de_otro_lote(self):
+        """En bloque es donde más daño hace: son todos los documentos de una vez."""
+        r = self._post("/api/gestoria_import_documentos_bulk",
+                       {"empresa_nombre": "Empresa A", "lote_id": "lote-b",
+                        "documentos": [{"id": "idoc-b", "estado_revision": "ok"}]},
+                       self.cookie_a)
+        self.assertIn(r["estado"], (403, 404), r["json"])
+        self.assertEqual(self._doc("idoc-b")["estado_revision"], "revisar")
+
+    # --- el diario en Excel --------------------------------------------------
+    def test_no_se_importa_un_diario_al_cliente_de_otro(self):
+        r = self._post("/api/gestoria_import_diario_excel",
+                       {"empresa_nombre": "Empresa A", "cliente_id": "cli-b",
+                        "periodo": "2026-T2", "filename": "diario.xlsx",
+                        "xlsx_b64": ""}, self.cookie_a)
+        self.assertIn(r["estado"], (400, 403), r["json"])
