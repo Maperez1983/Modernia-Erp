@@ -41093,6 +41093,25 @@ def sql_group_concat(expr: str, sep: str = " | ", *, distinct: bool = False) -> 
         return f"GROUP_CONCAT(DISTINCT {expr}, '{safe_sep}')"
     return f"GROUP_CONCAT({expr}, '{safe_sep}')"
 
+def cliente_existe(conn, cliente_id):
+    """¿Hay un cliente con ese id?
+
+    Varios endpoints insertaban con el `cliente_id` que viniera en la petición sin
+    comprobarlo. Si no existe salta la clave ajena, que sale como un 500 —y en Postgres
+    además deja la transacción abortada, así que muere también todo lo que venga después
+    en la misma petición— cuando lo que ocurre es que el id no está. Eso es un 404.
+    """
+    cid = str(cliente_id or "").strip()
+    if not cid:
+        return False
+    try:
+        return bool(conn.execute(
+            "SELECT 1 FROM clientes WHERE id = ? LIMIT 1", (cid,)).fetchone())
+    except Exception:
+        _rollback_best_effort(conn)
+        return False
+
+
 def row_value(row, key, default=None):
     if row is None:
         return default
@@ -68746,7 +68765,7 @@ class Handler(BaseHTTPRequestHandler):
     // está a medio hacer. Si no viene con la forma esperada, se deja tal cual.
     const fecha = (v) => {
       const t = String(v == null ? "" : v).trim();
-      const m = t.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/);
+      const m = t.match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[ T](\\d{2}:\\d{2}))?/);
       return m ? `${m[3]}/${m[2]}/${m[1]}` + (m[4] ? ` ${m[4]}` : "") : t;
     };
     const clave = "portal_busqueda_sesion";
@@ -69335,7 +69354,7 @@ class Handler(BaseHTTPRequestHandler):
     // comunero se le enseñan como se escriben aquí: «12/09/2026», no «2026-09-12».
     const fecha = (x) => {
       const t = String(x ?? "").trim();
-      const m = t.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/);
+      const m = t.match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[ T](\\d{2}:\\d{2}))?/);
       return m ? `${m[3]}/${m[2]}/${m[1]}` + (m[4] ? ` ${m[4]}` : "") : t;
     };
     const app = document.getElementById("app");
@@ -82363,8 +82382,18 @@ class Handler(BaseHTTPRequestHandler):
             workspace_id = str(payload.get("workspace_id") or "").strip()
             doc_key = str(payload.get("doc_key") or payload.get("s3_key") or "").strip()
             filename = str(payload.get("filename") or payload.get("nombre") or "nominas.pdf").strip() or "nominas.pdf"
-            year = int(payload.get("year") or 0)
-            month = int(payload.get("month") or 0)
+            # Convertir antes de validar: un «2026-08» en `month` —que es justo como
+            # se escribe un periodo en el resto del CRM— reventaba con ValueError y
+            # devolvía un 500, en vez del «month inválido» que hay diez líneas más
+            # abajo. Se convierte con red, y el valor malo cae en su propia
+            # comprobación de rango.
+            def _entero(valor):
+                try:
+                    return int(str(valor).strip())
+                except (TypeError, ValueError):
+                    return 0
+            year = _entero(payload.get("year") or 0)
+            month = _entero(payload.get("month") or 0)
             overwrite = 1 if str(payload.get("overwrite") or "").strip().lower() in {"1", "true", "si", "sí", "on"} else 0
             dry_run = 1 if str(payload.get("dry_run") or "").strip().lower() in {"1", "true", "si", "sí", "on"} else 0
             if not workspace_id:
@@ -88971,6 +89000,9 @@ class Handler(BaseHTTPRequestHandler):
                         (now, f"%{record_id}%"),
                     )
         elif parsed.path == "/api/seguros_ofertas":
+            if not cliente_existe(conn, payload.get("cliente_id")):
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
             conn.execute(
                 """
                 INSERT INTO seguros_ofertas (
@@ -89357,6 +89389,9 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/seguros_referidos":
+            if not cliente_existe(conn, payload.get("cliente_id")):
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
             conn.execute(
                 """
                 INSERT INTO seguros_referidos (
@@ -89668,7 +89703,13 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT estado FROM asesoramientos_financiacion WHERE id = ? LIMIT 1",
                 (asesoramiento_id,),
             ).fetchone()
-            stage = normalize_fin_stage(ases_row["estado"] if ases_row else "")
+            # Si el asesoramiento no existe se seguía adelante igualmente, insertando
+            # tareas colgadas de un id que no está: saltaba la clave ajena y salía un
+            # 500. Es un id que no existe, no un fallo del servidor.
+            if not ases_row:
+                json_response(self, {"error": "Asesoramiento no encontrado"}, status=404)
+                return
+            stage = normalize_fin_stage(ases_row["estado"])
             conn.execute(
                 "DELETE FROM fin_checklist WHERE asesoramiento_id = ?",
                 (asesoramiento_id,),
@@ -97839,6 +97880,11 @@ class Handler(BaseHTTPRequestHandler):
             force_new = bool(payload.get("force_new") or payload.get("forceCreateNew") or payload.get("no_reuse"))
             cliente = str(payload.get("cliente") or "").strip()
             cliente_id = str(payload.get("cliente_id") or "").strip() or None
+            # Aquí el cliente es opcional —se puede abrir un estudio sin ficha— pero si
+            # viene uno, tiene que existir.
+            if cliente_id and not cliente_existe(conn, cliente_id):
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
             fecha_encargo = str(payload.get("fecha_encargo") or "").strip() or None
             precio = parse_optional_float(payload.get("precio"))
             importe_hipoteca = parse_optional_float(payload.get("importe_hipoteca"))
@@ -111520,8 +111566,12 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/hipotecas_firmadas_pdf":
-            empresa_id = str(payload.get("empresa_id") or "").strip()
-            selected_year = str(payload.get("year") or "").strip()
+            # `payload` no existe en una petición GET: leerlo aquí hacía que este PDF
+            # reventara con UnboundLocalError **siempre**, sin excepción. Nadie ha
+            # podido descargar nunca el listado de hipotecas firmadas. Sus vecinos de
+            # unas líneas más arriba leen de `params`, que es de donde viene un GET.
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            selected_year = (params.get("year", [""])[0] or "").strip()
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
