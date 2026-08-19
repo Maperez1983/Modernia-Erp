@@ -79,6 +79,7 @@ class BaseGestoria(unittest.TestCase):
 
         self._prev = getattr(S.Handler, "db_path", None)
         S.Handler.db_path = str(self.db)
+        S.Handler._gestoria_dashboard_cache.clear()
         self.httpd = S.ThreadingHTTPServer(("127.0.0.1", 0), S.Handler)
         self.base = f"http://127.0.0.1:{self.httpd.server_address[1]}"
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
@@ -321,6 +322,48 @@ class ElCuadroDeMandoTests(BaseGestoria):
     def test_ni_el_de_renta(self):
         r = self._get("/api/gestoria_renta_dashboard?empresa_id=emp-b", self.cookie_a)
         self.assertNotIn("Cliente B", json.dumps(r["json"]))
+
+    def test_autonomos_lee_el_perfil_vivo_no_el_tipo_cliente_congelado(self):
+        """clientes.perfil es el dato que se edita; cliente_gestoria.tipo_cliente
+        se fija una vez al crear la ficha y nunca se resincroniza."""
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("clientes", dict(id="cli-a-auto", nombre="Autónoma A", nif="9990001",
+                                   empresa_id="emp-a", perfil="Autónomo", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-auto", cliente_id="cli-a-auto",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        self._ins("cliente_gestoria", dict(id="cg-a-auto", cliente_id="cli-a-auto",
+                                           tipo_cliente="Gestiones Administrativas",
+                                           mod_contable=1, **base))
+        r = self._get("/api/gestoria_dashboard?empresa_id=emp-a", self.cookie_a)
+        self.assertEqual(r["json"]["counts"]["autonomos"], 1)
+
+    def test_puntuales_es_sin_modulo_recurrente_y_no_se_fuga_de_empresa(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("clientes", dict(id="cli-a-suelto", nombre="Suelta A", nif="9990002",
+                                   empresa_id="emp-a", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-suelto", cliente_id="cli-a-suelto",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        self._ins("cliente_gestoria", dict(id="cg-a-suelto", cliente_id="cli-a-suelto",
+                                           tipo_cliente="Gestiones Administrativas",
+                                           mod_fiscal=0, mod_laboral=0, mod_contable=0,
+                                           mod_renta=0, **base))
+        self._ins("cliente_gestoria", dict(id="cg-b-suelto", cliente_id="cli-b",
+                                           tipo_cliente="Gestiones Administrativas",
+                                           mod_fiscal=0, mod_laboral=0, mod_contable=0,
+                                           mod_renta=0, **base))
+        r = self._get("/api/gestoria_dashboard?empresa_id=emp-a", self.cookie_a)
+        self.assertEqual(r["json"]["counts"]["puntuales"], 1)
+
+    def test_puntuales_no_cuenta_a_quien_tiene_renta(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("clientes", dict(id="cli-a-renta", nombre="Rentista A", nif="9990003",
+                                   empresa_id="emp-a", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-renta", cliente_id="cli-a-renta",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        self._ins("cliente_gestoria", dict(id="cg-a-renta", cliente_id="cli-a-renta",
+                                           tipo_cliente="Cliente Renta", mod_renta=1, **base))
+        r = self._get("/api/gestoria_dashboard?empresa_id=emp-a", self.cookie_a)
+        self.assertEqual(r["json"]["counts"]["puntuales"], 0)
 
 
 if __name__ == "__main__":

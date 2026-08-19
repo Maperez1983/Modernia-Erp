@@ -107393,11 +107393,11 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
 
-                tipos_map = {}
+                perfil_map = {}
                 try:
-                    tipos = conn.execute(
+                    perfiles = conn.execute(
                         f"""
-                        SELECT cg.tipo_cliente AS tipo, COUNT(*) AS total
+                        SELECT c.perfil AS perfil, COUNT(*) AS total
                         FROM cliente_gestoria cg
                         JOIN clientes c ON c.id = cg.cliente_id
                         LEFT JOIN clientes_empresas ce_join
@@ -107406,30 +107406,59 @@ class Handler(BaseHTTPRequestHandler):
                          AND {service_filter_join}
                         WHERE COALESCE(c.empresa_id, '') IN ({placeholders_emp})
                            OR ce_join.id IS NOT NULL
-                        GROUP BY cg.tipo_cliente
+                        GROUP BY c.perfil
                         """,
                         tuple([*empresa_ids, *empresa_ids]),
                     ).fetchall()
-                    for row in tipos:
-                        tipo = str(row_value(row, "tipo", "") or "").strip()
-                        if not tipo:
+                    for row in perfiles:
+                        perfil = str(row_value(row, "perfil", "") or "").strip()
+                        if not perfil:
                             continue
                         try:
-                            tipos_map[tipo] = int(row_value(row, "total", 0) or 0)
+                            perfil_map[perfil] = int(row_value(row, "total", 0) or 0)
                         except Exception:
-                            tipos_map[tipo] = 0
+                            perfil_map[perfil] = 0
                 except Exception as exc:
                     try:
-                        Handler._record_api_error("/api/gestoria_dashboard:tipos", exc)
+                        Handler._record_api_error("/api/gestoria_dashboard:perfiles", exc)
                     except Exception:
                         pass
 
-                def tipo_count(*labels):
-                    return sum(int(tipos_map.get(label, 0) or 0) for label in labels)
+                def perfil_count(*labels):
+                    return sum(int(perfil_map.get(label, 0) or 0) for label in labels)
 
-                payload["counts"]["autonomos"] = tipo_count("Autónomo", "Autonomo")
-                payload["counts"]["empresas"] = tipo_count("Empresa", "Empresas")
-                payload["counts"]["puntuales"] = tipo_count("Puntual", "Puntuales")
+                # cliente_gestoria.tipo_cliente se fija una vez al crear la ficha y no se
+                # resincroniza; clientes.perfil es el dato vivo, así que manda aquí.
+                payload["counts"]["autonomos"] = perfil_count("Autónomo", "Autonomo")
+                payload["counts"]["empresas"] = perfil_count("Empresa", "Empresas")
+
+                # Puntual: tiene ficha de gestoría pero ningún módulo recurrente
+                # (fiscal, laboral, contable o renta) activo — acude por trámites sueltos.
+                try:
+                    puntuales_row = conn.execute(
+                        f"""
+                        SELECT COUNT(*) AS total
+                        FROM cliente_gestoria cg
+                        JOIN clientes c ON c.id = cg.cliente_id
+                        LEFT JOIN clientes_empresas ce_join
+                          ON ce_join.cliente_id = c.id
+                         AND ce_join.empresa_id IN ({placeholders_emp})
+                         AND {service_filter_join}
+                        WHERE (COALESCE(c.empresa_id, '') IN ({placeholders_emp})
+                           OR ce_join.id IS NOT NULL)
+                          AND COALESCE(cg.mod_fiscal, 0) = 0
+                          AND COALESCE(cg.mod_laboral, 0) = 0
+                          AND COALESCE(cg.mod_contable, 0) = 0
+                          AND COALESCE(cg.mod_renta, 0) = 0
+                        """,
+                        tuple([*empresa_ids, *empresa_ids]),
+                    ).fetchone()
+                    payload["counts"]["puntuales"] = int(row_value(puntuales_row, "total", 0) or 0)
+                except Exception as exc:
+                    try:
+                        Handler._record_api_error("/api/gestoria_dashboard:puntuales", exc)
+                    except Exception:
+                        pass
 
             try:
                 docs_sin_archivo = conn.execute(
