@@ -28764,6 +28764,10 @@ const showWorkspaceConfigSkeletons = () => {
 
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
+  // Sin esto, la empresa activa que se guardó al pulsar "Activar contexto" nunca se
+  // aplicaba en una carga de página nueva: el match de más abajo comparaba contra un
+  // state.currentWorkspaceCompany* todavía vacío y siempre caía a companies[0].
+  restoreWorkspaceCompanyContextFromStorage();
   state.currentWorkspaceId = workspaceId;
   state.currentWorkspaceMemberRole = "";
   let wsNombre = "";
