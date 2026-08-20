@@ -5585,18 +5585,27 @@ const shouldPreferTenantRouting = () => {
   return Boolean(String(state.currentWorkspaceId || "").trim());
 };
 
-const restoreWorkspaceCompanyContextFromStorage = () => {
+const restoreWorkspaceCompanyContextFromStorage = (opts = {}) => {
+  // `force` existe porque `openHolding()` dispara `handleRoute()` varias veces durante
+  // el arranque sin esperar entre sí (loadWorkspaceCentral().catch(), no awaited), así
+  // que hay `loadWorkspaceDetail()` corriendo en paralelo. Con el guard "solo si está
+  // vacío", el primero que llega a rellenar `state` "gana" el guard y los demás lo
+  // saltan aunque su propio companyMatch fuera a resolver mejor; si ese primero venía
+  // de un companyMatch que cayó a companies[0] (aún sin este restore), la empresa
+  // guardada en localStorage nunca llegaba a aplicarse. Forzando aquí, todas las
+  // llamadas concurrentes parten del mismo valor persistido.
+  const force = Boolean(opts?.force);
   try {
     const wsCompanyId = String(localStorage.getItem("crm.currentWorkspaceCompanyWsId") || "").trim();
     const legacyCompanyId = String(localStorage.getItem("crm.currentWorkspaceCompanyId") || "").trim();
     const companyName = String(localStorage.getItem("crm.currentWorkspaceCompanyName") || "").trim();
-    if (wsCompanyId && !String(state.currentWorkspaceCompanyWsId || "").trim()) {
+    if (wsCompanyId && (force || !String(state.currentWorkspaceCompanyWsId || "").trim())) {
       state.currentWorkspaceCompanyWsId = wsCompanyId;
     }
-    if (legacyCompanyId && !String(state.currentWorkspaceCompanyId || "").trim()) {
+    if (legacyCompanyId && (force || !String(state.currentWorkspaceCompanyId || "").trim())) {
       state.currentWorkspaceCompanyId = legacyCompanyId;
     }
-    if (companyName && !String(state.currentWorkspaceCompanyName || "").trim()) {
+    if (companyName && (force || !String(state.currentWorkspaceCompanyName || "").trim())) {
       state.currentWorkspaceCompanyName = companyName;
     }
   } catch (_e) {}
@@ -28766,8 +28775,12 @@ const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
   // Sin esto, la empresa activa que se guardó al pulsar "Activar contexto" nunca se
   // aplicaba en una carga de página nueva: el match de más abajo comparaba contra un
-  // state.currentWorkspaceCompany* todavía vacío y siempre caía a companies[0].
-  restoreWorkspaceCompanyContextFromStorage();
+  // state.currentWorkspaceCompany* todavía vacío y siempre caía a companies[0]. Con
+  // `force`: `openHolding()` dispara `handleRoute()` varias veces sin esperar entre sí
+  // durante el arranque, así que hay varias `loadWorkspaceDetail()` corriendo a la vez;
+  // sin forzar, la primera en rellenar `state` "ganaba" el guard aunque cayera a
+  // companies[0], y las demás lo saltaban en vez de aplicar lo persistido.
+  restoreWorkspaceCompanyContextFromStorage({ force: true });
   state.currentWorkspaceId = workspaceId;
   state.currentWorkspaceMemberRole = "";
   let wsNombre = "";
