@@ -18723,6 +18723,15 @@ const renderWorkspaceRrhhHub = () => {
       deleteUserBtn.disabled = true;
       if (status) status.textContent = "Eliminando...";
       try {
+        // El acceso primero: la baja puede negarse —uno no puede echarse a sí mismo, ni
+        // dejar el espacio sin administrador— y al revés la persona ya habría desaparecido
+        // de la plantilla conservando su usuario, que es el peor de los dos estados.
+        const respUser = await apiPost("/api/usuarios_delete", {
+          workspace_id: state.currentWorkspaceId,
+          id: userId,
+          confirm: "DESACTIVAR",
+        });
+        if (respUser?.error) throw new Error(respUser.error);
         if (personaId) {
           const respFicha = await apiPost("/api/workspace_registro_personal_delete", {
             workspace_id: state.currentWorkspaceId,
@@ -18738,12 +18747,6 @@ const renderWorkspaceRrhhHub = () => {
             state.currentWorkspaceData.timeEmployees = removeLocal(state.currentWorkspaceData.timeEmployees);
           }
         }
-        const respUser = await apiPost("/api/usuarios_delete", {
-          workspace_id: state.currentWorkspaceId,
-          id: userId,
-          confirm: "DESACTIVAR",
-        });
-        if (respUser?.error) throw new Error(respUser.error);
         if (Array.isArray(state.usersList)) {
           state.usersList = state.usersList.filter((u) => String(u?.id || "").trim() !== userId);
         }

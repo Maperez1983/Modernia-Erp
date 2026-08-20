@@ -74845,6 +74845,11 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True})
             return
         if parsed.path == "/api/movimientos":
+            # `concepto` es NOT NULL en la tabla: sin él saltaba la restricción y salía
+            # un 500. Falta un dato obligatorio, que es un 400 de toda la vida.
+            if not str(payload.get("concepto") or "").strip():
+                json_response(self, {"error": "concepto requerido"}, status=400)
+                return
             conn.execute(
                 """
                 INSERT INTO movimientos (
@@ -76538,6 +76543,45 @@ class Handler(BaseHTTPRequestHandler):
                 # Sin workspace inferido: solo permitimos a superadmin/privileged (evita borrados cruzados).
                 if not workspace_actor_is_privileged(conn, session):
                     json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+
+            # Desactivar borra la pertenencia y revoca todas las sesiones del usuario, así
+            # que hacerlo sobre uno mismo es cerrarse la puerta desde fuera: el que pulsa
+            # se queda en la calle en la misma respuesta. Y si además era el único que
+            # podía gestionar el workspace, ya no queda nadie que pueda volver a invitarle.
+            actor_id = str((session or {}).get("user_id") or "").strip()
+            if actor_id and actor_id == user_id:
+                json_response(self, {"error": "No puedes desactivar tu propia cuenta. "
+                                              "Pídeselo a otro administrador."}, status=409)
+                return
+            if workspace_id:
+                try:
+                    ensure_workspace_core_tables(conn)
+                except Exception:
+                    _rollback_best_effort(conn)
+                try:
+                    filas = conn.execute(
+                        """
+                        SELECT m.usuario_id AS usuario_id, m.rol AS rol, u.activo AS activo
+                        FROM workspace_miembros m
+                        LEFT JOIN usuarios u ON u.id = m.usuario_id
+                        WHERE m.workspace_id = ?
+                        """,
+                        (workspace_id,),
+                    ).fetchall() or []
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("_do_POST/usuarios_delete/gestores", _fallo_tragado)
+                    filas = []
+                gestores = [
+                    str(row_value(f, "usuario_id") or "").strip()
+                    for f in filas
+                    if _normalize_workspace_member_role(row_value(f, "rol") or "") in {"Owner", "Admin"}
+                    and str(row_value(f, "activo", 1)) not in {"0", "False", "None"}
+                ]
+                if user_id in gestores and len([g for g in gestores if g != user_id]) == 0:
+                    json_response(self, {"error": "Es el único administrador del espacio. "
+                                                  "Nombra antes a otro o el espacio se queda "
+                                                  "sin quien lo gestione."}, status=409)
                     return
 
             # No hacemos borrado físico: desactivamos el usuario para evitar cascadas y pérdidas accidentales.
@@ -96462,6 +96506,22 @@ class Handler(BaseHTTPRequestHandler):
                     servicio = "financiaciones"
                 else:
                     json_response(self, {"error": "servicio requerido"}, status=400)
+                    return
+            # Lo que se guarda son claves ajenas: si el cliente o el inmueble no
+            # existen, salta la restricción y sale un 500 —y en Postgres, además, deja
+            # la transacción abortada—. Un id que no está es un 404.
+            for campo, tabla in (("cliente_id", "clientes"), ("inmueble_id", "inmuebles")):
+                valor = str(payload.get(campo) or "").strip()
+                if not valor:
+                    continue
+                try:
+                    existe = bool(conn.execute(
+                        f"SELECT 1 FROM {tabla} WHERE id = ? LIMIT 1", (valor,)).fetchone())
+                except Exception:
+                    _rollback_best_effort(conn)
+                    existe = False
+                if not existe:
+                    json_response(self, {"error": f"{campo} no encontrado"}, status=404)
                     return
             tipo = str(payload.get("tipo") or "").strip()
             estado = normalizar_estado_de_accion(payload.get("estado"))
