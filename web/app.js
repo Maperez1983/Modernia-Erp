@@ -38194,6 +38194,15 @@ const GESTORIA_SUBTIPOS = {
   "Gestión administrativa": ["Cliente Renta", "Gestiones Administrativas", "Renta", "Puntual"],
 };
 
+// gestoria_trabajos.estado en producción solo usa "Finalizado" — "completado" no
+// aparece nunca. Varios cálculos de "vencidas"/SLA comparaban solo contra
+// "completado" y por eso contaban como vencido cualquier trabajo ya finalizado
+// con fecha pasada (394 de 394 "vencidas" resultaron estar Finalizadas).
+const esEstadoTrabajoTerminado = (estado) => {
+  const norm = String(estado || "").trim().toLowerCase();
+  return norm === "completado" || norm === "finalizado";
+};
+
 const GESTORIA_TRABAJO_CATEGORIES = [
   { key: "laboral", label: "Laboral" },
   { key: "fiscal", label: "Fiscal" },
@@ -43695,7 +43704,7 @@ const loadGestoriaPipeline = () => {
           const estado = row.estado || "-";
           const responsable = row.responsable || "Sin asignar";
           let slaBadge = "";
-          if (row.sla_dias && row.fecha_inicio && String(estado).toLowerCase() !== "completado") {
+          if (row.sla_dias && row.fecha_inicio && !esEstadoTrabajoTerminado(estado)) {
             const due = new Date(row.fecha_inicio);
             const days = parseInt(row.sla_dias, 10);
             if (!Number.isNaN(due.getTime()) && !Number.isNaN(days)) {
@@ -66306,7 +66315,7 @@ const renderGestoriaDashboardGestiones = (rows = [], { estadoFiltro = "" } = {})
     : items;
 
   const todayIso = new Date().toISOString().slice(0, 10);
-  const isDone = (row) => normalizeSimple(String(row?.estado || "")) === "completado";
+  const isDone = (row) => esEstadoTrabajoTerminado(row?.estado);
   const due = (row) => gestoriaDashComputeDueDate(row) || "";
   const isOverdue = (row) => {
     const d = due(row);
@@ -66318,7 +66327,7 @@ const renderGestoriaDashboardGestiones = (rows = [], { estadoFiltro = "" } = {})
       const st = normalizeSimple(String(row?.estado || ""));
       if (st === "encurso") acc.enCurso += 1;
       else if (st === "enespera") acc.enEspera += 1;
-      else if (st === "completado") acc.completado += 1;
+      else if (esEstadoTrabajoTerminado(st)) acc.completado += 1;
       if (isOverdue(row)) acc.vencidas += 1;
       return acc;
     },
@@ -67765,7 +67774,7 @@ const loadGestoriaDashboard = () => {
     const vencidas = trabajos.filter((t) => {
       const fin = computeDueDate(t);
       const estado = String(t.estado || "").toLowerCase();
-      return fin && fin < todayStr && estado !== "completado";
+      return fin && fin < todayStr && !esEstadoTrabajoTerminado(estado);
     });
     if (gestoriaKpiGestionesCurso) gestoriaKpiGestionesCurso.textContent = enCurso.length;
     if (gestoriaKpiGestionesEspera) gestoriaKpiGestionesEspera.textContent = enEspera.length;
@@ -67834,7 +67843,7 @@ const loadGestoriaDashboard = () => {
     const proximas = trabajos.filter((t) => {
       const fin = computeDueDate(t);
       const estado = String(t.estado || "").toLowerCase();
-      return fin && fin >= todayStr && fin <= limitStr && estado !== "completado";
+      return fin && fin >= todayStr && fin <= limitStr && !esEstadoTrabajoTerminado(estado);
     });
     renderAlertList(
       gestoriaAlertGestionesProximas,
@@ -67860,7 +67869,7 @@ const loadGestoriaDashboard = () => {
         if (estado === "en curso") grouped[responsable].enCurso += 1;
         if (estado === "en espera") grouped[responsable].enEspera += 1;
         const due = computeDueDate(row);
-        if (due && due < todayStr && estado !== "completado") {
+        if (due && due < todayStr && !esEstadoTrabajoTerminado(estado)) {
           grouped[responsable].vencidas += 1;
         }
       });
