@@ -8219,6 +8219,8 @@ const renderWorkspaceEntryBanner = () => {
     state.currentWorkspaceDetail?.workspace || state.currentWorkspaceName || state.currentWorkspaceTarget || state.currentWorkspaceId || ""
   );
   const companyName = String(state.currentWorkspaceCompanyName || "").trim() || "Sin empresa activa";
+  // DIAGNÓSTICO TEMPORAL — quitar junto con los logs de loadWorkspaceDetail.
+  try { console.warn(`[banner] render t=${Date.now()} companyName=${companyName}`); } catch (e) {}
   const mode = state.currentWorkspaceEntryMode === "tenant" ? "tenant" : "platform";
   const currentView = normalizeWorkspaceViewKey(state.currentWorkspaceView || "overview");
   const viewLabel = getWorkspaceViewLabel(currentView);
@@ -28773,6 +28775,14 @@ const showWorkspaceConfigSkeletons = () => {
 
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
+  // DIAGNÓSTICO TEMPORAL — quitar tras localizar la causa de que "empresa activa" se
+  // pierda en un arranque real. Un solo console.log con marca de tiempo, argumento y
+  // pila de quién llama, para ver cuántas veces corre esto de verdad al cargar la
+  // página y quién gana la carrera.
+  try {
+    const seq = (window.__lwdSeq = (window.__lwdSeq || 0) + 1);
+    console.warn(`[lwd#${seq}] start workspaceId=${workspaceId} t=${Date.now()}`, new Error().stack);
+  } catch (e) {}
   // Sin esto, la empresa activa que se guardó al pulsar "Activar contexto" nunca se
   // aplicaba en una carga de página nueva: el match de más abajo comparaba contra un
   // state.currentWorkspaceCompany* todavía vacío y siempre caía a companies[0]. Con
@@ -28916,6 +28926,12 @@ const loadWorkspaceDetail = async (workspaceId) => {
     state.currentWorkspaceCompanyWsId = companiesV2.length ? String(picked?.id || "") : "";
     state.currentWorkspaceCompanyId = companiesV2.length ? String(picked?.legacy_empresa_id || "") : String(picked?.id || "");
   }
+  // DIAGNÓSTICO TEMPORAL — quitar junto con el log del inicio de la función.
+  try {
+    console.warn(
+      `[lwd] end workspaceId=${workspaceId} t=${Date.now()} matched=${Boolean(companyMatch)} picked=${picked?.nombre || "-"} companiesCount=${companies.length} tenantMode=${tenantOperationalMode}`
+    );
+  } catch (e) {}
   const companyQuery = getWorkspaceCompanyQuery();
   const timeMonth = normalizeMonthValue(state.workspaceTimeMonth || "");
   state.workspaceTimeMonth = timeMonth;
