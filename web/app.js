@@ -28916,6 +28916,17 @@ const loadWorkspaceDetail = async (workspaceId) => {
     state.currentWorkspaceCompanyWsId = companiesV2.length ? String(picked?.id || "") : "";
     state.currentWorkspaceCompanyId = companiesV2.length ? String(picked?.legacy_empresa_id || "") : String(picked?.id || "");
   }
+  // Autocorrección: si el companyMatch de arriba encontró la fila por su
+  // legacy_empresa_id (porque lo persistido en localStorage era ese id, no el v2),
+  // aquí ya tenemos el id v2 correcto en `picked.id`. Sin volver a guardarlo, la
+  // próxima carga —y cualquier llamada que use directamente el valor persistido,
+  // como /api/workspace_service_matrix— seguiría enviando el id equivocado y
+  // recibiendo 403 para siempre.
+  try {
+    localStorage.setItem("crm.currentWorkspaceCompanyWsId", String(state.currentWorkspaceCompanyWsId || ""));
+    localStorage.setItem("crm.currentWorkspaceCompanyId", String(state.currentWorkspaceCompanyId || ""));
+    localStorage.setItem("crm.currentWorkspaceCompanyName", String(state.currentWorkspaceCompanyName || ""));
+  } catch (e) {}
   const companyQuery = getWorkspaceCompanyQuery();
   const timeMonth = normalizeMonthValue(state.workspaceTimeMonth || "");
   state.workspaceTimeMonth = timeMonth;
