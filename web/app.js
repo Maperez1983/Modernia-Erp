@@ -5586,14 +5586,10 @@ const shouldPreferTenantRouting = () => {
 };
 
 const restoreWorkspaceCompanyContextFromStorage = (opts = {}) => {
-  // `force` existe porque `openHolding()` dispara `handleRoute()` varias veces durante
-  // el arranque sin esperar entre sí (loadWorkspaceCentral().catch(), no awaited), así
-  // que hay `loadWorkspaceDetail()` corriendo en paralelo. Con el guard "solo si está
-  // vacío", el primero que llega a rellenar `state` "gana" el guard y los demás lo
-  // saltan aunque su propio companyMatch fuera a resolver mejor; si ese primero venía
-  // de un companyMatch que cayó a companies[0] (aún sin este restore), la empresa
-  // guardada en localStorage nunca llegaba a aplicarse. Forzando aquí, todas las
-  // llamadas concurrentes parten del mismo valor persistido.
+  // `force` la usa `loadWorkspaceDetail` para que lo guardado en localStorage gane
+  // siempre sobre lo que hubiera en `state` al llegar aquí, en vez de aplicarse solo
+  // "si estaba vacío" (guard que dejaba lo persistido sin aplicar si algo anterior ya
+  // había puesto un valor, aunque fuera el de una carga previa).
   const force = Boolean(opts?.force);
   try {
     const wsCompanyId = String(localStorage.getItem("crm.currentWorkspaceCompanyWsId") || "").trim();
@@ -8219,8 +8215,6 @@ const renderWorkspaceEntryBanner = () => {
     state.currentWorkspaceDetail?.workspace || state.currentWorkspaceName || state.currentWorkspaceTarget || state.currentWorkspaceId || ""
   );
   const companyName = String(state.currentWorkspaceCompanyName || "").trim() || "Sin empresa activa";
-  // DIAGNÓSTICO TEMPORAL — quitar junto con los logs de loadWorkspaceDetail.
-  try { console.warn(`[banner] render t=${Date.now()} companyName=${companyName}`); } catch (e) {}
   const mode = state.currentWorkspaceEntryMode === "tenant" ? "tenant" : "platform";
   const currentView = normalizeWorkspaceViewKey(state.currentWorkspaceView || "overview");
   const viewLabel = getWorkspaceViewLabel(currentView);
@@ -28775,21 +28769,9 @@ const showWorkspaceConfigSkeletons = () => {
 
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
-  // DIAGNÓSTICO TEMPORAL — quitar tras localizar la causa de que "empresa activa" se
-  // pierda en un arranque real. Un solo console.log con marca de tiempo, argumento y
-  // pila de quién llama, para ver cuántas veces corre esto de verdad al cargar la
-  // página y quién gana la carrera.
-  try {
-    const seq = (window.__lwdSeq = (window.__lwdSeq || 0) + 1);
-    console.warn(`[lwd#${seq}] start workspaceId=${workspaceId} t=${Date.now()}`, new Error().stack);
-  } catch (e) {}
   // Sin esto, la empresa activa que se guardó al pulsar "Activar contexto" nunca se
   // aplicaba en una carga de página nueva: el match de más abajo comparaba contra un
-  // state.currentWorkspaceCompany* todavía vacío y siempre caía a companies[0]. Con
-  // `force`: `openHolding()` dispara `handleRoute()` varias veces sin esperar entre sí
-  // durante el arranque, así que hay varias `loadWorkspaceDetail()` corriendo a la vez;
-  // sin forzar, la primera en rellenar `state` "ganaba" el guard aunque cayera a
-  // companies[0], y las demás lo saltaban en vez de aplicar lo persistido.
+  // state.currentWorkspaceCompany* todavía vacío y siempre caía a companies[0].
   restoreWorkspaceCompanyContextFromStorage({ force: true });
   state.currentWorkspaceId = workspaceId;
   state.currentWorkspaceMemberRole = "";
@@ -28912,6 +28894,11 @@ const loadWorkspaceDetail = async (workspaceId) => {
     const wantedWs = String(state.currentWorkspaceCompanyWsId || "").trim();
     if (wantedWs && rowWsId && rowWsId === wantedWs) return true;
     if (wantedLegacy && rowLegacyId && rowLegacyId === wantedLegacy) return true;
+    // Alguna ruta de "Activar contexto" guarda el id legado de empresas en la
+    // casilla del id v2 (visto en producción: workspace_company_id con el mismo
+    // valor que empresas.id). Sin esto, esa selección nunca vuelve a encontrar su
+    // fila tras una recarga y cae siempre a companies[0].
+    if (wantedWs && rowLegacyId && rowLegacyId === wantedWs) return true;
     return false;
   });
   const picked = companyMatch || companies[0] || null;
@@ -28926,12 +28913,6 @@ const loadWorkspaceDetail = async (workspaceId) => {
     state.currentWorkspaceCompanyWsId = companiesV2.length ? String(picked?.id || "") : "";
     state.currentWorkspaceCompanyId = companiesV2.length ? String(picked?.legacy_empresa_id || "") : String(picked?.id || "");
   }
-  // DIAGNÓSTICO TEMPORAL — quitar junto con el log del inicio de la función.
-  try {
-    console.warn(
-      `[lwd] end workspaceId=${workspaceId} t=${Date.now()} matched=${Boolean(companyMatch)} picked=${picked?.nombre || "-"} companiesCount=${companies.length} tenantMode=${tenantOperationalMode}`
-    );
-  } catch (e) {}
   const companyQuery = getWorkspaceCompanyQuery();
   const timeMonth = normalizeMonthValue(state.workspaceTimeMonth || "");
   state.workspaceTimeMonth = timeMonth;
