@@ -15392,6 +15392,29 @@ def sync_gestoria_modelos_from_contabilidad(conn, *, empresa_ids=None, cliente_i
     if not resolved_cliente_ids:
         return 0
 
+    # IVA trimestral y retenciones son obligaciones de autónomos/empresas, no de
+    # particulares. Sin este filtro, cualquier cliente con un solo asiento contable
+    # —incluido un particular sin actividad económica— se llevaba ~10 modelos por
+    # año. En Fincas Velazquez generó 20.460 filas de golpe para ~2.000 clientes,
+    # la inmensa mayoría particulares que nunca presentan IVA.
+    try:
+        id_placeholders = ",".join(["?"] * len(resolved_cliente_ids))
+        perfil_rows = conn.execute(
+            f"""
+            SELECT id
+            FROM clientes
+            WHERE id IN ({id_placeholders})
+              AND LOWER(TRIM(COALESCE(perfil, ''))) IN ('autónomo', 'autonomo', 'empresa', 'empresas')
+            """,
+            list(resolved_cliente_ids),
+        ).fetchall()
+        resolved_cliente_ids = {str(row["id"]).strip() for row in perfil_rows}
+    except Exception:
+        resolved_cliente_ids = set()
+
+    if not resolved_cliente_ids:
+        return 0
+
     placeholders = ",".join(["?"] * len(resolved_cliente_ids))
     years = set()
     retention_years = set()

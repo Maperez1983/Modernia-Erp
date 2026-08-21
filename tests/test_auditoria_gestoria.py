@@ -394,6 +394,28 @@ class LosDosFallosDeLaFichaDeContabilidadTests(BaseGestoria):
         self.assertEqual(r["json"]["summary"]["total_rows"], 1)
 
 
+class LaGeneracionAutomaticaDeModelosTests(BaseGestoria):
+    """Generaba IVA trimestral + retenciones para cualquier cliente con un solo
+    asiento contable, fuera o no autónomo/empresa. En Fincas Velazquez generó
+    20.460 filas de golpe para ~2.000 clientes, casi todos particulares."""
+
+    def test_solo_se_generan_para_autonomo_o_empresa(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("clientes", dict(id="cli-a-auto-gen", nombre="Autónoma Gen", nif="9990010",
+                                   empresa_id="emp-a", perfil="Autónomo", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-auto-gen", cliente_id="cli-a-auto-gen",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        self._ins("clientes", dict(id="cli-a-particular-gen", nombre="Particular Gen", nif="9990011",
+                                   empresa_id="emp-a", perfil="Particular", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-particular-gen", cliente_id="cli-a-particular-gen",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        r = self._get("/api/gestoria_modelos?empresa_id=emp-a", self.cookie_a)
+        generados = [row for row in r["json"]["rows"] if "Generado automáticamente" in str(row.get("notas") or "")]
+        clientes_con_generados = {row.get("cliente") for row in generados}
+        self.assertIn("Autónoma Gen", clientes_con_generados)
+        self.assertNotIn("Particular Gen", clientes_con_generados)
+
+
 if __name__ == "__main__":
     unittest.main()
 
