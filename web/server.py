@@ -50994,7 +50994,8 @@ def enforce_gestoria_row_access(conn, session, tabla, row_id, *, write=False):
         return False, "id requerido"
     if tabla not in {"gestoria_docs", "gestoria_trabajos", "gestoria_contabilidad",
                      "gestoria_modelos", "gestoria_facturas", "gestoria_asientos",
-                     "gestoria_import_lotes", "gestoria_import_documentos"}:
+                     "gestoria_import_lotes", "gestoria_import_documentos",
+                     "gestoria_conta_tasks", "gestoria"}:
         return False, "Tabla no permitida"
     columnas = table_columns(conn, tabla)
     campos = [c for c in ("empresa_id", "cliente_id") if c in columnas]
@@ -85833,7 +85834,12 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, result)
             return
         elif parsed.path == "/api/gestoria_facturas_reparse":
-            empresa_id = str(payload.get("empresa_id") or empresa.get("id") or "").strip()
+            # `empresa` ya viene resuelto (y comprobado) por el pipeline genérico de
+            # más arriba. Leer primero `payload.get("empresa_id")` dejaba que el valor
+            # del cliente ganara por cortocircuito de `or` en cuanto viniera relleno,
+            # así que un `empresa_id` de otro tenant reconstruía asientos contables
+            # ajenos sin pasar por ningún control de pertenencia.
+            empresa_id = str(empresa["id"] if empresa else "").strip()
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
@@ -85984,6 +85990,13 @@ class Handler(BaseHTTPRequestHandler):
             record_id = payload.get("id")
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            ok_amb, err_amb = enforce_gestoria_row_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                "gestoria_conta_tasks", record_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb},
+                              status=404 if err_amb == "No encontrado" else 403)
                 return
             fields = ["tarea", "estado", "fecha_limite", "responsable"]
             updates = {f: payload.get(f) for f in fields if f in payload}
@@ -87451,6 +87464,13 @@ class Handler(BaseHTTPRequestHandler):
             record_id = payload.get("id")
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            ok_amb, err_amb = enforce_gestoria_row_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                "gestoria", record_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb},
+                              status=404 if err_amb == "No encontrado" else 403)
                 return
             updates = {}
             for key in ("estado", "fecha_baja"):
@@ -97767,7 +97787,11 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
-            ok, err = enforce_workspace_membership(conn, session, payload.get("workspace_id") or "", write=False)
+            # El `workspace_id` del payload solo valida ESE campo; el `empresa_id` que
+            # de verdad se usa más abajo para leer nunca se cruzaba contra él, así que
+            # bastaba con un workspace propio válido y un empresa_id ajeno para
+            # previsualizar el extracto bancario de otra empresa.
+            ok, err = enforce_empresa_membership(conn, session, empresa_id, write=False)
             if not ok:
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
@@ -97817,7 +97841,10 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
-            ok, err = enforce_workspace_membership(conn, session, payload.get("workspace_id") or "", write=True)
+            # Mismo fallo que en la previsualización de arriba: el `workspace_id` del
+            # payload se validaba, pero el `empresa_id` que de verdad importa el
+            # movimiento nunca se cruzaba contra él.
+            ok, err = enforce_empresa_membership(conn, session, empresa_id, write=True)
             if not ok:
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return

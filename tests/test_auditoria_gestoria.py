@@ -437,6 +437,74 @@ class LaGeneracionAutomaticaDeModelosTests(BaseGestoria):
         self.assertNotIn("Particular Gen", clientes_con_generados)
 
 
+class LosCuatroDeEscrituraSinNingunControlTests(BaseGestoria):
+    """Cuatro rutas de escritura que aceptaban un `id`/`empresa_id` de cualquier
+    empresa sin comprobar la sesión ni una vez: bastaba con saberlo para
+    reescribir la ficha, la tarea contable, la factura o el movimiento bancario
+    de un cliente ajeno."""
+
+    def test_no_se_reescribe_la_tarea_contable_de_otro(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("gestoria_conta_tasks", dict(id="ctt-b", cliente_id="cli-b",
+                                               tarea="IVA", estado="Pendiente", **base))
+        self._post("/api/gestoria_conta_task_update",
+                   {"id": "ctt-b", "estado": "Hecho"}, self.cookie_a)
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM gestoria_conta_tasks WHERE id = 'ctt-b'").fetchone()["estado"],
+            "Pendiente")
+
+    def test_lo_propio_si_se_reescribe(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("gestoria_conta_tasks", dict(id="ctt-a", cliente_id="cli-a",
+                                               tarea="IVA", estado="Pendiente", **base))
+        self._post("/api/gestoria_conta_task_update",
+                   {"id": "ctt-a", "estado": "Hecho"}, self.cookie_a)
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM gestoria_conta_tasks WHERE id = 'ctt-a'").fetchone()["estado"],
+            "Hecho")
+
+    def test_no_se_da_de_baja_la_ficha_de_otro(self):
+        """`gestoria` (la tabla legacy de alta/baja) no comprobaba nada: con el
+        `id` bastaba para dar de baja la cuota de un cliente ajeno."""
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("gestoria", dict(id="ges-b", empresa_id="emp-b", cliente_id="cli-b",
+                                   estado="Alta", **base))
+        self._post("/api/gestoria_update",
+                   {"id": "ges-b", "estado": "Baja"}, self.cookie_a)
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM gestoria WHERE id = 'ges-b'").fetchone()["estado"],
+            "Alta")
+
+    def test_el_reparse_de_facturas_no_sigue_el_empresa_id_del_cuerpo(self):
+        """`empresa_id = payload.get("empresa_id") or empresa.get("id")`: por el
+        cortocircuito de `or`, el valor que mandara el cliente ganaba siempre que
+        viniera relleno, así que un `empresa_id` ajeno reconstruía facturas (y su
+        asiento contable) de otra empresa. Con `empresa_nombre` resuelto a la
+        propia (Empresa A) por la sesión, un intento de colar `empresa_id=emp-b`
+        no debe tocar ni ver la factura de la empresa B."""
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("gestoria_facturas", dict(id="fac-b", empresa_id="emp-b", cliente_id="cli-b",
+                                            raw_text="Factura de la empresa B", **base))
+        r = self._post("/api/gestoria_facturas_reparse",
+                       {"empresa_nombre": "Empresa A", "empresa_id": "emp-b",
+                        "cliente_id": "cli-b"}, self.cookie_a)
+        self.assertEqual(r["json"].get("total"), 0,
+                         "el reparse ha alcanzado la factura de la empresa B")
+
+    def test_el_import_de_movimientos_no_sigue_el_empresa_id_del_cuerpo(self):
+        """El `workspace_id` del payload se validaba contra la sesión, pero el
+        `empresa_id` que de verdad se usaba para leer/escribir nunca se cruzaba
+        contra él: un workspace propio válido y un empresa_id ajeno bastaban."""
+        r = self._post("/api/gestoria_movimientos_bancarios_import_preview",
+                       {"workspace_id": self.ws_a, "empresa_id": "emp-b",
+                        "filename": "extracto.txt"}, self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+        r2 = self._post("/api/gestoria_movimientos_bancarios_import",
+                        {"workspace_id": self.ws_a, "empresa_id": "emp-b",
+                         "filename": "extracto.txt"}, self.cookie_a)
+        self.assertEqual(r2["estado"], 403)
+
+
 if __name__ == "__main__":
     unittest.main()
 
