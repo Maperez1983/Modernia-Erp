@@ -105322,11 +105322,19 @@ class Handler(BaseHTTPRequestHandler):
             next_30 = today + timedelta(days=30)
             where = []
             values = []
+            # EXISTS, no JOIN: un cliente puede tener varias filas en
+            # clientes_empresas para la misma empresa (2.497 filas para solo 548
+            # clientes en Fincas Velazquez). El JOIN que había antes multiplicaba
+            # cada modelo por cada fila duplicada — 376 modelos reales devolvían
+            # 25.010 aquí, y el dashboard mostraba "Modelos pendientes: 26.161".
             if len(empresa_ids) == 1:
-                where.append("ce.empresa_id = ?")
+                where.append("EXISTS (SELECT 1 FROM clientes_empresas ce WHERE ce.cliente_id = c.id AND ce.empresa_id = ?)")
                 values.append(empresa_ids[0])
             else:
-                where.append(f"ce.empresa_id IN ({','.join(['?'] * len(empresa_ids))})")
+                placeholders_emp_modelos = ",".join(["?"] * len(empresa_ids))
+                where.append(
+                    f"EXISTS (SELECT 1 FROM clientes_empresas ce WHERE ce.cliente_id = c.id AND ce.empresa_id IN ({placeholders_emp_modelos}))"
+                )
                 values.extend(empresa_ids)
             if scope == "proximos":
                 where.append("m.proxima_fecha IS NOT NULL")
@@ -105344,7 +105352,6 @@ class Handler(BaseHTTPRequestHandler):
                        COALESCE(c.nombre, '') AS cliente
                 FROM gestoria_modelos m
                 JOIN clientes c ON c.id = m.cliente_id
-                JOIN clientes_empresas ce ON ce.cliente_id = c.id
                 WHERE {where_clause}
                 ORDER BY m.proxima_fecha ASC
                 """,
@@ -105821,6 +105828,13 @@ class Handler(BaseHTTPRequestHandler):
                         "rows": out_rows,
                         "total_rows": total_rows,
                         "summary": {
+                            # También dentro de `summary`: el frontend lee
+                            # `summary.total_rows` en tres sitios (dashboard de
+                            # Gestoría y la ficha de contabilidad por empresa) y
+                            # antes solo existía en la raíz de la respuesta, así
+                            # que siempre veían "Asientos: 0" aunque hubiera
+                            # cientos de filas reales.
+                            "total_rows": total_rows,
                             "ingresos": ingresos,
                             "gastos": gastos,
                             "resultado": resultado,

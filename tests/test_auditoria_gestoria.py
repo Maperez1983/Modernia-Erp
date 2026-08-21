@@ -366,6 +366,34 @@ class ElCuadroDeMandoTests(BaseGestoria):
         self.assertEqual(r["json"]["counts"]["puntuales"], 0)
 
 
+class LosDosFallosDeLaFichaDeContabilidadTests(BaseGestoria):
+    """Encontrados recorriendo la pestaña Contabilidad en vivo: la tarjeta decía
+    «Asientos: 0» con 300 filas reales al lado, y «Modelos pendientes: 26.161»
+    cuando en toda la base de datos solo hay 376 modelos."""
+
+    def test_modelos_no_se_multiplica_por_duplicados_en_clientes_empresas(self):
+        """clientes_empresas puede tener varias filas para el mismo cliente y
+        empresa (2.497 filas para 548 clientes en producción). El JOIN que había
+        antes multiplicaba cada modelo por cada fila duplicada."""
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        # cli-a ya tiene una fila en clientes_empresas (del setUp); añado dos más
+        # para el mismo cliente y la misma empresa.
+        self._ins("clientes_empresas", dict(id="ce-a-dup1", cliente_id="cli-a",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-dup2", cliente_id="cli-a",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        r = self._get("/api/gestoria_modelos?empresa_id=emp-a", self.cookie_a)
+        filas_de_cli_a = [row for row in r["json"]["rows"] if row.get("id") == "mod-a"]
+        self.assertEqual(len(filas_de_cli_a), 1, "el modelo de cli-a salió duplicado")
+
+    def test_el_total_de_asientos_no_se_queda_en_cero(self):
+        """El backend ponía `total_rows` en la raíz de la respuesta, pero el
+        frontend lo lee de `summary.total_rows`: siempre undefined, siempre 0."""
+        r = self._get("/api/gestoria_contabilidad?empresa_id=emp-a", self.cookie_a)
+        self.assertEqual(r["json"]["total_rows"], 1)
+        self.assertEqual(r["json"]["summary"]["total_rows"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
 
