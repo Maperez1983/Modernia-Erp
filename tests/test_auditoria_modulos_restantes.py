@@ -18,6 +18,7 @@ que venga después en la misma petición muere con ella.
 
 import json
 import os
+import re
 import tempfile
 import threading
 import unittest
@@ -369,6 +370,41 @@ class NadieEntraEnElEspacioDelVecinoTests(Casa):
             except Exception:
                 continue
         self.assertEqual(escritas, [], f"ha escrito en la casa ajena: {escritas}")
+
+
+class TodoManejadorEstaDadoDeAltaTests(unittest.TestCase):
+    """`_do_POST` filtra por una lista blanca antes de mirar los manejadores. Escribir un
+    manejador nuevo y olvidarse de la lista no rompe nada visible al programar: el
+    endpoint contesta 404 «Endpoint no valido», igual que si no existiera. Ya había
+    pasado una vez —una tanda entera arreglada a mano— y volvió a pasar con otros tres:
+    cerrar una compraventa, la preparación guiada del inmueble y reprocesar el OCR de
+    una nómina, este último silencioso porque el front se lo traga en un catch vacío.
+
+    Las excepciones de abajo son manejadores POST que existen pero se piden por GET, que
+    es como los llama la interfaz; ésos no necesitan estar en la lista."""
+
+    SE_PIDEN_POR_GET = {
+        "/api/workspace_registro_horario_pdf",
+        "/api/workspace_registro_horario_xml",
+        "/api/ocr_job",
+    }
+    # Escritos pero no los llama nadie: quedan fuera a propósito, para no dar de alta
+    # superficie que no se usa. Si algún día se enganchan, hay que meterlos en la lista.
+    SIN_USAR = {"/api/hipotecas_fichas_pdf", "/api/hipotecas_listado_pdf"}
+
+    def test_ningun_manejador_post_se_queda_fuera_de_la_lista(self):
+        lineas = SERVER.splitlines()
+        ini = next(i for i, l in enumerate(lineas) if l.strip().startswith("def _do_POST"))
+        fin = next(i for i, l in enumerate(lineas) if i > ini and l.startswith("    def handle_api"))
+        cuerpo = "\n".join(lineas[ini:fin])
+        corte = cuerpo.index('json_response(self, {"error": "Endpoint no valido"}, status=404)')
+        permitidas = set(re.findall(r'"(/api/[a-z_0-9]+)"', cuerpo[:corte]))
+        self.assertGreater(len(permitidas), 200, "no reconozco la lista blanca de POST")
+        manejadores = set(re.findall(r'(?:parsed\.)?path == "(/api/[a-z_0-9]+)"', cuerpo[corte:]))
+        self.assertGreater(len(manejadores), 200, "no reconozco los manejadores de POST")
+        huerfanos = sorted(manejadores - permitidas - self.SE_PIDEN_POR_GET - self.SIN_USAR)
+        self.assertEqual(huerfanos, [], "manejador escrito que la lista no deja pasar: "
+                                        f"contestará «Endpoint no valido» {huerfanos}")
 
 
 if __name__ == "__main__":

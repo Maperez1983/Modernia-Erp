@@ -87145,6 +87145,20 @@ if (irpfGainForm) {
 	    setSlotStatus("PDF generado.");
 	  };
 
+  // Cada pestaña lleva el nombre de su escenario. Antes ponía «Ejemplo 1/2/3», que
+  // además de no ser lo que dice el campo de debajo —«Nombre escenario»— tapaba el
+  // nombre que el usuario acababa de escribir: con tres abiertos, comparar era adivinar
+  // cuál era cuál. El PDF ya los llamaba «Escenario» desde el principio.
+  const pintaNombresDeEscenario = () => {
+    if (!irpfScenarioTabs) return;
+    irpfScenarioTabs.querySelectorAll("[data-irpf-slot]").forEach((btn) => {
+      const clave = String(btn.dataset.irpfSlot || "").trim();
+      const st = slotState[clave];
+      if (!st) return;
+      btn.textContent = String(st.nombre || "").trim() || `Escenario ${clave}`;
+    });
+  };
+
   const setActiveSlot = (slot) => {
     activeSlot = slot;
     if (irpfScenarioTabs) {
@@ -87152,6 +87166,7 @@ if (irpfGainForm) {
         btn.classList.toggle("active", String(btn.dataset.irpfSlot || "") === slot);
       });
     }
+    pintaNombresDeEscenario();
     renderSlotPanel();
   };
 
@@ -87179,6 +87194,7 @@ if (irpfGainForm) {
       if (irpfSlotPrecioEscritura) st.escritura = String(irpfSlotPrecioEscritura.value || "").trim();
       if (irpfSlotCalcWith) st.calc = String(irpfSlotCalcWith.value || "venta").trim();
       if (irpfSlotInclude) st.include = Boolean(irpfSlotInclude.checked);
+      pintaNombresDeEscenario();
     });
     el.addEventListener("change", () => {
       const st = slotState[activeSlot] || slotState.A;

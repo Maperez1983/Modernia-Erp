@@ -70263,6 +70263,13 @@ class Handler(BaseHTTPRequestHandler):
             # respondían "Endpoint no valido" pese a existir: entre ellas las dos
             # exportaciones de listados y la recuperación de acceso, que además está
             # marcada como pública pero se rechazaba antes de llegar a comprobarlo.
+            # Segunda tanda, encontrada comparando la lista con los manejadores que hay
+            # escritos más abajo: cerrar una compraventa, la preparación guiada del
+            # inmueble —que además se pierde en un catch vacío, así que fallaba sin
+            # decir nada— y reprocesar el OCR de una nómina.
+            "/api/compraventas_close",
+            "/api/inmueble_guided_prepare",
+            "/api/workspace_rrhh_nomina_ocr",
             "/api/ai_inmo_encargo_copilot",
             "/api/auth_request_access_recovery",
             "/api/gestoria_asiento_punteo_banco",
