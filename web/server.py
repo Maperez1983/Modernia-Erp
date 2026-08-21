@@ -108023,7 +108023,12 @@ class Handler(BaseHTTPRequestHandler):
                     pass
 
             try:
-                # Histórico de clientes activos (ALTA/ACTIVO/ACTIVA) por tipo_cliente.
+                # Histórico de clientes activos (ALTA/ACTIVO/ACTIVA) por perfil.
+                # cliente_gestoria.tipo_cliente se fija una vez al crear la ficha y no se
+                # resincroniza (ver el mismo comentario más arriba, en counts.autonomos):
+                # aquí no tenía ni un solo valor "AUTONOMO" en toda la tabla, así que esta
+                # serie mostraba siempre 0 autónomos por más que hubiera 54 activos.
+                # clientes.perfil es el dato vivo, así que manda aquí también.
                 link_rows = conn.execute(
                     f"""
                     WITH ce_latest AS (
@@ -108045,9 +108050,9 @@ class Handler(BaseHTTPRequestHandler):
                       ce_latest.estado,
                       ce_latest.fecha_inicio,
                       ce_latest.fecha_fin,
-                      cg.tipo_cliente AS tipo_cliente
+                      c.perfil AS perfil
                     FROM ce_latest
-                    LEFT JOIN cliente_gestoria cg ON cg.cliente_id = ce_latest.cliente_id
+                    LEFT JOIN clientes c ON c.id = ce_latest.cliente_id
                     WHERE ce_latest.rn = 1
                     """,
                     tuple(empresa_ids),
@@ -108078,7 +108083,7 @@ class Handler(BaseHTTPRequestHandler):
                         for row in clients:
                             if not _active_at(row, day):
                                 continue
-                            tipo = normalize_lookup_text(row.get("tipo_cliente") or "")
+                            tipo = normalize_lookup_text(row.get("perfil") or "")
                             if tipo in {"AUTONOMO", "AUTONOMOS"}:
                                 a_count += 1
                             elif tipo in {"EMPRESA", "EMPRESAS"}:

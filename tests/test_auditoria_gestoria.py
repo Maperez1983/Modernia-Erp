@@ -354,6 +354,27 @@ class ElCuadroDeMandoTests(BaseGestoria):
         r = self._get("/api/gestoria_dashboard?empresa_id=emp-a", self.cookie_a)
         self.assertEqual(r["json"]["counts"]["puntuales"], 1)
 
+    def test_el_historico_de_autonomos_tambien_lee_el_perfil_vivo(self):
+        """Mismo fallo que arriba pero en `clientes_hist`, la serie mensual que
+        alimenta el gráfico "Clientes · Autónomo / Empresa": seguía leyendo
+        `cliente_gestoria.tipo_cliente`, que en producción no tenía ni un solo
+        valor "AUTONOMO" en toda la tabla (1.564 "PARTICULAR", 55 "CLIENTE
+        RENTA", 2 "EMPRESA"), así que el gráfico daba siempre 0 autónomos
+        aunque el KPI de arriba, ya corregido, mostrara 54."""
+        import datetime as _dt
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("clientes", dict(id="cli-a-auto-hist", nombre="Autónoma Hist", nif="9990004",
+                                   empresa_id="emp-a", perfil="Autónomo", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-auto-hist", cliente_id="cli-a-auto-hist",
+                                            empresa_id="emp-a", servicio="gestoria",
+                                            estado="Alta", fecha_inicio="2020-01-01", **base))
+        self._ins("cliente_gestoria", dict(id="cg-a-auto-hist", cliente_id="cli-a-auto-hist",
+                                           tipo_cliente="Gestiones Administrativas",
+                                           mod_contable=1, **base))
+        r = self._get("/api/gestoria_dashboard?empresa_id=emp-a", self.cookie_a)
+        year = str(_dt.datetime.now().year)
+        self.assertGreaterEqual(r["json"]["clientes_hist"]["totals"][year]["autonomos"], 1)
+
     def test_puntuales_no_cuenta_a_quien_tiene_renta(self):
         base = dict(created_at=AHORA, updated_at=AHORA)
         self._ins("clientes", dict(id="cli-a-renta", nombre="Rentista A", nif="9990003",
