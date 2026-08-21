@@ -66751,6 +66751,16 @@ class Handler(BaseHTTPRequestHandler):
     ocr_db_path = OCR_DB_DEFAULT
     _db_ready = False
     _db_ready_lock = threading.Lock()
+    # Sin esto, `socketserver` no aplica ningún timeout al socket: si un cliente
+    # cierra la pestaña o pierde la red a media respuesta, el hilo se queda
+    # bloqueado para siempre en el write() y nunca llega a `finish()`, así que la
+    # conexión a Postgres que llevaba (con su transacción a medias) tampoco se
+    # cierra nunca. Visto en producción: tres conexiones "idle in transaction"
+    # desde hacía más de 3 horas, una de ellas bloqueando a las demás lecturas de
+    # `workspaces`. `StreamRequestHandler.setup()` ya llama a
+    # `self.connection.settimeout(self.timeout)` si este atributo no es None;
+    # solo faltaba fijarlo.
+    timeout = 120
 
     def _emit_security_headers(self):
         # Inyecta cabeceras de seguridad en TODA respuesta (se llama desde end_headers).
