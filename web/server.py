@@ -48552,6 +48552,12 @@ def build_gestoria_excel_plantilla_response(conn, params, handler):
     if not empresa_ids:
         json_response(handler, {"error": "Sin empresas en el workspace", "rows": []}, status=200)
         return
+    ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+        conn, getattr(handler, "auth_session", None) or handler._current_session(),
+        workspace_id, empresa_id)
+    if not ok_amb:
+        json_response(handler, {"error": err_amb}, status=403)
+        return
     if not cliente_id:
         json_response(handler, {"error": "cliente_id requerido"}, status=400)
         return
@@ -51078,6 +51084,23 @@ def enforce_empresa_membership(conn, session, empresa_id, *, write=False):
             return True, ""
         last_err = err or last_err
     return False, last_err or "No autorizado"
+
+
+def enforce_workspace_or_empresa_scope(conn, session, workspace_id, empresa_id, *, write=False):
+    """La misma pregunta que `resolve_empresa_ids_for_request` resuelve sin hacer:
+    ¿pertenece este `workspace_id`/`empresa_id` a la sesión?
+
+    Varios endpoints de Gestoría (sociedades, socios, actas, trabajos, asientos,
+    cuentas bancarias...) resolvían su ámbito con `resolve_empresa_ids_for_request`
+    o `fetch_workspace_company_ids` —resolutores puros, sin sesión— y ejecutaban la
+    consulta directamente con lo que resultara. Con un `workspace_id` o `empresa_id`
+    ajeno bastaba para leer datos de cualquier otro tenant.
+    """
+    if workspace_id:
+        return enforce_workspace_membership(conn, session, workspace_id, write=write)
+    if empresa_id:
+        return enforce_empresa_membership(conn, session, empresa_id, write=write)
+    return False, "workspace_id o empresa_id requerido"
 
 
 def infer_workspace_id_for_empresa(conn, session, empresa_id):
@@ -103151,6 +103174,14 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if workspace_id:
+                ok_amb, err_amb = enforce_workspace_membership(conn, session, workspace_id)
+            else:
+                ok_amb, err_amb = enforce_empresa_membership(conn, session, empresa_id or empresa_ids[0])
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             q = params.get("q", [""])[0]
             estado = params.get("estado", [""])[0]
             ejercicio = params.get("ejercicio", [""])[0]
@@ -103198,6 +103229,14 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if workspace_id:
+                ok_amb, err_amb = enforce_workspace_membership(conn, session, workspace_id)
+            else:
+                ok_amb, err_amb = enforce_empresa_membership(conn, session, empresa_id or empresa_ids[0])
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             ejercicio = params.get("ejercicio", [""])[0]
             try:
                 ids_key = ",".join(sorted([str(eid or "").strip() for eid in empresa_ids if str(eid or "").strip()]))
@@ -103244,6 +103283,16 @@ class Handler(BaseHTTPRequestHandler):
             empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                return
+            # Exporta CSV con NIF, teléfono, email y dirección: sin esto, un
+            # workspace_id/empresa_id ajeno lo descargaba entero.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if workspace_id:
+                ok_amb, err_amb = enforce_workspace_membership(conn, session, workspace_id)
+            else:
+                ok_amb, err_amb = enforce_empresa_membership(conn, session, empresa_id or empresa_ids[0])
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             ejercicio = params.get("ejercicio", [""])[0]
             kind = str(params.get("kind", ["all"])[0] or "all").strip().lower()
@@ -105149,6 +105198,15 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
+            # `resolve_empresa_ids_for_request` es un resolutor puro: no mira la sesión.
+            # Sin esto, un `workspace_id` o `empresa_id` ajeno devolvía sociedades enteras
+            # (CIF, capital social, domicilio) de cualquier otro tenant.
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             placeholders = ",".join(["?"] * len(empresa_ids))
             where = [f"empresa_id IN ({placeholders})"]
             values = list(empresa_ids)
@@ -105187,6 +105245,12 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             placeholders = ",".join(["?"] * len(empresa_ids))
             where = [f"s.empresa_id IN ({placeholders})"]
             values = list(empresa_ids)
@@ -105223,6 +105287,12 @@ class Handler(BaseHTTPRequestHandler):
             empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                return
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             placeholders = ",".join(["?"] * len(empresa_ids))
             where = [f"sc.empresa_id IN ({placeholders})"]
@@ -105269,6 +105339,12 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             placeholders = ",".join(["?"] * len(empresa_ids))
             where = [f"a.empresa_id IN ({placeholders})"]
             values = list(empresa_ids)
@@ -105307,6 +105383,12 @@ class Handler(BaseHTTPRequestHandler):
             empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                return
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             placeholders = ",".join(["?"] * len(empresa_ids))
             where = [f"f.empresa_id IN ({placeholders})"]
@@ -105433,6 +105515,17 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id and not empresa_ids:
                 json_response(self, {"error": "cliente_id, empresa_id o workspace_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if cliente_id:
+                ok_amb, err_amb = enforce_gestoria_cliente_access(conn, session, cliente_id)
+                if not ok_amb:
+                    json_response(self, {"error": err_amb}, status=403)
+                    return
+            elif empresa_ids:
+                ok_amb, err_amb = enforce_workspace_or_empresa_scope(conn, session, workspace_id, empresa_id)
+                if not ok_amb:
+                    json_response(self, {"error": err_amb}, status=403)
+                    return
 
             limit = 500
             if limit_raw:
@@ -105481,6 +105574,10 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(conn, session, workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             rol_norm = normalize_lookup_text((session or {}).get("rol") or "")
             is_admin_actor = rol_norm in {"ADMINISTRADOR", "ADMIN", "DIRECCION", "ADMINISTRACION", "CONTROL"} or bool(
                 is_superadmin_actor(None, session)
@@ -105914,6 +106011,16 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id and not empresa_id:
                 json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
                 return
+            # `conciliar=true` no solo lee: llama a reconcile_gestoria_factura_asiento
+            # y hace commit, así que aquí un GET también puede escribir.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if cliente_id:
+                ok_amb, err_amb = enforce_gestoria_cliente_access(conn, session, cliente_id, write=conciliar)
+            else:
+                ok_amb, err_amb = enforce_empresa_membership(conn, session, empresa_id, write=conciliar)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             where = []
             values = []
             if cliente_id:
@@ -106004,6 +106111,12 @@ class Handler(BaseHTTPRequestHandler):
             empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                return
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             placeholders = ",".join(["?"] * len(empresa_ids))
             rows = conn.execute(
@@ -106120,6 +106233,20 @@ class Handler(BaseHTTPRequestHandler):
             if not lote_id:
                 json_response(self, {"error": "lote_id requerido"}, status=400)
                 return
+            # Su vecino /api/gestoria_import_excel sí comprueba esto sobre el mismo
+            # lote_id; aquí faltaba del todo, y era el único de los dos que no exige
+            # ni empresa_id ni workspace_id en la petición.
+            lote_row = conn.execute(
+                "SELECT empresa_id FROM gestoria_import_lotes WHERE id = ? LIMIT 1", (lote_id,)).fetchone()
+            if not lote_row:
+                json_response(self, {"error": "lote no encontrado"}, status=404)
+                return
+            session_tmp = getattr(self, "auth_session", None) or self._current_session()
+            if session_tmp and not workspace_actor_is_privileged(conn, session_tmp):
+                ok, err = enforce_empresa_membership(conn, session_tmp, str(lote_row["empresa_id"] or ""), write=False)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
             values = [lote_id]
             where_estado = ""
             if estado:
@@ -106339,6 +106466,14 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id and not empresa_id:
                 json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if cliente_id:
+                ok_amb, err_amb = enforce_gestoria_cliente_access(conn, session, cliente_id)
+            else:
+                ok_amb, err_amb = enforce_empresa_membership(conn, session, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             where = []
             values = []
             if cliente_id:
@@ -106418,9 +106553,18 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/gestoria_cuentas_bancarias":
             empresa_id = params.get("empresa_id", [""])[0]
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=params.get("workspace_id", [""])[0])
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
             if not empresa_ids:
                 json_response(self, {"rows": []})
+                return
+            # IBAN y titular de la cuenta: sin esto, un empresa_id/workspace_id ajeno
+            # los devolvía enteros.
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             placeholders = ",".join(["?"] * len(empresa_ids))
             rows = conn.execute(
@@ -106448,9 +106592,16 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/gestoria_movimientos_bancarios":
             empresa_id = params.get("empresa_id", [""])[0]
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=params.get("workspace_id", [""])[0])
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
             if not empresa_ids:
                 json_response(self, {"rows": []})
+                return
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             placeholders = ",".join(["?"] * len(empresa_ids))
             rows = conn.execute(
@@ -106659,6 +106810,15 @@ class Handler(BaseHTTPRequestHandler):
                         "facturas_resumen": {"total": 0, "conciliadas": 0, "pendientes": 0},
                     },
                 )
+                return
+            # Este GET siempre escribe: sync_gestoria_modelos_from_contabilidad, dos
+            # líneas más abajo, genera modelos si hace falta —y con `conciliar=true`
+            # además valida conciliaciones—, así que se pide con write=True.
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             try:
                 sync_gestoria_modelos_from_contabilidad(conn, empresa_ids=empresa_ids, cliente_ids=[cliente_id] if cliente_id else None, now=datetime.utcnow().isoformat())
@@ -107090,6 +107250,11 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
+            ok_amb, err_amb = enforce_gestoria_cliente_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(), cliente_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             row = conn.execute(
                 """
                 SELECT id, cliente_id, periodo, fecha_inicio, responsable
@@ -107115,6 +107280,17 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id and not empresa_ids:
                 json_response(self, {"error": "cliente_id, empresa_id o workspace_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if cliente_id:
+                ok_amb, err_amb = enforce_gestoria_cliente_access(conn, session, cliente_id)
+                if not ok_amb:
+                    json_response(self, {"error": err_amb}, status=403)
+                    return
+            elif empresa_ids:
+                ok_amb, err_amb = enforce_workspace_or_empresa_scope(conn, session, workspace_id, empresa_id)
+                if not ok_amb:
+                    json_response(self, {"error": err_amb}, status=403)
+                    return
             where = []
             values = []
             if cliente_id:
@@ -107279,6 +107455,13 @@ class Handler(BaseHTTPRequestHandler):
             ejercicio = (params.get("ejercicio", [""])[0] if params else "").strip()
             if not empresa_id or not cliente_id:
                 json_response(self, {"error": "empresa_id y cliente_id requeridos"}, status=400)
+                return
+            # Devuelve la ficha completa del cliente y toda su renta (declaraciones,
+            # documentos): con el empresa_id/cliente_id bastaba, sin mirar la sesión.
+            ok_amb, err_amb = enforce_empresa_membership(
+                conn, getattr(self, "auth_session", None) or self._current_session(), empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             ejercicio_val = ejercicio if re.match(r"^20[0-9]{2}$", ejercicio or "") else ""
             service_filter = gestoria_service_sql_condition("clientes_empresas")

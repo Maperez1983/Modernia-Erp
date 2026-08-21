@@ -505,6 +505,106 @@ class LosCuatroDeEscrituraSinNingunControlTests(BaseGestoria):
         self.assertEqual(r2["estado"], 403)
 
 
+class LosVeintiunoDeLecturaSinNingunControlTests(BaseGestoria):
+    """`resolve_empresa_ids_for_request` y `fetch_workspace_company_ids` son
+    resolutores puros: no miran la sesión. 21 endpoints GET de Gestoría
+    ejecutaban la consulta con lo que resultara, sin cruzarlo contra el
+    workspace/empresa del actor. Basta con `?empresa_id=emp-b` o
+    `?workspace_id=ws-otra` desde el gestor A."""
+
+    def _no_alcanza_por(self, ruta):
+        r = self._get(f"{ruta}?empresa_id=emp-b", self.cookie_a)
+        self.assertEqual(r["estado"], 403, f"{ruta}?empresa_id=emp-b debería dar 403")
+        r2 = self._get(f"{ruta}?workspace_id=ws-otra", self.cookie_a)
+        self.assertEqual(r2["estado"], 403, f"{ruta}?workspace_id=ws-otra debería dar 403")
+
+    def test_sociedades(self):
+        self._no_alcanza_por("/api/gestoria_sociedades")
+
+    def test_socios(self):
+        self._no_alcanza_por("/api/gestoria_socios")
+
+    def test_socios_cambios(self):
+        self._no_alcanza_por("/api/gestoria_socios_cambios")
+
+    def test_actas(self):
+        self._no_alcanza_por("/api/gestoria_actas")
+
+    def test_acta_firmas(self):
+        self._no_alcanza_por("/api/gestoria_acta_firmas")
+
+    def test_trabajos(self):
+        self._no_alcanza_por("/api/gestoria_trabajos")
+
+    def test_trabajo_tipos(self):
+        self._no_alcanza_por("/api/gestoria_trabajo_tipos")
+
+    def test_facturas(self):
+        r = self._get("/api/gestoria_facturas?empresa_id=emp-b", self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+
+    def test_import_lotes(self):
+        self._no_alcanza_por("/api/gestoria_import_lotes")
+
+    def test_import_documentos(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("gestoria_import_lotes", dict(id="lote-b", empresa_id="emp-b",
+                                                estado="Pendiente", **base))
+        r = self._get("/api/gestoria_import_documentos?lote_id=lote-b", self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+
+    def test_asientos(self):
+        r = self._get("/api/gestoria_asientos?empresa_id=emp-b", self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+
+    def test_cuentas_bancarias(self):
+        self._no_alcanza_por("/api/gestoria_cuentas_bancarias")
+
+    def test_movimientos_bancarios(self):
+        self._no_alcanza_por("/api/gestoria_movimientos_bancarios")
+
+    def test_libros(self):
+        self._no_alcanza_por("/api/gestoria_libros")
+
+    def test_excel_plantilla(self):
+        r = self._get("/api/gestoria_excel_plantilla?empresa_id=emp-b&cliente_id=cli-b", self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+
+    def test_conta_config(self):
+        r = self._get("/api/gestoria_conta_config?cliente_id=cli-b", self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+
+    def test_conta_tasks(self):
+        self._no_alcanza_por("/api/gestoria_conta_tasks")
+
+    def test_renta_cards(self):
+        self._no_alcanza_por("/api/gestoria_renta_cards")
+
+    def test_renta_dashboard(self):
+        self._no_alcanza_por("/api/gestoria_renta_dashboard")
+
+    def test_renta_export(self):
+        self._no_alcanza_por("/api/gestoria_renta_export")
+
+    def test_renta_debug(self):
+        r = self._get("/api/gestoria_renta_debug?empresa_id=emp-b&cliente_id=cli-b", self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+
+    def test_lo_propio_si_se_lee(self):
+        """Ninguna guarda nueva le cierra la puerta al propio: sociedades,
+        cuentas bancarias y renta siguen respondiendo 200 para lo suyo."""
+        for ruta in ("/api/gestoria_sociedades", "/api/gestoria_cuentas_bancarias",
+                     "/api/gestoria_movimientos_bancarios", "/api/gestoria_renta_cards",
+                     "/api/gestoria_renta_dashboard"):
+            with self.subTest(ruta=ruta):
+                r = self._get(f"{ruta}?empresa_id=emp-a", self.cookie_a)
+                self.assertEqual(r["estado"], 200, f"{ruta} ya no responde a lo propio")
+        r = self._get("/api/gestoria_trabajos?empresa_id=emp-a", self.cookie_a)
+        self.assertEqual(r["estado"], 200)
+        r = self._get("/api/gestoria_asientos?empresa_id=emp-a", self.cookie_a)
+        self.assertEqual(r["estado"], 200)
+
+
 if __name__ == "__main__":
     unittest.main()
 
