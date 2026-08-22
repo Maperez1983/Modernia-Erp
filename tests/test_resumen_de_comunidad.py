@@ -72,12 +72,16 @@ class ComunidadDePrueba(unittest.TestCase):
                 "coeficiente, iban, created_at, updated_at) VALUES (?,?,?,?,?,?,?,datetime(?),datetime(?))",
                 (f"v{i}", self.ws, self.com, f"P{i}", f"{i}A", 4.1667, IBAN, self.ahora, self.ahora))
             if recibos:
+                # Los tres impagados son del mes ANTERIOR: deber es no haber pagado algo
+                # que ya venció. Un recibo pendiente del mes en curso no es morosidad
+                # —si contara, la comunidad entera saldría en rojo el día de emitirlos—.
+                atrasado = i <= 2
                 self.conn.execute(
                     "INSERT INTO workspace_fincas_recibos (id, workspace_id, comunidad_id, vecino_id, periodo, "
                     "concepto, importe, estado, created_at, updated_at) "
-                    "VALUES (?,?,?,?,'2026-08','Cuota',50,?,datetime(?),datetime(?))",
-                    (f"r{i}", self.ws, self.com, f"v{i}", "Cobrado" if i > 2 else "Pendiente",
-                     self.ahora, self.ahora))
+                    "VALUES (?,?,?,?,?,'Cuota',50,?,datetime(?),datetime(?))",
+                    (f"r{i}", self.ws, self.com, f"v{i}", "2026-07" if atrasado else "2026-08",
+                     "Pendiente" if atrasado else "Cobrado", self.ahora, self.ahora))
         self.conn.commit()
 
 
@@ -152,7 +156,8 @@ class LasCifrasDelResumenTests(ComunidadDePrueba):
         self.poblar()
         d = self.dashboard()
         self.assertEqual(d["censo"]["propietarios"], 24)
-        self.assertEqual(d["recibos"]["emitido"], 1200.0)
+        # De agosto se emitieron 21 (los otros tres arrastran el recibo de julio sin pagar).
+        self.assertEqual(d["recibos"]["emitido"], 1050.0)
         self.assertEqual(d["recibos"]["cobrado"], 1050.0)
         self.assertEqual(d["morosidad"]["deudores"], 3)
 

@@ -192,3 +192,64 @@ class LosEndpointsEstanGuardadosTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ElMesEnCursoTodaviaNoEsDeudaTests(BaseConDeuda):
+    """Emitir los recibos no convierte a la comunidad en morosa.
+
+    Contar como deuda todo lo que estuviera «Pendiente» pintaba de rojo a los cuatro
+    vecinos el mismo día de emitir: nadie había tenido ocasión de pagar. Salió simulando
+    un mes completo de una comunidad —alta, censo, presupuesto, emisión, remesa— el
+    2026-08-22: al llegar a la pantalla de morosidad figuraban los cuatro.
+
+    Peor todavía en el certificado de deuda, que se pide para vender un piso y para
+    reclamar por el art. 21 de la LPH: certificaba un importe que aún no se debía.
+
+    El criterio: devuelto por el banco es impago siempre; pendiente lo es cuando su mes
+    ya pasó. Lo que sigue vivo el mes en curso sale en «recibos pendientes», que es otra
+    cifra y otra caja de la pantalla.
+    """
+
+    def _emite_del_mes_en_curso(self, vecino="v2", estado="Pendiente"):
+        import datetime as _dt
+        periodo = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m")
+        ahora = _dt.datetime.now().isoformat(timespec="seconds")
+        self.conn.execute(
+            "INSERT INTO workspace_fincas_recibos (id, workspace_id, comunidad_id, vecino_id, periodo, "
+            "concepto, importe, estado, created_at, updated_at) "
+            "VALUES ('rmes',?,?,?,?,'Cuota del mes',75.0,?,datetime(?),datetime(?))",
+            (self.ws, self.com, vecino, periodo, estado, ahora, ahora),
+        )
+        self.conn.commit()
+        return periodo
+
+    def test_un_recibo_pendiente_de_este_mes_no_hace_moroso_a_nadie(self):
+        self._emite_del_mes_en_curso()
+        nombres = [d["nombre"] for d in self.morosidad()["rows"]]
+        self.assertNotIn("Ana Ruiz", nombres, "sale como morosa el día de emitir")
+
+    def test_si_el_banco_lo_devuelve_cuenta_aunque_sea_de_este_mes(self):
+        """Una devolución no espera a fin de mes: es un impago desde que llega."""
+        self._emite_del_mes_en_curso(estado="Devuelto")
+        deudores = {d["nombre"]: d["deuda"] for d in self.morosidad()["rows"]}
+        self.assertIn("Ana Ruiz", deudores)
+        self.assertAlmostEqual(float(deudores["Ana Ruiz"]), 75.0, places=2)
+
+    def test_lo_de_meses_pasados_sigue_contando(self):
+        """El arreglo no puede tapar la morosidad de verdad, que es de lo que se vive."""
+        self._emite_del_mes_en_curso()
+        juan = [d for d in self.morosidad()["rows"] if d["nombre"] == "Juan Pérez Gómez"]
+        self.assertEqual(len(juan), 1)
+        self.assertAlmostEqual(float(juan[0]["deuda"]), 150.0, places=2)
+
+    def test_el_certificado_no_certifica_lo_que_aun_no_vence(self):
+        periodo = self._emite_del_mes_en_curso(vecino="v1")
+        cond, hoy = server.condicion_de_recibo_impagado()
+        filas = self.conn.execute(
+            "SELECT periodo, importe FROM workspace_fincas_recibos "
+            f"WHERE vecino_id = 'v1' AND workspace_id = ? AND {cond} ORDER BY periodo",
+            (self.ws, hoy),
+        ).fetchall()
+        periodos = [dict(f)["periodo"] for f in filas]
+        self.assertNotIn(periodo, periodos, "certifica un recibo que todavía no vence")
+        self.assertEqual(periodos, ["2026-04", "2026-05", "2026-06"])

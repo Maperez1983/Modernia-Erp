@@ -57324,6 +57324,26 @@ def cerrar_ejercicio_fincas(conn, workspace_id, comunidad_id, ejercicio, *, now=
             "dotacion_fondo": dotacion, "ejercicio_siguiente": siguiente}
 
 
+def condicion_de_recibo_impagado(alias=""):
+    """Qué es deuda de verdad y qué es un recibo recién emitido.
+
+    Contar como moroso todo lo que estuviera «Pendiente» pintaba de rojo a la comunidad
+    entera el mismo día de emitir los recibos: nadie había tenido ocasión de pagar. Y el
+    certificado de deuda —que se usa para vender un piso y para reclamar por el 21 de la
+    LPH— certificaba un importe que todavía no se debía.
+
+    El criterio: un recibo devuelto por el banco está impagado siempre; uno pendiente lo
+    está cuando su mes ya ha pasado. Si no tiene periodo, cuenta como deuda, que es como
+    se comportaba antes y es el lado prudente.
+
+    Devuelve la condición SQL y el parámetro del periodo actual.
+    """
+    p = f"{alias}." if alias else ""
+    condicion = (f"({p}estado = 'Devuelto' OR ({p}estado = 'Pendiente' "
+                 f"AND COALESCE(NULLIF({p}periodo, ''), '0000-00') < ?))")
+    return condicion, datetime.now(timezone.utc).strftime("%Y-%m")
+
+
 def fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id):
     """Quién debe, cuánto y desde cuándo.
 
@@ -57331,8 +57351,9 @@ def fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id):
     está impagado igual que uno que nunca se pasó al cobro, y tratarlo aparte era
     la forma de que la mitad de la morosidad no se viera.
     """
+    condicion, periodo_actual = condicion_de_recibo_impagado("r")
     filas = conn.execute(
-        """
+        f"""
         SELECT
           v.id AS vecino_id,
           COALESCE(v.nombre, '') AS nombre,
@@ -57344,13 +57365,13 @@ def fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id):
           MAX(r.periodo) AS hasta
         FROM workspace_fincas_vecinos v
         JOIN workspace_fincas_recibos r
-          ON r.vecino_id = v.id AND r.estado IN ('Pendiente', 'Devuelto')
+          ON r.vecino_id = v.id AND {condicion}
         WHERE v.workspace_id = ? AND v.comunidad_id = ?
         GROUP BY v.id, v.nombre, v.piso, v.nif
         HAVING COALESCE(SUM(r.importe), 0) > 0
         ORDER BY COALESCE(SUM(r.importe), 0) DESC
         """,
-        (workspace_id, comunidad_id),
+        (periodo_actual, workspace_id, comunidad_id),
     ).fetchall()
     deudores = []
     for fila in filas:
@@ -101122,11 +101143,12 @@ class Handler(BaseHTTPRequestHandler):
                     "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
                     (comunidad_id, workspace_id),
                 ).fetchone()
+                _cond, _periodo_hoy = condicion_de_recibo_impagado()
                 impagados = conn.execute(
                     "SELECT periodo, concepto, estado, importe FROM workspace_fincas_recibos "
-                    "WHERE workspace_id = ? AND vecino_id = ? AND estado IN ('Pendiente', 'Devuelto') "
+                    f"WHERE workspace_id = ? AND vecino_id = ? AND {_cond} "
                     "ORDER BY periodo",
-                    (workspace_id, row_value(fila, "vecino_id", "")),
+                    (workspace_id, row_value(fila, "vecino_id", ""), _periodo_hoy),
                 ).fetchall()
                 detalle = fetch_workspace_detail(conn, workspace_id)
                 pdf = build_certificado_deuda_pdf(
@@ -101876,11 +101898,12 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
                 (row_value(vecino, "comunidad_id", ""), workspace_id),
             ).fetchone()
+            _cond, _periodo_hoy = condicion_de_recibo_impagado()
             recibos = conn.execute(
                 "SELECT periodo, concepto, importe, estado FROM workspace_fincas_recibos "
-                "WHERE vecino_id = ? AND workspace_id = ? AND estado IN ('Pendiente', 'Devuelto') "
+                f"WHERE vecino_id = ? AND workspace_id = ? AND {_cond} "
                 "ORDER BY periodo",
-                (vecino_id, workspace_id),
+                (vecino_id, workspace_id, _periodo_hoy),
             ).fetchall()
             detalle = fetch_workspace_detail(conn, workspace_id)
             pdf = build_certificado_deuda_pdf(
