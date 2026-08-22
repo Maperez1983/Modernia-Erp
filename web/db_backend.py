@@ -218,16 +218,42 @@ def _qmark_to_pyformat(sql):
 def _escape_psycopg_pyformat_percents(sql: str) -> str:
     # psycopg3 pyformat placeholders use %s (and %b/%t). Any other % sequence must be escaped as %%,
     # otherwise psycopg raises: "only '%s', '%b', '%t' are allowed as placeholders".
+    #
+    # Esto tiene que ser consciente de comillas: `_qmark_to_pyformat` sólo pone `%s`
+    # fuera de cadenas, así que un `%t` o `%b` DENTRO de una cadena nunca es un
+    # placeholder real, es coincidencia —un LIKE '%trafic%' o '%tasaci%' empieza
+    # justo por "%t"—. Tratarlo como placeholder no lo escapaba, y entonces psycopg
+    # contaba de más: "the query has 10 placeholders but 7 parameters were passed"
+    # en vez de fallar por token inválido, así que el error ni siquiera apuntaba
+    # aquí. Vistos así en producción: `%trafic%`, `%transfer%` y `%tasaci%` en la
+    # segmentación de trabajos del dashboard de Gestoría, que por eso devolvía
+    # `segmentacion_trabajos: {}` en vez de sus totales.
     out = []
+    in_squote = False
+    in_dquote = False
     i = 0
     while i < len(sql):
         ch = sql[i]
+        nxt = sql[i + 1] if i + 1 < len(sql) else ""
+        if ch == "'" and not in_dquote:
+            out.append(ch)
+            if in_squote and nxt == "'":
+                out.append(nxt)
+                i += 2
+                continue
+            in_squote = not in_squote
+            i += 1
+            continue
+        if ch == '"' and not in_squote:
+            out.append(ch)
+            in_dquote = not in_dquote
+            i += 1
+            continue
         if ch != "%":
             out.append(ch)
             i += 1
             continue
-        nxt = sql[i + 1] if i + 1 < len(sql) else ""
-        if nxt in {"s", "b", "t", "%"}:
+        if not in_squote and not in_dquote and nxt in {"s", "b", "t", "%"}:
             out.append("%")
             if nxt:
                 out.append(nxt)
