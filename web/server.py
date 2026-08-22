@@ -92740,6 +92740,50 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Captación no encontrada"}, status=404)
                 return
             inmueble_id = str(captacion["inmueble_id"] or "").strip()
+            # Borrar la captación se lleva el inmueble por delante, y hay cosas colgadas de
+            # él que no se pueden perder: un cierre firmado, una operación, un estudio de
+            # financiación, una firma pedida. Hasta ahora ni se miraba: la clave ajena
+            # saltaba en mitad del borrado y salía un 500 «API error» —en Postgres, además,
+            # con la transacción envenenada para el resto de la petición—. Se mira antes y
+            # se dice qué hay detrás.
+            RETIENEN_EL_INMUEBLE = (
+                ("inmueble_cierres", "cierres firmados"),
+                ("operaciones_inmobiliarias", "operaciones"),
+                ("asesoramientos_financiacion", "estudios de financiación"),
+                ("inmueble_signature_requests", "firmas solicitadas"),
+            )
+            if inmueble_id:
+                retenido = {}
+                for tabla, etiqueta in RETIENEN_EL_INMUEBLE:
+                    cols = table_columns(conn, tabla) or set()
+                    if "inmueble_id" not in cols:
+                        continue
+                    try:
+                        cuenta = conn.execute(
+                            f"SELECT COUNT(*) AS total FROM {tabla} WHERE inmueble_id = ?",
+                            (inmueble_id,),
+                        ).fetchone()
+                        cuantas = int(row_value(cuenta, "total", 0) or 0)
+                    except Exception as _fallo_tragado:
+                        _rollback_best_effort(conn)
+                        apunta_escritura_tragada("_do_POST/captacion_delete/retenido", _fallo_tragado)
+                        continue
+                    if cuantas:
+                        retenido[etiqueta] = cuantas
+                if retenido:
+                    detalle = ", ".join(f"{etiqueta} ({n})" for etiqueta, n in retenido.items())
+                    json_response(
+                        self,
+                        {
+                            "error": f"Este inmueble tiene {detalle}. Borrar la captación lo "
+                                     "borraría también y esos registros se quedarían sin "
+                                     "inmueble. Archiva la captación en vez de borrarla.",
+                            "retenido": retenido,
+                        },
+                        status=409,
+                    )
+                    return
+
             actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
             try:
                 trash_backup_row(conn, "captaciones", record_id, deleted_by=actor, reason="api/captacion_delete", now=now)
@@ -92762,6 +92806,23 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute("DELETE FROM inmueble_propietarios WHERE inmueble_id = ?", (inmueble_id,))
                 conn.execute("DELETE FROM visitas WHERE inmueble_id = ?", (inmueble_id,))
                 conn.execute("DELETE FROM acciones WHERE inmueble_id = ?", (inmueble_id,))
+                # Estos cuelgan del inmueble y no tienen valor propio: si se quedan,
+                # apuntan a una vivienda que ya no existe.
+                for tabla in ("inmueble_compradores", "inmueble_servicios", "crm_stage_events"):
+                    if "inmueble_id" in (table_columns(conn, tabla) or set()):
+                        try:
+                            conn.execute(f"DELETE FROM {tabla} WHERE inmueble_id = ?", (inmueble_id,))
+                        except Exception as _fallo_tragado:
+                            _rollback_best_effort(conn)
+                            apunta_escritura_tragada("_do_POST/captacion_delete/hijos", _fallo_tragado)
+            # El embudo también se guarda por captación, no sólo por inmueble: si la
+            # captación nunca llegó a tener piso, el evento se quedaba suelto.
+            if "captacion_id" in (table_columns(conn, "crm_stage_events") or set()):
+                try:
+                    conn.execute("DELETE FROM crm_stage_events WHERE captacion_id = ?", (record_id,))
+                except Exception as _fallo_tragado:
+                    _rollback_best_effort(conn)
+                    apunta_escritura_tragada("_do_POST/captacion_delete/embudo", _fallo_tragado)
             conn.execute("DELETE FROM captaciones WHERE id = ?", (record_id,))
             if inmueble_id:
                 conn.execute("DELETE FROM inmuebles WHERE id = ?", (inmueble_id,))
