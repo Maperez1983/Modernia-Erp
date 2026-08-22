@@ -17,6 +17,7 @@ python scripts/simula_ciclo_rrhh.py
 python scripts/simula_ciclo_seguros.py
 python scripts/simula_ciclo_financiaciones.py
 python scripts/simula_ciclo_gestoria.py
+python scripts/simula_portales.py
 ```
 
 Cada uno levanta su propio servidor sobre una base temporal —borran `DATABASE_URL` antes
@@ -94,6 +95,23 @@ Alta del cliente → servicios contratados → un trabajo con su plazo → model
 devuelve los servicios contratados, no el expediente entero —los trabajos y los modelos
 se piden aparte—, y `gestoria_contabilidad` guarda un `importe` único, no base+IVA.
 
+### Los tres portales de cliente (`simula_portales.py`)
+
+Lo único del CRM que ve alguien de fuera. La agencia genera los tres enlaces; el cliente
+entra sin cuenta, acepta el consentimiento, mira lo suyo y hace algo.
+
+**Sin fallos, y con la puerta de RGPD bien puesta:** antes de aceptar no se enseña ni un
+dato. Después, cada uno ve lo suyo y sólo lo suyo — el propietario no ve otro piso ni el
+teléfono del comprador, el comprador no ve el del propietario, el comunero no ve a su
+vecina. Un token inventado no abre nada, el token de un portal no vale en otro, y un
+enlace revocado responde «Este enlace ha sido anulado. Pide uno nuevo a tu agencia».
+
+El circuito cierra: el comprador pide visita desde su portal, la cita le aparece a él y
+la agencia la ve en su agenda.
+
+Detalle del contrato público: el portal identifica cada inmueble **por su índice en la
+lista**, no por id, para no exponer identificadores internos.
+
 ## Fallos encontrados
 
 ### La comunidad entera salía morosa el día de emitir los recibos
@@ -161,8 +179,6 @@ Conviene tenerlo claro para no dar por auditado lo que no lo está:
 - **Sólo el camino principal.** Los seis módulos están simulados; quedan los caminos que se salen de lo
   normal: derramas, cambio de propietario a mitad de ejercicio, anulaciones, devoluciones
   parciales, alquileres, ausencias, nóminas, cambio de compañía y bajas de póliza.
-- **Los portales, de punta a punta.** El del propietario, el del comprador y el del
-  comunero se auditaron por separado, pero no como un recorrido completo del cliente.
 - **La interfaz.** Las simulaciones comprueban la API y la base. Una pantalla puede
   enseñar mal un dato correcto, y eso sólo se ve en el navegador.
 

@@ -125,6 +125,9 @@ Tan importante como lo anterior, para no repetir trabajo:
 - **Registro horario**: el borrado de una ficha con fichajes protegidos desactiva en vez
   de borrar. Bien resuelto desde antes.
 - **Sesión caducada**: superpone la capa de acceso sin recargar; no se pierde lo tecleado.
+- **Los tres portales de cliente, de punta a punta**: consentimiento antes de enseñar
+  nada, cada uno ve sólo lo suyo, token falso y token cruzado rechazados, enlace revocado
+  con mensaje claro, y la visita pedida desde el portal llega a la agenda. Sin fallos.
 - **Ciclo de una gestoría**: expediente con sus servicios, trabajo con plazo, modelos
   programados, apunte contable y panel. Sin fallos.
 - **Ciclo de una póliza**: oferta, contratación con su PDF obligatorio, entrada en vigor,
@@ -145,6 +148,7 @@ python scripts/simula_ciclo_rrhh.py            # jornada y cierre de mes
 python scripts/simula_ciclo_seguros.py         # de la oferta a la renovación
 python scripts/simula_ciclo_financiaciones.py  # del estudio a la firma
 python scripts/simula_ciclo_gestoria.py        # expediente, trabajos y modelos
+python scripts/simula_portales.py              # los tres portales de cliente
 python scripts/auditoria_endpoints_inmo.py     # barrido de los endpoints del módulo
 ```
 
