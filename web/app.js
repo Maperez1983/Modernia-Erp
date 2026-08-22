@@ -75824,6 +75824,15 @@ const renderSimpleTable = (container, columns, rows) => {
   container.appendChild(table);
 };
 
+// Con Fincas Velazquez como empresa activa (y no un cliente concreto de la
+// "cliente"), no siempre es "no hay nada": la contabilidad de cada empresa del
+// workspace es independiente, y el usuario puede llevar activa una que nunca
+// tuvo asientos aunque otra del mismo workspace sí. "Sin datos." no lo dice.
+const gestoriaLibrosVaciosDeEmpresaAviso = (nombreEmpresa) => {
+  const nombre = String(nombreEmpresa || "").trim() || "la empresa activa";
+  return `<p class='muted'>Sin apuntes contables para «${escapeHtml(nombre)}». Si esperabas ver movimientos, comprueba que sea la empresa activa correcta: la contabilidad de cada empresa del workspace es independiente, y puede que la que buscas lleve su libro bajo otra.</p>`;
+};
+
 const getGestoriaMonthLabel = (dateStr) => {
   const months = [
     "Enero",
@@ -76788,6 +76797,33 @@ const loadGestoriaClienteLibros = async (clienteIdOrOpts, empresaId = "") => {
         if (gestoriaClienteLibroIvaTable) {
           gestoriaClienteLibroIvaTable.innerHTML = "<p class='muted'>Desglose IVA cargado.</p>";
         }
+        syncGestoriaBooksDownloadButtons();
+        return;
+      }
+
+      // Con Fincas Velazquez como empresa activa, Diario/Mayor/Balance/PyG/Facturas
+      // salían vacíos sin ninguna pista de por qué: sus 1.225 asientos reales están
+      // bajo Estudio Velazquez, otra empresa del mismo workspace, y "Sin datos." no
+      // dice que hay que cambiar de empresa activa para verlos. Solo se muestra
+      // cuando TODO está vacío a la vez (no solo el diario: una empresa puede tener
+      // facturas sin conciliar todavía, y esas sí hay que seguir mostrando) y solo
+      // en modo "empresa" (no en el de "cliente", donde uno sin apuntes es normal).
+      if (!clienteId && resolvedEmpresaId && !diario.length && !mayor.length && !balance.length && !pyg.length && !facturas.length) {
+        const nombreEmpresa =
+          state.currentWorkspaceCompanyName
+          || (Array.isArray(state.empresas) ? state.empresas.find((e) => resolveLegacyEmpresaId(e) === resolvedEmpresaId || String(e?.id || "") === resolvedEmpresaId)?.nombre : "")
+          || "";
+        const aviso = gestoriaLibrosVaciosDeEmpresaAviso(nombreEmpresa);
+        if (gestoriaClienteLibroDiarioTable) gestoriaClienteLibroDiarioTable.innerHTML = aviso;
+        if (gestoriaClienteLibroMayorTable) gestoriaClienteLibroMayorTable.innerHTML = aviso;
+        if (gestoriaClienteLibroBalanceTable) gestoriaClienteLibroBalanceTable.innerHTML = aviso;
+        if (gestoriaClienteLibroPyGTable) gestoriaClienteLibroPyGTable.innerHTML = aviso;
+        if (gestoriaClienteLibroFacturasTable) gestoriaClienteLibroFacturasTable.innerHTML = aviso;
+        if (gestoriaClienteLibroIvaTable) gestoriaClienteLibroIvaTable.innerHTML = aviso;
+        if (gestoriaClienteLibroDiarioInfo) gestoriaClienteLibroDiarioInfo.textContent = "";
+        if (gestoriaClienteLibroMayorInfo) gestoriaClienteLibroMayorInfo.textContent = "";
+        if (gestoriaClienteLibroBalanceInfo) gestoriaClienteLibroBalanceInfo.textContent = "";
+        if (gestoriaClienteLibroPyGInfo) gestoriaClienteLibroPyGInfo.textContent = "";
         syncGestoriaBooksDownloadButtons();
         return;
       }

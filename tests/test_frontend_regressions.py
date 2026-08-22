@@ -2649,6 +2649,74 @@ class GestoriaContabilidadNoDisparaUnaPeticionPorClienteTests(unittest.TestCase)
             APP_SOURCE,
         )
 
+
+class GestoriaLibrosVaciosDeEmpresaAvisoTests(unittest.TestCase):
+    """Con Fincas Velazquez como empresa activa, Diario/Mayor/Balance/PyG y
+    Facturas salían con el "Sin datos." genérico compartido por
+    renderSimpleTable, sin ninguna pista de que sus asientos reales estaban
+    bajo otra empresa del mismo workspace (Estudio Velazquez). Este mensaje
+    nombra la empresa activa y explica por qué puede estar vacía."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const gestoriaLibrosVaciosDeEmpresaAviso = (nombreEmpresa) => {",
+            "const getGestoriaMonthLabel = (dateStr) => {",
+        )
+        cls.param_names = ["escapeHtml"]
+        cls.return_names = ["gestoriaLibrosVaciosDeEmpresaAviso"]
+
+    def _run(self, body: str) -> None:
+        prelude = 'const escapeHtml = (s) => String(s).replace(/[&<>"\']/g, (c) => "&#" + c.charCodeAt(0) + ";");'
+        script = make_factory_script(self.segment, self.param_names, self.return_names, prelude, body)
+        run_node_script(script)
+
+    def test_nombra_la_empresa_activa(self):
+        self._run(
+            dedent(
+                """
+                const { gestoriaLibrosVaciosDeEmpresaAviso } = api;
+                const html = gestoriaLibrosVaciosDeEmpresaAviso("Fincas Velazquez");
+                assert.ok(html.includes("Fincas Velazquez"), html);
+                assert.ok(html.includes("empresa activa"), html);
+                """
+            )
+        )
+
+    def test_sin_nombre_cae_en_la_empresa_activa_generica(self):
+        self._run(
+            dedent(
+                """
+                const { gestoriaLibrosVaciosDeEmpresaAviso } = api;
+                const html = gestoriaLibrosVaciosDeEmpresaAviso("");
+                assert.ok(html.includes("la empresa activa»"), html);
+                """
+            )
+        )
+
+    def test_escapa_el_nombre_de_la_empresa(self):
+        self._run(
+            dedent(
+                """
+                const { gestoriaLibrosVaciosDeEmpresaAviso } = api;
+                const html = gestoriaLibrosVaciosDeEmpresaAviso("<script>alert(1)</script>");
+                assert.ok(!html.includes("<script>"), html);
+                """
+            )
+        )
+
+    def test_las_dos_colas_contables_usan_la_carga_en_bloque(self):
+        segment_general = extract_segment(
+            "const loadGestoriaContabilidad =",
+            "const loadSegurosContabilidad =",
+        )
+        segment_seguros = extract_segment(
+            "const loadSegurosContabilidad =",
+            "const formatInputDate =",
+        )
+        self.assertIn("await loadAllSegurosForContabilidad();", segment_general)
+        self.assertIn("await loadAllSegurosForContabilidad();", segment_seguros)
+
     def test_las_dos_colas_contables_usan_la_carga_en_bloque(self):
         segment_general = extract_segment(
             "const loadGestoriaContabilidad =",
