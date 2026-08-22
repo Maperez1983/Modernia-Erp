@@ -5867,6 +5867,11 @@ def derive_hipoteca_financing(precio, importe_hipoteca):
         "precio": round(precio_num, 2),
         "importe_hipoteca": round(hipoteca_num, 2),
         "porcentaje": porcentaje,
+        # La ficha enseña «Entrada» al lado de «% financiación», y salía en blanco con el
+        # precio y el importe delante: la misma resta que el asesor acababa haciendo a
+        # mano. Sólo se rellena si está vacía —quien la haya puesto a mano puede estar
+        # contando también gastos e impuestos, y eso no se pisa—.
+        "entrada": round(max(precio_num - hipoteca_num, 0.0), 2),
     }
 
 
@@ -86502,6 +86507,7 @@ class Handler(BaseHTTPRequestHandler):
                     "ocr_quality": fin_quality,
                 },
             )
+            return
         elif parsed.path == "/api/fin_asesoramiento_ocr_auto":
             data_uri = payload.get("file_base64") or payload.get("data")
             if not data_uri:
@@ -87299,7 +87305,17 @@ class Handler(BaseHTTPRequestHandler):
                     (record_id,),
                 ).fetchone()
             hipoteca_id = convert_fin_asesoramiento_to_hipoteca(conn, empresa["id"], row, now)
+            # La conversión inserta la hipoteca y marca el asesoramiento como convertido,
+            # pero nadie confirmaba: se devolvía el id de una hipoteca que no existía y el
+            # asesor no la encontraba en su listado. Con suerte la salvaba la siguiente
+            # escritura de la misma conexión, y sin suerte se perdía.
+            conn.commit()
             json_response(self, {"hipoteca_id": hipoteca_id})
+            # Sin este `return` la ejecución seguía hasta el 404 del final e intentaba
+            # contestar por segunda vez: cada conversión dejaba un BrokenPipeError en el
+            # registro. Funcionaba de suerte —el cliente ya tenía su respuesta— y el ruido
+            # tapaba errores de verdad.
+            return
         elif parsed.path == "/api/hipotecas_update":
             record_id = payload.get("id")
             if not record_id:
@@ -87543,6 +87559,9 @@ class Handler(BaseHTTPRequestHandler):
                 updates["precio"] = financing_split["precio"]
                 updates["importe_hipoteca"] = financing_split["importe_hipoteca"]
                 updates["porcentaje"] = financing_split["porcentaje"]
+                entrada_actual = updates.get("entrada") if "entrada" in updates else current_row["entrada"]
+                if entrada_actual in (None, "", 0, 0.0):
+                    updates["entrada"] = financing_split["entrada"]
             if "anio" not in updates:
                 fecha_ref = str(updates.get("fecha_firma") or updates.get("fecha_encargo") or "").strip()
                 if fecha_ref:
@@ -90013,7 +90032,11 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
-            json_response(self, {"ok": True})
+            # Sin esto el botón contestaba «ok» y no guardaba nada: el expediente se
+            # quedaba con la lista vacía y quien lo pulsó creía haberla generado. Es el
+            # mismo descuido que tenía `fin_checklist_update`, arreglado en su día.
+            conn.commit()
+            json_response(self, {"ok": True, "tareas": len(tasks)})
             return
         elif parsed.path == "/api/fin_checklist_update":
             record_id = payload.get("id")

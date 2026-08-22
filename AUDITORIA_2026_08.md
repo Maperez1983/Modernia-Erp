@@ -68,6 +68,7 @@ Trece cambios publicados. Ordenados por lo que le pasaba a quien lo sufría.
 |---|---|
 | Borrar a un propietario del censo dejaba **tres recibos sin dueño**, uno pendiente de 240 €. Contestaba «ok». | `505b0a5` |
 | Borrar la captación de un piso vendido reventaba con un **500** por clave ajena; en Postgres además envenenaba el resto de la petición. | `64e6f85` |
+| **«Generar checklist»** y **«Convertir en hipoteca»** decían «ok» y no guardaban nada: faltaba el `conn.commit()`. La conversión devolvía el id de una hipoteca inexistente. | *(en este documento)* |
 | Un importe pegado en formato inglés (`1,234.56`) se guardaba como **1,23 €**. Estaba en tres analizadores distintos. | `40e1522` |
 | Teclear **31/02** no daba error: guardaba el 3 de marzo. Con guiones o puntos, ni se traducía. | `85241ac` |
 
@@ -124,6 +125,8 @@ Tan importante como lo anterior, para no repetir trabajo:
 - **Registro horario**: el borrado de una ficha con fichajes protegidos desactiva en vez
   de borrar. Bien resuelto desde antes.
 - **Sesión caducada**: superpone la capa de acceso sin recargar; no se pierde lo tecleado.
+- **Ciclo de una gestoría**: expediente con sus servicios, trabajo con plazo, modelos
+  programados, apunte contable y panel. Sin fallos.
 - **Ciclo de una póliza**: oferta, contratación con su PDF obligatorio, entrada en vigor,
   recibo, resumen, siniestro y renovación. Los importes cuadran de punta a punta y los
   dos controles del módulo explican qué hacer. Sin fallos.
@@ -140,6 +143,8 @@ python scripts/simula_ciclo_fincas.py          # mes completo de una comunidad
 python scripts/simula_ciclo_inmobiliaria.py    # de la captación a la firma
 python scripts/simula_ciclo_rrhh.py            # jornada y cierre de mes
 python scripts/simula_ciclo_seguros.py         # de la oferta a la renovación
+python scripts/simula_ciclo_financiaciones.py  # del estudio a la firma
+python scripts/simula_ciclo_gestoria.py        # expediente, trabajos y modelos
 python scripts/auditoria_endpoints_inmo.py     # barrido de los endpoints del módulo
 ```
 
@@ -156,9 +161,7 @@ Y en la suite, las pruebas nuevas que vigilan lo encontrado: búsquense por
 
 ### Sin auditar
 
-- **Dos módulos sin simular**: gestoría y financiaciones. Se barrieron buscando errores,
-  pero no se simuló su uso.
-- **Los caminos que se salen de lo normal** en los cuatro módulos simulados: derramas,
+- **Los caminos que se salen de lo normal** en los seis módulos simulados: derramas,
   cambio de propietario a mitad de ejercicio, anulaciones, devoluciones parciales,
   alquileres, ausencias, nóminas, cambio de compañía y bajas de póliza.
 - **Los portales de punta a punta**, como recorrido completo del cliente.

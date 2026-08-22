@@ -15,6 +15,8 @@ python scripts/simula_ciclo_fincas.py
 python scripts/simula_ciclo_inmobiliaria.py
 python scripts/simula_ciclo_rrhh.py
 python scripts/simula_ciclo_seguros.py
+python scripts/simula_ciclo_financiaciones.py
+python scripts/simula_ciclo_gestoria.py
 ```
 
 Cada uno levanta su propio servidor sobre una base temporal —borran `DATABASE_URL` antes
@@ -74,6 +76,24 @@ lado, y «Debes adjuntar el PDF de la póliza antes de marcarla como Contratada/
 Un detalle del modelo, por si despista al leer el código: **la comisión es el dato que se
 guarda** y el porcentaje se deriva de ella para mostrarlo.
 
+### Ciclo de una financiación (`simula_ciclo_financiaciones.py`)
+
+Estudio → checklist → conversión en hipoteca → ficha completa → firma → paneles y PDF.
+
+Es el módulo que más ha dado. Comprueba, además del recorrido, que **lo que se guarda
+queda guardado**: cada verificación usa una conexión nueva a la base, porque la del
+propio script arrastra una instantánea de SQLite que no ve lo que el servidor escribe
+después.
+
+### Ciclo de una gestoría (`simula_ciclo_gestoria.py`)
+
+Alta del cliente → servicios contratados → un trabajo con su plazo → modelos a presentar
+→ apunte contable → panel → listados.
+
+**Sin fallos.** Dos detalles del modelo, por si despistan: `/api/cliente_gestoria`
+devuelve los servicios contratados, no el expediente entero —los trabajos y los modelos
+se piden aparte—, y `gestoria_contabilidad` guarda un `importe` único, no base+IVA.
+
 ## Fallos encontrados
 
 ### La comunidad entera salía morosa el día de emitir los recibos
@@ -91,6 +111,27 @@ impago siempre; pendiente lo es cuando su mes ya ha pasado. Lo del mes en curso 
 viéndose en «recibos pendientes», que es otra cifra y otra caja del resumen.
 
 Prueba: `tests/test_morosidad_y_certificado.py::ElMesEnCursoTodaviaNoEsDeudaTests`.
+
+### Dos botones de financiación decían «ok» y no guardaban nada
+
+**«Generar checklist»** devolvía `{"ok": true}` y creaba cero tareas: el asesor lo
+pulsaba, veía que había ido bien, y el expediente seguía con la lista vacía.
+
+**«Convertir en hipoteca»** devolvía el identificador de una hipoteca que no existía.
+Comprobado del modo más duro: tras convertir, la propia API contestaba «0 hipotecas» y el
+fichero tenía 0. Con suerte la salvaba una escritura posterior de la misma conexión; sin
+suerte se perdía.
+
+A los dos les faltaba `conn.commit()`. Es la tercera vez que aparece este descuido en el
+mismo módulo —`fin_checklist_update` ya se había arreglado antes—.
+
+De paso, cada conversión dejaba un `BrokenPipeError` en el registro: faltaba el `return`
+tras responder, así que la ejecución seguía hasta el 404 final e intentaba contestar dos
+veces. Un barrido de las demás ramas encontró exactamente otra igual, también arreglada.
+
+Y la ficha enseñaba «Entrada» en blanco teniendo precio e hipoteca: la misma resta que el
+asesor hacía a mano. Ahora sale sola, y sólo si estaba vacía —quien la ponga a mano puede
+estar contando gastos e impuestos—.
 
 ### Cerrabas la venta y el piso seguía apareciendo como disponible
 
@@ -117,8 +158,7 @@ Prueba: `tests/test_una_venta_cerrada_figura_vendida.py`.
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
 
-- **Sólo el camino principal de cuatro módulos.** Quedan sin simular gestoría y
-  financiaciones, y dentro de los cuatro hechos quedan los caminos que se salen de lo
+- **Sólo el camino principal.** Los seis módulos están simulados; quedan los caminos que se salen de lo
   normal: derramas, cambio de propietario a mitad de ejercicio, anulaciones, devoluciones
   parciales, alquileres, ausencias, nóminas, cambio de compañía y bajas de póliza.
 - **Los portales, de punta a punta.** El del propietario, el del comprador y el del
