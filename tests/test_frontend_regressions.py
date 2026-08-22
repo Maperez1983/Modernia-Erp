@@ -2717,14 +2717,58 @@ class GestoriaLibrosVaciosDeEmpresaAvisoTests(unittest.TestCase):
         self.assertIn("await loadAllSegurosForContabilidad();", segment_general)
         self.assertIn("await loadAllSegurosForContabilidad();", segment_seguros)
 
-    def test_las_dos_colas_contables_usan_la_carga_en_bloque(self):
-        segment_general = extract_segment(
-            "const loadGestoriaContabilidad =",
-            "const loadSegurosContabilidad =",
+
+class GestoriaFacturaOcrUsaLaEmpresaDelClienteTests(unittest.TestCase):
+    """`runGestoriaFacturaOcr` mandaba `empresa_nombre: FINCAS_COMPANY` fijo. El
+    backend resuelve `empresa_id` solo a partir de ese nombre (sin mirar
+    `cliente_id`), así que una factura OCR de un cliente de cualquier otra
+    empresa del workspace (Estudio Velazquez, Inversure...) se archivaba
+    igualmente bajo Fincas Velazquez: mismo cliente, empresa equivocada en el
+    asiento y en los libros. Ahora usa `resolveCrmGestoriaEmpresaNombre()`,
+    el mismo resolutor multi-nivel que ya usa el resto de Gestoría para saber
+    de qué empresa es la sesión activa."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const runGestoriaFacturaOcr = async ({",
+            "const updateCatalogoList =",
         )
-        segment_seguros = extract_segment(
-            "const loadSegurosContabilidad =",
-            "const formatInputDate =",
+        cls.param_names = ["fileToBase64", "resolveCrmGestoriaEmpresaNombre", "loadGestoriaContabilidad",
+                            "loadGestoriaClienteContaResultados", "loadGestoriaClienteLibros"]
+        cls.return_names = ["runGestoriaFacturaOcr"]
+
+    def _run(self, prelude: str, body: str) -> None:
+        script = make_factory_script(self.segment, self.param_names, self.return_names, prelude, body)
+        run_node_script(script)
+
+    def test_no_manda_fincas_velazquez_fijo(self):
+        self.assertNotIn("empresa_nombre: FINCAS_COMPANY", self.segment)
+
+    def test_usa_la_empresa_resuelta_del_cliente_activo(self):
+        self._run(
+            dedent(
+                """
+                const fileToBase64 = async () => "data:application/pdf;base64,AAAA";
+                const resolveCrmGestoriaEmpresaNombre = () => "Estudio Velazquez 2012 SL";
+                const loadGestoriaContabilidad = () => {};
+                const loadGestoriaClienteContaResultados = () => {};
+                const loadGestoriaClienteLibros = () => {};
+                let sentBody = null;
+                globalThis.fetch = async (url, opts) => {
+                  sentBody = JSON.parse(opts.body);
+                  return { json: async () => ({ factura_id: "f-1", asiento_id: "a-1" }) };
+                };
+                """
+            ),
+            dedent(
+                """
+                const { runGestoriaFacturaOcr } = api;
+                const fileInput = { files: [{ name: "f.pdf" }], value: "x" };
+                const statusEl = { textContent: "" };
+                await runGestoriaFacturaOcr({ fileInput, tipoInput: null, statusEl, clienteId: "cli-1" });
+                assert.strictEqual(sentBody.empresa_nombre, "Estudio Velazquez 2012 SL");
+                assert.strictEqual(sentBody.cliente_id, "cli-1");
+                """
+            ),
         )
-        self.assertIn("await loadAllSegurosForContabilidad();", segment_general)
-        self.assertIn("await loadAllSegurosForContabilidad();", segment_seguros)

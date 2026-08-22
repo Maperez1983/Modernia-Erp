@@ -79063,7 +79063,11 @@ const runGestoriaFacturaOcr = async ({
   const file = fileInput.files[0];
   const dataUrl = await fileToBase64(file);
   const payload = {
-    empresa_nombre: FINCAS_COMPANY,
+    // Antes iba fija a FINCAS_COMPANY: una factura OCR de un cliente de
+    // cualquier otra empresa del workspace (p.ej. Estudio Velazquez) se
+    // archivaba igualmente bajo Fincas Velazquez, porque el backend resuelve
+    // `empresa_id` solo por `empresa_nombre`, sin mirar el `cliente_id`.
+    empresa_nombre: resolveCrmGestoriaEmpresaNombre(),
     file_base64: dataUrl,
     filename: file.name || "",
     tipo_factura: tipoInput ? tipoInput.value : "compra",
