@@ -14,6 +14,7 @@ serios encontrados con este método devolvían `200 OK` en todas sus llamadas.
 python scripts/simula_ciclo_fincas.py
 python scripts/simula_ciclo_inmobiliaria.py
 python scripts/simula_ciclo_rrhh.py
+python scripts/simula_ciclo_seguros.py
 ```
 
 Cada uno levanta su propio servidor sobre una base temporal —borran `DATABASE_URL` antes
@@ -55,6 +56,23 @@ exportaciones (PDF, XLSX, XML) salen con datos.
 
 **Sin fallos.** El control se comporta como debe y además lo explica: al intentar fichar
 con el mes cerrado responde `409 · «Mes bloqueado: desbloquea el periodo para fichar.»`
+
+### Ciclo de una póliza (`simula_ciclo_seguros.py`)
+
+Oferta → alta de la póliza → contratación → entrada en vigor → recibo → resumen y KPI →
+siniestro → cola de renovaciones.
+
+Comprueba que el flujo de estados **no se salta** —Presupuesto → Contratada → En vigor—,
+que no se pone una póliza en vigor sin adjuntar su PDF, que la prima y la comisión quedan
+coherentes, que el recibo hereda los importes y que el resumen del panel suma lo mismo
+que hay en la base.
+
+**Sin fallos.** Los dos controles del módulo no sólo impiden la acción, explican qué
+hacer: «Transición de estado no permitida: Presupuesto → En vigor» con el flujo bueno al
+lado, y «Debes adjuntar el PDF de la póliza antes de marcarla como Contratada/En vigor».
+
+Un detalle del modelo, por si despista al leer el código: **la comisión es el dato que se
+guarda** y el porcentaje se deriva de ella para mostrarlo.
 
 ## Fallos encontrados
 
@@ -99,10 +117,10 @@ Prueba: `tests/test_una_venta_cerrada_figura_vendida.py`.
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
 
-- **Sólo el camino principal de tres módulos.** Quedan sin simular gestoría, seguros y
-  financiaciones, y dentro de los tres hechos quedan los caminos que se salen de lo
+- **Sólo el camino principal de cuatro módulos.** Quedan sin simular gestoría y
+  financiaciones, y dentro de los cuatro hechos quedan los caminos que se salen de lo
   normal: derramas, cambio de propietario a mitad de ejercicio, anulaciones, devoluciones
-  parciales, alquileres, ausencias y nóminas.
+  parciales, alquileres, ausencias, nóminas, cambio de compañía y bajas de póliza.
 - **Los portales, de punta a punta.** El del propietario, el del comprador y el del
   comunero se auditaron por separado, pero no como un recorrido completo del cliente.
 - **La interfaz.** Las simulaciones comprueban la API y la base. Una pantalla puede
