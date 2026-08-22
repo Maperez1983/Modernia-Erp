@@ -21,8 +21,17 @@ constantes con nombre, para que un asesor pueda leerlas y corregirlas sin bucear
 en el código.
 """
 
+import json
+import os
+import tempfile
+import threading
 import unittest
+import urllib.error
+import urllib.request
 from pathlib import Path
+
+os.environ.setdefault("DATABASE_URL", "")
+os.environ.setdefault("POSTGRES_URL", "")
 
 RAIZ = Path(__file__).resolve().parents[1]
 SERVER = (RAIZ / "web" / "server.py").read_text(encoding="utf-8")
@@ -126,3 +135,111 @@ class LaPantallaTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LaMismaPersonaEnOtraTablaTests(unittest.TestCase):
+    """La supresión respondía «la ficha ya no identifica a nadie», y podía ser mentira.
+
+    Un cliente puede ser además vecino de una comunidad, socio de una sociedad o
+    firmante de un acta. En esas tablas su nombre, NIF, teléfono y hasta el IBAN están
+    escritos otra vez, y no cuelgan de `clientes`: suprimir el cliente no las toca.
+    Comprobado el 2026-08-21 con un cliente que era también vecino: la ficha quedaba
+    anónima y la fila del vecino conservaba los cinco datos.
+
+    No se borran a ciegas —mientras sea propietario de un piso hay base legal para
+    conservarlos en la comunidad—, pero quien atiende la solicitud tiene que saber que
+    quedan, y hasta ahora se le decía justo lo contrario.
+    """
+
+    CLAVE = "Supresion1234!"
+    AHORA = "2026-08-21 09:00:00"
+
+    def _monta(self, tambien_vecino):
+        from web import server as S
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db = Path(tmp.name) / "a.sqlite"
+        S.ensure_tables(db)
+        conn = S.open_sqlite_conn(str(db), with_row_factory=True)
+        for fn in ("ensure_workspace_core_tables", "ensure_workspace_product_tables"):
+            try:
+                getattr(S, fn)(conn)
+            except Exception:
+                pass
+        ws = conn.execute("SELECT id FROM workspaces LIMIT 1").fetchone()["id"]
+
+        def ins(tabla, datos):
+            cols = {c[1] for c in conn.execute(f"pragma table_info({tabla})")}
+            d = {k: v for k, v in datos.items() if k in cols}
+            conn.execute(f"INSERT OR REPLACE INTO {tabla} ({','.join(d)}) "
+                         f"VALUES ({','.join('?' * len(d))})", tuple(d.values()))
+            conn.commit()
+
+        b = dict(created_at=self.AHORA, updated_at=self.AHORA)
+        ins("empresas", dict(id="emp1", nombre="Modernia", nif="B29123456", activo=1, **b))
+        ins("workspace_empresas", dict(id="we1", workspace_id=ws, empresa_id="emp1", **b))
+        ins("usuarios", dict(id="u1", nombre="Ana", usuario="ana", email="a@x.test",
+                             rol="Administrador", activo=1,
+                             password_hash=S.hash_password(self.CLAVE), **b))
+        ins("workspace_miembros", dict(id="wm1", workspace_id=ws, usuario_id="u1", rol="Owner", **b))
+        ins("clientes", dict(id="cli1", nombre="Manuel Ruiz Galvez", nif="25111111A",
+                             telefono="600000010", email="manuel@x.test",
+                             empresa_id="emp1", workspace_id=ws, **b))
+        if tambien_vecino:
+            ins("workspace_fincas_comunidades", dict(id="com1", workspace_id=ws, empresa_id="emp1",
+                                                     nombre="C.P Ejemplo", estado="Activa", **b))
+            ins("workspace_fincas_vecinos", dict(id="v1", workspace_id=ws, comunidad_id="com1",
+                                                 nombre="Manuel Ruiz Galvez", nif="25111111A",
+                                                 telefono="600000010", email="manuel@x.test",
+                                                 iban="ES2321000418400000000001", **b))
+        anterior = getattr(S.Handler, "db_path", None)
+        S.Handler.db_path = str(db)
+        httpd = S.ThreadingHTTPServer(("127.0.0.1", 0), S.Handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.shutdown)
+        if anterior is not None:
+            self.addCleanup(setattr, S.Handler, "db_path", anterior)
+        return conn, ws, httpd.server_address[1]
+
+    def _post(self, puerto, ruta, cuerpo, cookie=None):
+        rq = urllib.request.Request(f"http://127.0.0.1:{puerto}{ruta}",
+                                    data=json.dumps(cuerpo).encode(),
+                                    headers={"Content-Type": "application/json"}, method="POST")
+        if cookie:
+            rq.add_header("Cookie", cookie)
+        try:
+            with urllib.request.urlopen(rq, timeout=40) as r:
+                return r.status, json.loads(r.read() or b"{}"), r.headers.get("Set-Cookie")
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read() or b"{}"), None
+
+    def _suprime(self, tambien_vecino):
+        conn, ws, puerto = self._monta(tambien_vecino)
+        _, _, galleta = self._post(puerto, "/api/login", {"usuario": "ana", "password": self.CLAVE})
+        cookie = galleta.split(";")[0]
+        estado, cuerpo, _ = self._post(puerto, "/api/cliente_suprimir",
+                                       {"cliente_id": "cli1", "empresa_id": "emp1",
+                                        "workspace_id": ws, "confirm": "SUPRIMIR",
+                                        "motivo": "art.17"}, cookie)
+        self.assertEqual(estado, 200, cuerpo)
+        return conn, cuerpo
+
+    def test_avisa_de_la_copia_que_queda(self):
+        conn, r = self._suprime(tambien_vecino=True)
+        self.assertIn("workspace_fincas_vecinos", r.get("copias_que_quedan") or {})
+        self.assertIn("vecinos de comunidad", r.get("aviso") or "")
+        self.assertNotIn("ya no identifica a nadie. Se conservan", r.get("aviso") or "")
+        # Y no ha borrado nada por su cuenta: avisar no es suprimir.
+        v = conn.execute("SELECT nif FROM workspace_fincas_vecinos WHERE id='v1'").fetchone()
+        self.assertEqual(dict(v)["nif"], "25111111A")
+
+    def test_sin_copias_el_mensaje_es_el_de_siempre(self):
+        _, r = self._suprime(tambien_vecino=False)
+        self.assertEqual(r.get("copias_que_quedan"), {})
+        self.assertIn("ya no identifica a nadie", r.get("aviso") or "")
+
+    def test_la_ficha_del_cliente_si_queda_anonima(self):
+        conn, _ = self._suprime(tambien_vecino=True)
+        f = dict(conn.execute("SELECT nombre, nif, telefono, email FROM clientes WHERE id='cli1'").fetchone())
+        self.assertIn("suprimido", f["nombre"].lower())
+        self.assertFalse(any([f["nif"], f["telefono"], f["email"]]), f)

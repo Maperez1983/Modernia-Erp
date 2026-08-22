@@ -6724,6 +6724,23 @@ RGPD_TABLAS_QUE_SE_CONSERVAN = (
     ("clientes_empresas", "vínculo de servicio"),
 )
 
+# La misma persona puede estar copiada en otras tablas que NO cuelgan de `clientes`:
+# un cliente puede ser además vecino de una comunidad, socio de una sociedad o firmante
+# de un acta, y ahí su nombre, NIF, teléfono e IBAN están escritos otra vez. Suprimir el
+# cliente no las toca —y no debe tocarlas a ciegas: mientras sea propietario de un piso
+# hay base legal para conservar sus datos en la comunidad—. Lo que no vale es responder
+# «la ficha ya no identifica a nadie» cuando queda una copia entera en otra pantalla.
+# Esto no borra: mira y avisa, para que quien atiende la solicitud sepa qué queda.
+RGPD_TABLAS_CON_COPIA_DE_IDENTIDAD = (
+    ("workspace_fincas_vecinos", "vecinos de comunidad"),
+    ("workspace_fincas_proveedores", "proveedores de comunidad"),
+    ("gestoria_socios", "socios de sociedad"),
+    ("gestoria_acta_firmas", "firmantes de actas"),
+    ("gestoria_terceros", "terceros de contabilidad"),
+    ("workspace_registro_personal", "fichas de plantilla"),
+)
+
+
 # Columnas de `clientes` que identifican a una persona. Se vacían todas.
 RGPD_COLUMNAS_IDENTIFICATIVAS = (
     "nif",
@@ -94554,6 +94571,21 @@ class Handler(BaseHTTPRequestHandler):
 
             columnas = table_columns(conn, "clientes") or set()
 
+            # Se leen antes de vaciarlos: después ya no hay con qué buscar las copias.
+            identidad_previa = {}
+            try:
+                cols_id = [c for c in ("nombre", "nif", "telefono", "movil", "email") if c in columnas]
+                if cols_id:
+                    prev = conn.execute(
+                        f"SELECT {', '.join(cols_id)} FROM clientes WHERE id = ?", (cliente_id,)
+                    ).fetchone()
+                    for c in cols_id:
+                        valor = str(row_value(prev, c, "") or "").strip()
+                        if valor:
+                            identidad_previa[c] = valor
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_do_POST/cliente_suprimir/identidad", _fallo_tragado)
+
             # Antes de borrar nada, soltar las referencias de tablas que se conservan.
             # Sin esto la clave ajena aborta la supresión —y en Postgres deja la
             # transacción envenenada, así que todo lo que venga después en la misma
@@ -94626,9 +94658,34 @@ class Handler(BaseHTTPRequestHandler):
                 (*valores, cliente_id),
             )
 
+            # ¿Queda la misma persona escrita en otra tabla? No se toca nada: se cuenta
+            # y se dice, porque el aviso de abajo afirmaba que ya no identificaba a nadie.
+            copias = {}
+            try:
+                for tabla, etiqueta in RGPD_TABLAS_CON_COPIA_DE_IDENTIDAD:
+                    cols = table_columns(conn, tabla) or set()
+                    condiciones, valores = [], []
+                    for campo in ("nif", "email", "telefono", "movil", "nombre"):
+                        if campo in cols and identidad_previa.get(campo):
+                            condiciones.append(f"{campo} = ?")
+                            valores.append(identidad_previa[campo])
+                    if not condiciones:
+                        continue
+                    cuenta = conn.execute(
+                        f"SELECT COUNT(*) AS total FROM {tabla} WHERE " + " OR ".join(condiciones),
+                        tuple(valores),
+                    ).fetchone()
+                    cuantas = int(row_value(cuenta, "total", 0) or 0)
+                    if cuantas:
+                        copias[tabla] = {"filas": cuantas, "donde": etiqueta}
+            except Exception as _fallo_tragado:
+                _rollback_best_effort(conn)
+                apunta_escritura_tragada("_do_POST/cliente_suprimir/copias", _fallo_tragado)
+
             resumen = {
                 "cliente_id": cliente_id,
                 "motivo": motivo,
+                "copias_que_quedan": copias,
                 "borrado": borrados,
                 # Qué referencias se soltaron: la fila se queda, sólo deja de apuntar a
                 # algo que se ha suprimido.
@@ -94659,9 +94716,15 @@ class Handler(BaseHTTPRequestHandler):
                     # qué se conservó y dejó de apuntar a lo suprimido.
                     "desvinculado": soltados,
                     "conservado": conservados,
+                    "copias_que_quedan": copias,
                     "aviso": (
                         "La ficha ya no identifica a nadie. Se conservan los registros con "
                         "obligación legal de conservación, ahora anónimos."
+                        if not copias else
+                        "La ficha de cliente ya no identifica a nadie, pero la misma persona "
+                        "sigue escrita con sus datos en: "
+                        + ", ".join(f"{d['donde']} ({d['filas']})" for d in copias.values())
+                        + ". Revisa si queda base legal para conservarlas."
                     ),
                 },
             )
