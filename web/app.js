@@ -52909,7 +52909,11 @@ const renderClienteRelaciones = (relations = []) => {
   state.currentClienteRelaciones.forEach((row) => {
     const tr = document.createElement("tr");
     const personTd = document.createElement("td");
-    personTd.innerHTML = `<strong>${formatNombreCliente(row.counterpart_nombre || "") || "-"}</strong><div class="muted">${row.counterpart_nif || "-"}</div>`;
+    // El nombre y el NIF salen de la ficha del cliente, y ahí escribe gente: sin escapar,
+    // un nombre con etiquetas se ejecuta al abrir la pestaña de relaciones. Es el único
+    // sitio del front donde se colaba un campo de la base sin pasar por escapeHtml.
+    personTd.innerHTML = `<strong>${escapeHtml(formatNombreCliente(row.counterpart_nombre || "") || "-")}</strong>`
+      + `<div class="muted">${escapeHtml(String(row.counterpart_nif || "-"))}</div>`;
     tr.appendChild(personTd);
     const vinculoTd = document.createElement("td");
     vinculoTd.textContent = row.vinculo || "-";
