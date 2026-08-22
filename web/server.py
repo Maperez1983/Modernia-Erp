@@ -27282,10 +27282,17 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
         usuario=usuario,
         reason=f"Cierre {tipo_label}",
     )
-    final_stage = "Noticia" if tipo_label == "Alquiler" else "Inmueble"
-    # Registra el cierre y deja la ficha en la fase operativa correspondiente, conservando el histórico.
+    # La ficha se queda contando lo que pasó. Antes se ponía en «Vendido» y la línea
+    # siguiente lo pisaba con «Inmueble», así que un piso vendido volvía al listado del
+    # comercial indistinguible de uno disponible: mismo estado, mismo precio, ninguna
+    # marca. Y por el otro camino de cerrar una venta —convertir la captación con destino
+    # «vendido»— sí quedaba en «Vendido»: los dos caminos acababan distinto.
+    #
+    # Si con el tiempo vuelve a salir a la venta, se retoma convirtiéndola otra vez a
+    # «Encargo», que es lo que ya hacía `captacion_convert`. Reabrir es un acto, no el
+    # estado por defecto de lo que se acaba de cerrar.
+    final_stage = tipo_label
     sync_inmueble_stage_for_action(conn, inmueble_id, tipo_label, now)
-    sync_inmueble_stage_for_action(conn, inmueble_id, final_stage, now)
     archived = 0
     if archive_pending:
         try:
