@@ -5634,8 +5634,15 @@ def parse_money_value(value):
     has_comma = "," in text
     has_dot = "." in text
     if has_comma and has_dot:
-        # es-ES: dots thousands, comma decimals (ej: 20.000,50)
-        text = text.replace(".", "").replace(",", ".")
+        # Con los dos separadores manda el último: es el decimal. Suponer siempre es-ES
+        # convertía "1,234.56" —lo que sale de una factura o un Excel en inglés, y lo que
+        # se pega tal cual— en 1,23 €. Mil veces menos, guardado con un «ok» y sin aviso.
+        if text.rfind(",") > text.rfind("."):
+            # es-ES: puntos de millar, coma decimal (ej: 20.000,50)
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            # en-US: comas de millar, punto decimal (ej: 20,000.50)
+            text = text.replace(",", "")
     elif has_comma:
         # Coma como decimal (ej: 20000,50)
         text = text.replace(",", ".")

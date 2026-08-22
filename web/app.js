@@ -4848,8 +4848,14 @@ const formatEuros = (value) => {
   const hasComma = text.includes(",");
   const hasDot = text.includes(".");
   if (hasComma && hasDot) {
-    // es-ES: dots for thousands, comma for decimals
-    text = text.replace(/\./g, "").replace(",", ".");
+    // Manda el separador que va el último: es el decimal. Suponer siempre es-ES
+    // convertía "1,234.56" —lo que se pega de una factura o un Excel en inglés— en
+    // 1,23: mil veces menos, y sin que nada avisara.
+    if (text.lastIndexOf(",") > text.lastIndexOf(".")) {
+      text = text.replace(/\./g, "").replace(",", ".");   // 20.000,50
+    } else {
+      text = text.replace(/,/g, "");                      // 20,000.50
+    }
   } else if (hasComma) {
     text = text.replace(",", ".");
   } else if (hasDot) {
@@ -35935,8 +35941,14 @@ const toNumber = (value) => {
   const hasComma = text.includes(",");
   const hasDot = text.includes(".");
   if (hasComma && hasDot) {
-    // es-ES: dots for thousands, comma for decimals
-    text = text.replace(/\./g, "").replace(",", ".");
+    // Manda el separador que va el último: es el decimal. Suponer siempre es-ES
+    // convertía "1,234.56" —lo que se pega de una factura o un Excel en inglés— en
+    // 1,23: mil veces menos, y sin que nada avisara.
+    if (text.lastIndexOf(",") > text.lastIndexOf(".")) {
+      text = text.replace(/\./g, "").replace(",", ".");   // 20.000,50
+    } else {
+      text = text.replace(/,/g, "");                      // 20,000.50
+    }
   } else if (hasComma) {
     text = text.replace(",", ".");
   } else if (hasDot) {
