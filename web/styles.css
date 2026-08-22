@@ -2522,7 +2522,12 @@ body.theme-operativa #holdingSection .workspace-central-layout {
 
 .workspace-company-chip-title {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  /* La columna de nombre tenía mínimo 0: si los botones de acción (columna auto
+     de .workspace-company-chip-actions) no dejaban hueco, el nombre colapsaba
+     a 0px y desaparecía por completo (visto en producción con "Estudio
+     Velazquez 2012 SL" bajo esta fila). El mínimo asegura que el nombre
+     siempre tenga sitio, aunque tenga que truncarse con el ellipsis. */
+  grid-template-columns: minmax(90px, 1fr) auto;
   gap: 12px;
   align-items: flex-start;
   min-width: 0;
@@ -2588,6 +2593,11 @@ body.theme-operativa #holdingSection .workspace-central-layout {
   gap: 10px;
   justify-content: flex-end;
   align-items: flex-start;
+  /* Sin tope, esta columna "auto" se estiraba a su ancho sin envolver (todos
+     los botones en una sola línea) y le quitaba casi todo el sitio a la
+     columna del nombre en .workspace-company-chip. Con el tope, el
+     flex-wrap ya declarado arriba puede hacer su trabajo. */
+  max-width: 230px;
 }
 
 .workspace-company-more {

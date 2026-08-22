@@ -77565,6 +77565,9 @@ class Handler(BaseHTTPRequestHandler):
             if not fields:
                 json_response(self, {"ok": True, "updated": False})
                 return
+            if "nombre" in fields and not str(fields.get("nombre") or "").strip():
+                json_response(self, {"error": "nombre no puede quedar vacío"}, status=400)
+                return
             # Normaliza tipos
             if "activo" in fields:
                 try:
