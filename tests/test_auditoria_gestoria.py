@@ -437,6 +437,41 @@ class LaGeneracionAutomaticaDeModelosTests(BaseGestoria):
         self.assertNotIn("Particular Gen", clientes_con_generados)
 
 
+class ElClienteIdNoSeAmpliaATodaLaEmpresaTests(BaseGestoria):
+    """Encontrado abriendo en el navegador la ficha de un cliente de Gestoría:
+    la pestaña se quedaba congelada más de un minuto, sin ningún bloqueo de
+    Postgres de por medio (pool libre, sin locks). `/api/gestoria_libros?
+    cliente_id=X&empresa_id=Y` pasa `cliente_ids=[X]` a
+    `sync_gestoria_modelos_from_contabilidad`, pero la función, en cuanto
+    recibía también `empresa_ids`, ignoraba ese cliente_id explícito y
+    ampliaba la barrida a TODOS los clientes con asientos de esa empresa —en
+    Fincas Velazquez, 33 tras el filtro de perfil, cada uno con su propio
+    SELECT+INSERT por año×modelo sin agrupar. Una ficha de un único cliente
+    pagaba el coste de toda la cartera."""
+
+    def test_no_genera_modelos_para_otro_cliente_de_la_empresa(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("clientes", dict(id="cli-a-target", nombre="Target Autonomo", nif="9990020",
+                                   empresa_id="emp-a", perfil="Autónomo", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-target", cliente_id="cli-a-target",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        self._ins("gestoria_asientos", dict(id="asi-a-target", empresa_id="emp-a", cliente_id="cli-a-target",
+                                            fecha="2026-03-01", concepto="Venta", **base))
+        self._ins("clientes", dict(id="cli-a-other", nombre="Otro Autonomo", nif="9990021",
+                                   empresa_id="emp-a", perfil="Autónomo", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-other", cliente_id="cli-a-other",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        self._ins("gestoria_asientos", dict(id="asi-a-other", empresa_id="emp-a", cliente_id="cli-a-other",
+                                            fecha="2026-03-01", concepto="Venta", **base))
+        self._get("/api/gestoria_libros?empresa_id=emp-a&cliente_id=cli-a-target&conciliar=1", self.cookie_a)
+        generados = self.conn.execute(
+            "SELECT cliente_id FROM gestoria_modelos WHERE notas LIKE '%Generado autom%'"
+        ).fetchall()
+        clientes_con_generados = {row["cliente_id"] for row in generados}
+        self.assertIn("cli-a-target", clientes_con_generados)
+        self.assertNotIn("cli-a-other", clientes_con_generados)
+
+
 class LosCuatroDeEscrituraSinNingunControlTests(BaseGestoria):
     """Cuatro rutas de escritura que aceptaban un `id`/`empresa_id` de cualquier
     empresa sin comprobar la sesión ni una vez: bastaba con saberlo para

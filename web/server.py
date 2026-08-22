@@ -15405,7 +15405,14 @@ def sync_gestoria_modelos_from_contabilidad(conn, *, empresa_ids=None, cliente_i
         return 0
 
     resolved_cliente_ids = set(cliente_ids)
-    if empresa_ids:
+    # Si ya viene un cliente_ids explícito (p. ej. desde la ficha de un cliente
+    # concreto), es la petición del llamante: acotar a ESE cliente, no ampliarla.
+    # Sin este guard, /api/gestoria_libros?cliente_id=X&empresa_id=Y pasaba
+    # cliente_ids=[X] pero de todos modos barría TODOS los clientes de Y —para
+    # Fincas Velazquez, 33 tras el filtro de perfil, cada uno con su propio
+    # SELECT+INSERT por año×modelo— dejando la ficha de un único cliente
+    # colgada más de un minuto sin ningún bloqueo de Postgres de por medio.
+    if empresa_ids and not resolved_cliente_ids:
         placeholders = ",".join(["?"] * len(empresa_ids))
         try:
             rows = conn.execute(
