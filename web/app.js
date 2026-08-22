@@ -36561,15 +36561,27 @@ const normalizeDateInput = (value) => {
   if (!text) {
     return "";
   }
-  if (text.includes("/")) {
-    const parts = text.split(/[\\/.-]/).map((part) => part.trim());
-    if (parts.length >= 3) {
-      const [day, month, yearRaw] = parts;
-      if (day && month && yearRaw) {
-        const year = yearRaw.length === 2 ? `20${yearRaw}` : yearRaw;
-        return `${year.padStart(4, "0")}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-      }
-    }
+  // Una fecha que no existe no se corrige sola: "31/02/2026" salía como "2026-02-31" y
+  // el navegador la convertía en el 3 de marzo sin decir nada. Y sólo se traducía si
+  // llevaba barras, así que "31-02-2026" o "31.02.2026" —que también se teclean— se
+  // guardaban tal cual. Se valida el día del calendario y, si no existe, se devuelve
+  // vacío: mejor un hueco que una fecha distinta de la que quería la persona.
+  const existeEnElCalendario = (y, m, d) => {
+    const f = new Date(Date.UTC(y, m - 1, d));
+    return f.getUTCFullYear() === y && f.getUTCMonth() === m - 1 && f.getUTCDate() === d;
+  };
+  const diaMesAnio = text.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/);
+  if (diaMesAnio) {
+    const day = Number(diaMesAnio[1]);
+    const month = Number(diaMesAnio[2]);
+    const year = Number(diaMesAnio[3].length === 2 ? `20${diaMesAnio[3]}` : diaMesAnio[3]);
+    if (!existeEnElCalendario(year, month, day)) return "";
+    return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    if (!existeEnElCalendario(Number(iso[1]), Number(iso[2]), Number(iso[3]))) return "";
+    return text;
   }
   if (text.includes("-")) {
     return text;
