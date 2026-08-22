@@ -24095,6 +24095,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
                       <button type="button" class="secondary ghost" data-vecino-portal="${escapeHtml(String(v.id || ""))}">Enlace del portal</button>
                       <button type="button" class="secondary ghost" data-vecino-edit="${escapeHtml(String(v.id || ""))}">Editar</button>
                       <button type="button" class="secondary ghost" data-vecino-borrar="${escapeHtml(String(v.id || ""))}">Borrar</button>
+                      <button type="button" class="secondary ghost" data-vecino-suprimir="${escapeHtml(String(v.id || ""))}">Suprimir datos (RGPD)</button>
                     </span>
                   </div>
                 </div>
@@ -24132,6 +24133,46 @@ const renderWorkspaceFincasCommunityFicha = async () => {
             }
           });
         });
+        // Art. 17 para un comunero. «Borrar» es para un alta equivocada; quien ya tiene
+        // recibos o votos en junta no se borra —eso dejaba la contabilidad sin dueño—:
+        // se le quita la identidad y los apuntes se quedan.
+        (listWrap?.querySelectorAll("[data-vecino-suprimir]") || []).forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const v = items.find((row) => String(row.id || "") === String(btn.dataset.vecinoSuprimir || ""));
+            if (!v) return;
+            const quien = v.nombre || v.piso || "este propietario";
+            const confirmacion = window.prompt(
+              `Vas a suprimir los datos personales de ${quien}.\n\n` +
+                "Se borra su acceso al portal y se vacían NIF, teléfono, correo, IBAN y mandato.\n" +
+                "Se conservan recibos, apuntes y actas, porque la ley obliga, pero dejan de " +
+                "identificar a nadie. El piso y su coeficiente se quedan en la comunidad.\n\n" +
+                "Esto no se puede deshacer. Escribe SUPRIMIR para confirmar:"
+            );
+            if (String(confirmacion || "").trim().toUpperCase() !== "SUPRIMIR") return;
+            const motivo = window.prompt("Motivo (queda registrado junto a quién y cuándo):",
+                                         "Solicitud del interesado") || "";
+            btn.disabled = true;
+            try {
+              const data = await postJsonWithDbRetry("/api/workspace_fincas_vecino_suprimir", {
+                workspace_id: workspaceId, vecino_id: v.id, confirm: "SUPRIMIR", motivo,
+              });
+              const conservado = Object.entries(data?.conservado || {});
+              window.alert(
+                (data?.aviso || "Datos suprimidos.") +
+                (conservado.length
+                  ? "\n\nConservado por obligación legal (ya anónimo):\n" +
+                    conservado.map(([, x]) => `  · ${x.motivo}: ${x.filas}`).join("\n")
+                  : "")
+              );
+              await loadVecinos();
+            } catch (e) {
+              if (listStatus) listStatus.textContent = e?.message || "No se pudo suprimir.";
+              window.alert(e?.message || "No se pudo suprimir.");
+            } finally {
+              btn.disabled = false;
+            }
+          });
+        });
         (listWrap?.querySelectorAll("[data-vecino-borrar]") || []).forEach((btn) => {
           btn.addEventListener("click", async () => {
             const v = items.find((row) => String(row.id || "") === String(btn.dataset.vecinoBorrar || ""));
@@ -24141,7 +24182,10 @@ const renderWorkspaceFincasCommunityFicha = async () => {
               await postJsonWithDbRetry("/api/workspace_fincas_vecino_delete", { workspace_id: workspaceId, id: v.id });
               await loadVecinos();
             } catch (e) {
+              // El servidor puede negarse porque tiene contabilidad detrás, y ese motivo
+              // hay que leerlo: dice qué hacer en su lugar.
               if (listStatus) listStatus.textContent = e?.message || "No se pudo borrar.";
+              window.alert(e?.message || "No se pudo borrar.");
             }
           });
         });

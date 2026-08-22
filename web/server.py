@@ -6724,6 +6724,39 @@ RGPD_TABLAS_QUE_SE_CONSERVAN = (
     ("clientes_empresas", "vínculo de servicio"),
 )
 
+# --- Supresión de un comunero -------------------------------------------------
+# Un vecino de comunidad no es un `cliente`: vive en `workspace_fincas_vecinos` con su
+# propio nombre, NIF, teléfono, correo e IBAN, y hasta ahora no había forma de ejercer
+# el art. 17 sobre él. Mismo criterio que con el cliente: no se borra la fila —los
+# recibos, los apuntes y las actas cuelgan de ella y hay que conservarlos—, se le quita
+# la identidad.
+#
+# Lo que se conserva y por qué:
+#   - recibos, apuntes y certificados: contabilidad de la comunidad (LGT, y art. 17.3 b)
+#   - asistentes y votos de junta: el acta debe reflejar quién asistió y cómo votó
+#     (LPH art. 19.2), así que la fila se queda apuntando a una ficha ya anónima
+#   - coeficientes: son del piso, no de la persona
+RGPD_FINCAS_BORRAR_DEL_VECINO = (
+    ("workspace_fincas_portal_accesos", "vecino_id"),   # enlaces y tokens del portal
+)
+
+RGPD_FINCAS_CONSERVAR_DEL_VECINO = (
+    ("workspace_fincas_recibos", "recibos emitidos"),
+    ("workspace_fincas_apuntes", "apuntes contables"),
+    ("workspace_fincas_certificados", "certificados emitidos"),
+    ("workspace_fincas_junta_asistentes", "asistencia a juntas (LPH art. 19.2)"),
+    ("workspace_fincas_junta_votos", "votos en junta (LPH art. 19.2)"),
+    ("workspace_fincas_coeficientes", "coeficiente del piso"),
+    ("workspace_fincas_incidencias", "incidencias de la comunidad"),
+)
+
+# Del vecino se vacía todo lo que señala a la persona. `mandato_ref` entra porque en la
+# práctica lleva el NIF dentro, y sin IBAN el mandato ya no sirve para cobrar.
+RGPD_FINCAS_IDENTIDAD_DEL_VECINO = (
+    "nif", "telefono", "email", "iban", "mandato_ref", "mandato_fecha", "notas",
+)
+
+
 # La misma persona puede estar copiada en otras tablas que NO cuelgan de `clientes`:
 # un cliente puede ser además vecino de una comunidad, socio de una sociedad o firmante
 # de un acta, y ahí su nombre, NIF, teléfono e IBAN están escritos otra vez. Suprimir el
@@ -70304,6 +70337,9 @@ class Handler(BaseHTTPRequestHandler):
             # respondían "Endpoint no valido" pese a existir: entre ellas las dos
             # exportaciones de listados y la recuperación de acceso, que además está
             # marcada como pública pero se rechazaba antes de llegar a comprobarlo.
+            # Y el art. 17 para un comunero, que hasta ahora no tenía forma de ejercerse:
+            # un vecino no es un cliente y `cliente_suprimir` no llegaba a su ficha.
+            "/api/workspace_fincas_vecino_suprimir",
             # Segunda tanda, encontrada comparando la lista con los manejadores que hay
             # escritos más abajo: cerrar una compraventa, la preparación guiada del
             # inmueble —que además se pierde en un catch vacío, así que fallaba sin
@@ -85480,6 +85516,41 @@ class Handler(BaseHTTPRequestHandler):
             if not ok:
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
+            # Borrar la ficha dejaba los recibos apuntando al vacío: contestaba «ok» y la
+            # comunidad se quedaba con cobros —incluidos los pendientes— de los que ya no
+            # se sabía de quién eran. Eso no es dar de baja a un propietario, es perder la
+            # contabilidad. Con historia detrás no se borra: se suprime, que conserva los
+            # apuntes y quita la identidad.
+            historia = {}
+            for tabla, etiqueta in RGPD_FINCAS_CONSERVAR_DEL_VECINO:
+                cols = table_columns(conn, tabla) or set()
+                if "vecino_id" not in cols:
+                    continue
+                try:
+                    cuenta = conn.execute(
+                        f"SELECT COUNT(*) AS total FROM {tabla} WHERE vecino_id = ?", (record_id,)
+                    ).fetchone()
+                    cuantas = int(row_value(cuenta, "total", 0) or 0)
+                except Exception as _fallo_tragado:
+                    _rollback_best_effort(conn)
+                    apunta_escritura_tragada("_do_POST/vecino_delete/historia", _fallo_tragado)
+                    continue
+                if cuantas:
+                    historia[etiqueta] = cuantas
+            if historia:
+                detalle = ", ".join(f"{etiqueta} ({n})" for etiqueta, n in historia.items())
+                json_response(
+                    self,
+                    {
+                        "error": f"Este propietario tiene {detalle}. Borrarlo dejaría esos "
+                                 "registros sin dueño. Usa «Suprimir datos (RGPD)»: conserva la "
+                                 "contabilidad y le quita la identidad.",
+                        "historia": historia,
+                    },
+                    status=409,
+                )
+                return
+
             conn.execute(
                 "DELETE FROM workspace_fincas_vecinos WHERE id = ? AND workspace_id = ?",
                 (record_id, workspace_id),
@@ -94725,6 +94796,169 @@ class Handler(BaseHTTPRequestHandler):
                         "sigue escrita con sus datos en: "
                         + ", ".join(f"{d['donde']} ({d['filas']})" for d in copias.values())
                         + ". Revisa si queda base legal para conservarlas."
+                    ),
+                },
+            )
+            return
+        elif parsed.path == "/api/workspace_fincas_vecino_suprimir":
+            # Art. 17 para un comunero. No es un `cliente`, así que `cliente_suprimir` no
+            # llegaba hasta aquí: su nombre, NIF, teléfono, correo e IBAN se quedaban
+            # enteros aunque la ficha de cliente de la misma persona quedara anónima.
+            #
+            # Mismo criterio que allí: la fila no se borra —los recibos, los apuntes y las
+            # actas cuelgan de ella— y lo que desaparece es la identidad.
+            ws_id = str(payload.get("workspace_id") or "").strip()
+            vecino_id = str(payload.get("vecino_id") or payload.get("id") or "").strip()
+            motivo = str(payload.get("motivo") or "").strip()
+            confirm = str(payload.get("confirm") or "").strip().upper()
+            if not vecino_id:
+                json_response(self, {"error": "vecino_id requerido"}, status=400)
+                return
+            if not ws_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, ws_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(
+                    self,
+                    {"error": "Solo un responsable del workspace puede suprimir una ficha."},
+                    status=403,
+                )
+                return
+            if confirm and confirm != "SUPRIMIR":
+                json_response(self, {"error": "confirm inválido (usa SUPRIMIR)"}, status=400)
+                return
+
+            fila = conn.execute(
+                "SELECT id, nombre, comunidad_id FROM workspace_fincas_vecinos "
+                "WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (vecino_id, ws_id),
+            ).fetchone()
+            if not fila:
+                json_response(self, {"error": "Vecino no encontrado en este workspace"}, status=404)
+                return
+            nombre_previo = str(row_value(fila, "nombre", "") or "")
+            comunidad_id = str(row_value(fila, "comunidad_id", "") or "")
+
+            # Con recibos sin cobrar la relación sigue viva y hay base legal para
+            # conservar los datos: quien debe dinero a la comunidad no desaparece del
+            # censo. Se dice cuántos son, para poder resolverlo y volver.
+            pendientes = 0
+            try:
+                cuenta = conn.execute(
+                    "SELECT COUNT(*) AS total FROM workspace_fincas_recibos "
+                    "WHERE vecino_id = ? AND LOWER(COALESCE(estado,'')) IN ('pendiente','devuelto')",
+                    (vecino_id,),
+                ).fetchone()
+                pendientes = int(row_value(cuenta, "total", 0) or 0)
+            except Exception as _fallo_tragado:
+                _rollback_best_effort(conn)
+                apunta_escritura_tragada("_do_POST/vecino_suprimir/pendientes", _fallo_tragado)
+            if pendientes:
+                json_response(
+                    self,
+                    {
+                        "error": f"Tiene {pendientes} recibo(s) sin cobrar. Mientras haya deuda con "
+                                 "la comunidad hay base legal para conservar sus datos: liquida o "
+                                 "anula esos recibos antes de suprimir.",
+                        "recibos_pendientes": pendientes,
+                    },
+                    status=409,
+                )
+                return
+
+            now = datetime.now(timezone.utc).isoformat()
+            columnas = table_columns(conn, "workspace_fincas_vecinos") or set()
+
+            borrados = {}
+            for tabla, columna in RGPD_FINCAS_BORRAR_DEL_VECINO:
+                cols = table_columns(conn, tabla) or set()
+                if columna not in cols:
+                    continue
+                try:
+                    cuenta = conn.execute(
+                        f"SELECT COUNT(*) AS total FROM {tabla} WHERE {columna} = ?", (vecino_id,)
+                    ).fetchone()
+                    cuantas = int(row_value(cuenta, "total", 0) or 0)
+                    if cuantas:
+                        conn.execute(f"DELETE FROM {tabla} WHERE {columna} = ?", (vecino_id,))
+                        borrados[tabla] = cuantas
+                except Exception as _fallo_tragado:
+                    _rollback_best_effort(conn)
+                    apunta_escritura_tragada("_do_POST/vecino_suprimir/borrar", _fallo_tragado)
+
+            conservados = {}
+            for tabla, etiqueta in RGPD_FINCAS_CONSERVAR_DEL_VECINO:
+                cols = table_columns(conn, tabla) or set()
+                if "vecino_id" not in cols:
+                    continue
+                try:
+                    cuenta = conn.execute(
+                        f"SELECT COUNT(*) AS total FROM {tabla} WHERE vecino_id = ?", (vecino_id,)
+                    ).fetchone()
+                    cuantas = int(row_value(cuenta, "total", 0) or 0)
+                except Exception as _fallo_tragado:
+                    _rollback_best_effort(conn)
+                    apunta_escritura_tragada("_do_POST/vecino_suprimir/conservar", _fallo_tragado)
+                    continue
+                if cuantas:
+                    conservados[tabla] = {"filas": cuantas, "motivo": etiqueta}
+
+            sets, valores = [], []
+            for columna in RGPD_FINCAS_IDENTIDAD_DEL_VECINO:
+                if columna in columnas:
+                    sets.append(f"{columna} = NULL")
+            if "nombre" in columnas:
+                sets.append("nombre = ?")
+                valores.append(f"Vecino suprimido · {vecino_id[:8]}")
+            if "updated_at" in columnas:
+                sets.append("updated_at = ?")
+                valores.append(now)
+            conn.execute(
+                "UPDATE workspace_fincas_vecinos SET " + ", ".join(sets) + " WHERE id = ?",
+                (*valores, vecino_id),
+            )
+            conn.commit()
+
+            try:
+                audit_event(
+                    conn,
+                    str(payload.get("empresa_id") or "").strip(),
+                    "workspace_fincas_vecino",
+                    vecino_id,
+                    "supresion_rgpd",
+                    usuario=(session or {}).get("usuario") or "",
+                    detalles={
+                        "vecino_id": vecino_id,
+                        "comunidad_id": comunidad_id,
+                        "workspace_id": ws_id,
+                        "motivo": motivo,
+                        "borrado": borrados,
+                        "conservado": conservados,
+                    },
+                    now=now,
+                )
+                conn.commit()
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_do_POST/vecino_suprimir/audit", _fallo_tragado)
+
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "vecino_id": vecino_id,
+                    "nombre_previo": nombre_previo,
+                    "borrado": borrados,
+                    "conservado": conservados,
+                    "columnas_vaciadas": [c for c in RGPD_FINCAS_IDENTIDAD_DEL_VECINO if c in columnas],
+                    "aviso": (
+                        "El vecino ya no identifica a nadie. Los recibos, apuntes y actas se "
+                        "conservan por obligación legal, ahora anónimos. El coeficiente sigue "
+                        "en el piso, que es de quien lo compre."
                     ),
                 },
             )
