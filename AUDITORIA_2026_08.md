@@ -124,6 +124,9 @@ Tan importante como lo anterior, para no repetir trabajo:
 - **Registro horario**: el borrado de una ficha con fichajes protegidos desactiva en vez
   de borrar. Bien resuelto desde antes.
 - **Sesión caducada**: superpone la capa de acceso sin recargar; no se pierde lo tecleado.
+- **Registro de jornada, ciclo completo**: fichar, regularizar un olvido con constancia en
+  la auditoría, cerrar el mes —que impide fichar y regularizar, diciendo qué hacer—,
+  desbloquear y exportar. Sin fallos.
 
 ---
 
@@ -132,6 +135,7 @@ Tan importante como lo anterior, para no repetir trabajo:
 ```bash
 python scripts/simula_ciclo_fincas.py          # mes completo de una comunidad
 python scripts/simula_ciclo_inmobiliaria.py    # de la captación a la firma
+python scripts/simula_ciclo_rrhh.py            # jornada y cierre de mes
 python scripts/auditoria_endpoints_inmo.py     # barrido de los endpoints del módulo
 ```
 
@@ -148,11 +152,11 @@ Y en la suite, las pruebas nuevas que vigilan lo encontrado: búsquense por
 
 ### Sin auditar
 
-- **Cuatro módulos sin simular**: gestoría, seguros, financiaciones y RRHH. Se barrieron
-  buscando errores, pero no se simuló su uso.
-- **Los caminos que se salen de lo normal** en fincas e inmobiliaria: derramas,
-  regularizaciones, cambio de propietario a mitad de ejercicio, anulaciones, devoluciones
-  parciales, alquileres.
+- **Tres módulos sin simular**: gestoría, seguros y financiaciones. Se barrieron buscando
+  errores, pero no se simuló su uso.
+- **Los caminos que se salen de lo normal** en fincas, inmobiliaria y RRHH: derramas,
+  cambio de propietario a mitad de ejercicio, anulaciones, devoluciones parciales,
+  alquileres, ausencias y nóminas.
 - **Los portales de punta a punta**, como recorrido completo del cliente.
 - **La interfaz**: las simulaciones comprueban la API y la base. Una pantalla puede
   enseñar mal un dato correcto.
