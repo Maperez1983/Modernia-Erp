@@ -102084,7 +102084,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
             record_signature_event(conn, data["id"], "document_viewed", handler=self, now=datetime.now(timezone.utc).isoformat())
             conn.commit()
-            send_file(self, path_obj, filename=str(data.get("doc_nombre") or "documento.pdf"))
+            # Mismo criterio que en `/uploads/`: este enlace es público —se le manda al
+            # cliente para que firme— y el fichero lo ha subido alguien de la agencia sin
+            # que nadie mire la extensión. Servir un .html o un .svg con su tipo real lo
+            # ejecutaría en el origen de la aplicación, en el navegador de quien firma.
+            _suf = path_obj.suffix.lower()
+            if _suf in {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+                send_file(self, path_obj, filename=str(data.get("doc_nombre") or "documento.pdf"))
+            elif _suf in {".svg", ".svgz"}:
+                send_file(self, path_obj, filename=str(data.get("doc_nombre") or "documento.svg"),
+                          force_attachment=True)
+            else:
+                send_file(self, path_obj, filename=str(data.get("doc_nombre") or "documento"),
+                          force_download=True)
             return
 
         if path == "/api/workspace_portal_facturas_excel":
