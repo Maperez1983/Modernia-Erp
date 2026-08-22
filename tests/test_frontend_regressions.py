@@ -2577,3 +2577,86 @@ class WorkspaceTimeHomeProfileTests(unittest.TestCase):
                 """
             ),
         )
+
+
+class GestoriaContabilidadSegurosFanOutTests(unittest.TestCase):
+    """La cola contable disparaba un `/api/seguros_cliente` por cada cliente
+    distinto entre los asientos —un `Promise.all` sin límite, hasta 200+ a la
+    vez en producción— y tumbaba el backend con 502. Ahora una sola carga en
+    bloque (`/api/tabla`) basta, y el acceso por cliente se resuelve
+    filtrando esa caché en el propio navegador, sin más peticiones."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const gestoriaContabilidadSegurosCache = new Map();",
+            "const loadClientesForSegurosContabilidad =",
+        ).replace("api(", "globalThis.api(")
+        cls.param_names = ["resolveCrmSegurosEmpresa", "resolveLegacyEmpresaId"]
+        cls.return_names = ["loadSegurosForClienteContabilidad", "loadAllSegurosForContabilidad"]
+
+    def _run(self, prelude: str, body: str) -> None:
+        script = make_factory_script(self.segment, self.param_names, self.return_names, prelude, body)
+        run_node_script(script)
+
+    def test_carga_en_bloque_evita_una_peticion_por_cliente(self):
+        self._run(
+            dedent(
+                """
+                const resolveCrmSegurosEmpresa = () => ({ id: "emp-a" });
+                const resolveLegacyEmpresaId = (empresa) => String(empresa?.id || "");
+                const apiCalls = [];
+                globalThis.api = async (url) => {
+                  apiCalls.push(url);
+                  return {
+                    columns: ["id", "poliza_numero", "compania", "ramo", "cliente_id"],
+                    rows: [
+                      ["seg-1", "POL-1", "Mapfre", "Auto", "cli-1"],
+                      ["seg-2", "POL-2", "Axa", "Hogar", "cli-2"],
+                    ],
+                  };
+                };
+                """
+            ),
+            dedent(
+                """
+                const { loadSegurosForClienteContabilidad, loadAllSegurosForContabilidad } = api;
+                await loadAllSegurosForContabilidad();
+                const clienteIds = ["cli-1", "cli-2", "cli-3"];
+                const results = await Promise.all(
+                  clienteIds.map((id) => loadSegurosForClienteContabilidad(id))
+                );
+                assert.strictEqual(apiCalls.length, 1, "debería bastar una sola petición en bloque");
+                assert.strictEqual(apiCalls[0].split("?")[0], "/api/tabla");
+                assert.strictEqual(results[0].length, 1);
+                assert.strictEqual(results[0][0].poliza_numero, "POL-1");
+                assert.strictEqual(results[1].length, 1);
+                assert.strictEqual(results[1][0].poliza_numero, "POL-2");
+                assert.strictEqual(results[2].length, 0);
+                """
+            ),
+        )
+
+
+class GestoriaContabilidadNoDisparaUnaPeticionPorClienteTests(unittest.TestCase):
+    """Guarda de regresión sobre el propio texto: si alguien vuelve a meter un
+    `Promise.all` de `loadSegurosForClienteContabilidad` por cada cliente, esto
+    debe fallar."""
+
+    def test_no_hay_promise_all_por_cliente(self):
+        self.assertNotIn(
+            "Promise.all(clienteIds.map((clienteId) => loadSegurosForClienteContabilidad(clienteId)))",
+            APP_SOURCE,
+        )
+
+    def test_las_dos_colas_contables_usan_la_carga_en_bloque(self):
+        segment_general = extract_segment(
+            "const loadGestoriaContabilidad =",
+            "const loadSegurosContabilidad =",
+        )
+        segment_seguros = extract_segment(
+            "const loadSegurosContabilidad =",
+            "const formatInputDate =",
+        )
+        self.assertIn("await loadAllSegurosForContabilidad();", segment_general)
+        self.assertIn("await loadAllSegurosForContabilidad();", segment_seguros)

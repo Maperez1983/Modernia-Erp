@@ -42672,6 +42672,15 @@ const loadSegurosForClienteContabilidad = async (clienteId) => {
   if (gestoriaContabilidadSegurosCache.has(key)) {
     return gestoriaContabilidadSegurosCache.get(key) || [];
   }
+  // Si ya está la lista completa de la empresa en caché (un solo /api/tabla), se filtra
+  // en cliente en vez de pedir /api/seguros_cliente por cada cliente. Sin esto, la cola
+  // contable disparaba un Promise.all sin límite —una petición por cada cliente
+  // distinto entre los asientos, hasta 200+ a la vez— y tumbaba el backend con 502.
+  if (Array.isArray(segurosContabilidadAllCache)) {
+    const rows = segurosContabilidadAllCache.filter((s) => String(s.cliente_id || "").trim() === key);
+    gestoriaContabilidadSegurosCache.set(key, rows);
+    return rows;
+  }
   try {
     const payload = await api(`/api/seguros_cliente?cliente_id=${encodeURIComponent(key)}&uploaded_only=0`);
     const rows = Array.isArray(payload?.rows) ? payload.rows : [];
@@ -42905,14 +42914,11 @@ const loadGestoriaContabilidad = () => {
       gestoriaContabilidadInfo.textContent = "";
       return;
     }
-    const clienteIds = [
-      ...new Set(
-        rows
-          .flatMap((row) => parseGestoriaContaClienteIds(row.cliente_ids_json, row.cliente_id))
-          .filter(Boolean)
-      ),
-    ];
-    await Promise.all(clienteIds.map((clienteId) => loadSegurosForClienteContabilidad(clienteId)));
+    // Antes: una petición /api/seguros_cliente por cada cliente distinto entre los
+    // asientos (Promise.all sin límite, hasta 200+ a la vez). Ahora: una sola carga en
+    // bloque de todas las pólizas de la empresa, y loadSegurosForClienteContabilidad
+    // filtra en cliente a partir de esa caché.
+    await loadAllSegurosForContabilidad();
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
@@ -43082,14 +43088,11 @@ const loadSegurosContabilidad = () => {
       }
       return;
     }
-    const clienteIds = [
-      ...new Set(
-        rows
-          .flatMap((row) => parseGestoriaContaClienteIds(row.cliente_ids_json, row.cliente_id))
-          .filter(Boolean)
-      ),
-    ];
-    await Promise.all(clienteIds.map((clienteId) => loadSegurosForClienteContabilidad(clienteId)));
+    // Antes: una petición /api/seguros_cliente por cada cliente distinto entre los
+    // asientos (Promise.all sin límite, hasta 200+ a la vez). Ahora: una sola carga en
+    // bloque de todas las pólizas de la empresa, y loadSegurosForClienteContabilidad
+    // filtra en cliente a partir de esa caché.
+    await loadAllSegurosForContabilidad();
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
