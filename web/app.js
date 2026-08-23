@@ -24500,12 +24500,16 @@ const renderWorkspaceFincasCommunityFicha = async () => {
           ${(r.propietarios || []).map((p) => `
             <div class="workspace-billing-row">
               <div><strong>${escapeHtml(p.piso || "—")} · ${escapeHtml(p.nombre || "")}</strong>
-                <div class="muted">${Number(p.coeficiente || 0).toFixed(4)} %${p.representado_por ? ` · representado por ${escapeHtml(p.representado_por)}` : ""}</div></div>
+                <div class="muted">${Number(p.coeficiente || 0).toFixed(4)} %${p.representado_por ? ` · representado por ${escapeHtml(p.representado_por)}` : ""}${p.sin_derecho_voto ? " · <strong>sin derecho de voto</strong> (no está al corriente, art. 15.2)" : ""}</div></div>
               <div class="workspace-billing-meta">
                 <label class="fincas-extra" style="border:0;padding:0;">
                   <input type="checkbox" data-asiste="${escapeHtml(String(p.id))}" ${p.asiste ? "checked" : ""} />
                   <span>Asiste</span>
                 </label>
+                ${p.sin_derecho_voto ? `<label class="fincas-extra" style="border:0;padding:0;" title="Márcalo solo si antes de empezar la junta ha pagado, ha impugnado judicialmente la deuda o la ha consignado.">
+                  <input type="checkbox" data-habilita="${escapeHtml(String(p.id))}" />
+                  <span>Tiene voto</span>
+                </label>` : ""}
                 <input placeholder="Representado por" value="${escapeHtml(p.representado_por || "")}" data-repre="${escapeHtml(String(p.id))}" style="max-width:180px;" />
               </div>
             </div>`).join("")}
@@ -24522,7 +24526,9 @@ const renderWorkspaceFincasCommunityFicha = async () => {
             <div class="muted">
               A favor ${ac.favor} · en contra ${ac.contra} · abstenciones ${ac.abstencion} —
               ${Number(ac.favor_propietarios).toFixed(2)} % de propietarios y ${Number(ac.favor_coeficiente).toFixed(2)} % de coeficiente,
-              sobre ${escapeHtml(ac.sobre || "toda la comunidad")}.
+              sobre ${escapeHtml(ac.sobre || "toda la comunidad")}${(r.sin_derecho_voto || []).length
+                ? `, descontando a ${(r.sin_derecho_voto || []).length} sin derecho de voto (queda ${Number(r.asistencia?.coeficiente_con_voto || 0).toFixed(2)} % de coeficiente)`
+                : ""}.
             </div>
             <label>Mayoría exigida
               <select data-mayoria="${escapeHtml(String(ac.id))}">
@@ -24535,7 +24541,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
               ${(r.propietarios || []).map((p) => `
                 <label class="fincas-extra">
                   <span>${escapeHtml(p.piso || p.nombre)}</span>
-                  <select data-voto="${escapeHtml(String(ac.id))}" data-vecino="${escapeHtml(String(p.id))}">
+                  <select data-voto="${escapeHtml(String(ac.id))}" data-vecino="${escapeHtml(String(p.id))}" ${p.sin_derecho_voto ? `disabled title="No está al corriente: puede asistir y deliberar, pero no vota (art. 15.2 LPH)."` : ""}>
                     <option value="">—</option>
                     <option value="Favor">A favor</option>
                     <option value="Contra">En contra</option>
@@ -24565,6 +24571,13 @@ const renderWorkspaceFincasCommunityFicha = async () => {
         manda("/api/workspace_fincas_junta_asistencia", {
           junta_id: juntaId, vecino_id: el.dataset.asiste, asiste: el.checked ? "1" : "0",
           representado_por: cuerpo.querySelector(`[data-repre="${el.dataset.asiste}"]`)?.value || "",
+        })));
+      cuerpo.querySelectorAll("[data-habilita]").forEach((el) => el.addEventListener("change", () =>
+        manda("/api/workspace_fincas_junta_asistencia", {
+          junta_id: juntaId, vecino_id: el.dataset.habilita,
+          asiste: cuerpo.querySelector(`[data-asiste="${el.dataset.habilita}"]`)?.checked ? "1" : "0",
+          representado_por: cuerpo.querySelector(`[data-repre="${el.dataset.habilita}"]`)?.value || "",
+          derecho_voto: el.checked ? "1" : "",
         })));
       cuerpo.querySelectorAll("[data-repre]").forEach((el) => el.addEventListener("change", () =>
         manda("/api/workspace_fincas_junta_asistencia", {

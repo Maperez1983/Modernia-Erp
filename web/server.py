@@ -45416,6 +45416,15 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    # El moroso no vota (art. 15.2), pero SÍ vota si antes de empezar la junta ha
+    # pagado, ha impugnado judicialmente la deuda o la ha consignado. Eso el CRM no
+    # puede saberlo: lo marca quien preside, y esta casilla es ese «sí lo tiene».
+    # NULL = se sigue lo que diga la deuda.
+    try:
+        ensure_column(conn, "workspace_fincas_junta_asistentes", "derecho_voto",
+                      "derecho_voto INTEGER")
+    except Exception:
+        pass
     try:
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_junta_asistente_unico "
@@ -55668,11 +55677,43 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
     asistencia = {
         row_value(a, "vecino_id", ""): a
         for a in conn.execute(
-            "SELECT vecino_id, asiste, representado_por FROM workspace_fincas_junta_asistentes "
+            "SELECT vecino_id, asiste, representado_por, derecho_voto "
+            "FROM workspace_fincas_junta_asistentes "
             "WHERE junta_id = ? AND workspace_id = ?",
             (junta_id, workspace_id),
         ).fetchall()
     }
+
+    # Quien no está al corriente de pago puede asistir y deliberar, pero no vota, y su
+    # cuota se deduce del total del inmueble a efectos de alcanzar las mayorías
+    # (LPH art. 15.2). La convocatoria que genera el CRM ya lo advertía; el recuento no
+    # lo aplicaba, así que el voto del deudor contaba y su coeficiente seguía en el
+    # divisor. Un acuerdo dado por aprobado así es impugnable (art. 18).
+    #
+    # Recupera el voto quien antes del inicio de la junta haya pagado, impugnado
+    # judicialmente la deuda o consignado su importe. Eso no está en la base: lo marca
+    # quien preside con la casilla `derecho_voto`.
+    deudores = {}
+    try:
+        # Devuelve {"rows": [...]}, no la lista: iterar el diccionario da sus claves.
+        for m in (fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id)
+                  or {}).get("rows") or []:
+            vid = str(m.get("vecino_id") or "")
+            if vid:
+                deudores[vid] = round(parse_money_value(m.get("deuda")), 2)
+    except Exception:
+        _rollback_best_effort(conn)
+        deudores = {}
+    sin_voto = []
+    for vecino_id, deuda in deudores.items():
+        if vecino_id not in coef:
+            continue
+        marca = row_value(asistencia.get(vecino_id), "derecho_voto", None) if asistencia.get(vecino_id) else None
+        if marca is not None and str(marca).strip() not in {"", "None"} and int(marca or 0):
+            continue          # ha pagado, impugnado o consignado: vota
+        sin_voto.append(vecino_id)
+    sin_voto_set = set(sin_voto)
+    con_voto = [v for v in coef if v not in sin_voto_set]
     presentes, representados = [], []
     for vecino_id in coef:
         fila = asistencia.get(vecino_id)
@@ -55687,12 +55728,21 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
     # use, y aquí depende de una casilla, no de la memoria de quien preside.
     segunda = bool(int(row_value(junta, "segunda_convocatoria", 0) or 0))
 
-    def porcentaje(ids, sobre_coef=True, sobre_asistentes=None):
+    # Las mayorías se miden entre quienes tienen derecho a voto: los deudores salen de
+    # los dos divisores, el de cabezas y el de cuotas (art. 15.2). La asistencia, en
+    # cambio, se sigue midiendo sobre toda la comunidad: el deudor asiste y delibera.
+    total_coef_voto = round(sum(coef[v] for v in con_voto), 4)
+    total_prop_voto = len(con_voto)
+    asistentes_con_voto = [a for a in asistentes if a not in sin_voto_set]
+
+    def porcentaje(ids, sobre_coef=True, sobre_asistentes=None, con_derecho=True):
         usar_segunda = segunda if sobre_asistentes is None else sobre_asistentes
+        base = asistentes_con_voto if con_derecho else asistentes
         if sobre_coef:
-            divisor = (round(sum(coef.get(i, 0.0) for i in asistentes), 4) if usar_segunda else total_coef)
+            divisor = (round(sum(coef.get(i, 0.0) for i in base), 4) if usar_segunda
+                       else (total_coef_voto if con_derecho else total_coef))
             return round(sum(coef.get(i, 0.0) for i in ids) / divisor * 100, 4) if divisor else 0.0
-        divisor = (len(asistentes) if usar_segunda else total_prop)
+        divisor = (len(base) if usar_segunda else (total_prop_voto if con_derecho else total_prop))
         return round(len(ids) / divisor * 100, 4) if divisor else 0.0
 
     mayorias = {m["clave"]: m for m in fetch_workspace_fincas_mayorias(conn, workspace_id)}
@@ -55709,8 +55759,11 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
             (acuerdo_id, workspace_id),
         ).fetchall():
             clave = str(row_value(voto, "voto", "") or "").strip().capitalize()
-            if clave in votos:
-                votos[clave].append(row_value(voto, "vecino_id", ""))
+            vid = row_value(voto, "vecino_id", "")
+            # Puede quedar un voto guardado de antes de que el vecino entrara en
+            # morosidad. No se borra —es histórico— pero no cuenta.
+            if clave in votos and vid not in sin_voto_set:
+                votos[clave].append(vid)
         mayoria = mayorias.get(str(row_value(acuerdo, "mayoria_clave", "") or ""))
         # El porcentaje se mide sobre el total de la comunidad, no sobre los que
         # votaron: si no, una junta de cuatro gatos aprobaría por unanimidad.
@@ -55762,11 +55815,29 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
             "presentes": len(presentes),
             "representados": len(representados),
             "asistentes": len(asistentes),
-            "asistentes_pct_propietarios": porcentaje(asistentes, False, sobre_asistentes=False),
-            "asistentes_pct_coeficiente": porcentaje(asistentes, True, sobre_asistentes=False),
+            "asistentes_pct_propietarios": porcentaje(asistentes, False, sobre_asistentes=False,
+                                                      con_derecho=False),
+            "asistentes_pct_coeficiente": porcentaje(asistentes, True, sobre_asistentes=False,
+                                                     con_derecho=False),
             "segunda_convocatoria": segunda,
+            # Sobre cuánto se miden las mayorías después de descontar a los deudores.
+            "coeficiente_con_voto": total_coef_voto,
+            "propietarios_con_voto": total_prop_voto,
         },
         "acuerdos": acuerdos,
+        # Quién no vota y por cuánto: sin esta lista, un porcentaje sobre 85 % en vez de
+        # sobre 100 % es un número que nadie puede comprobar.
+        "sin_derecho_voto": [
+            {
+                "vecino_id": v,
+                "nombre": ficha_propietario.get(v, {}).get("nombre", ""),
+                "piso": ficha_propietario.get(v, {}).get("piso", ""),
+                "coeficiente": coef.get(v, 0.0),
+                "deuda": deudores.get(v, 0.0),
+            }
+            for v in sorted(sin_voto, key=lambda x: (ficha_propietario.get(x, {}).get("piso", ""),
+                                                     ficha_propietario.get(x, {}).get("nombre", "")))
+        ],
         "mayorias": list(mayorias.values()),
         "tipos_acuerdo": fetch_workspace_fincas_tipos_acuerdo(conn, workspace_id),
         "propietarios": [
@@ -55776,6 +55847,7 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
                 "piso": row_value(p, "piso", ""),
                 "coeficiente": float(row_value(p, "coeficiente", 0) or 0),
                 "asiste": row_value(p, "id", "") in asistentes,
+                "sin_derecho_voto": row_value(p, "id", "") in sin_voto_set,
                 "representado_por": str(row_value(asistencia.get(row_value(p, "id", "")), "representado_por", "") or "")
                 if asistencia.get(row_value(p, "id", "")) else "",
             }
@@ -57713,6 +57785,35 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
         ("", [f"De ellos, {asistencia.get('presentes', 0)} presentes y "
               f"{asistencia.get('representados', 0)} representados."]),
     ]
+
+    # Art. 15.2: el deudor asiste y delibera, pero no vota, y su cuota se deduce del
+    # total a efectos de alcanzar las mayorías. Si no consta en el acta quiénes son,
+    # los porcentajes de más abajo no hay forma de comprobarlos: están calculados sobre
+    # un denominador que el acta no enseña.
+    privados = recuento.get("sin_derecho_voto") or []
+    if privados:
+        sections.append(("Propietarios sin derecho de voto", {
+            "kind": "table",
+            "columns": [
+                {"label": "Inmueble", "width": 2},
+                {"label": "Propietario", "width": 5},
+                {"label": "Coeficiente", "width": 2, "align": "right"},
+                {"label": "Deuda", "width": 2, "align": "right"},
+            ],
+            "rows": [[limpio(x.get("piso")), limpio(x.get("nombre")),
+                      format_pct(x.get("coeficiente", 0)), format_eur(x.get("deuda", 0))]
+                     for x in privados],
+            "total": ["Total", "", format_pct(sum(float(x.get("coeficiente") or 0) for x in privados)),
+                      format_eur(sum(float(x.get("deuda") or 0) for x in privados))],
+        }))
+        sections.append(("", [
+            "Los propietarios relacionados no están al corriente en el pago de las deudas "
+            "vencidas con la comunidad. Han podido asistir y deliberar, pero no han tenido "
+            "derecho de voto (art. 15.2 LPH).",
+            f"Las mayorías de los acuerdos se calculan, por tanto, sobre "
+            f"{format_pct(asistencia.get('coeficiente_con_voto', 0))} de coeficiente y "
+            f"{asistencia.get('propietarios_con_voto', 0)} propietarios con derecho a voto.",
+        ]))
 
     # Art. 19.1.e: el orden del día de la reunión. Iba implícito en los títulos de cada
     # acuerdo; aquí va como lista, que es lo que pide la ley y lo que se lee de un vistazo.
@@ -84843,6 +84944,10 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 asiste = 1 if str(payload.get("asiste") or "").strip().lower() in {"1", "true", "si", "sí"} else 0
                 representado = str(payload.get("representado_por") or "").strip() or None
+                # Vacío = manda la deuda. 1 = ha pagado, impugnado o consignado y vota.
+                crudo_voto = payload.get("derecho_voto")
+                derecho_voto = (None if str(crudo_voto or "").strip() in {"", "None"}
+                                else (1 if str(crudo_voto).strip().lower() in {"1", "true", "si", "sí"} else 0))
                 existente = conn.execute(
                     "SELECT id FROM workspace_fincas_junta_asistentes WHERE junta_id = ? AND vecino_id = ? LIMIT 1",
                     (junta_id, vecino_id),
@@ -84850,15 +84955,17 @@ class Handler(BaseHTTPRequestHandler):
                 if existente:
                     conn.execute(
                         "UPDATE workspace_fincas_junta_asistentes SET asiste = ?, representado_por = ?, "
-                        "updated_at = datetime(?) WHERE id = ?",
-                        (asiste, representado, now, row_value(existente, "id", "")),
+                        "derecho_voto = ?, updated_at = datetime(?) WHERE id = ?",
+                        (asiste, representado, derecho_voto, now, row_value(existente, "id", "")),
                     )
                 else:
                     conn.execute(
                         "INSERT INTO workspace_fincas_junta_asistentes "
-                        "(id, workspace_id, junta_id, vecino_id, asiste, representado_por, created_at, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
-                        (os.urandom(16).hex(), workspace_id, junta_id, vecino_id, asiste, representado, now, now),
+                        "(id, workspace_id, junta_id, vecino_id, asiste, representado_por, derecho_voto, "
+                        " created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
+                        (os.urandom(16).hex(), workspace_id, junta_id, vecino_id, asiste, representado,
+                         derecho_voto, now, now),
                     )
                 conn.commit()
                 json_response(self, {"ok": True, "recuento": calcular_recuento_junta(conn, workspace_id, junta_id)})
@@ -84930,6 +85037,25 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
                 if not fila:
                     json_response(self, {"error": "acuerdo no encontrado"}, status=404)
+                    return
+                # Un deudor no vota (art. 15.2). Registrarlo y no contarlo sería peor:
+                # quien preside vería el voto en pantalla y creería que cuenta.
+                junta_id_voto = row_value(fila, "junta_id", "")
+                recuento_previo = calcular_recuento_junta(conn, workspace_id, junta_id_voto) or {}
+                privados = {str(x.get("vecino_id")): x
+                            for x in (recuento_previo.get("sin_derecho_voto") or [])}
+                if voto and vecino_id in privados:
+                    quien = privados[vecino_id]
+                    json_response(
+                        self,
+                        {"error": f"{quien.get('nombre') or 'Ese propietario'} no está al corriente "
+                                  f"({format_export_money(quien.get('deuda'))}) y no tiene derecho de "
+                                  f"voto (LPH art. 15.2). Puede asistir y deliberar. Si antes de "
+                                  f"empezar la junta ha pagado, ha impugnado judicialmente la deuda o "
+                                  f"la ha consignado, márcale «tiene voto» en la lista de asistencia.",
+                         "code": "sin_derecho_de_voto"},
+                        status=409,
+                    )
                     return
                 conn.execute("DELETE FROM workspace_fincas_junta_votos WHERE acuerdo_id = ? AND vecino_id = ?",
                              (acuerdo_id, vecino_id))

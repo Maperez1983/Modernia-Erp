@@ -19,6 +19,7 @@ python scripts/simula_ciclo_financiaciones.py
 python scripts/simula_ciclo_gestoria.py
 python scripts/simula_portales.py
 python scripts/simula_fincas_fuera_de_lo_normal.py
+python scripts/simula_junta_de_propietarios.py
 ```
 
 Cada uno levanta su propio servidor sobre una base temporal —borran `DATABASE_URL` antes
@@ -129,6 +130,28 @@ dos abajo—. Los que estaban bien:
   emisión se niega diciendo cuánto suman y qué revisar (LPH art. 5). No se cuela ni un
   recibo.
 - **Cerrar el ejercicio** no hace desaparecer lo que se debe.
+
+### Una junta de propietarios, de la convocatoria al acta (`simula_junta_de_propietarios.py`)
+
+Es el sitio donde el CRM deja de llevar cuentas y empieza a **decir si algo está
+aprobado**. Un acuerdo dado por bueno sin la mayoría que exige la ley es impugnable
+(art. 18), y quien firma el acta es el administrador. Cada porcentaje se comprueba con la
+calculadora, no con lo que responde la API.
+
+Lo que ya estaba bien, que es casi todo:
+
+- **La convocatoria** lleva las cuatro cosas del art. 16.2: orden del día, lugar con las
+  dos horas, relación de quien no está al corriente y la advertencia de que no votan.
+- **Doble cómputo**: un acuerdo sólo sale si alcanza por cabezas Y por coeficiente. Con
+  un vecino del 40 %, dos votos que son el 55 % de cuota pero el 40 % de propietarios no
+  aprueban nada, que es lo correcto.
+- **Segunda convocatoria**: el denominador pasa de toda la comunidad a los asistentes, y
+  el acta dice cuál se ha usado. Es el cambio que peor se hace a mano.
+- **Tres quintos y unanimidad** se exigen de verdad; los estatutos con el 80 % de los
+  propietarios salen como NO aprobados.
+- **El acta** recoge fecha y lugar, carácter y convocatoria, asistentes, orden del día,
+  quién votó qué con su cuota, y el resultado de cada punto. Sale sin firmar, que es lo
+  que debe hacer un programa.
 
 ## Fallos encontrados
 
@@ -291,6 +314,33 @@ que antes.
 
 Prueba: `tests/test_el_recibo_dice_a_quien_se_emitio.py`.
 
+### El deudor votaba en la junta, y su cuota contaba para la mayoría
+
+El CRM ya sabía la regla: la convocatoria que genera lista a quien no está al corriente y
+advierte, con el artículo al lado, de que puede asistir y deliberar pero **no tiene
+derecho de voto** (LPH art. 15.2). Luego llegaba el recuento y contaba su voto como el de
+cualquiera.
+
+La segunda consecuencia es peor que la primera. El artículo dice que las cuotas de los
+deudores **se deducen del total del inmueble a efectos de alcanzar las mayorías**. Con un
+deudor del 15 %, un acuerdo apoyado por el 40 % salía como «40 % de coeficiente» cuando
+legalmente es el 47,06 % de lo que vota. O sea que el CRM podía dar por no aprobado algo
+que sí lo estaba, y al revés.
+
+Arreglado en los tres sitios: no se deja registrar el voto —con un mensaje que dice quién
+es, cuánto debe y cómo se recupera el derecho—, sale de los dos divisores, y un voto que
+quedara guardado de antes deja de contar sin borrarse.
+
+Recupera el voto quien antes de empezar la junta haya pagado, impugnado judicialmente la
+deuda o consignado su importe. Eso el CRM no puede saberlo: lo marca quien preside con una
+casilla «tiene voto», y sin marcarla manda lo que diga la deuda.
+
+Y queda por escrito: el acta relaciona a quién no votó, por cuánto debe y sobre qué
+coeficiente se han medido las mayorías. Sin esa lista, un porcentaje sobre el 85 % es un
+número que nadie puede comprobar.
+
+Prueba: `tests/test_el_moroso_no_vota.py`.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
@@ -298,7 +348,7 @@ Conviene tenerlo claro para no dar por auditado lo que no lo está:
 - **Los caminos que se salen de lo normal, salvo en fincas.** Ahí ya están: derrama,
   cambio de propietario, recibo devuelto, censo descuadrado y cierre de ejercicio.
   Quedan los de los otros cinco módulos: anulaciones, devoluciones parciales, alquileres,
-  ausencias, nóminas, cambio de compañía y bajas de póliza. Y en fincas, juntas y actas.
+  ausencias, nóminas, cambio de compañía y bajas de póliza. En fincas ya están, incluida la junta entera; queda la impugnación y el cómputo de los ausentes a los 30 días (art. 17.8).
 - **La interfaz.** Las simulaciones comprueban la API y la base. Una pantalla puede
   enseñar mal un dato correcto, y eso sólo se ve en el navegador.
 
