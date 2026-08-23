@@ -1172,6 +1172,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/session_state",
     "/api/auth_invite_status",
     "/api/portal_inmuebles",
+    "/api/portal_empresa_logo",
     "/api/portal_inmueble_foto",
     "/api/portal_inmueble",
     "/api/inmueble_portal_feed",
@@ -35563,8 +35564,15 @@ def portal_inmueble_row_to_public(row):
     title = data.get("titulo_anuncio") or data.get("titulo") or data.get("direccion") or "Inmueble Verifika2"
     description = data.get("descripcion_larga") or data.get("descripcion_corta") or data.get("descripcion")
     empresa_id = data.get("empresa_id")
-    empresa_nombre_publico = "Grupo Modernia"
-    empresa_logo_publico = "/assets/grupo_modernia_logo.png"
+    # El nombre y el logo salían fijos aunque la consulta ya trae los de la empresa del
+    # inmueble (`e.nombre` y `e.logo_url`). Hoy no se nota porque todo lo publicado es de
+    # la misma casa; el día que publique una segunda agencia, sus inmuebles saldrían con
+    # el nombre y el logotipo de otra. Se usa el suyo, y sólo si no lo tiene se cae a la
+    # marca de la casa.
+    empresa_nombre_publico = str(data.get("empresa_nombre") or "").strip() or "Grupo Modernia"
+    empresa_logo_publico = str(data.get("empresa_logo") or "").strip() or "/assets/grupo_modernia_logo.png"
+    if empresa_logo_publico and not empresa_logo_publico.startswith(("/", "http")):
+        empresa_logo_publico = f"/api/portal_empresa_logo?id={urllib.parse.quote(str(empresa_id or ''))}"
     return {
         "id": data.get("id"),
         "referencia": data.get("referencia"),
