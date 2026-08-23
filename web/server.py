@@ -109258,14 +109258,20 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id,),
             ).fetchone()
-            logo_url = str(row_value(row, "logo_url") or "").strip() if row else ""
-            if not logo_url:
+            # Aquí ya sabemos que la empresa tiene escaparate abierto: la consulta de
+            # arriba es la puerta, y para quien no la pasa esto es un 404 y punto.
+            if row is None:
                 self.send_error(404, "Not found")
                 return
+            logo_url = str(row_value(row, "logo_url") or "").strip()
             raw_bytes = None
             content_type = "image/png"
             if logo_url.startswith("s3://"):
-                safe_key = _normalize_s3_key(logo_url)
+                # `_normalize_s3_key` espera la clave, no la URI: pasarle el «s3://»
+                # entero dejaba la comprobación del prefijo en falso siempre, así que
+                # ningún logotipo de S3 se llegaba a servir. Es como lo hace el
+                # generador de informes, que sí funciona.
+                safe_key = _normalize_s3_key(logo_url[5:])
                 if safe_key and safe_key.startswith("company_logos/"):
                     raw_bytes, _err = s3_get_object_bytes(safe_key)
             elif logo_url.startswith("/uploads/s3_local/"):
@@ -109278,8 +109284,17 @@ class Handler(BaseHTTPRequestHandler):
                 if safe_path and safe_path.exists():
                     raw_bytes = safe_path.read_bytes()
             if not raw_bytes:
-                self.send_error(404, "Not found")
-                return
+                # La empresa está publicando, así que aquí hay alguien mirando un
+                # anuncio: un 404 le deja un hueco roto en el escaparate. Si su
+                # logotipo no se puede servir —no lo tiene, o la clave de S3 ya no
+                # resuelve— se enseña la marca de la casa, que es la misma caída que
+                # anuncia el listado. El 404 queda para quien no tiene escaparate.
+                respaldo = safe_resolve_under(ASSETS, "grupo_modernia_logo.png")
+                if not (respaldo and respaldo.exists()):
+                    self.send_error(404, "Not found")
+                    return
+                raw_bytes = respaldo.read_bytes()
+                logo_url = "/assets/grupo_modernia_logo.png"
             lower = logo_url.lower()
             download_name = None
             if lower.endswith(".jpg") or lower.endswith(".jpeg"):

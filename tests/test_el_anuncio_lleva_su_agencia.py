@@ -31,10 +31,13 @@ from web import server as S  # noqa: E402
 
 RAIZ = Path(__file__).resolve().parents[1]
 LOGO_REAL = "/assets/grupo_modernia_logo.png"
+SERVER = (RAIZ / "web" / "server.py").read_text(encoding="utf-8")
 AHORA = "2026-08-23 09:00:00"
 
 
 class ElAnuncioLlevaSuAgenciaTests(unittest.TestCase):
+    SERVER = SERVER
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -130,6 +133,41 @@ class ElAnuncioLlevaSuAgenciaTests(unittest.TestCase):
 
     def test_una_empresa_inventada_tampoco_dice_nada(self):
         self.assertEqual(self._get("/api/portal_empresa_logo", id="emp-que-no-existe")[0], 404)
+
+    def test_un_logotipo_en_s3_se_sirve(self):
+        """`_normalize_s3_key` espera la clave, no la URI.
+
+        Pasarle el «s3://» entero dejaba la comprobación del prefijo en falso siempre,
+        así que ningún logotipo guardado en S3 llegaba a servirse. En producción todos
+        los que tienen logotipo propio lo tienen así. No se llegó a notar porque el
+        endpoint no era alcanzable: en cuanto lo fue, salió."""
+        clave = ("s3://company_logos/20260408_204404_6aab4d1b_empresa_"
+                 "ceff9019-5715-4867-a8a5-31ecf447020b_1775681044215.jpg")
+        self.assertEqual(S._normalize_s3_key(clave[5:]),
+                         clave[5:],
+                         "la clave sale distinta de lo que se guardó")
+        self.assertTrue(S._normalize_s3_key(clave[5:]).startswith("company_logos/"))
+        # Y el manejador la trocea igual que el generador de informes, que sí funciona.
+        ini = self.SERVER.index('if path == "/api/portal_empresa_logo":')
+        manejador = self.SERVER[ini:ini + 2500]
+        self.assertIn("_normalize_s3_key(logo_url[5:])", manejador)
+
+    def test_si_su_logotipo_no_se_puede_servir_no_queda_un_hueco(self):
+        """La clave de S3 puede no resolver. Quien mira el anuncio no tiene la culpa."""
+        self.conn.execute("UPDATE empresas SET logo_url = 's3://company_logos/no-existe.jpg' "
+                          "WHERE id = 'emp1'")
+        self.conn.commit()
+        estado, crudo, tipo = self._get("/api/portal_empresa_logo", id="emp1")
+        self.assertEqual(estado, 200, crudo[:200])
+        self.assertEqual(tipo, "image/png")
+        self.assertGreater(len(crudo), 0)
+
+    def test_pero_eso_no_abre_la_puerta_a_quien_no_publica(self):
+        """El respaldo es para el escaparate, no un 200 para cualquier id."""
+        self.conn.execute("UPDATE empresas SET logo_url = 's3://company_logos/no-existe.jpg' "
+                          "WHERE id = 'emp9'")
+        self.conn.commit()
+        self.assertEqual(self._get("/api/portal_empresa_logo", id="emp9")[0], 404)
 
     def test_la_ruta_esta_dada_de_alta_como_publica(self):
         """El manejador llevaba escrito desde antes; lo que faltaba era la lista."""
