@@ -60,7 +60,7 @@ llamadas: sólo aparecen si compruebas el resultado, no la respuesta.
 
 ## 2. Lo que se encontró
 
-Trece cambios publicados. Ordenados por lo que le pasaba a quien lo sufría.
+Diecinueve cambios publicados. Ordenados por lo que le pasaba a quien lo sufría.
 
 ### Se perdían datos
 
@@ -86,6 +86,27 @@ Trece cambios publicados. Ordenados por lo que le pasaba a quien lo sufría.
 |---|---|
 | Tres botones contestaban «Endpoint no valido»: cerrar una compraventa, la preparación guiada del inmueble y reprocesar el OCR de una nómina. El manejador existía; faltaba darlo de alta en una lista. | `38962df` |
 | Un comunero no tenía forma de ejercer el art. 17: no es un cliente, y la supresión no llegaba a su ficha. | `505b0a5` |
+
+### El dato entraba mal y nadie avisaba
+
+Cuatro cifras que el CRM aceptaba con un «ok». El criterio lo decidió el cliente:
+**rechazar los negativos siempre** —porque el signo lo pone el tipo de apunte, no quien
+teclea— y **pedir confirmación por encima de un tope** en vez de bloquear, porque una
+derrama grande es legítima y un tope de negocio se acaba quedando corto.
+
+| Qué pasaba | Cómo queda |
+|---|---|
+| Un **coeficiente del 250 %** entraba en la ficha del vecino. Es la parte que le toca de la finca (art. 5 LPH) y multiplica lo que se le cobra: dos veces y media el presupuesto entero. Un negativo le devolvía dinero cada mes. | 400 entre 0 y 100 |
+| **Cuota mensual negativa** en el alta de la comunidad. | 400 |
+| Un **gasto de -500 €** sumaba en vez de restar: el signo lo pone el tipo. | 400, y se indica que un abono se anota como ingreso |
+| Un apunte de **un billón de euros**. | 409 con `requiere_confirmacion`; el front pregunta y reintenta |
+
+### El escaparate llevaba la marca de otro
+
+| Qué pasaba | Cómo queda |
+|---|---|
+| Todo lo publicado salía anunciado por **«Grupo Modernia»**, fuera de quien fuera. La consulta ya traía `e.nombre` y `e.logo_url` de la empresa dueña; el armador de la respuesta pública no los miraba. Hoy no se nota porque publica una sola agencia. | Cada piso sale con el nombre y el logotipo de **su** agencia, y sólo se cae a la marca de la casa si no tiene |
+| `/api/portal_empresa_logo` estaba escrito y no era alcanzable desde ninguna ruta pública. | Dado de alta en la lista pública de GET, y sólo responde si esa empresa tiene algo publicado: no sirve para pasear el directorio de empresas desde fuera |
 
 ### Seguridad
 
@@ -157,7 +178,8 @@ Y en la suite, las pruebas nuevas que vigilan lo encontrado: búsquense por
 `test_ningun_campo_de_la_base_sin_escapar`, `test_importe_en_formato_ingles`,
 `test_una_fecha_que_no_existe`, `test_documento_de_firma_no_se_ejecuta`,
 `test_borrar_captacion_no_arrastra_el_cierre`, `test_una_venta_cerrada_figura_vendida`,
-`test_supresion_rgpd`, `test_morosidad_y_certificado`.
+`test_supresion_rgpd`, `test_morosidad_y_certificado`,
+`test_cifras_que_no_pueden_ser`, `test_el_anuncio_lleva_su_agencia`.
 
 ---
 
@@ -174,12 +196,6 @@ Y en la suite, las pruebas nuevas que vigilan lo encontrado: búsquense por
 
 ### Decisiones pendientes del cliente
 
-- **Valores absurdos que el sistema acepta**: gastos negativos, importes de un billón,
-  **coeficientes negativos o del 250 %** —que multiplican lo que se cobra a cada vecino—
-  y cuotas mensuales negativas. No se bloquean porque un negativo puede ser un abono
-  legítimo; hace falta el criterio de negocio.
-- El nombre público **«Grupo Modernia»** está fijo en el código del listado público.
-- `/api/portal_empresa_logo` no es alcanzable desde ninguna ruta pública.
 - Datos de fincas: coeficientes por cargar, referencia catastral de Sierra Bermeja 5,
   recuento de unidades de cinco comunidades, 39 correos truncados.
 - El **500 de `/api/gestoria_docs`** (clave ajena), sin tocar por ser área de trabajo

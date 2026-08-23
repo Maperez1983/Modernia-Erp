@@ -172,6 +172,44 @@ acaba de cerrar.
 
 Prueba: `tests/test_una_venta_cerrada_figura_vendida.py`.
 
+### El CRM aceptaba cifras que no pueden ser
+
+Probando lo que teclea una persona con prisa, cuatro entradas pasaban sin decir nada y
+todas descuadraban algo. La peor: un **coeficiente del 250 %** en la ficha de un vecino.
+El coeficiente es la parte que le toca de la finca (art. 5 LPH) y multiplica directamente
+lo que se le cobra, así que un 250 % le pasa dos veces y media el presupuesto entero de
+la comunidad, y un negativo le devuelve dinero cada mes. Igual una **cuota mensual
+negativa** y un **gasto de -500 €**, que sumaba en vez de restar porque el signo lo pone
+el tipo de apunte —Gasto o Ingreso—, no el número.
+
+El criterio lo decidió el cliente, y son dos distintos:
+
+- **Los negativos se rechazan siempre** (400, diciendo por qué). Un abono se anota como
+  ingreso, que es lo que es.
+- **Las cifras absurdas no se bloquean: se preguntan.** Un apunte de un billón de euros
+  responde 409 con `requiere_confirmacion`, y el front lo vuelve a mandar confirmado si
+  la persona dice que sí. Una derrama grande es legítima; un tope de negocio se queda
+  corto el día que hace falta.
+
+Prueba: `tests/test_cifras_que_no_pueden_ser.py`, incluido que el front sepa reintentar
+—sin eso el 409 sería un callejón sin salida—.
+
+### Todo lo publicado se anunciaba como «Grupo Modernia»
+
+El escaparate es lo único del CRM que ve alguien de fuera. La consulta ya traía el nombre
+y el logotipo de la empresa dueña de cada inmueble; el armador de la respuesta pública no
+los miraba y escribía la marca de la casa a pelo.
+
+Hoy no se nota, porque publica una sola agencia. El día que publique la segunda, sus
+pisos saldrían en el escaparate con la marca de otra —y con su contacto—, que es un
+problema con quien te ha dado la exclusiva.
+
+Arreglado, y de paso enganchado `/api/portal_empresa_logo`, que llevaba escrito sin ser
+alcanzable desde ninguna ruta pública. Sólo responde si esa empresa tiene algo publicado:
+no vale para pasear el directorio de empresas del CRM desde fuera.
+
+Prueba: `tests/test_el_anuncio_lleva_su_agencia.py`.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:

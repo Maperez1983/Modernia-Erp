@@ -57357,6 +57357,17 @@ def cerrar_ejercicio_fincas(conn, workspace_id, comunidad_id, ejercicio, *, now=
             "dotacion_fondo": dotacion, "ejercicio_siguiente": siguiente}
 
 
+# Por encima de esto, un apunte de comunidad pide confirmación antes de guardarse. No
+# es un tope: una derrama grande es legítima. Es la red para el dedazo y para el importe
+# pegado con formato raro, que es de donde salen las cifras imposibles.
+FINCAS_IMPORTE_QUE_PIDE_CONFIRMACION = 100000.0
+
+
+def _quiere_confirmar(payload):
+    valor = (payload or {}).get("confirmado", (payload or {}).get("confirmar"))
+    return str(valor).strip().lower() in {"1", "true", "si", "sí", "yes"}
+
+
 def condicion_de_recibo_impagado(alias=""):
     """Qué es deuda de verdad y qué es un recibo recién emitido.
 
@@ -83427,6 +83438,18 @@ class Handler(BaseHTTPRequestHandler):
                 num_vecinos, num_locales, num_trasteros, num_aparcamientos,
                 tarifas=fetch_workspace_fincas_tarifas(conn, workspace_id),
             )
+            # Una comunidad no cobra una cuota negativa: eso no es una cuota, es un
+            # reparto al revés, y se aceptaba sin decir nada.
+            for campo in ("cuota_mensual", "honorario_mensual"):
+                if str(payload.get(campo) or "").strip():
+                    valor = parse_money_value(payload.get(campo))
+                    if valor is not None and valor < 0:
+                        json_response(
+                            self,
+                            {"error": f"La cuota no puede ser negativa ({format_export_money(valor)})."},
+                            status=400,
+                        )
+                        return
             values = (
                 workspace_id,
                 empresa_id,
@@ -84079,6 +84102,31 @@ class Handler(BaseHTTPRequestHandler):
             if importe is None:
                 json_response(self, {"error": "importe requerido"}, status=400)
                 return
+            # El signo lo pone el tipo —Gasto o Ingreso—, no el importe. Un gasto de
+            # -500 € entraba y restaba como si fuera un ingreso, descuadrando el
+            # ejercicio sin que nada avisara. Un abono se anota como ingreso.
+            if importe < 0:
+                json_response(
+                    self,
+                    {"error": "El importe va en positivo: lo que decide si suma o resta es "
+                              "el tipo (Gasto o Ingreso). Si es un abono, anótalo como ingreso."},
+                    status=400,
+                )
+                return
+            # Un dedazo o un pegado con formato raro mete cifras imposibles. No se
+            # bloquea —una derrama grande es legítima—: se pide confirmarla.
+            if importe > FINCAS_IMPORTE_QUE_PIDE_CONFIRMACION and not _quiere_confirmar(payload):
+                json_response(
+                    self,
+                    {
+                        "error": f"{format_export_money(importe)} es mucho para un apunte de "
+                                 "comunidad. Si es correcto, confírmalo.",
+                        "requiere_confirmacion": True,
+                        "importe": importe,
+                    },
+                    status=409,
+                )
+                return
             values = (
                 workspace_id,
                 (payload.get("comunidad_id") or "").strip() or None,
@@ -84276,6 +84324,18 @@ class Handler(BaseHTTPRequestHandler):
                     coeficiente = float(coef_raw.replace(",", "."))
                 except Exception:
                     coeficiente = None
+            # El coeficiente es la parte que le toca a ese piso del total de la finca
+            # (art. 5 LPH): ni negativo ni por encima de cien tiene sentido, y multiplica
+            # directamente lo que se le cobra. Se aceptaba un 250 %, que es cobrarle dos
+            # veces y media el presupuesto entero de la comunidad.
+            if coeficiente is not None and not (0.0 <= coeficiente <= 100.0):
+                json_response(
+                    self,
+                    {"error": f"El coeficiente es el porcentaje que le toca a ese piso: "
+                              f"tiene que estar entre 0 y 100, y has puesto {coef_raw}."},
+                    status=400,
+                )
+                return
             values = (
                 workspace_id,
                 comunidad_id,

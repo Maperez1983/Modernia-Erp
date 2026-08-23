@@ -4839,6 +4839,24 @@ const euroFormatter = new Intl.NumberFormat("es-ES", {
   maximumFractionDigits: 2,
 });
 
+const guardarApunteDeComunidad = async (payload) => {
+  const enviar = async (cuerpo) => {
+    const r = await fetch("/api/workspace_fincas_contabilidad", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cuerpo),
+    });
+    return { estado: r.status, datos: await r.json().catch(() => ({})) };
+  };
+  let { estado, datos } = await enviar(payload);
+  if (estado === 409 && datos?.requiere_confirmacion) {
+    if (!window.confirm(`${datos.error}\n\n¿Lo guardo así?`)) return null;
+    ({ estado, datos } = await enviar({ ...payload, confirmado: true }));
+  }
+  if (datos?.error) throw new Error(datos.error);
+  return datos;
+};
+
 const formatEuros = (value) => {
   if (value === null || value === undefined || value === "") return euroFormatter.format(0);
   if (typeof value === "number") return euroFormatter.format(Number.isFinite(value) ? value : 0);
@@ -25384,12 +25402,8 @@ const renderWorkspaceFincasCommunityFicha = async () => {
 	          payload.workspace_id = workspaceId;
 	          payload.comunidad_id = comunidadId;
 	          if (!payload.estado) payload.estado = "Manual";
-	          const res = await fetch("/api/workspace_fincas_contabilidad", {
-	            method: "POST",
-	            headers: { "Content-Type": "application/json" },
-	            body: JSON.stringify(payload),
-	          }).then((r) => r.json());
-	          if (res?.error) throw new Error(res.error);
+	          const res = await guardarApunteDeComunidad(payload);
+	          if (res === null) { if (statusEl) statusEl.textContent = ""; return; }
 	          await refreshWorkspaceFincasLedger({ force: true, silent: true });
 	          reset();
 	          if (statusEl) statusEl.textContent = "Guardado.";
@@ -26114,12 +26128,8 @@ const openFincasCommunityFichaModal = (record) => {
 	            payload.workspace_id = workspaceId;
 	            payload.comunidad_id = comunidadId;
 	            if (!payload.estado) payload.estado = "Manual";
-	            const res = await fetch("/api/workspace_fincas_contabilidad", {
-	              method: "POST",
-	              headers: { "Content-Type": "application/json" },
-	              body: JSON.stringify(payload),
-	            }).then((r) => r.json());
-	            if (res?.error) throw new Error(res.error);
+	            const res = await guardarApunteDeComunidad(payload);
+	            if (res === null) { if (statusEl) statusEl.textContent = ""; return; }
 	            await refreshWorkspaceFincasLedger({ force: true, silent: true });
 	            resetLedgerForm();
 	            setSubtab("manual");
@@ -88754,12 +88764,11 @@ if (workspaceFincasLedgerForm) {
     const payload = Object.fromEntries(formData.entries());
     payload.workspace_id = state.currentWorkspaceId;
     try {
-      const data = await fetch("/api/workspace_fincas_contabilidad", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }).then((res) => res.json());
-      if (data?.error) throw new Error(data.error);
+      const data = await guardarApunteDeComunidad(payload);
+      if (data === null) {
+        if (workspaceFincasLedgerStatus) workspaceFincasLedgerStatus.textContent = "";
+        return;
+      }
       if (workspaceFincasLedgerStatus) workspaceFincasLedgerStatus.textContent = "Movimiento guardado.";
       await refreshWorkspaceFincasLedger({ force: true, silent: true });
       fillWorkspaceFincasLedgerForm();
