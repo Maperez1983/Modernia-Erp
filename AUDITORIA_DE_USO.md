@@ -18,6 +18,7 @@ python scripts/simula_ciclo_seguros.py
 python scripts/simula_ciclo_financiaciones.py
 python scripts/simula_ciclo_gestoria.py
 python scripts/simula_portales.py
+python scripts/simula_fincas_fuera_de_lo_normal.py
 ```
 
 Cada uno levanta su propio servidor sobre una base temporal —borran `DATABASE_URL` antes
@@ -111,6 +112,23 @@ la agencia la ve en su agenda.
 
 Detalle del contrato público: el portal identifica cada inmueble **por su índice en la
 lista**, no por id, para no exponer identificadores internos.
+
+### Lo que no es el mes normal de una comunidad (`simula_fincas_fuera_de_lo_normal.py`)
+
+El ciclo mensual sale limpio, pero una administradora se pasa el año fuera de ese camino.
+Esto recorre lo otro: una derrama, un piso que cambia de dueño en junio, un recibo
+devuelto por el banco, un vecino nuevo que descuadra los coeficientes, y cerrar el
+ejercicio con recibos sin cobrar.
+
+De cinco escenarios, tres estaban bien y dos no —la derrama y el cambio de dueño, los
+dos abajo—. Los que estaban bien:
+
+- **Cobrado y devuelto**: al marcarlo cobrado deja de ser moroso; cuando el banco lo
+  devuelve vuelve a contar como deuda y se borra la fecha de cobro. Correcto.
+- **Coeficientes descuadrados**: dar de alta un trastero deja el reparto en 105 % y la
+  emisión se niega diciendo cuánto suman y qué revisar (LPH art. 5). No se cuela ni un
+  recibo.
+- **Cerrar el ejercicio** no hace desaparecer lo que se debe.
 
 ## Fallos encontrados
 
@@ -225,13 +243,62 @@ simulación. Si el cambio se ve desde fuera, hay que mirarlo desde fuera.
 
 Prueba: `tests/test_el_anuncio_lleva_su_agencia.py`.
 
+### La derrama dejaba a la comunidad sin cobrar la cuota de ese mes
+
+La junta aprueba arreglar el ascensor: 12.000 € a repartir en agosto. Agosto ya tiene su
+cuota ordinaria de 1.200 €, y emitir la derrama contestaba:
+
+```
+409 · Ya hay recibos emitidos de 2026-08. Marca «reemitir» si quieres rehacerlos.
+```
+
+Y «reemitir» —la única salida que ofrecía el aviso, y la única que ofrecía el botón—
+**borraba los recibos pendientes del mes**. Quien seguía esa instrucción emitía la
+derrama, leía «4 recibos por 12.000 €» y se quedaba sin cobrar los 1.200 € de la cuota.
+Con 200 OK y sin nada que lo dijera. Debajo, el índice único de la tabla era
+`(comunidad, vecino, periodo)`: los dos cargos no cabían ni en el esquema.
+
+Arreglado: lo que identifica un cargo dentro de un mes es su **concepto**. Repetir el
+mismo cargo sigue pidiendo confirmación y rehace sólo ése; un concepto distinto es un
+cargo aparte, se dice qué hay ya en ese mes —cuántos recibos y por cuánto— y se suma si
+se confirma. Que es lo que pasa de verdad: en un mes puede haber la cuota, una derrama y
+una liquidación.
+
+Prueba: `tests/test_una_derrama_no_se_come_la_cuota.py`.
+
+### Vendías el piso y tus recibos impagados pasaban a nombre del comprador
+
+El 1º A se vende en junio. La única forma de meter al comprador en el censo es editar la
+ficha del vecino, y eso es un `UPDATE` sobre la misma fila: los 4.050 € que dejó sin
+pagar la vendedora pasaban a figurar a nombre del comprador, y ella desaparecía del
+histórico de la comunidad.
+
+La deuda **sí** viaja con el piso —el comprador responde de la del año en curso y los
+tres anteriores—, así que el importe estaba bien. Lo que estaba mal es que un recibo
+dijera que se le emitió a quien no se le emitió. Y eso sale del CRM en un papel: el
+certificado de deuda, que se pide para vender y se enseña en una notaría, listaba la
+deuda de la vendedora bajo el nombre del comprador sin decirlo.
+
+Arreglado: el recibo guarda el nombre y el NIF del propietario **el día de emitirlo**, y
+ya no se mueve. Lo que había se rellenó una vez con el propietario que consta hoy, que es
+exactamente lo que venía enseñándose. El certificado sigue saliendo a nombre de quien es
+dueño hoy —es quien responde y quien lo va a enseñar—, pero si hay recibos de otro los
+saca en su columna «Emitido a» y lo explica en un apartado aparte. Lo que no hace es
+decidir quién paga: eso no lo determina un programa sin firma.
+
+La columna sólo aparece cuando hace falta. Sin cambio de dueño, el certificado sale igual
+que antes.
+
+Prueba: `tests/test_el_recibo_dice_a_quien_se_emitio.py`.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
 
-- **Sólo el camino principal.** Los seis módulos están simulados; quedan los caminos que se salen de lo
-  normal: derramas, cambio de propietario a mitad de ejercicio, anulaciones, devoluciones
-  parciales, alquileres, ausencias, nóminas, cambio de compañía y bajas de póliza.
+- **Los caminos que se salen de lo normal, salvo en fincas.** Ahí ya están: derrama,
+  cambio de propietario, recibo devuelto, censo descuadrado y cierre de ejercicio.
+  Quedan los de los otros cinco módulos: anulaciones, devoluciones parciales, alquileres,
+  ausencias, nóminas, cambio de compañía y bajas de póliza. Y en fincas, juntas y actas.
 - **La interfaz.** Las simulaciones comprueban la API y la base. Una pantalla puede
   enseñar mal un dato correcto, y eso sólo se ve en el navegador.
 

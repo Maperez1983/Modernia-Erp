@@ -45918,6 +45918,37 @@ def ensure_workspace_product_tables(conn):
         )
     except Exception:
         pass
+    # A quién se le emitió el recibo, congelado el día de emitirlo. Un piso cambia de
+    # dueño y la única forma de meter al comprador en el censo es editar la ficha del
+    # vecino, que es la misma fila: sin esto, los recibos del vendedor pasaban a figurar
+    # a nombre del comprador y el vendedor desaparecía del histórico. La deuda sí viaja
+    # con el piso (el comprador responde del año en curso y los tres anteriores), pero
+    # un recibo no puede decir que se le emitió a quien no se le emitió.
+    for columna in ("vecino_nombre", "vecino_nif"):
+        try:
+            ensure_column(conn, "workspace_fincas_recibos", columna, f"{columna} TEXT")
+        except Exception:
+            pass
+    try:
+        # Lo ya guardado se rellena una vez con el propietario que consta hoy: es
+        # exactamente lo que venía enseñándose, y a partir de aquí deja de moverse.
+        conn.execute(
+            "UPDATE workspace_fincas_recibos SET vecino_nombre = ("
+            "  SELECT v.nombre FROM workspace_fincas_vecinos v WHERE v.id = workspace_fincas_recibos.vecino_id"
+            ") WHERE vecino_nombre IS NULL OR vecino_nombre = ''"
+        )
+        conn.execute(
+            "UPDATE workspace_fincas_recibos SET vecino_nif = ("
+            "  SELECT v.nif FROM workspace_fincas_vecinos v WHERE v.id = workspace_fincas_recibos.vecino_id"
+            ") WHERE vecino_nif IS NULL OR vecino_nif = ''"
+        )
+    except Exception as _fallo_tragado:
+        # No tumba el arranque: sin relleno, el listado y el certificado se caen al
+        # nombre que consta hoy, que es lo que enseñaban antes. Pero que se sepa: en
+        # Postgres una sentencia fallida deja la transacción abortada.
+        _rollback_best_effort(conn)
+        apunta_escritura_tragada("ensure_tables/workspace_fincas_recibos.vecino_nombre",
+                                 _fallo_tragado)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_remesas (
@@ -55371,6 +55402,8 @@ def fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo="",
           r.fecha_emision, r.fecha_cobro, r.motivo_devolucion, r.remesa_id,
           r.vecino_id,
           COALESCE(v.nombre, '') AS nombre,
+          -- A nombre de quién se emitió, que no tiene por qué ser quien vive allí hoy.
+          COALESCE(r.vecino_nombre, v.nombre, '') AS emitido_a,
           COALESCE(v.piso, '') AS piso,
           COALESCE(v.iban, '') AS iban
         FROM workspace_fincas_recibos r
@@ -57968,22 +58001,49 @@ def build_certificado_deuda_pdf(comunidad, vecino, recibos, workspace=None, comp
         ) if linea]),
     ]
     if recibos:
+        # Un piso cambia de dueño y la deuda le sigue: el comprador responde de la del
+        # año en curso y los tres anteriores. Pero esos recibos se le emitieron a otra
+        # persona, y el certificado se usa en una notaría: tiene que decir a nombre de
+        # quién se emitió cada uno en vez de dar a entender que todo es del actual.
+        de_otro = [r for r in recibos
+                   if limpio(row_value(r, "vecino_nombre", "")) not in {"", nombre}]
+        columnas = [
+            {"label": "Periodo", "width": 2},
+            {"label": "Concepto", "width": 5},
+            {"label": "Estado", "width": 2},
+            {"label": "Importe", "width": 2, "align": "right"},
+        ]
+        filas = [[
+            row_value(r, "periodo", ""),
+            row_value(r, "concepto", ""),
+            row_value(r, "estado", ""),
+            format_eur(row_value(r, "importe", 0)),
+        ] for r in recibos]
+        pie = ["Total", "", "", format_eur(total)]
+        if de_otro:
+            columnas.insert(2, {"label": "Emitido a", "width": 4})
+            for fila, r in zip(filas, recibos):
+                fila.insert(2, limpio(row_value(r, "vecino_nombre", "")) or nombre)
+            pie.insert(2, "")
         sections.append(("Recibos impagados", {
-            "kind": "table",
-            "columns": [
-                {"label": "Periodo", "width": 2},
-                {"label": "Concepto", "width": 5},
-                {"label": "Estado", "width": 2},
-                {"label": "Importe", "width": 2, "align": "right"},
-            ],
-            "rows": [[
-                row_value(r, "periodo", ""),
-                row_value(r, "concepto", ""),
-                row_value(r, "estado", ""),
-                format_eur(row_value(r, "importe", 0)),
-            ] for r in recibos],
-            "total": ["Total", "", "", format_eur(total)],
+            "kind": "table", "columns": columnas, "rows": filas, "total": pie,
         }))
+        if de_otro:
+            anteriores = []
+            for r in de_otro:
+                quien = limpio(row_value(r, "vecino_nombre", ""))
+                if quien and quien not in anteriores:
+                    anteriores.append(quien)
+            suma_otros = round(sum(parse_money_value(row_value(r, "importe", 0))
+                                   for r in de_otro), 2)
+            sections.append(("Sobre los recibos emitidos a nombre de otro propietario", [
+                f"{len(de_otro)} de los {len(recibos)} recibos impagados, por "
+                f"{format_eur(suma_otros)}, se emitieron a nombre de "
+                f"{', '.join(anteriores)}, propietario anterior del inmueble según consta "
+                f"en la comunidad.",
+                "Se detallan porque siguen sin pagar y afectan al inmueble. Quién responde "
+                "de ellos no lo determina este documento.",
+            ]))
     sections.append(("Firma", [
         "Este certificado recoge los recibos impagados que constan en la contabilidad de la",
         "comunidad a la fecha de emisión. Debe ser firmado por el secretario administrador con",
@@ -84493,7 +84553,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "comunidad no encontrada"}, status=404)
                 return
             propietarios = conn.execute(
-                "SELECT id, nombre, piso, coeficiente, iban FROM workspace_fincas_vecinos "
+                "SELECT id, nombre, nif, piso, coeficiente, iban FROM workspace_fincas_vecinos "
                 "WHERE workspace_id = ? AND comunidad_id = ? ORDER BY piso, nombre",
                 (workspace_id, comunidad_id),
             ).fetchall()
@@ -84616,10 +84676,15 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute(
                     "INSERT INTO workspace_fincas_recibos "
                     "(id, workspace_id, comunidad_id, vecino_id, periodo, concepto, importe, coeficiente, estado, "
-                    " fecha_emision, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', ?, datetime(?), datetime(?))",
+                    " fecha_emision, vecino_nombre, vecino_nif, created_at, updated_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?, datetime(?), datetime(?))",
                     (os.urandom(16).hex(), workspace_id, comunidad_id, vecino_id, periodo, concepto, importe,
-                     row_value(vecino, "coeficiente", None), datetime.now().date().isoformat(), now, now),
+                     row_value(vecino, "coeficiente", None), datetime.now().date().isoformat(),
+                     # A nombre de quién se emite, congelado aquí: la ficha del vecino
+                     # cambia cuando el piso cambia de dueño, y el recibo no debe cambiar.
+                     str(row_value(vecino, "nombre", "") or "").strip() or None,
+                     str(row_value(vecino, "nif", "") or "").strip() or None,
+                     now, now),
                 )
                 creados += 1
             conn.commit()
@@ -102073,7 +102138,8 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             _cond, _periodo_hoy = condicion_de_recibo_impagado()
             recibos = conn.execute(
-                "SELECT periodo, concepto, importe, estado FROM workspace_fincas_recibos "
+                "SELECT periodo, concepto, importe, estado, vecino_nombre "
+                "FROM workspace_fincas_recibos "
                 f"WHERE vecino_id = ? AND workspace_id = ? AND {_cond} "
                 "ORDER BY periodo",
                 (vecino_id, workspace_id, _periodo_hoy),
