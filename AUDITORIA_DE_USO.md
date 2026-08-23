@@ -208,6 +208,21 @@ Arreglado, y de paso enganchado `/api/portal_empresa_logo`, que llevaba escrito 
 alcanzable desde ninguna ruta pública. Sólo responde si esa empresa tiene algo publicado:
 no vale para pasear el directorio de empresas del CRM desde fuera.
 
+**Y aquí me equivoqué dos veces, que es la parte que interesa.** Probé el endpoint con una
+empresa de mentira cuyo logotipo era `/assets/sur.png`, un fichero que no existe. Dio 404,
+lo achaqué al fichero inventado y lo di por bueno. No lo era: dentro tenía un fallo que
+nunca se había ejecutado —le pasaba a `_normalize_s3_key` la URI entera en vez de la
+clave—, y en producción todas las empresas con logotipo propio lo tienen en S3. El
+escaparate pasó de enseñar el logotipo del grupo a enseñar un hueco.
+
+El segundo: al mirar el nombre de la empresa, los seis anuncios pasaron a decir «Estudio
+Velazquez 2012 SL». Es quien tiene el encargo y es correcto en la base, pero nadie busca
+piso a una razón social. Ahora hay un **nombre comercial** en la ficha de la empresa; en
+blanco se anuncia con la marca del grupo, que es lo que había siempre.
+
+Los dos salieron de un `curl` al escaparate público con el commit ya desplegado, no de la
+simulación. Si el cambio se ve desde fuera, hay que mirarlo desde fuera.
+
 Prueba: `tests/test_el_anuncio_lleva_su_agencia.py`.
 
 ## Qué NO cubre esto todavía

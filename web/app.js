@@ -13484,6 +13484,7 @@ const prefillWorkspaceCompanyEditorFromRow = (company) => {
   set("nombre", String(company?.nombre || ""));
   set("logo_url", String(company?.logo_url || ""));
   set("razon_social", String(company?.razon_social || ""));
+  set("nombre_comercial", String(company?.nombre_comercial || ""));
   set("nif", String(company?.nif || ""));
   set("direccion", String(company?.direccion || ""));
   set("direccion_fiscal", String(company?.direccion_fiscal || ""));

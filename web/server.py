@@ -35569,7 +35569,10 @@ def portal_inmueble_row_to_public(row):
     # la misma casa; el día que publique una segunda agencia, sus inmuebles saldrían con
     # el nombre y el logotipo de otra. Se usa el suyo, y sólo si no lo tiene se cae a la
     # marca de la casa.
-    empresa_nombre_publico = str(data.get("empresa_nombre") or "").strip() or "Grupo Modernia"
+    # Lo que se anuncia es el nombre comercial de la agencia, no el que se usa dentro
+    # del CRM ni su razón social: nadie busca piso a «Estudio Velazquez 2012 SL». Si no
+    # lo tiene puesto se anuncia con la marca del grupo, que es lo que había siempre.
+    empresa_nombre_publico = str(data.get("empresa_nombre_comercial") or "").strip() or "Grupo Modernia"
     empresa_logo_publico = str(data.get("empresa_logo") or "").strip() or "/assets/grupo_modernia_logo.png"
     if empresa_logo_publico and not empresa_logo_publico.startswith(("/", "http")):
         empresa_logo_publico = f"/api/portal_empresa_logo?id={urllib.parse.quote(str(empresa_id or ''))}"
@@ -35716,6 +35719,7 @@ def fetch_portal_inmuebles_public(conn, *, listing_id="", limit=100, filtros=Non
           i.ascensor, i.garaje, i.trastero, i.terraza, i.piscina, i.amueblado,
           i.exterior, i.aire_acondicionado, i.calefaccion, i.accesible,
           MAX(e.nombre) AS empresa_nombre, MAX(e.logo_url) AS empresa_logo,
+          MAX(e.nombre_comercial) AS empresa_nombre_comercial,
           MAX(COALESCE(c.noticia_verificada, 0)) AS noticia_verificada,
           ({photo_expr}) AS foto
         FROM inmuebles i
@@ -41983,6 +41987,10 @@ def _ensure_tables_sin_red(db_path, _abiertas):
     # con la suya: esto solo decide qué sale preseleccionado al crear.
     ensure_column(conn, "empresas", "fincas_por_defecto", "fincas_por_defecto INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "empresas", "razon_social", "razon_social TEXT")
+    # El nombre con el que la agencia se anuncia en el escaparate público, que no tiene
+    # por qué ser ni el interno ni la razón social: nadie busca piso a «Estudio
+    # Velazquez 2012 SL». Vacío = se anuncia con la marca del grupo.
+    ensure_column(conn, "empresas", "nombre_comercial", "nombre_comercial TEXT")
     ensure_column(conn, "empresas", "nif", "nif TEXT")
     ensure_column(conn, "empresas", "direccion", "direccion TEXT")
     ensure_column(conn, "empresas", "direccion_fiscal", "direccion_fiscal TEXT")
@@ -76907,6 +76915,10 @@ class Handler(BaseHTTPRequestHandler):
                 razon_social = str(payload.get("razon_social") or "").strip() or None
                 updates.append("razon_social = ?")
                 values.append(razon_social)
+            if "nombre_comercial" in payload:
+                nombre_comercial = str(payload.get("nombre_comercial") or "").strip() or None
+                updates.append("nombre_comercial = ?")
+                values.append(nombre_comercial)
             if "nif" in payload:
                 nif = str(payload.get("nif") or "").strip() or None
                 updates.append("nif = ?")
@@ -98985,6 +98997,7 @@ class Handler(BaseHTTPRequestHandler):
                   nombre,
                   COALESCE(logo_url, '') AS logo_url,
                   COALESCE(razon_social, '') AS razon_social,
+                  COALESCE(nombre_comercial, '') AS nombre_comercial,
                   COALESCE(nif, '') AS nif,
                   COALESCE(direccion, '') AS direccion,
                   COALESCE(direccion_fiscal, '') AS direccion_fiscal,

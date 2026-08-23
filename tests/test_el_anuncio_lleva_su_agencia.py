@@ -12,6 +12,12 @@ De paso quedaba escrito y sin enganchar `/api/portal_empresa_logo`, que es justa
 que sirve el logotipo de cada agencia a un visitante sin cuenta. Ahora está en la lista
 pública de GET, y sólo responde si esa empresa tiene algo publicado: no vale para pasear
 el directorio de empresas del CRM desde fuera.
+
+Lo que se anuncia es un **nombre comercial** propio, no el nombre interno de la empresa
+ni su razón social. Al arreglarlo mirando el nombre de la empresa, los seis anuncios de
+producción pasaron a decir «Estudio Velazquez 2012 SL»: correcto en la base y malo en un
+escaparate, porque nadie busca piso a una razón social. El campo va en la ficha de la
+empresa y en blanco se anuncia con la marca del grupo, que es lo que había siempre.
 """
 
 import json
@@ -53,7 +59,10 @@ class ElAnuncioLlevaSuAgenciaTests(unittest.TestCase):
         self.ws = self.conn.execute("SELECT id FROM workspaces LIMIT 1").fetchone()["id"]
         b = dict(created_at=AHORA, updated_at=AHORA)
         # Dos agencias distintas publicando en el mismo escaparate.
+        # La primera tiene nombre de escaparate; la segunda no lo ha puesto.
         self._ins("empresas", dict(id="emp1", nombre="Inmobiliaria Sur SL",
+                                   razon_social="Inmobiliaria Sur 2012 S.L.",
+                                   nombre_comercial="Pisos del Sur",
                                    nif="B29111111", activo=1, logo_url=LOGO_REAL, **b))
         self._ins("empresas", dict(id="emp2", nombre="Fincas Poniente SL",
                                    nif="B29222222", activo=1, **b))
@@ -107,11 +116,30 @@ class ElAnuncioLlevaSuAgenciaTests(unittest.TestCase):
         filas = cuerpo.get("rows") or cuerpo.get("inmuebles") or []
         return {str(f.get("direccion")): f for f in filas}
 
-    def test_cada_piso_se_anuncia_con_el_nombre_de_su_agencia(self):
+    def test_cada_piso_se_anuncia_con_la_marca_de_su_agencia(self):
         anuncios = self._anuncios()
         self.assertEqual(len(anuncios), 2, anuncios)
-        self.assertEqual(anuncios["Calle Sur 1"]["empresa_nombre"], "Inmobiliaria Sur SL")
-        self.assertEqual(anuncios["Calle Poniente 2"]["empresa_nombre"], "Fincas Poniente SL")
+        self.assertEqual(anuncios["Calle Sur 1"]["empresa_nombre"], "Pisos del Sur")
+
+    def test_no_se_publica_la_razon_social_ni_el_nombre_interno(self):
+        """Fue lo que pasó en producción al mirar el nombre de la empresa."""
+        anuncio = self._anuncios()["Calle Sur 1"]
+        for texto in ("S.L.", "SL", "Inmobiliaria Sur"):
+            self.assertNotIn(texto, str(anuncio["empresa_nombre"]))
+
+    def test_la_que_no_lo_ha_puesto_se_anuncia_con_la_marca_del_grupo(self):
+        """En blanco no se cae a la razón social: se cae a lo que había siempre."""
+        self.assertEqual(self._anuncios()["Calle Poniente 2"]["empresa_nombre"],
+                         "Grupo Modernia")
+
+    def test_el_nombre_comercial_se_guarda_desde_la_ficha_de_la_empresa(self):
+        """Si no se puede editar, el campo no sirve de nada."""
+        self.assertIn('name="nombre_comercial"',
+                      (RAIZ / "web" / "index.html").read_text(encoding="utf-8"))
+        self.assertIn('set("nombre_comercial"',
+                      (RAIZ / "web" / "app.js").read_text(encoding="utf-8"))
+        self.assertIn('if "nombre_comercial" in payload:', self.SERVER)
+        self.assertIn("COALESCE(nombre_comercial, '') AS nombre_comercial", self.SERVER)
 
     def test_y_con_su_logotipo(self):
         self.assertEqual(self._anuncios()["Calle Sur 1"]["empresa_logo"], LOGO_REAL)

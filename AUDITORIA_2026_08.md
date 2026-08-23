@@ -28,6 +28,33 @@ de falsos positivos que llegué a dar por buenos. Dos ejemplos que cuestan tiemp
 **Regla:** antes de afirmar un fallo, ejecutarlo. Y si el barrido es estático, comprobar
 que reconoce lo que dice reconocer.
 
+### Una simulación con datos inventados demuestra lo que tú has inventado
+
+El caso más caro de la campaña, y salió al final. Al enganchar
+`/api/portal_empresa_logo` lo probé con una empresa de mentira cuyo logotipo era
+`/assets/sur.png`, un fichero que no existe. Dio 404, lo achaqué al fichero inventado
+—correctamente— y di el endpoint por bueno.
+
+No lo era. Dentro tenía un fallo que nunca se había ejecutado, porque hasta ese día la
+ruta no era alcanzable: le pasaba a `_normalize_s3_key` la URI entera en vez de la clave,
+así que la comprobación del prefijo quedaba en falso y **ningún logotipo de S3 llegaba a
+servirse**. En producción todas las empresas con logotipo propio lo tienen en S3. El
+resultado: el escaparate público pasó de enseñar el logotipo del grupo a enseñar un
+hueco, y estuvo así hasta que lo miré en producción.
+
+Dos reglas, las dos de lo mismo:
+
+- **Los datos de la simulación tienen que existir.** Un 404 que se explica por tu propio
+  dato de mentira no distingue «el dato no está» de «el código está roto». Poner un
+  fichero real habría enseñado el fallo en el sitio, no en producción.
+- **Al enganchar código que nunca se ha ejecutado, dar por hecho que está roto.** Llevaba
+  escrito y sin usar; nadie lo había probado nunca. Que compile y que lea bien no es
+  haberlo ejecutado.
+
+Y una tercera, de después: **al publicar algo que cambia lo que se ve desde fuera,
+mirarlo desde fuera.** Bastó un `curl` al escaparate público con el commit ya desplegado.
+Ahí salieron los dos problemas de golpe: el logotipo roto y el nombre.
+
 ### Una prueba que nunca ha fallado no demuestra nada
 
 El patrón más productivo de toda la campaña fue **auditar los guardarraíles**, no el
@@ -60,7 +87,7 @@ llamadas: sólo aparecen si compruebas el resultado, no la respuesta.
 
 ## 2. Lo que se encontró
 
-Diecinueve cambios publicados. Ordenados por lo que le pasaba a quien lo sufría.
+Veintidós cambios publicados. Ordenados por lo que le pasaba a quien lo sufría.
 
 ### Se perdían datos
 
@@ -105,8 +132,10 @@ derrama grande es legítima y un tope de negocio se acaba quedando corto.
 
 | Qué pasaba | Cómo queda |
 |---|---|
-| Todo lo publicado salía anunciado por **«Grupo Modernia»**, fuera de quien fuera. La consulta ya traía `e.nombre` y `e.logo_url` de la empresa dueña; el armador de la respuesta pública no los miraba. Hoy no se nota porque publica una sola agencia. | Cada piso sale con el nombre y el logotipo de **su** agencia, y sólo se cae a la marca de la casa si no tiene |
+| Todo lo publicado salía anunciado por **«Grupo Modernia»**, fuera de quien fuera. La consulta ya traía `e.nombre` y `e.logo_url` de la empresa dueña; el armador de la respuesta pública no los miraba. Hoy no se nota porque publica una sola agencia. | Cada piso sale con la marca y el logotipo de **su** agencia |
 | `/api/portal_empresa_logo` estaba escrito y no era alcanzable desde ninguna ruta pública. | Dado de alta en la lista pública de GET, y sólo responde si esa empresa tiene algo publicado: no sirve para pasear el directorio de empresas desde fuera |
+| Dentro de ese endpoint, **ningún logotipo de S3 se servía**: se le pasaba la URI entera a `_normalize_s3_key`, que espera la clave. Nunca se había notado porque la ruta no era alcanzable; en cuanto lo fue, dejó el escaparate sin logotipo. | Se trocea como en el generador de informes. Y si aun así no se puede servir, se enseña la marca de la casa: quien mira el anuncio no tiene la culpa |
+| Al publicarlo, los seis anuncios pasaron a decir **«Estudio Velazquez 2012 SL»**: es la empresa dueña, correcto en la base y malo en un escaparate. | Un campo **nombre comercial** en la ficha de la empresa, editable. Vacío = «Grupo Modernia», que es lo que había siempre |
 
 ### Seguridad
 
