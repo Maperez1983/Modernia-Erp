@@ -135,11 +135,14 @@ class AlCerrarLaVentaTests(unittest.TestCase):
         self.assertAlmostEqual(float(cierre["importe_final"]), 285000.0, places=2)
         self.assertAlmostEqual(float(cierre["honorarios"]), 8550.0, places=2)
 
-    def test_un_alquiler_queda_como_alquiler(self):
-        """Antes volvía a «Noticia», o sea al circuito, como si no se hubiera alquilado."""
+    def test_un_alquiler_queda_como_alquilado(self):
+        """Antes volvía a «Noticia», o sea al circuito, como si no se hubiera alquilado.
+
+        Y la fase se llamaba «Alquiler», que se lee como el escaparate; ahora dice
+        «Alquilado», que es lo que ha pasado."""
         estado, cuerpo, _ = self._cierra(tipo="alquiler")
         self.assertEqual(estado, 200, cuerpo)
-        self.assertEqual(self._estado(), "Alquiler")
+        self.assertEqual(self._estado(), "Alquilado")
 
     def test_si_vuelve_a_salir_a_la_venta_se_retoma(self):
         self._cierra()

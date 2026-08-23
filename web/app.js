@@ -37196,7 +37196,7 @@ const isValidDocumento = (value) => {
 
 // CRM Inmobiliario: 5 fases principales (el resto se trata como histórico/extra).
 const CRM_ETAPAS_MAIN = ["Inmueble", "Noticia", "Encargo", "Propuesta", "Vendido"];
-const CRM_ETAPAS_EXTRA = ["Cerrado negativamente", "Alquiler"];
+const CRM_ETAPAS_EXTRA = ["Cerrado negativamente", "Alquilado"];
 const CRM_ETAPAS = [...CRM_ETAPAS_MAIN, ...CRM_ETAPAS_EXTRA];
 
 const normalizeCrmMainEtapa = (value) => {
@@ -37209,7 +37209,8 @@ const normalizeCrmMainEtapa = (value) => {
     return "Vendido";
   }
   if (key.includes("cerrado")) return "Cerrado negativamente";
-  if (key.includes("alquil")) return "Alquiler";
+  // «Alquiler» se leía como «está en alquiler» cuando quiere decir «está alquilado».
+  if (key.includes("alquil")) return "Alquilado";
   return "Inmueble";
 };
 
@@ -40511,7 +40512,7 @@ const syncInmuebleArchivePendingButton = () => {
   const stage = resolveInmuebleMainEtapa(inmueble, captacion);
   const enabled = Boolean(state.currentInmuebleId);
   // Mostrar solo cuando el inmueble ya está en cierre positivo (Vendido/Alquiler) o cierre negativo.
-  const visible = ["Vendido", "Alquiler", "Cerrado negativamente"].includes(stage);
+  const visible = ["Vendido", "Alquilado", "Cerrado negativamente"].includes(stage);
   inmuebleArchivePendingBtn.classList.toggle("hidden", !visible);
   inmuebleArchivePendingBtn.disabled = !enabled;
 };
@@ -54459,7 +54460,7 @@ const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") =>
     compraventa: "Vendido",
     vendido: "Vendido",
     cerrado_negativamente: "Cerrado negativamente",
-    alquiler: "Alquiler",
+    alquiler: "Alquilado",
   }[destino] || destino;
   const ok = window.confirm(
     `¿Convertir la captación "${rowMap.direccion || rowMap.propietario || captacionId}" a ${destinationLabel}?`
@@ -54543,7 +54544,7 @@ const runCurrentInmuebleConversion = (destino) => {
     compraventa: "Vendido",
     vendido: "Vendido",
     cerrado_negativamente: "Cerrado negativamente",
-    alquiler: "Alquiler",
+    alquiler: "Alquilado",
   }[destino] || destino;
   const ok = window.confirm(
     `¿Convertir el inmueble "${inmueble.direccion || inmueble.referencia || inmuebleId}" a ${destinationLabel}?`
@@ -54830,11 +54831,29 @@ const loadCrmClientes = async ({ force = false } = {}) => {
 	  } catch (e) {}
 	};
 
-const resolveCaptacionCodePrefix = (etapa) => {
+// La sigla que va delante de la dirección es lo ÚNICO que dice el estado en la tabla
+// densa: no hay columna de estado. Antes devolvía "EN" para todo lo que no fuera
+// Inmueble o Noticia, así que un piso vendido, uno alquilado y uno cerrado en negativo
+// se veían igual que uno en venta. Y hacía falta separar el escaparate del desenlace:
+// «en venta» no es «vendido», y «en alquiler» no es «alquilado».
+const resolveCaptacionCodePrefix = (etapa, operacion = "") => {
+  // Arras y reserva están comprometidas pero la venta no se ha consumado. El sistema
+  // las agrupa dentro de «Vendido» para el embudo —eso viene de antes—, así que hay que
+  // mirar la fase tal como está escrita antes de normalizarla, o un piso reservado se
+  // anuncia como vendido.
+  const faseCruda = normalizeSimple(etapa || "");
+  if (faseCruda.includes("arras")) return "AR";
+  if (faseCruda.includes("reserv")) return "RS";
   const stage = normalizeCrmMainEtapa(etapa || "") || "Inmueble";
+  const esAlquiler = normalizeSimple(operacion || "").includes("alquil");
   if (stage === "Inmueble") return "IN";
   if (stage === "Noticia") return "NT";
-  return "EN";
+  if (stage === "Vendido") return "VD";
+  if (stage === "Alquilado") return "AQ";
+  if (stage === "Cerrado negativamente") return "CN";
+  // Encargo, Propuesta y Contrato de arras siguen en el escaparate: lo que cambia es
+  // si se vende o se alquila.
+  return esAlquiler ? "EA" : "EV";
 };
 
 const resolveCaptacionDotTone = (row = {}) => {
@@ -54897,7 +54916,7 @@ const buildCrmCaptacionesDenseTableNode = (rows = []) => {
 	    tr.appendChild(dotTd);
 
     const stage = normalizeCrmMainEtapa(row.etapa || "") || "Inmueble";
-    const prefix = resolveCaptacionCodePrefix(stage);
+    const prefix = resolveCaptacionCodePrefix(stage, row.tipo_operacion || row.operacion || "");
     const isVerified = String(row?.noticia_verificada ?? "").trim() === "1";
     const address = String(row.direccion || "").trim() || "-";
     const localidad = [row.poblacion || "", row.provincia || ""].filter(Boolean).join(" · ");
@@ -56250,7 +56269,7 @@ const renderCrmInicioBoard = (pipelineItems = []) => {
       const inmuebleId = String(row.inmueble_id || row.id || "").trim();
       const captacionId = String(row.captacion_id || "").trim();
       const stage = normalizeStage(row.stage || row.estado || "");
-      const codePrefix = resolveCaptacionCodePrefix(stage);
+      const codePrefix = resolveCaptacionCodePrefix(stage, row.tipo_operacion || row.operacion || "");
       const direccion = String(row.direccion || "").trim() || "Sin dirección";
       const propietario = String(row.propietario || row.propietarios || "").trim() || "Propietario pendiente";
       const proxima = String(row.proxima_accion || "").trim() || "Sin próxima acción definida.";
@@ -58706,7 +58725,7 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
 
 		    const inmuebleTd = document.createElement("td");
 		    const stage = normalizeCrmMainEtapa(row?.estado || "") || "Inmueble";
-		    const prefix = resolveCaptacionCodePrefix(stage);
+		    const prefix = resolveCaptacionCodePrefix(stage, row.tipo_operacion || row.operacion || "");
 	    const address = String(row.direccion || "").trim() || "Sin dirección";
 	    inmuebleTd.innerHTML = `<a class="tc-link" href="#" data-open-inmueble="1">${escapeHtml(`${prefix} - ${address}`)}</a>`;
 	    const link = inmuebleTd.querySelector('a[data-open-inmueble]');
@@ -62906,10 +62925,13 @@ const openInmuebleDetail = (id, originView = "", options = {}) => {
 		      syncInmuebleNoticiaTab(inmueble, normalizedCaptacion);
       if (inmuebleTitle) {
         const etapa = resolveInmuebleMainEtapa(inmueble, normalizedCaptacion) || "Inmueble";
-        const tecnoStage = etapa === "Inmueble" || etapa === "Noticia" ? etapa : "Encargo";
-        const codePrefix = resolveCaptacionCodePrefix(tecnoStage);
+        // El título aplastaba todo lo que no fuera Inmueble o Noticia a «Encargo», así
+        // que la ficha de un piso vendido se encabezaba «Encargo · EN -». Se respeta la
+        // fase real, que es lo que la persona necesita leer al abrirla.
+        const codePrefix = resolveCaptacionCodePrefix(
+          etapa, inmueble.tipo_operacion || inmueble.operacion || "");
         const label = inmueble.direccion || inmueble.referencia || "Ficha de inmueble";
-        inmuebleTitle.textContent = `${tecnoStage} · ${codePrefix} - ${label}`;
+        inmuebleTitle.textContent = `${etapa} · ${codePrefix} - ${label}`;
       }
       if (inmuebleSubtitle) {
         inmuebleSubtitle.textContent =

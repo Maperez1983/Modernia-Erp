@@ -26790,7 +26790,11 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
         "vendido": "Vendido",
         "compraventa": "Vendido",
         "cerrado_negativamente": "Cerrado negativamente",
-        "alquiler": "Alquiler",
+        # «Alquiler» se leía como «está en alquiler» cuando quiere decir «está
+        # alquilado»: la misma palabra para el escaparate y para el desenlace. Se
+        # aceptan las dos claves porque la etiqueta nueva vuelve a entrar por aquí.
+        "alquiler": "Alquilado",
+        "alquilado": "Alquilado",
     }.get(destino_key) or {
         "inmueble": "Inmueble",
         "noticia": "Noticia",
@@ -26803,7 +26807,8 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
         "vendido": "Vendido",
         "compraventa": "Vendido",
         "cerrado negativamente": "Cerrado negativamente",
-        "alquiler": "Alquiler",
+        "alquiler": "Alquilado",
+        "alquilado": "Alquilado",
     }.get(destino_norm)
     if not inmueble_id or not destino_label:
         return
@@ -27041,7 +27046,7 @@ def ensure_inmueble_cierres_schema(conn):
 
 
 def create_operacion_for_inmueble_cierre(conn, empresa_id, inmueble_id, tipo_label, now, *, fecha_cierre=None, importe_final=None, honorarios=None, numero_citas=None, nuevo_propietario_id=None, nuevo_propietario=None, notas=None):
-    if tipo_label not in {"Vendido", "Alquiler"}:
+    if tipo_label not in {"Vendido", "Alquilado"}:
         return None
     inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
     if not inmueble:
@@ -27110,7 +27115,7 @@ def create_operacion_for_inmueble_cierre(conn, empresa_id, inmueble_id, tipo_lab
         (
             op_id,
             empresa_id,
-            "alquiler" if tipo_label == "Alquiler" else "venta",
+            "alquiler" if tipo_label == "Alquilado" else "venta",
             "Cerrada",
             "cierre_encargo",
             "CRM inmobiliario",
@@ -27139,7 +27144,7 @@ def create_operacion_for_inmueble_cierre(conn, empresa_id, inmueble_id, tipo_lab
             fecha,
             precio_encargo or None,
             importe_num if tipo_label == "Vendido" else None,
-            importe_num if tipo_label == "Alquiler" else None,
+            importe_num if tipo_label == "Alquilado" else None,
             dias_hasta_venta,
             int(numero_citas) if numero_citas is not None else None,
             honorarios_num,
@@ -27153,7 +27158,7 @@ def create_operacion_for_inmueble_cierre(conn, empresa_id, inmueble_id, tipo_lab
             now,
         ),
     )
-    if tipo_label == "Alquiler":
+    if tipo_label == "Alquilado":
         try:
             conn.execute(
                 """
@@ -27207,7 +27212,8 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
     tipo_label = {
         "vendido": "Vendido",
         "compraventa": "Vendido",
-        "alquiler": "Alquiler",
+        "alquiler": "Alquilado",
+        "alquilado": "Alquilado",
         "cerrado_negativamente": "Cerrado negativamente",
         "cerrado negativamente": "Cerrado negativamente",
     }.get(tipo_key) or {
@@ -27215,11 +27221,11 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
         "alquiler": "Alquiler",
         "cerrado negativamente": "Cerrado negativamente",
     }.get(tipo_norm) or str(tipo or "").strip()
-    if tipo_label not in {"Vendido", "Alquiler", "Cerrado negativamente"}:
+    if tipo_label not in {"Vendido", "Alquilado", "Cerrado negativamente"}:
         # fallback razonable por tipo_operacion
         row = conn.execute("SELECT tipo_operacion FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
         op = normalize_lookup_text((row["tipo_operacion"] if row else "") or "")
-        tipo_label = "Alquiler" if op == "alquiler" else "Vendido"
+        tipo_label = "Alquilado" if op == "alquiler" else "Vendido"
     ensure_inmueble_cierres_schema(conn)
     nuevo_propietario = nuevo_propietario or {}
     nuevo_propietario_id = None
