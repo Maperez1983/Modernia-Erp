@@ -45900,11 +45900,21 @@ def ensure_workspace_product_tables(conn):
         """
     )
     try:
-        # Un propietario no puede tener dos recibos del mismo periodo: emitir dos
-        # veces el mismo mes es la forma más rápida de cobrar dos veces.
+        # Un propietario no puede tener dos recibos del mismo cargo en el mismo mes:
+        # emitirlo dos veces es la forma más rápida de cobrar dos veces.
+        #
+        # El concepto entra en la clave desde 2026-08-23. Antes era sólo el mes, y eso
+        # dejaba a la comunidad sin poder pasar una derrama: agosto ya tenía la cuota
+        # ordinaria, así que el ascensor no cabía. Lo que sí cabe —y es lo que hay que
+        # impedir— es repetir el mismo cargo. El índice viejo se retira: el nuevo es más
+        # ancho, así que nada de lo que ya está guardado lo incumple.
+        conn.execute("DROP INDEX IF EXISTS idx_fincas_recibos_unico")
+    except Exception:
+        pass
+    try:
         conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_recibos_unico "
-            "ON workspace_fincas_recibos (comunidad_id, vecino_id, periodo)"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_recibos_unico_cargo "
+            "ON workspace_fincas_recibos (comunidad_id, vecino_id, periodo, concepto)"
         )
     except Exception:
         pass
@@ -84531,34 +84541,73 @@ class Handler(BaseHTTPRequestHandler):
                     "code": "sin_importe",
                 }, status=400)
                 return
-            ya_emitidos = conn.execute(
-                "SELECT COUNT(*) AS n FROM workspace_fincas_recibos WHERE comunidad_id = ? AND periodo = ?",
-                (comunidad_id, periodo),
-            ).fetchone()
-            if int(row_value(ya_emitidos, "n", 0) or 0):
-                # Volver a emitir el mismo mes es la forma más rápida de cobrar dos
-                # veces: se exige decirlo a propósito y se borra lo pendiente.
-                if str(payload.get("reemitir") or "").strip().lower() not in {"1", "true", "si", "sí"}:
+            concepto = str(payload.get("concepto") or "").strip() or f"Cuota de comunidad {periodo}"
+            # Lo que identifica un cargo dentro de un mes es su concepto, no el mes.
+            # Antes bastaba el mes, y eso dejaba sin salida la derrama: emitirla en
+            # agosto chocaba con la cuota de agosto, y la única puerta que ofrecía el
+            # aviso —«reemitir»— borraba los recibos pendientes del mes. Quien seguía
+            # esa instrucción cobraba los 12.000 € de la derrama y se dejaba sin cobrar
+            # los 1.200 € de la cuota ordinaria, con un 200 OK y sin más aviso.
+            mismos = int(row_value(conn.execute(
+                "SELECT COUNT(*) AS n FROM workspace_fincas_recibos "
+                "WHERE comunidad_id = ? AND periodo = ? AND concepto = ?",
+                (comunidad_id, periodo, concepto),
+            ).fetchone(), "n", 0) or 0)
+            otros = conn.execute(
+                "SELECT concepto, COUNT(*) AS n, COALESCE(SUM(importe), 0) AS total "
+                "FROM workspace_fincas_recibos "
+                "WHERE comunidad_id = ? AND periodo = ? AND concepto <> ? "
+                "GROUP BY concepto ORDER BY concepto",
+                (comunidad_id, periodo, concepto),
+            ).fetchall()
+            quiere_reemitir = str(payload.get("reemitir") or "").strip().lower() in {"1", "true", "si", "sí"}
+            if mismos:
+                # Repetir el mismo cargo del mismo mes es la forma más rápida de cobrar
+                # dos veces: se exige decirlo a propósito, y se rehace sólo ese cargo.
+                if not quiere_reemitir:
                     json_response(
                         self,
-                        {"error": f"Ya hay recibos emitidos de {periodo}. Marca «reemitir» si quieres rehacerlos.",
+                        {"error": f"Ya hay {mismos} recibos de {periodo} con el concepto "
+                                  f"«{concepto}». Marca «reemitir» para rehacer los que sigan "
+                                  f"pendientes de ese concepto; el resto del mes no se toca.",
                          "code": "ya_emitido"},
                         status=409,
                     )
                     return
                 conn.execute(
-                    "DELETE FROM workspace_fincas_recibos WHERE comunidad_id = ? AND periodo = ? AND estado = 'Pendiente'",
-                    (comunidad_id, periodo),
+                    "DELETE FROM workspace_fincas_recibos "
+                    "WHERE comunidad_id = ? AND periodo = ? AND concepto = ? AND estado = 'Pendiente'",
+                    (comunidad_id, periodo, concepto),
                 )
-            concepto = str(payload.get("concepto") or "").strip() or f"Cuota de comunidad {periodo}"
+            elif otros and not _quiere_confirmar(payload):
+                # Hay recibos de ese mes, pero de otra cosa. Puede ser una derrama que se
+                # suma —lo normal— o que quien emite haya cambiado la redacción del
+                # concepto y crea que está rehaciendo la cuota. No se adivina: se dice
+                # qué hay y se pregunta.
+                detalle = "; ".join(
+                    f"{int(row_value(o, 'n', 0) or 0)} de «{row_value(o, 'concepto', '')}» "
+                    f"por {format_export_money(parse_money_value(row_value(o, 'total', 0)))}"
+                    for o in otros)
+                json_response(
+                    self,
+                    {"error": f"En {periodo} ya hay recibos de otro concepto ({detalle}). "
+                              f"Si «{concepto}» es un cargo aparte —una derrama—, confírmalo y "
+                              f"se suma a lo que ya hay. Si querías rehacer aquéllos, emítelos "
+                              f"con su mismo concepto.",
+                     "code": "otro_cargo_en_el_mes",
+                     "requiere_confirmacion": True},
+                    status=409,
+                )
+                return
             reparto, por_partes = reparte_por_coeficiente(total, propietarios)
             creados = 0
             sin_iban = []
             for vecino, importe in reparto:
                 vecino_id = row_value(vecino, "id", "")
                 existe = conn.execute(
-                    "SELECT id FROM workspace_fincas_recibos WHERE comunidad_id = ? AND vecino_id = ? AND periodo = ? LIMIT 1",
-                    (comunidad_id, vecino_id, periodo),
+                    "SELECT id FROM workspace_fincas_recibos "
+                    "WHERE comunidad_id = ? AND vecino_id = ? AND periodo = ? AND concepto = ? LIMIT 1",
+                    (comunidad_id, vecino_id, periodo, concepto),
                 ).fetchone()
                 if existe:
                     continue

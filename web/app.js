@@ -24414,9 +24414,17 @@ const renderWorkspaceFincasCommunityFicha = async () => {
         try {
           res = await postJsonWithDbRetry("/api/workspace_fincas_recibos_emitir", cuerpo);
         } catch (err) {
-          if (!/Ya hay recibos emitidos/.test(String(err?.message || ""))) throw err;
-          if (!window.confirm(`Ya hay recibos de ${cuerpo.periodo}. ¿Rehacer los que sigan pendientes?`)) { di(""); return; }
-          res = await postJsonWithDbRetry("/api/workspace_fincas_recibos_emitir", { ...cuerpo, reemitir: "1" });
+          // Dos situaciones distintas y dos preguntas distintas. Antes había una sola,
+          // «¿rehacer los pendientes?», y decir que sí a una derrama borraba la cuota
+          // ordinaria del mes.
+          const aviso = String(err?.message || "");
+          if (/Ya hay \d+ recibos/.test(aviso)) {
+            if (!window.confirm(`${aviso}\n\n¿Los rehago?`)) { di(""); return; }
+            res = await postJsonWithDbRetry("/api/workspace_fincas_recibos_emitir", { ...cuerpo, reemitir: "1" });
+          } else if (/ya hay recibos de otro concepto/i.test(aviso)) {
+            if (!window.confirm(`${aviso}\n\n¿Lo emito como cargo aparte?`)) { di(""); return; }
+            res = await postJsonWithDbRetry("/api/workspace_fincas_recibos_emitir", { ...cuerpo, confirmado: true });
+          } else throw err;
         }
         const avisos = [`${res.creados} recibos por ${euroFormatter.format(res.total)}.`];
         if (res.reparto_por_partes) avisos.push("Nadie tenía coeficiente: se ha repartido a partes iguales.");
