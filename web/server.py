@@ -116915,7 +116915,36 @@ def main():
     parser.add_argument("--host", default="0.0.0.0", help="Host.")
     env_port = os.environ.get("PORT")
     parser.add_argument("--port", default=(env_port or "8000"), help="Port.")
+    parser.add_argument(
+        "--permitir-produccion", action="store_true",
+        help="Arrancar aunque la base sea la de producción. Sólo hace falta fuera de la nube.")
     args = parser.parse_args()
+
+    # `web/db_backend.py` lee el .env de la raíz al importarse, y ahí está el
+    # DATABASE_URL de producción. Levantar el CRM en un portátil abría, sin decir nada,
+    # un CRM local escribiendo en la base real: misma pantalla, mismos botones, datos de
+    # verdad. En la nube eso es lo correcto y por eso sólo se pregunta fuera de ella.
+    if db_is_postgres_enabled() and not os.environ.get("RENDER") and not args.permitir_produccion:
+        destino = ""
+        try:
+            crudo = (os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or "").strip()
+            partes = urllib.parse.urlparse(crudo)
+            # Sin usuario ni contraseña: esto se imprime en una terminal.
+            destino = (f" ({partes.hostname}/{(partes.path or '').lstrip('/')})"
+                       if partes.hostname else "")
+        except Exception:
+            destino = ""
+        print(
+            f"\n  ALTO: esto va a conectarse a la base de PRODUCCIÓN{destino}.\n"
+            f"\n  Estás fuera de la nube, así que probablemente no es lo que quieres:"
+            f"\n  cualquier cosa que toques aquí la tocas en los datos de verdad.\n"
+            f"\n  · Para trabajar contra una base de prueba, vacía DATABASE_URL y"
+            f"\n    POSTGRES_URL ANTES de arrancar (el .env se lee al importar)."
+            f"\n  · Si de verdad quieres entrar en producción, añade"
+            f"\n    --permitir-produccion.\n",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
     try:
         raw_port = str(args.port or "").strip()
         if raw_port in {"$PORT", "${PORT}", "PORT"}:

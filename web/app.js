@@ -75367,6 +75367,12 @@ const renderGestoriaBancoMovimientos = (rows = []) => {
     if (gestoriaBancoMovimientosInfo) gestoriaBancoMovimientosInfo.textContent = "";
     return;
   }
+  // Sin `ui-table` esta tabla se quedaba fuera del sistema de diseño: en un móvil no
+  // se apilaba en tarjetas como las demás ni tenía scroll —el propio sistema lo
+  // desactiva por debajo de 760 px—, así que la columna de punteo salía partida y la
+  // del asiento no se alcanzaba. Justo las dos que se vienen a mirar aquí.
+  const envoltorio = document.createElement("div");
+  envoltorio.className = "ui-table ui-table-scroll";
   const table = document.createElement("table");
   table.innerHTML = `
     <thead>
@@ -75400,18 +75406,19 @@ const renderGestoriaBancoMovimientos = (rows = []) => {
         ? `<span class="ocr-badge media" title="Punteado, pero el emparejamiento automático quedó ${estadoConciliacion || "sin validar"} con ${Math.round(score)} % de confianza. Revísalo.">Por revisar</span>`
         : `<span class="ocr-badge ok">Punteado</span>`;
     tr.innerHTML = `
-      <td>${escapeHtml(row.fecha_operacion || row.fecha_valor || "-")}</td>
-      <td>${escapeHtml(row.concepto || "-")}</td>
-      <td style="white-space:nowrap;">${euroFormatter.format(parseMoneyValue(row.importe || 0))}</td>
-      <td style="white-space:nowrap;">${row.saldo != null ? euroFormatter.format(parseMoneyValue(row.saldo)) : "-"}</td>
-      <td>${escapeHtml([row.banco_nombre, row.iban].filter(Boolean).join(" · ") || "-")}</td>
-      <td>${badge}${punteado ? ` <span class="muted">(${Math.round(score)}%)</span>` : ""}</td>
-      <td>${row.asiento_id ? escapeHtml(row.asiento_referencia || row.asiento_concepto || row.asiento_id) : "-"}</td>
+      <td data-label="Fecha">${escapeHtml(row.fecha_operacion || row.fecha_valor || "-")}</td>
+      <td data-label="Concepto">${escapeHtml(row.concepto || "-")}</td>
+      <td data-label="Importe" style="white-space:nowrap;">${euroFormatter.format(parseMoneyValue(row.importe || 0))}</td>
+      <td data-label="Saldo" style="white-space:nowrap;">${row.saldo != null ? euroFormatter.format(parseMoneyValue(row.saldo)) : "-"}</td>
+      <td data-label="Banco">${escapeHtml([row.banco_nombre, row.iban].filter(Boolean).join(" · ") || "-")}</td>
+      <td data-label="Punteo">${badge}${punteado ? ` <span class="muted">(${Math.round(score)}%)</span>` : ""}</td>
+      <td data-label="Asiento">${row.asiento_id ? escapeHtml(row.asiento_referencia || row.asiento_concepto || row.asiento_id) : "-"}</td>
     `;
     tbody.appendChild(tr);
   });
   gestoriaBancoMovimientosTable.innerHTML = "";
-  gestoriaBancoMovimientosTable.appendChild(table);
+  envoltorio.appendChild(table);
+  gestoriaBancoMovimientosTable.appendChild(envoltorio);
   gestoriaBancoMovimientosTable.querySelectorAll("[data-banco-open-asiento]").forEach((btn) => {
     btn.addEventListener("click", () => openGestoriaAsientoFichaAndScroll(btn.dataset.bancoOpenAsiento || ""));
   });

@@ -12044,6 +12044,21 @@ body.crm-context-gestoria #gestoriaDashboardSection .dashboard-kpis.grid {
   color: light-dark(#b33b2e, #D69F9A);
 }
 
+/* `ok` y `danger` se usaban en ocho sitios —punteo bancario, cuenta principal,
+   validación de asientos— y no existían aquí: salían como texto negro sin píldora, así
+   que «Punteado» y «Pendiente» se veían exactamente igual y sólo los distinguía la
+   palabra. Reutilizan la paleta de `alta` y `baja`, que es la que ya estaba pensada
+   para este badge. */
+.ocr-badge.ok {
+  background: light-dark(#e3f3e8, #1A3D3A);
+  color: light-dark(#2f7a50, #9CD3B4);
+}
+
+.ocr-badge.danger {
+  background: light-dark(#fde6e3, #372732);
+  color: light-dark(#b33b2e, #D69F9A);
+}
+
 .ocr-compare-content {
   max-width: 720px;
 }

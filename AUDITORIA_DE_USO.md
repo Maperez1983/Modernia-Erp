@@ -575,9 +575,13 @@ from web import db_backend as D
 assert not D.is_postgres_enabled()  # y comprobarlo, no suponerlo
 ```
 
-Merece la pena decidir si el servidor debe **negarse a arrancar contra Postgres sin un
-`--permitir-produccion` explícito**. No se ha hecho aquí porque puede haber quien
-depure con datos reales a propósito, y eso es una decisión del cliente, no del auditor.
+**Ya hay candado** (decidido por el cliente el 2026-08-24). El servidor se niega a
+arrancar contra Postgres y dice a qué host y a qué base iba a entrar —sin usuario ni
+contraseña, que esto acaba en un registro—. No se activa en tres casos: en la nube
+(se reconoce por `RENDER`, la variable que ya usa el resto del código), con SQLite, y
+si se pasa `--permitir-produccion` a propósito.
+
+Prueba: `tests/test_el_candado_de_produccion.py`.
 
 ## Contrastar la pantalla con la base (`contrasta_pantalla_con_la_base.py`)
 
@@ -612,10 +616,31 @@ Antes ese pie decía «Punteados 3». Es la forma de auditar la pantalla que ha 
 más fiable: determinista, sin depender de que el navegador esté visible, y comprobando
 el resultado en vez del código fuente.
 
-Lo que sigue sin cubrirse es la **maquetación**: que la columna esté donde toca, que el
-ámbar se distinga del verde en pantalla, que quepa en un móvil. Eso necesita ojos. Del
-recorrido con navegador en esta sesión se llegó hasta: la aplicación carga, el acceso
-funciona y las 27 llamadas del arranque responden 200.
+### La maquetación, mirada de verdad
+
+Se montó la tabla real con la hoja de estilos real en una página suelta y se miró en
+escritorio, en móvil y en modo oscuro. Salieron dos cosas, y ninguna se ve leyendo código.
+
+**Las etiquetas verde y roja no existían.** El front pinta `ocr-badge ok` y
+`ocr-badge danger` en ocho sitios —punteo bancario, cuenta principal, validación de
+asientos— y la hoja de estilos sólo define `alta`, `media` y `baja`. Resultado: esas ocho
+salían como **texto negro sin píldora**, así que «Punteado» y «Pendiente» se veían
+exactamente igual y sólo los distinguía la palabra.
+
+Conviene corregir aquí algo que dijeron los commits anteriores: el punteo con cero de
+confianza **nunca salió en verde**. Salía en negro, igual que el pendiente. El fallo era
+real —los estados no se distinguían— pero el color no.
+
+**La tabla se salía de la pantalla en un móvil.** El sistema de diseño resuelve eso
+apilando las filas en tarjetas, pero sólo para `.ui-table`, y esta tabla se pintaba sin
+esa clase ni `data-label` en las celdas. Por debajo de 760 px el propio sistema desactiva
+el scroll horizontal, así que la columna de punteo salía partida y la del asiento no se
+alcanzaba: justo las dos que se vienen a mirar aquí.
+
+Las dos arregladas y comprobadas a ojo en las tres vistas. Queda apuntado que **ninguna
+tabla pintada por JavaScript lleva `ui-table`** —`ui-table-scroll` aparece 3 veces en el
+HTML y 0 en `app.js`—: se arregló la del punteo, que es la que se estaba auditando, no
+las demás.
 
 ## Qué NO cubre esto todavía
 
