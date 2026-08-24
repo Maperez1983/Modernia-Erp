@@ -313,7 +313,7 @@ def main():
     conn.execute("UPDATE workspace_fincas_juntas SET segunda_convocatoria = 0 WHERE id = ?",
                  (junta,))
     conn.commit()
-    for vecino in ("v0", "v2", "v3"):          # 40 + 15 + 15 = 70 %, 3 de 5 = 60 %
+    for vecino in ("v0", "v2", "v4"):          # presentes o representados, no el ausente
         _, rec, _ = pide("/api/workspace_fincas_junta_voto", {
             "workspace_id": ws, "acuerdo_id": ids["Instalar ascensor (mejora no necesaria)"],
             "vecino_id": vecino, "voto": "Favor"})
@@ -323,7 +323,7 @@ def main():
           f"({asc['articulo']}) · aprobado: {asc['aprobado']}")
     comprueba("el ascensor sale con tres quintos por las dos medidas",
               asc["aprobado"] is True, asc)
-    for vecino in ("v0", "v1", "v2", "v3"):    # falta Inés: no es unanimidad
+    for vecino in ("v0", "v2", "v4"):          # falta Julián, que está ausente
         _, rec, _ = pide("/api/workspace_fincas_junta_voto", {
             "workspace_id": ws, "acuerdo_id": ids["Modificar los estatutos"],
             "vecino_id": vecino, "voto": "Favor"})
@@ -332,6 +332,79 @@ def main():
           f"{est['favor_coeficiente']} % cuota · {est['mayoria_etiqueta']} "
           f"· aprobado: {est['aprobado']}")
     comprueba("los estatutos NO salen sin unanimidad", est["aprobado"] is False, est)
+
+    # ------------------------------------------- 5b. el cómputo de ausentes (art. 17.8)
+    print("\n=== 5b. Los estatutos: faltan dos ausentes por manifestarse")
+    est = [a for a in rec["recuento"]["acuerdos"] if "estatutos" in a["titulo"]][0]
+    print(f"       ausentes que se sumarían: {est['ausentes_pendientes']} "
+          f"({est['ausentes_pendientes_coeficiente']} % de cuota)")
+    print(f"       con ellos a favor: {est['favor_con_ausentes_propietarios']} % cabezas, "
+          f"{est['favor_con_ausentes_coeficiente']} % cuota → "
+          f"aprobado: {est['aprobado_con_ausentes']}")
+    comprueba("se cuenta a los ausentes que faltan por contestar",
+              est["ausentes_pendientes"] >= 1, est.get("ausentes_pendientes"))
+    comprueba("sin fecha de comunicación del acta, el punto NO es firme",
+              est["firme"] is False and not est["plazo_ausentes"]["acta_notificada"],
+              est["plazo_ausentes"])
+
+    print("\n=== 5c. Se comunica el acta: arrancan los 30 días naturales")
+    _, rec, _ = pide("/api/workspace_fincas_junta_notificar_acta",
+                     {"workspace_id": ws, "junta_id": junta, "fecha": "2026-09-20"})
+    est = [a for a in rec["recuento"]["acuerdos"] if "estatutos" in a["titulo"]][0]
+    print(f"       acta comunicada el {est['plazo_ausentes']['acta_notificada']}, "
+          f"el plazo vence el {est['plazo_ausentes']['vence']}")
+    comprueba("el plazo vence 30 días naturales después",
+              est["plazo_ausentes"]["vence"] == "2026-10-20", est["plazo_ausentes"])
+    comprueba("con el plazo abierto sigue sin ser firme", est["firme"] is False,
+              est["plazo_ausentes"])
+
+    print("\n=== 5d. Julián, que no fue, escribe diciendo que no está de acuerdo")
+    estado, rec, _ = pide("/api/workspace_fincas_junta_discrepancia",
+                          {"workspace_id": ws, "acuerdo_id": ids["Modificar los estatutos"],
+                           "vecino_id": "v3", "discrepa": "1", "medio": "Burofax"})
+    est = [a for a in rec["recuento"]["acuerdos"] if "estatutos" in a["titulo"]][0]
+    comprueba("su discrepancia se anota", est["ausentes_discrepan"] == 1, est)
+    comprueba("y deja de sumar a favor", est["ausentes_pendientes"] == 0, est)
+    comprueba("con ella en contra, la unanimidad ya no sale",
+              est["aprobado_con_ausentes"] is False, est["aprobado_con_ausentes"])
+    comprueba("y el punto queda firme: ya no puede cambiar", est["firme"] is True, est)
+
+    print("       Y a quien SÍ asistió no se le puede anotar una discrepancia:")
+    estado, r, _ = pide("/api/workspace_fincas_junta_discrepancia",
+                        {"workspace_id": ws, "acuerdo_id": ids["Modificar los estatutos"],
+                         "vecino_id": "v0", "discrepa": "1"})
+    comprueba("se rechaza, porque el 17.8 es sólo para ausentes", estado == 409,
+              f"HTTP {estado} · {str(r.get('error'))[:80]}")
+    # Se retira para seguir con el resto de la simulación.
+    pide("/api/workspace_fincas_junta_discrepancia",
+         {"workspace_id": ws, "acuerdo_id": ids["Modificar los estatutos"],
+          "vecino_id": "v3", "discrepa": "0"})
+
+    print("\n=== 5e. Vence el plazo sin que el otro ausente diga nada")
+    conn.execute("UPDATE workspace_fincas_juntas SET acta_notificada = '2026-06-01' WHERE id = ?",
+                 (junta,))
+    conn.commit()
+    _, rec, _ = pide("/api/workspace_fincas_junta_asistencia",
+                     {"workspace_id": ws, "junta_id": junta, "vecino_id": "v0", "asiste": "1"})
+    est = [a for a in rec["recuento"]["acuerdos"] if "estatutos" in a["titulo"]][0]
+    comprueba("cerrado el plazo, el punto queda firme", est["firme"] is True,
+              est["plazo_ausentes"])
+    asc = [a for a in rec["recuento"]["acuerdos"] if "ascensor" in a["titulo"]][0]
+    comprueba("y el ascensor también", asc["firme"] is True, asc["plazo_ausentes"])
+
+    print("\n=== 5f. A las energías renovables NO se les aplica el cómputo")
+    pide("/api/workspace_fincas_junta_acuerdo", {
+        "workspace_id": ws, "junta_id": junta, "titulo": "Placas solares",
+        "tipo_acuerdo": "energias_telecom", "orden": 4})
+    solar_id = [a["id"] for a in fresco(
+        "SELECT id, titulo FROM workspace_fincas_junta_acuerdos WHERE junta_id = ?", (junta,))
+        if "solares" in a["titulo"]][0]
+    _, rec, _ = pide("/api/workspace_fincas_junta_voto", {
+        "workspace_id": ws, "acuerdo_id": solar_id, "vecino_id": "v0", "voto": "Favor"})
+    solar = [a for a in rec["recuento"]["acuerdos"] if "solares" in a["titulo"]][0]
+    comprueba("el 17.1 queda fuera del cómputo de ausentes",
+              solar["computa_ausentes"] is False and solar["ausentes_pendientes"] == 0, solar)
+    comprueba("y por eso es firme desde el primer día", solar["firme"] is True, solar)
 
     # -------------------------------------------------------------------- 6. el acta
     print("\n=== 6. Se levanta el acta")
@@ -348,7 +421,9 @@ def main():
                             ("el apartado de quién no vota", "sin derecho de voto"),
                             # Sin salto de línea en medio: el PDF parte las frases largas.
                             ("y sobre cuánto se han medido las mayorías",
-                             "sobre 85,00 % de coeficiente")):
+                             "sobre 85,00 % de coeficiente"),
+                            ("el cómputo de ausentes", "art. 17.8 LPH"),
+                            ("y hasta cuándo corre el plazo", "el plazo termina el")):
         comprueba(f"el acta recoge {etiqueta}", aguja.lower() in acta.lower(),
                   "" if aguja.lower() in acta.lower() else f"no aparece {aguja!r}")
 

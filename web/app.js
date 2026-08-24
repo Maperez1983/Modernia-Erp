@@ -24494,6 +24494,11 @@ const renderWorkspaceFincasCommunityFicha = async () => {
           <input type="checkbox" data-segunda ${r.asistencia?.segunda_convocatoria ? "checked" : ""} />
           <span>Segunda convocatoria — las mayorías se cuentan sobre los asistentes (LPH art. 17.7)</span>
         </label>
+        <label class="fincas-extra" style="max-width:520px;">
+          <span>Acta comunicada el</span>
+          <input type="date" data-acta-notificada value="${escapeHtml(String(r.acuerdos?.[0]?.plazo_ausentes?.acta_notificada || ""))}" />
+          <span class="muted">Desde ese día corren los 30 naturales del cómputo de ausentes (art. 17.8).</span>
+        </label>
         <p class="muted">El quórum lo decide quien preside: aquí solo están las cifras.</p>
         <h4>Asistencia</h4>
         <div class="workspace-billing-list">
@@ -24537,6 +24542,26 @@ const renderWorkspaceFincasCommunityFicha = async () => {
               </select>
             </label>
             ${ac.articulo ? `<div class="muted">Según ${escapeHtml(ac.articulo)}.</div>` : ""}
+            ${ac.computa_ausentes && ac.ausentes_pendientes ? `
+              <div class="muted" style="border-left:3px solid var(--acento,#888);padding-left:.6rem;">
+                <strong>Pendiente del cómputo de ausentes (art. 17.8).</strong>
+                ${ac.ausentes_pendientes} ausente${ac.ausentes_pendientes === 1 ? "" : "s"}
+                (${Number(ac.ausentes_pendientes_coeficiente || 0).toFixed(2)} % de coeficiente)
+                no ${ac.ausentes_pendientes === 1 ? "ha" : "han"} manifestado discrepancia.
+                Contándolos a favor: ${Number(ac.favor_con_ausentes_propietarios || 0).toFixed(2)} % de
+                propietarios y ${Number(ac.favor_con_ausentes_coeficiente || 0).toFixed(2)} % de coeficiente
+                → <strong>${ac.aprobado_con_ausentes === true ? "APROBADO" : ac.aprobado_con_ausentes === false ? "seguiría sin aprobarse" : "sin mayoría asignada"}</strong>.
+                ${ac.plazo_ausentes?.acta_notificada
+                  ? `Plazo hasta el ${escapeHtml(ac.plazo_ausentes.vence)}${Number.isFinite(ac.plazo_ausentes.dias_restantes) ? ` (${ac.plazo_ausentes.dias_restantes} días)` : ""}.`
+                  : "<strong>No consta la fecha de comunicación del acta: el plazo no ha empezado.</strong>"}
+                <div style="margin-top:.35rem;">Discrepancias recibidas:
+                  ${(ac.ausentes_nominales || []).map((v) => `
+                    <label class="fincas-extra" style="border:0;padding:0;margin-right:.6rem;">
+                      <input type="checkbox" data-discrepa="${escapeHtml(String(ac.id))}" data-discrepante="${escapeHtml(String(v.vecino_id || ""))}" ${v.discrepa ? "checked" : ""} />
+                      <span>${escapeHtml(v.piso || v.nombre || "")}</span>
+                    </label>`).join("") || "<span class='muted'>ninguna</span>"}
+                </div>
+              </div>` : ""}
             <div class="junta-votos">
               ${(r.propietarios || []).map((p) => `
                 <label class="fincas-extra">
@@ -24593,6 +24618,13 @@ const renderWorkspaceFincasCommunityFicha = async () => {
       cuerpo.querySelectorAll("[data-voto]").forEach((el) => el.addEventListener("change", () =>
         manda("/api/workspace_fincas_junta_voto", {
           acuerdo_id: el.dataset.voto, vecino_id: el.dataset.vecino, voto: el.value,
+        })));
+      cuerpo.querySelector("[data-acta-notificada]")?.addEventListener("change", (ev) =>
+        manda("/api/workspace_fincas_junta_notificar_acta", { junta_id: juntaId, fecha: ev.target.value || "" }));
+      cuerpo.querySelectorAll("[data-discrepa]").forEach((el) => el.addEventListener("change", () =>
+        manda("/api/workspace_fincas_junta_discrepancia", {
+          acuerdo_id: el.dataset.discrepa, vecino_id: el.dataset.discrepante,
+          discrepa: el.checked ? "1" : "0",
         })));
       cuerpo.querySelector("[data-segunda]")?.addEventListener("change", (ev) =>
         manda("/api/workspace_fincas_junta_convocatoria", { junta_id: juntaId, segunda: ev.target.checked ? "1" : "0" }));

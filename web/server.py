@@ -45416,6 +45416,28 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_junta_discrepancias (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          junta_id TEXT NOT NULL,
+          acuerdo_id TEXT NOT NULL,
+          vecino_id TEXT NOT NULL,
+          fecha TEXT,
+          medio TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_junta_discrepancia_unica "
+            "ON workspace_fincas_junta_discrepancias (acuerdo_id, vecino_id)"
+        )
+    except Exception:
+        pass
     # El moroso no vota (art. 15.2), pero SÍ vota si antes de empezar la junta ha
     # pagado, ha impugnado judicialmente la deuda o la ha consignado. Eso el CRM no
     # puede saberlo: lo marca quien preside, y esta casilla es ese «sí lo tiene».
@@ -45520,6 +45542,23 @@ def ensure_workspace_product_tables(conn):
         pass
     # En segunda convocatoria el denominador cambia: la mayoría se cuenta sobre los
     # asistentes, no sobre el total de la comunidad (LPH art. 17.7).
+    # Estas tres van aquí y no arriba porque `ensure_column` necesita que la tabla ya
+    # exista: puesto antes del CREATE no añadía nada y el fallo sólo se veía en la
+    # primera pasada, cuando nadie había llamado dos veces a esta función.
+    #
+    # La fecha en que el acta se comunicó a los propietarios (art. 9.1.h y 19.3): el día
+    # desde el que corren los 30 naturales del cómputo de ausentes. Sin ella el plazo no
+    # ha empezado y ningún acuerdo pendiente de ese cómputo es firme.
+    ensure_column(conn, "workspace_fincas_juntas", "acta_notificada", "acta_notificada TEXT")
+    # Si el cómputo de ausentes del art. 17.8 se aplica a ese tipo de acuerdo. No a
+    # todos: el propio artículo lo excluye cuando el coste no se puede repercutir a
+    # quien no votó a favor. Se siembra según la ley y se edita como el resto.
+    ensure_column(conn, "workspace_fincas_tipos_acuerdo", "computa_ausentes",
+                  "computa_ausentes INTEGER NOT NULL DEFAULT 1")
+    # De qué tipo es el acuerdo. Se recibía al crearlo, se usaba para derivar la mayoría
+    # y se tiraba; hace falta guardarlo, porque es lo que dice si a ese punto se le
+    # aplica el cómputo de ausentes.
+    ensure_column(conn, "workspace_fincas_junta_acuerdos", "tipo_acuerdo", "tipo_acuerdo TEXT")
     ensure_column(conn, "workspace_fincas_juntas", "segunda_convocatoria", "segunda_convocatoria INTEGER NOT NULL DEFAULT 0")
     # El artículo 16.2 de la LPH obliga a que la convocatoria diga el lugar y la hora de
     # primera y segunda convocatoria. La tabla solo guardaba la fecha, así que eso había
@@ -55506,7 +55545,9 @@ FINCAS_TIPOS_ACUERDO_DEFECTO = [
     {
         "clave": "mejoras_no_necesarias", "etiqueta": "Nuevas instalaciones o mejoras no necesarias",
         "mayoria_clave": "tres_quintos", "articulo": "LPH art. 17.4",
-        "nota": "Quien vote en contra no queda obligado si su parte supera tres mensualidades ordinarias.",
+        "nota": "Quien vote en contra no queda obligado si su parte supera tres mensualidades "
+                "ordinarias. Si es el caso, quita el cómputo de ausentes: el 17.8 no se aplica "
+                "cuando el coste no se le puede repercutir a quien no votó a favor.",
         "orden": 5,
     },
     {
@@ -55519,6 +55560,9 @@ FINCAS_TIPOS_ACUERDO_DEFECTO = [
         "clave": "energias_telecom", "etiqueta": "Energías renovables o infraestructura de telecomunicaciones",
         "mayoria_clave": "un_tercio", "articulo": "LPH art. 17.1",
         "nota": "El coste lo asumen quienes lo solicitan, no la comunidad entera.",
+        # El 17.8 excluye del cómputo de ausentes los casos en que el coste no se puede
+        # repercutir a quien no votó a favor, y éste es uno.
+        "computa_ausentes": 0,
         "orden": 7,
     },
     {
@@ -55531,6 +55575,8 @@ FINCAS_TIPOS_ACUERDO_DEFECTO = [
         "clave": "recarga_electrica", "etiqueta": "Punto de recarga de vehículo eléctrico (plaza privativa)",
         "mayoria_clave": "", "articulo": "LPH art. 17.5",
         "nota": "No requiere acuerdo: basta comunicación previa a la comunidad. El coste es del interesado.",
+        # Ni hay acuerdo que computar ni coste que repercutir.
+        "computa_ausentes": 0,
         "orden": 9,
     },
 ]
@@ -55553,7 +55599,8 @@ def fetch_workspace_fincas_tipos_acuerdo(conn, workspace_id, *, sembrar=True):
 
     def leer():
         return conn.execute(
-            "SELECT clave, etiqueta, mayoria_clave, articulo, nota, activo, orden "
+            "SELECT clave, etiqueta, mayoria_clave, articulo, nota, activo, orden, "
+            "COALESCE(computa_ausentes, 1) AS computa_ausentes "
             "FROM workspace_fincas_tipos_acuerdo WHERE workspace_id = ? ORDER BY orden, etiqueta",
             (workspace_id,),
         ).fetchall()
@@ -55565,10 +55612,11 @@ def fetch_workspace_fincas_tipos_acuerdo(conn, workspace_id, *, sembrar=True):
             conn.execute(
                 "INSERT INTO workspace_fincas_tipos_acuerdo "
                 "(id, workspace_id, clave, etiqueta, mayoria_clave, articulo, nota, activo, orden, "
-                " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                " computa_ausentes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
                 (os.urandom(16).hex(), workspace_id, item["clave"], item["etiqueta"],
                  item.get("mayoria_clave") or None, item.get("articulo") or None,
-                 item.get("nota") or None, item.get("orden", 0), ahora, ahora),
+                 item.get("nota") or None, item.get("orden", 0),
+                 int(item.get("computa_ausentes", 1)), ahora, ahora),
             )
         try:
             conn.commit()
@@ -55584,6 +55632,8 @@ def fetch_workspace_fincas_tipos_acuerdo(conn, workspace_id, *, sembrar=True):
             "nota": row_value(f, "nota", "") or "",
             "activo": int(row_value(f, "activo", 1) or 0),
             "orden": int(row_value(f, "orden", 0) or 0),
+            # Si a este tipo de acuerdo se le aplica el cómputo de ausentes (art. 17.8).
+            "computa_ausentes": int(row_value(f, "computa_ausentes", 1) or 0),
         }
         for f in filas
     ]
@@ -55746,9 +55796,43 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
         return round(len(ids) / divisor * 100, 4) if divisor else 0.0
 
     mayorias = {m["clave"]: m for m in fetch_workspace_fincas_mayorias(conn, workspace_id)}
+    tipos = {tp["clave"]: tp for tp in fetch_workspace_fincas_tipos_acuerdo(conn, workspace_id)}
+
+    # Cómputo de ausentes (LPH art. 17.8): al propietario ausente debidamente citado que,
+    # informado del acuerdo, no manifieste su discrepancia en 30 días naturales, se le
+    # computa el voto A FAVOR. Es lo que hace que un acuerdo salga «no aprobado» el día de
+    # la junta y sea firme y aprobado un mes después, y no estaba.
+    #
+    # El plazo arranca el día en que se comunicó el acta, no el de la junta: si no consta
+    # la comunicación, el plazo no ha empezado y nada es firme.
+    notificada = str(row_value(junta, "acta_notificada", "") or "")[:10]
+    hoy = datetime.now(timezone.utc).date()
+    vence = None
+    dias_restantes = None
+    if notificada:
+        try:
+            vence = (datetime.strptime(notificada, "%Y-%m-%d").date()
+                     + timedelta(days=FINCAS_DIAS_COMPUTO_AUSENTES))
+            dias_restantes = (vence - hoy).days
+        except Exception:
+            vence = None
+    plazo_cerrado = bool(vence and dias_restantes is not None and dias_restantes < 0)
+
+    # Ausentes con derecho a voto: los que no asistieron ni fueron representados.
+    ausentes = [v for v in coef if v not in asistentes and v not in sin_voto_set]
+    discrepan_por_acuerdo = {}
+    for d in conn.execute(
+        "SELECT acuerdo_id, vecino_id FROM workspace_fincas_junta_discrepancias "
+        "WHERE junta_id = ? AND workspace_id = ?",
+        (junta_id, workspace_id),
+    ).fetchall():
+        discrepan_por_acuerdo.setdefault(row_value(d, "acuerdo_id", ""), set()).add(
+            row_value(d, "vecino_id", ""))
+
     acuerdos = []
     for acuerdo in conn.execute(
-        "SELECT id, orden, titulo, descripcion, mayoria_clave FROM workspace_fincas_junta_acuerdos "
+        "SELECT id, orden, titulo, descripcion, mayoria_clave, tipo_acuerdo "
+        "FROM workspace_fincas_junta_acuerdos "
         "WHERE junta_id = ? AND workspace_id = ? ORDER BY orden",
         (junta_id, workspace_id),
     ).fetchall():
@@ -55787,7 +55871,51 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
             )
             for sentido, ids in votos.items()
         }
+        # El ausente que no discrepa cuenta a favor. Y en cuanto se cuentan ausentes, la
+        # medida deja de ser «sobre los asistentes»: se mide sobre toda la comunidad con
+        # derecho a voto, porque los ausentes ya están dentro del cómputo.
+        tipo_acuerdo = tipos.get(str(row_value(acuerdo, "tipo_acuerdo", "") or ""), {})
+        computa = bool(tipo_acuerdo.get("computa_ausentes", 1)) if tipo_acuerdo else True
+        discrepan = discrepan_por_acuerdo.get(acuerdo_id, set())
+        ya_votaron = set(votos["Favor"]) | set(votos["Contra"]) | set(votos["Abstencion"])
+        se_suman = [a for a in ausentes if a not in discrepan and a not in ya_votaron]
+        con_ausentes = list(votos["Favor"]) + (se_suman if computa else [])
+        pct_coef_ausentes = porcentaje(con_ausentes, True, sobre_asistentes=False)
+        pct_prop_ausentes = porcentaje(con_ausentes, False, sobre_asistentes=False)
+        aprobado_con_ausentes = (None if not mayoria else
+                                 bool(_alcanza(pct_coef_ausentes, mayoria)
+                                      and _alcanza(pct_prop_ausentes, mayoria)))
         acuerdos.append({
+            "computa_ausentes": computa,
+            # Cuántos ausentes se sumarían a favor y cuánta cuota traen.
+            "ausentes_pendientes": len(se_suman) if computa else 0,
+            "ausentes_pendientes_coeficiente": round(sum(coef.get(a, 0.0) for a in se_suman), 4)
+            if computa else 0.0,
+            "ausentes_discrepan": len([d for d in discrepan if d in ausentes]),
+            # TODOS los ausentes con derecho a voto, no sólo los que faltan por
+            # contestar: si sólo salieran los pendientes, marcar una discrepancia haría
+            # desaparecer la casilla y no habría forma de rectificarla.
+            "ausentes_nominales": sorted(
+                ({"vecino_id": a,
+                  "piso": ficha_propietario.get(a, {}).get("piso", ""),
+                  "nombre": ficha_propietario.get(a, {}).get("nombre", ""),
+                  "coeficiente": coef.get(a, 0.0),
+                  "discrepa": a in discrepan,
+                  "suma_a_favor": a in se_suman}
+                 for a in (ausentes if computa else [])),
+                key=lambda x: (x["piso"], x["nombre"])),
+            "favor_con_ausentes_coeficiente": pct_coef_ausentes,
+            "favor_con_ausentes_propietarios": pct_prop_ausentes,
+            "aprobado_con_ausentes": aprobado_con_ausentes,
+            # Firme cuando el resultado ya no puede cambiar: o a ese tipo no se le aplica
+            # el cómputo, o no queda ausente que sumar, o el plazo de 30 días se acabó.
+            "firme": (not computa) or (not se_suman) or plazo_cerrado,
+            "plazo_ausentes": {
+                "acta_notificada": notificada or "",
+                "vence": vence.isoformat() if vence else "",
+                "dias_restantes": dias_restantes,
+                "cerrado": plazo_cerrado,
+            },
             "votos_nominales": nominal,
             "id": acuerdo_id,
             "orden": int(row_value(acuerdo, "orden", 0) or 0),
@@ -57575,6 +57703,11 @@ FINCAS_DIAS_ANTELACION_ORDINARIA = 6
 #: la reunión o dentro de los diez días naturales siguientes (art. 19.2 LPH).
 FINCAS_DIAS_CIERRE_ACTA = 10
 
+#: Días NATURALES que tiene un propietario ausente, desde que se le comunica el acuerdo,
+#: para manifestar su discrepancia. Si no lo hace, su voto se computa como favorable
+#: (LPH art. 17.8). No son hábiles: el artículo dice «naturales».
+FINCAS_DIAS_COMPUTO_AUSENTES = 30
+
 
 def build_convocatoria_junta_pdf(junta, comunidad, acuerdos, morosos, workspace=None, company=None):
     """La convocatoria de la junta, con lo que el artículo 16 de la LPH obliga a poner.
@@ -57866,6 +57999,41 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
             veredicto = "Sin mayoría asignada: el resultado no se dictamina."
         else:
             veredicto = "APROBADO" if acuerdo["aprobado"] else "NO APROBADO"
+        # Cómputo de ausentes (art. 17.8): mientras corra el plazo, el resultado del día
+        # de la junta no es el definitivo. Decirlo aquí es lo que evita que alguien dé
+        # por cerrado un punto que todavía puede cambiar de signo.
+        computo = []
+        plazo = acuerdo.get("plazo_ausentes") or {}
+        if acuerdo.get("computa_ausentes") and int(acuerdo.get("ausentes_pendientes") or 0):
+            pendientes = ", ".join(
+                f"{v.get('nombre', '')} ({v.get('piso') or 'sin piso'}, {format_pct(v.get('coeficiente'), 4)})"
+                for v in (acuerdo.get("ausentes_nominales") or []))
+            con_ellos = ("APROBADO" if acuerdo.get("aprobado_con_ausentes")
+                         else "seguiría NO APROBADO")
+            if plazo.get("cerrado"):
+                veredicto = (f"{veredicto} el día de la junta. Cerrado el plazo del artículo 17.8 "
+                             f"el {plazo.get('vence', '')}, el resultado definitivo es: "
+                             f"{'APROBADO' if acuerdo.get('aprobado_con_ausentes') else 'NO APROBADO'}.")
+            computo = [
+                f"{acuerdo.get('ausentes_pendientes')} propietarios ausentes "
+                f"({format_pct(acuerdo.get('ausentes_pendientes_coeficiente', 0))} de coeficiente) "
+                f"no han manifestado discrepancia: {pendientes}.",
+                (f"Su voto se computa como favorable si no la manifiestan en los "
+                 f"{FINCAS_DIAS_COMPUTO_AUSENTES} días naturales siguientes a la comunicación "
+                 f"del acuerdo (art. 17.8 LPH)."),
+                (f"Acta comunicada el {plazo.get('acta_notificada')}; el plazo termina el "
+                 f"{plazo.get('vence')}."
+                 if plazo.get("acta_notificada")
+                 else "NO CONSTA la fecha de comunicación del acta: el plazo no ha empezado a "
+                      "correr y este punto no es firme."),
+                f"Contando a esos ausentes a favor, el resultado sería: "
+                f"{format_pct(acuerdo.get('favor_con_ausentes_propietarios', 0))} de los "
+                f"propietarios y {format_pct(acuerdo.get('favor_con_ausentes_coeficiente', 0))} "
+                f"de los coeficientes — {con_ellos}.",
+            ]
+            if acuerdo.get("ausentes_discrepan"):
+                computo.append(f"{acuerdo['ausentes_discrepan']} ausentes han manifestado su "
+                               f"discrepancia dentro de plazo y no se computan a favor.")
         # Art. 19.1.f: los nombres de quienes votaron a favor y en contra, con sus
         # cuotas, cuando sea relevante para la validez del acuerdo. Los votos estaban
         # en la base desde siempre y el acta solo imprimía el recuento.
@@ -57885,6 +58053,7 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
                 f"Votaron en contra: {en_contra}." if en_contra else "",
                 f"Se abstuvieron: {abstenciones}." if abstenciones else "",
                 veredicto,
+                *computo,
             ) if linea
         ]))
 
@@ -70661,6 +70830,8 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_junta_asistencia",
             "/api/workspace_fincas_junta_acuerdo",
             "/api/workspace_fincas_junta_voto",
+            "/api/workspace_fincas_junta_notificar_acta",
+            "/api/workspace_fincas_junta_discrepancia",
             "/api/workspace_fincas_mayorias",
             "/api/workspace_fincas_junta_convocatoria",
             "/api/workspace_fincas_presupuesto_anual",
@@ -84922,6 +85093,8 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path in ("/api/workspace_fincas_junta_asistencia",
                              "/api/workspace_fincas_junta_acuerdo",
                              "/api/workspace_fincas_junta_voto",
+                             "/api/workspace_fincas_junta_notificar_acta",
+                             "/api/workspace_fincas_junta_discrepancia",
                              "/api/workspace_fincas_mayorias"):
             session = getattr(self, "auth_session", None) or self._current_session()
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -85011,16 +85184,101 @@ class Handler(BaseHTTPRequestHandler):
                         "orden = ?, updated_at = datetime(?) WHERE id = ? AND workspace_id = ?",
                         (*valores, now, record_id, workspace_id),
                     )
+                    # Sólo si viene: cambiar la mayoría a mano no debe borrar el tipo.
+                    if tipo_clave:
+                        conn.execute(
+                            "UPDATE workspace_fincas_junta_acuerdos SET tipo_acuerdo = ? "
+                            "WHERE id = ? AND workspace_id = ?", (tipo_clave, record_id, workspace_id))
                 else:
                     record_id = os.urandom(16).hex()
                     conn.execute(
                         "INSERT INTO workspace_fincas_junta_acuerdos "
-                        "(id, workspace_id, junta_id, titulo, descripcion, mayoria_clave, orden, created_at, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
-                        (record_id, workspace_id, junta_id, *valores, now, now),
+                        "(id, workspace_id, junta_id, titulo, descripcion, mayoria_clave, orden, "
+                        " tipo_acuerdo, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
+                        (record_id, workspace_id, junta_id, *valores, tipo_clave or None, now, now),
                     )
                 conn.commit()
                 json_response(self, {"ok": True, "id": record_id,
+                                     "recuento": calcular_recuento_junta(conn, workspace_id, junta_id)})
+                return
+
+            if parsed.path == "/api/workspace_fincas_junta_notificar_acta":
+                # El día que se comunicó el acta a los propietarios (art. 9.1.h y 19.3).
+                # De aquí arrancan los 30 días naturales del cómputo de ausentes.
+                junta_id = str(payload.get("junta_id") or "").strip()
+                fecha = str(payload.get("fecha") or "").strip()[:10]
+                if not junta_id:
+                    json_response(self, {"error": "junta_id requerido"}, status=400)
+                    return
+                if fecha:
+                    try:
+                        datetime.strptime(fecha, "%Y-%m-%d")
+                    except Exception:
+                        json_response(self, {"error": f"«{fecha}» no es una fecha (AAAA-MM-DD). "
+                                                      f"De ella dependen los 30 días del art. 17.8."},
+                                      status=400)
+                        return
+                conn.execute(
+                    "UPDATE workspace_fincas_juntas SET acta_notificada = ?, updated_at = datetime(?) "
+                    "WHERE id = ? AND workspace_id = ?",
+                    (fecha or None, now, junta_id, workspace_id),
+                )
+                conn.commit()
+                json_response(self, {"ok": True,
+                                     "recuento": calcular_recuento_junta(conn, workspace_id, junta_id)})
+                return
+
+            if parsed.path == "/api/workspace_fincas_junta_discrepancia":
+                # El ausente que sí manifiesta su discrepancia dentro de los 30 días. Sin
+                # esto, callarse y oponerse dan el mismo resultado.
+                acuerdo_id = str(payload.get("acuerdo_id") or "").strip()
+                vecino_id = str(payload.get("vecino_id") or "").strip()
+                if not acuerdo_id or not vecino_id:
+                    json_response(self, {"error": "acuerdo_id y vecino_id requeridos"}, status=400)
+                    return
+                fila = conn.execute(
+                    "SELECT junta_id FROM workspace_fincas_junta_acuerdos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (acuerdo_id, workspace_id),
+                ).fetchone()
+                if not fila:
+                    json_response(self, {"error": "acuerdo no encontrado"}, status=404)
+                    return
+                junta_id = row_value(fila, "junta_id", "")
+                # El artículo 17.8 habla de los propietarios AUSENTES. Quien asistió
+                # —en persona o representado— ya se manifestó votando, y anotarle una
+                # discrepancia después sería colarle un voto fuera de la junta.
+                asistio = conn.execute(
+                    "SELECT 1 FROM workspace_fincas_junta_asistentes "
+                    "WHERE junta_id = ? AND vecino_id = ? AND COALESCE(asiste, 0) = 1 LIMIT 1",
+                    (junta_id, vecino_id),
+                ).fetchone()
+                if asistio:
+                    json_response(
+                        self,
+                        {"error": "Ese propietario asistió a la junta, en persona o "
+                                  "representado. La discrepancia del artículo 17.8 es sólo "
+                                  "para los ausentes: si quieres cambiar su postura, "
+                                  "cámbiale el voto.",
+                         "code": "no_estaba_ausente"},
+                        status=409,
+                    )
+                    return
+                conn.execute(
+                    "DELETE FROM workspace_fincas_junta_discrepancias WHERE acuerdo_id = ? AND vecino_id = ?",
+                    (acuerdo_id, vecino_id),
+                )
+                if str(payload.get("discrepa") or "").strip().lower() in {"1", "true", "si", "sí"}:
+                    conn.execute(
+                        "INSERT INTO workspace_fincas_junta_discrepancias "
+                        "(id, workspace_id, junta_id, acuerdo_id, vecino_id, fecha, medio, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
+                        (os.urandom(16).hex(), workspace_id, junta_id, acuerdo_id, vecino_id,
+                         str(payload.get("fecha") or "").strip()[:10] or datetime.now().date().isoformat(),
+                         str(payload.get("medio") or "").strip() or None, now, now),
+                    )
+                conn.commit()
+                json_response(self, {"ok": True,
                                      "recuento": calcular_recuento_junta(conn, workspace_id, junta_id)})
                 return
 

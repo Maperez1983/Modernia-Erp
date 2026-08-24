@@ -341,6 +341,41 @@ número que nadie puede comprobar.
 
 Prueba: `tests/test_el_moroso_no_vota.py`.
 
+### Un acuerdo salía «no aprobado» y un mes después estaba aprobado
+
+Al propietario ausente debidamente citado que, informado del acuerdo, **no manifieste su
+discrepancia en 30 días naturales**, se le computa el voto a favor (LPH art. 17.8). Es la
+regla que hace posible la unanimidad en una comunidad donde nunca vienen todos, y el CRM
+no la tenía: dictaminaba con los votos del día de la junta y ahí se quedaba.
+
+Con cinco propietarios y uno que no viene, el acta decía:
+
+```
+Modificar los estatutos · unanimidad · 80 % de propietarios → NO APROBADO
+```
+
+Cuando la verdad es que ese punto queda aprobado el día 31 si el ausente calla. El papel
+decía lo contrario y nadie volvía a mirarlo.
+
+Ahora cada punto lleva las dos cifras —la del día y la del cómputo—, el plazo con su
+fecha de vencimiento y un `firme` que dice si el resultado ya puede darse por cerrado.
+Tres cosas que no se dan por supuestas:
+
+- **El plazo arranca cuando se comunica el acta** (art. 9.1.h y 19.3), no el día de la
+  junta. Sin esa fecha el plazo no ha empezado, y el acta lo dice con todas las letras
+  en vez de dar un resultado que no lo es.
+- **No se aplica a todo.** El propio artículo lo excluye cuando el coste no se puede
+  repercutir a quien no votó a favor —las energías renovables del 17.1, por ejemplo—. Va
+  por tipo de acuerdo, sembrado según la ley y editable como el resto del catálogo.
+- **Discrepar es de ausentes.** A quien asistió, en persona o representado, no se le
+  anota: ya se manifestó votando, y colarle una postura después sería un voto fuera de
+  la junta.
+
+De paso salió que el **tipo del acuerdo no se guardaba**: se recibía al crearlo, se usaba
+para derivar la mayoría y se tiraba. Es justo el dato que dice si el 17.8 aplica.
+
+Prueba: `tests/test_computo_de_ausentes.py`.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
@@ -348,7 +383,7 @@ Conviene tenerlo claro para no dar por auditado lo que no lo está:
 - **Los caminos que se salen de lo normal, salvo en fincas.** Ahí ya están: derrama,
   cambio de propietario, recibo devuelto, censo descuadrado y cierre de ejercicio.
   Quedan los de los otros cinco módulos: anulaciones, devoluciones parciales, alquileres,
-  ausencias, nóminas, cambio de compañía y bajas de póliza. En fincas ya están, incluida la junta entera; queda la impugnación y el cómputo de los ausentes a los 30 días (art. 17.8).
+  ausencias, nóminas, cambio de compañía y bajas de póliza. En fincas ya están, incluida la junta entera y el cómputo de ausentes; queda la impugnación de acuerdos (art. 18).
 - **La interfaz.** Las simulaciones comprueban la API y la base. Una pantalla puede
   enseñar mal un dato correcto, y eso sólo se ve en el navegador.
 
