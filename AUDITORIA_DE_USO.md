@@ -21,6 +21,7 @@ python scripts/simula_portales.py
 python scripts/simula_fincas_fuera_de_lo_normal.py
 python scripts/simula_junta_de_propietarios.py
 python scripts/simula_seguros_fuera_de_lo_normal.py
+python scripts/simula_rrhh_fuera_de_lo_normal.py
 ```
 
 Cada uno levanta su propio servidor sobre una base temporal —borran `DATABASE_URL` antes
@@ -429,6 +430,27 @@ anular de verdad, y nunca los ya cobrados —si hay que devolver dinero eso es u
 
 Prueba: `tests/test_cambio_de_compania_y_anulacion.py`.
 
+### Unas vacaciones del 20 al 10 entraban, y gastaban cero días
+
+Las ausencias se piden a mano, y a mano se teclea mal.
+
+**La ausencia que acaba antes de empezar** no era sólo fea. El contador de vacaciones
+cuenta los días de inicio a fin, así que una del 20 al 10 sale en negativo y se guarda
+como **cero días consumidos**: el trabajador se va quince días y el resumen dice que no
+ha gastado ninguno, y los vuelve a tener disponibles en diciembre.
+
+**Dos ausencias encima del mismo día** se guardaban las dos sin decir nada, y el cómputo
+contaba los días dos veces. Aquí no vale bloquear, porque el caso común es legítimo: una
+baja médica que cae dentro de unas vacaciones aprobadas, y la ley dice que esos días de
+vacaciones se recuperan (ET art. 38.3). Se avisa de con qué se solapa, se explica eso, y
+se pide confirmar.
+
+Lo que ya estaba bien y queda fijado: un trabajador puede pedir su ausencia pero **no
+aprobársela** (403); cerrar el mes no borra lo que está sin resolver; y el resumen
+descuenta los días aprobados.
+
+Prueba: `tests/test_ausencias_que_no_cuadran.py`.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
@@ -436,8 +458,8 @@ Conviene tenerlo claro para no dar por auditado lo que no lo está:
 - **Los caminos que se salen de lo normal, salvo en fincas.** Ahí ya están: derrama,
   cambio de propietario, recibo devuelto, censo descuadrado y cierre de ejercicio.
   En seguros ya están los de la póliza: cambio de compañía, anulación y recibo
-  devuelto. Quedan los de gestoría, financiaciones, RRHH e inmobiliaria:
-  devoluciones parciales, alquileres, ausencias y nóminas. En fincas ya están: ciclo mensual, caminos raros, junta completa, cómputo de ausentes e impugnación.
+  devuelto. En RRHH ya están las ausencias. Quedan los de gestoría, financiaciones
+  e inmobiliaria: devoluciones parciales, alquileres y nóminas. En fincas ya están: ciclo mensual, caminos raros, junta completa, cómputo de ausentes e impugnación.
 - **La interfaz.** Las simulaciones comprueban la API y la base. Una pantalla puede
   enseñar mal un dato correcto, y eso sólo se ve en el navegador.
 

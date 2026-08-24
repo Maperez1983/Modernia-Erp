@@ -82541,6 +82541,59 @@ class Handler(BaseHTTPRequestHandler):
             if not fecha_inicio or not fecha_fin:
                 json_response(self, {"error": "fecha_inicio y fecha_fin requeridos"}, status=400)
                 return
+            # Una ausencia que acaba antes de empezar no es una ausencia. Y no era sólo
+            # feo: el contador de vacaciones cuenta los días de inicio a fin, así que
+            # una del 20 al 10 gastaba CERO días. El trabajador se iba quince días y el
+            # resumen decía que no había usado ninguno.
+            def _dia(valor):
+                try:
+                    return datetime.strptime(str(valor or "")[:10], "%Y-%m-%d").date()
+                except Exception:
+                    return None
+            dia_inicio, dia_fin = _dia(fecha_inicio), _dia(fecha_fin)
+            if not dia_inicio or not dia_fin:
+                json_response(self, {"error": "Las fechas van en formato AAAA-MM-DD."}, status=400)
+                return
+            if dia_fin < dia_inicio:
+                json_response(
+                    self,
+                    {"error": f"La ausencia acaba antes de empezar: del {fecha_inicio} al "
+                              f"{fecha_fin}. Revisa las fechas."},
+                    status=400,
+                )
+                return
+            # Dos ausencias del mismo trabajador encima del mismo día. No se bloquea,
+            # porque el caso más común es legítimo —una baja médica que cae dentro de
+            # unas vacaciones aprobadas— y ahí la ley dice que esos días de vacaciones
+            # se recuperan (ET art. 38.3). Lo que no vale es que entre sin que nadie se
+            # entere y el cómputo cuente los días dos veces.
+            solapadas = conn.execute(
+                "SELECT id, tipo, fecha_inicio, fecha_fin, estado "
+                "FROM workspace_rrhh_ausencias "
+                "WHERE workspace_id = ? AND persona_id = ? AND id <> ? "
+                "  AND LOWER(COALESCE(estado, '')) NOT IN ('cancelada', 'cancelado', 'rechazada') "
+                "  AND COALESCE(fecha_inicio, '') <= ? AND COALESCE(fecha_fin, '') >= ? "
+                "ORDER BY fecha_inicio",
+                (workspace_id, persona_id, record_id or "", fecha_fin, fecha_inicio),
+            ).fetchall()
+            if solapadas and not _quiere_confirmar(payload):
+                detalle = "; ".join(
+                    f"{row_value(s, 'tipo', '') or 'Ausencia'} del "
+                    f"{row_value(s, 'fecha_inicio', '')} al {row_value(s, 'fecha_fin', '')} "
+                    f"({row_value(s, 'estado', '')})"
+                    for s in solapadas)
+                json_response(
+                    self,
+                    {"error": f"{persona_nombre} ya tiene otra ausencia en esos días: {detalle}. "
+                              f"Si es una baja que cae dentro de unas vacaciones, confírmalo: "
+                              f"esos días de vacaciones se recuperan (ET art. 38.3). Si te has "
+                              f"equivocado de fechas, corrígelas.",
+                     "code": "ausencias_solapadas",
+                     "requiere_confirmacion": True,
+                     "solapa_con": [dict(s) for s in solapadas]},
+                    status=409,
+                )
+                return
             prev = None
             if record_id:
                 row = conn.execute(
