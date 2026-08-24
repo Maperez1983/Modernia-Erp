@@ -23,6 +23,7 @@ python scripts/simula_junta_de_propietarios.py
 python scripts/simula_seguros_fuera_de_lo_normal.py
 python scripts/simula_rrhh_fuera_de_lo_normal.py
 python scripts/simula_inmobiliaria_fuera_de_lo_normal.py
+python scripts/contrasta_pantalla_con_la_base.py
 ```
 
 Cada uno levanta su propio servidor sobre una base temporal —borran `DATABASE_URL` antes
@@ -549,6 +550,55 @@ cosas: darlo de alta en las **dos** listas —la blanca y el grupo que despacha�
 la comprobación de importes, que no la tiene: hoy dejaría conciliar un movimiento de
 500 € contra un asiento de 5.000 €.
 
+## Levantar el CRM en local te conecta a PRODUCCIÓN
+
+Esto no salió auditando una pantalla: salió al intentar auditarlas. Es lo más importante
+de todo el documento y por eso va aparte.
+
+El arranque local que hay en `.claude/launch.json` —`python -m web.server`— importa
+`web/db_backend.py`, que lo primero que hace es leer el `.env` de la raíz. Y ahí está el
+`DATABASE_URL` de producción. O sea que **levantar el CRM en local abre un CRM local
+conectado a la base real**, y `/api/build_info` lo confirma: `backend: postgres`, con el
+host de Render.
+
+No hay ningún aviso. La pantalla es idéntica.
+
+Quien vaya a trabajar contra una base de prueba tiene que apagarlo a mano **antes de
+importar nada**, porque `_load_env_file` sólo rellena las claves que no estén ya en el
+entorno:
+
+```python
+import os
+for clave in ("DATABASE_URL", "POSTGRES_URL"):
+    os.environ[clave] = ""          # antes de `from web import ...`
+from web import db_backend as D
+assert not D.is_postgres_enabled()  # y comprobarlo, no suponerlo
+```
+
+Merece la pena decidir si el servidor debe **negarse a arrancar contra Postgres sin un
+`--permitir-produccion` explícito**. No se ha hecho aquí porque puede haber quien
+depure con datos reales a propósito, y eso es una decisión del cliente, no del auditor.
+
+## Contrastar la pantalla con la base (`contrasta_pantalla_con_la_base.py`)
+
+Siembra una base con importes y estados escogidos a mano, levanta el servidor encima y
+compara, pantalla por pantalla, las cifras que recibe el front con las que hay guardadas.
+
+Es la red para la clase de fallo que más tarde se descubre: el dato está bien y sólo se
+lee mal. El último que salió así fue el punteo bancario, que pintaba en verde un
+emparejamiento con cero de confianza porque la tabla leía uno de los tres campos que le
+llegaban.
+
+Hoy cubre los movimientos bancarios —con los cuatro estados que hay que saber
+distinguir— y la contabilidad de gestoría, comprobando que los importes llegan **como
+número y no como texto** y que su suma cuadra con la de la base. Sale limpio.
+
+**Lo que no ve:** el HTML y el CSS. Un número correcto pintado fuera de su columna, o una
+etiqueta con el color cambiado, esto no lo detecta. Eso sigue necesitando un navegador, y
+en esta sesión no se pudo completar: el panel del navegador quedó oculto y cada acción
+agotaba el tiempo. Lo que sí se comprobó a mano: la aplicación carga, el acceso funciona
+y las 27 llamadas del arranque responden 200.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
@@ -558,8 +608,8 @@ Conviene tenerlo claro para no dar por auditado lo que no lo está:
   En seguros ya están los de la póliza: cambio de compañía, anulación y recibo
   devuelto. Están los seis módulos, con sus caminos raros, las nóminas y la conciliación
   bancaria. En fincas ya están: ciclo mensual, caminos raros, junta completa, cómputo de ausentes e impugnación.
-- **La interfaz.** Las simulaciones comprueban la API y la base. Una pantalla puede
-  enseñar mal un dato correcto, y eso sólo se ve en el navegador.
+- **El HTML y el CSS.** El contraste de arriba cubre lo que la pantalla *recibe*; lo que
+  *pinta* —columnas, colores, etiquetas— sigue pendiente de recorrer con un navegador.
 
 ## Anotaciones menores
 
