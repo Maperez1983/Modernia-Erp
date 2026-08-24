@@ -376,6 +376,30 @@ para derivar la mayoría y se tiraba. Es justo el dato que dice si el 17.8 aplic
 
 Prueba: `tests/test_computo_de_ausentes.py`.
 
+### Impugnar un acuerdo tiene tres reglas, y no había ninguna
+
+El artículo 18 no dice sólo que un acuerdo se puede impugnar. Dice **quién**, **hasta
+cuándo** y **qué pasa mientras tanto**, y las tres se fallan a menudo:
+
+- **Quién** (18.2). Sólo los que salvaron su voto, los ausentes y los privados
+  indebidamente de votar. Quien votó a favor, no: no se impugna lo que uno mismo ha
+  votado. Y hay que estar al corriente o haber consignado judicialmente lo debido, salvo
+  que el acuerdo sea sobre el establecimiento o la alteración de las cuotas de
+  participación — ésos sí los puede impugnar un deudor.
+- **Hasta cuándo** (18.3). Tres meses… o **un año** si el acuerdo es contrario a la ley o
+  a los estatutos. Y para los ausentes se cuenta desde que se les comunicó, no desde la
+  junta: cuatro fechas posibles, que es justo la cuenta que sale mal a mano. El CRM da
+  las cuatro calculadas.
+- **Qué pasa mientras tanto** (18.4). **No suspende la ejecución.** Es lo que peor sale:
+  dejar de ejecutar un acuerdo porque «está impugnado» es meterse en otro problema. Se
+  avisa al anotarla y se repite en el acta.
+
+El plazo vencido no bloquea —el hecho ocurrió y hay que poder anotarlo— pero tampoco se
+traga en silencio: se dice hasta cuándo era y se pide confirmar. Mismo criterio que con
+los importes absurdos.
+
+Prueba: `tests/test_impugnar_un_acuerdo.py`.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
@@ -383,7 +407,7 @@ Conviene tenerlo claro para no dar por auditado lo que no lo está:
 - **Los caminos que se salen de lo normal, salvo en fincas.** Ahí ya están: derrama,
   cambio de propietario, recibo devuelto, censo descuadrado y cierre de ejercicio.
   Quedan los de los otros cinco módulos: anulaciones, devoluciones parciales, alquileres,
-  ausencias, nóminas, cambio de compañía y bajas de póliza. En fincas ya están, incluida la junta entera y el cómputo de ausentes; queda la impugnación de acuerdos (art. 18).
+  ausencias, nóminas, cambio de compañía y bajas de póliza. En fincas ya están: ciclo mensual, caminos raros, junta completa, cómputo de ausentes e impugnación.
 - **La interfaz.** Las simulaciones comprueban la API y la base. Una pantalla puede
   enseñar mal un dato correcto, y eso sólo se ve en el navegador.
 

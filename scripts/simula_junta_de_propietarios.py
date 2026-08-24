@@ -406,6 +406,34 @@ def main():
               solar["computa_ausentes"] is False and solar["ausentes_pendientes"] == 0, solar)
     comprueba("y por eso es firme desde el primer día", solar["firme"] is True, solar)
 
+    # ------------------------------------------------- 5g. impugnar un acuerdo (art. 18)
+    print("\n=== 5g. Rocío, que votó en contra del ascensor, lo impugna")
+    imp = {"workspace_id": ws, "acuerdo_id": ids["Instalar ascensor (mejora no necesaria)"]}
+    estado, r, _ = pide("/api/workspace_fincas_junta_impugnacion",
+                        {**imp, "vecino_id": "v0", "motivo": "lesivo_comunidad"})
+    comprueba("quien votó a favor no puede impugnar", estado == 409,
+              f"HTTP {estado} · {str(r.get('error'))[:70]}")
+    # Rocío votó a favor del ascensor en esta simulación; el que no votó es Julián.
+    estado, r, _ = pide("/api/workspace_fincas_junta_impugnacion",
+                        {**imp, "vecino_id": "v3", "motivo": "lesivo_comunidad",
+                         "notas": "Presentada en el juzgado nº 3"})
+    comprueba("el ausente sí puede", estado == 200, f"HTTP {estado} · {str(r)[:80]}")
+    comprueba("y se le avisa de que NO suspende la ejecución",
+              "NO suspende" in str(r.get("aviso", "")), r.get("aviso"))
+    asc = [a for a in r["recuento"]["acuerdos"] if "ascensor" in a["titulo"]][0]
+    comprueba("el acuerdo sigue aprobado pese a la impugnación", asc["aprobado"] is True, asc)
+    comprueba("y se dan los dos plazos, que dependen del motivo",
+              bool(asc["plazo_impugnacion"]["vence_tres_meses"])
+              and bool(asc["plazo_impugnacion"]["vence_un_ano"]),
+              asc["plazo_impugnacion"])
+    print(f"       tres meses hasta el {asc['plazo_impugnacion']['vence_tres_meses']}, "
+          f"un año hasta el {asc['plazo_impugnacion']['vence_un_ano']}")
+    estado, r, _ = pide("/api/workspace_fincas_junta_impugnacion",
+                        {**imp, "vecino_id": "v3", "motivo": "lesivo_comunidad",
+                         "fecha": "2030-01-01"})
+    comprueba("fuera de plazo se avisa en vez de tragarlo", estado == 409,
+              f"HTTP {estado} · {str(r.get('error'))[:70]}")
+
     # -------------------------------------------------------------------- 6. el acta
     print("\n=== 6. Se levanta el acta")
     _, doc, _ = pide("/api/workspace_fincas_acta", None, workspace_id=ws, id=junta)
@@ -423,7 +451,9 @@ def main():
                             ("y sobre cuánto se han medido las mayorías",
                              "sobre 85,00 % de coeficiente"),
                             ("el cómputo de ausentes", "art. 17.8 LPH"),
-                            ("y hasta cuándo corre el plazo", "el plazo termina el")):
+                            ("y hasta cuándo corre el plazo", "el plazo termina el"),
+                            ("la impugnación", "IMPUGNADO"),
+                            ("y que no suspende", "no suspende la ejecución")):
         comprueba(f"el acta recoge {etiqueta}", aguja.lower() in acta.lower(),
                   "" if aguja.lower() in acta.lower() else f"no aparece {aguja!r}")
 

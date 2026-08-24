@@ -24562,6 +24562,37 @@ const renderWorkspaceFincasCommunityFicha = async () => {
                     </label>`).join("") || "<span class='muted'>ninguna</span>"}
                 </div>
               </div>` : ""}
+            ${(ac.impugnaciones || []).length ? `
+              <div class="muted" style="border-left:3px solid #c0392b;padding-left:.6rem;">
+                <strong>Impugnado.</strong>
+                ${(ac.impugnaciones || []).map((i) => `${escapeHtml(i.nombre || "")} (${escapeHtml(i.piso || "")}) el ${escapeHtml(i.fecha || "")} — ${escapeHtml(i.motivo_etiqueta || "")} ${i.articulo ? `(${escapeHtml(i.articulo)})` : ""}`).join("; ")}.
+                <br />La impugnación <strong>no suspende</strong> la ejecución del acuerdo, salvo que el juez la suspenda cautelarmente (art. 18.4).
+                <div style="margin-top:.35rem;">
+                  ${(ac.impugnaciones || []).map((i) => `<button type="button" class="secondary ghost" data-retira-imp="${escapeHtml(String(ac.id))}" data-retira-vecino="${escapeHtml(String(i.vecino_id))}">Retirar la de ${escapeHtml(i.piso || i.nombre || "")}</button>`).join(" ")}
+                </div>
+              </div>` : ""}
+            <details style="margin:.4rem 0;">
+              <summary class="muted">Anotar una impugnación (art. 18)</summary>
+              <div class="form-grid" style="align-items:end;">
+                <label>Propietario
+                  <select data-imp-vecino="${escapeHtml(String(ac.id))}">
+                    ${(r.propietarios || []).map((p) => `<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.piso || p.nombre || "")}</option>`).join("")}
+                  </select>
+                </label>
+                <label>Motivo
+                  <select data-imp-motivo="${escapeHtml(String(ac.id))}">
+                    <option value="lesivo_comunidad">Gravemente lesivo para la comunidad — 3 meses</option>
+                    <option value="perjudicial_abuso">Gravemente perjudicial o abuso de derecho — 3 meses</option>
+                    <option value="ley_estatutos">Contrario a la ley o a los estatutos — 1 año</option>
+                  </select>
+                </label>
+                <label class="span-2">Notas <input data-imp-notas="${escapeHtml(String(ac.id))}" placeholder="Ej. presentada en el juzgado nº 3" /></label>
+                <div class="form-actions span-all">
+                  <button type="button" data-imp-anota="${escapeHtml(String(ac.id))}">Anotar</button>
+                  <span class="muted">Plazo desde la junta: 3 meses hasta el ${escapeHtml(ac.plazo_impugnacion?.vence_tres_meses || "—")}; un año hasta el ${escapeHtml(ac.plazo_impugnacion?.vence_un_ano || "—")}.</span>
+                </div>
+              </div>
+            </details>
             <div class="junta-votos">
               ${(r.propietarios || []).map((p) => `
                 <label class="fincas-extra">
@@ -24618,6 +24649,37 @@ const renderWorkspaceFincasCommunityFicha = async () => {
       cuerpo.querySelectorAll("[data-voto]").forEach((el) => el.addEventListener("change", () =>
         manda("/api/workspace_fincas_junta_voto", {
           acuerdo_id: el.dataset.voto, vecino_id: el.dataset.vecino, voto: el.value,
+        })));
+      cuerpo.querySelectorAll("[data-imp-anota]").forEach((btn) => btn.addEventListener("click", async () => {
+        const id = btn.dataset.impAnota;
+        const cuerpoImp = {
+          acuerdo_id: id,
+          vecino_id: cuerpo.querySelector(`[data-imp-vecino="${id}"]`)?.value || "",
+          motivo: cuerpo.querySelector(`[data-imp-motivo="${id}"]`)?.value || "",
+          notas: cuerpo.querySelector(`[data-imp-notas="${id}"]`)?.value || "",
+        };
+        const anota = async (extra) => {
+          const res = await postJsonWithDbRetry("/api/workspace_fincas_junta_impugnacion",
+            { workspace_id: workspaceId, ...cuerpoImp, ...extra });
+          if (res?.aviso) window.alert(res.aviso);
+          if (res?.recuento) pinta(res.recuento);
+        };
+        try {
+          await anota({});
+        } catch (err) {
+          // Las dos salidas que ofrece el servidor: confirmar fuera de plazo, o decir
+          // que el acuerdo va de cuotas de participación —la excepción del 18.2—.
+          const aviso = String(err?.message || "");
+          if (/plazo para impugnar/i.test(aviso)) {
+            if (window.confirm(`${aviso}\n\n¿La anoto igualmente?`)) await anota({ confirmado: true });
+          } else if (/cuotas de participación/i.test(aviso)) {
+            if (window.confirm(`${aviso}\n\n¿El acuerdo es sobre las cuotas de participación?`)) await anota({ afecta_cuotas: "1" });
+          } else window.alert(aviso);
+        }
+      }));
+      cuerpo.querySelectorAll("[data-retira-imp]").forEach((btn) => btn.addEventListener("click", () =>
+        manda("/api/workspace_fincas_junta_impugnacion", {
+          acuerdo_id: btn.dataset.retiraImp, vecino_id: btn.dataset.retiraVecino, retirar: "1",
         })));
       cuerpo.querySelector("[data-acta-notificada]")?.addEventListener("change", (ev) =>
         manda("/api/workspace_fincas_junta_notificar_acta", { junta_id: juntaId, fecha: ev.target.value || "" }));

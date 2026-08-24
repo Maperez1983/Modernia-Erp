@@ -45438,6 +45438,29 @@ def ensure_workspace_product_tables(conn):
         )
     except Exception:
         pass
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_junta_impugnaciones (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          junta_id TEXT NOT NULL,
+          acuerdo_id TEXT NOT NULL,
+          vecino_id TEXT NOT NULL,
+          motivo TEXT NOT NULL,
+          fecha TEXT,
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_junta_impugnacion_unica "
+            "ON workspace_fincas_junta_impugnaciones (acuerdo_id, vecino_id)"
+        )
+    except Exception:
+        pass
     # El moroso no vota (art. 15.2), pero SÍ vota si antes de empezar la junta ha
     # pagado, ha impugnado judicialmente la deuda o la ha consignado. Eso el CRM no
     # puede saberlo: lo marca quien preside, y esta casilla es ese «sí lo tiene».
@@ -55828,6 +55851,33 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
     ).fetchall():
         discrepan_por_acuerdo.setdefault(row_value(d, "acuerdo_id", ""), set()).add(
             row_value(d, "vecino_id", ""))
+    impugnaciones_por_acuerdo = {}
+    for imp in conn.execute(
+        "SELECT acuerdo_id, vecino_id, motivo, fecha, notas "
+        "FROM workspace_fincas_junta_impugnaciones WHERE junta_id = ? AND workspace_id = ? "
+        "ORDER BY fecha",
+        (junta_id, workspace_id),
+    ).fetchall():
+        impugnaciones_por_acuerdo.setdefault(row_value(imp, "acuerdo_id", ""), []).append(imp)
+
+    # El plazo de caducidad del art. 18.3 corre desde que se adoptó el acuerdo; para los
+    # ausentes, desde que se les comunicó. Son dos fechas distintas y dos plazos según
+    # el motivo, así que se dan los dos calculados en vez de dejarlo a la memoria.
+    fecha_junta = str(row_value(junta, "fecha", "") or "")[:10]
+
+    def vence_impugnacion(meses, desde):
+        if not desde:
+            return ""
+        try:
+            d = datetime.strptime(desde, "%Y-%m-%d").date()
+        except Exception:
+            return ""
+        mes = d.month - 1 + meses
+        ano = d.year + mes // 12
+        mes = mes % 12 + 1
+        dia = min(d.day, [31, 29 if ano % 4 == 0 and (ano % 100 != 0 or ano % 400 == 0) else 28,
+                          31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mes - 1])
+        return date(ano, mes, dia).isoformat()
 
     acuerdos = []
     for acuerdo in conn.execute(
@@ -55915,6 +55965,33 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
                 "vence": vence.isoformat() if vence else "",
                 "dias_restantes": dias_restantes,
                 "cerrado": plazo_cerrado,
+            },
+            # Impugnación (art. 18). Se dan los dos plazos porque dependen del motivo, y
+            # se dice lo que más se olvida: impugnar NO suspende la ejecución del acuerdo
+            # (art. 18.4), salvo que el juez lo acuerde. Quien deje de ejecutarlo porque
+            # «está impugnado» se mete en otro problema.
+            "impugnaciones": [
+                {
+                    "vecino_id": row_value(i, "vecino_id", ""),
+                    "nombre": ficha_propietario.get(row_value(i, "vecino_id", ""), {}).get("nombre", ""),
+                    "piso": ficha_propietario.get(row_value(i, "vecino_id", ""), {}).get("piso", ""),
+                    "motivo": row_value(i, "motivo", ""),
+                    "motivo_etiqueta": (FINCAS_MOTIVOS_IMPUGNACION.get(row_value(i, "motivo", ""))
+                                        or {}).get("etiqueta", ""),
+                    "articulo": (FINCAS_MOTIVOS_IMPUGNACION.get(row_value(i, "motivo", ""))
+                                 or {}).get("articulo", ""),
+                    "fecha": row_value(i, "fecha", "") or "",
+                    "notas": row_value(i, "notas", "") or "",
+                }
+                for i in impugnaciones_por_acuerdo.get(acuerdo_id, [])
+            ],
+            "plazo_impugnacion": {
+                "desde_la_junta": fecha_junta,
+                "desde_la_comunicacion": notificada or "",
+                "vence_tres_meses": vence_impugnacion(3, fecha_junta),
+                "vence_un_ano": vence_impugnacion(12, fecha_junta),
+                "vence_tres_meses_ausentes": vence_impugnacion(3, notificada),
+                "vence_un_ano_ausentes": vence_impugnacion(12, notificada),
             },
             "votos_nominales": nominal,
             "id": acuerdo_id,
@@ -57703,6 +57780,29 @@ FINCAS_DIAS_ANTELACION_ORDINARIA = 6
 #: la reunión o dentro de los diez días naturales siguientes (art. 19.2 LPH).
 FINCAS_DIAS_CIERRE_ACTA = 10
 
+#: Motivos por los que un acuerdo se puede impugnar y el plazo de caducidad de cada uno
+#: (LPH art. 18). El plazo NO es el mismo: tres meses en general, pero un año si el
+#: acuerdo es contrario a la ley o a los estatutos. Confundirlos deja fuera de plazo una
+#: impugnación que estaba en plazo, o al revés.
+FINCAS_MOTIVOS_IMPUGNACION = {
+    "ley_estatutos": {
+        "etiqueta": "Contrario a la ley o a los estatutos",
+        "articulo": "LPH art. 18.1.a",
+        "meses": 12,
+    },
+    "lesivo_comunidad": {
+        "etiqueta": "Gravemente lesivo para la comunidad en beneficio de uno o varios propietarios",
+        "articulo": "LPH art. 18.1.b",
+        "meses": 3,
+    },
+    "perjudicial_abuso": {
+        "etiqueta": "Gravemente perjudicial para un propietario sin obligación de soportarlo, "
+                    "o adoptado con abuso de derecho",
+        "articulo": "LPH art. 18.1.c",
+        "meses": 3,
+    },
+}
+
 #: Días NATURALES que tiene un propietario ausente, desde que se le comunica el acuerdo,
 #: para manifestar su discrepancia. Si no lo hace, su voto se computa como favorable
 #: (LPH art. 17.8). No son hábiles: el artículo dice «naturales».
@@ -58034,6 +58134,18 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
             if acuerdo.get("ausentes_discrepan"):
                 computo.append(f"{acuerdo['ausentes_discrepan']} ausentes han manifestado su "
                                f"discrepancia dentro de plazo y no se computan a favor.")
+        # Impugnación (art. 18). Va en el acta porque es un hecho del acuerdo, y con el
+        # aviso del 18.4 al lado: lo que peor sale es dejar de ejecutar un acuerdo
+        # porque «está impugnado».
+        for imp in acuerdo.get("impugnaciones") or []:
+            computo.append(
+                f"IMPUGNADO por {imp.get('nombre', '')} "
+                f"({imp.get('piso') or 'sin piso'}) el {imp.get('fecha', '')}: "
+                f"{imp.get('motivo_etiqueta', '')} ({imp.get('articulo', '')})."
+                + (f" {imp.get('notas')}" if imp.get("notas") else ""))
+        if acuerdo.get("impugnaciones"):
+            computo.append("La impugnación no suspende la ejecución del acuerdo, salvo que el "
+                           "juez la suspenda cautelarmente (art. 18.4).")
         # Art. 19.1.f: los nombres de quienes votaron a favor y en contra, con sus
         # cuotas, cuando sea relevante para la validez del acuerdo. Los votos estaban
         # en la base desde siempre y el acta solo imprimía el recuento.
@@ -70832,6 +70944,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_junta_voto",
             "/api/workspace_fincas_junta_notificar_acta",
             "/api/workspace_fincas_junta_discrepancia",
+            "/api/workspace_fincas_junta_impugnacion",
             "/api/workspace_fincas_mayorias",
             "/api/workspace_fincas_junta_convocatoria",
             "/api/workspace_fincas_presupuesto_anual",
@@ -85095,6 +85208,7 @@ class Handler(BaseHTTPRequestHandler):
                              "/api/workspace_fincas_junta_voto",
                              "/api/workspace_fincas_junta_notificar_acta",
                              "/api/workspace_fincas_junta_discrepancia",
+                             "/api/workspace_fincas_junta_impugnacion",
                              "/api/workspace_fincas_mayorias"):
             session = getattr(self, "auth_session", None) or self._current_session()
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -85280,6 +85394,137 @@ class Handler(BaseHTTPRequestHandler):
                 conn.commit()
                 json_response(self, {"ok": True,
                                      "recuento": calcular_recuento_junta(conn, workspace_id, junta_id)})
+                return
+
+            if parsed.path == "/api/workspace_fincas_junta_impugnacion":
+                # Impugnar un acuerdo (art. 18). Tres reglas que se olvidan y que aquí
+                # se comprueban antes de anotar nada: quién está legitimado, si está al
+                # corriente, y si el plazo de caducidad sigue abierto.
+                acuerdo_id = str(payload.get("acuerdo_id") or "").strip()
+                vecino_id = str(payload.get("vecino_id") or "").strip()
+                motivo = str(payload.get("motivo") or "").strip()
+                if not acuerdo_id or not vecino_id:
+                    json_response(self, {"error": "acuerdo_id y vecino_id requeridos"}, status=400)
+                    return
+                fila = conn.execute(
+                    "SELECT junta_id FROM workspace_fincas_junta_acuerdos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (acuerdo_id, workspace_id),
+                ).fetchone()
+                if not fila:
+                    json_response(self, {"error": "acuerdo no encontrado"}, status=404)
+                    return
+                junta_id = row_value(fila, "junta_id", "")
+                if str(payload.get("retirar") or "").strip().lower() in {"1", "true", "si", "sí"}:
+                    conn.execute(
+                        "DELETE FROM workspace_fincas_junta_impugnaciones "
+                        "WHERE acuerdo_id = ? AND vecino_id = ? AND workspace_id = ?",
+                        (acuerdo_id, vecino_id, workspace_id),
+                    )
+                    conn.commit()
+                    json_response(self, {"ok": True,
+                                         "recuento": calcular_recuento_junta(conn, workspace_id, junta_id)})
+                    return
+                if motivo not in FINCAS_MOTIVOS_IMPUGNACION:
+                    json_response(
+                        self,
+                        {"error": "Falta el motivo, y de él depende el plazo: tres meses en "
+                                  "general, un año si el acuerdo es contrario a la ley o a los "
+                                  "estatutos (art. 18.3).",
+                         "motivos": [{"clave": k, **v} for k, v in FINCAS_MOTIVOS_IMPUGNACION.items()]},
+                        status=400,
+                    )
+                    return
+                recuento = calcular_recuento_junta(conn, workspace_id, junta_id) or {}
+                punto = next((a for a in (recuento.get("acuerdos") or [])
+                              if str(a.get("id")) == acuerdo_id), {})
+                quien = next((p for p in (recuento.get("propietarios") or [])
+                              if str(p.get("id")) == vecino_id), None)
+                if quien is None:
+                    json_response(self, {"error": "propietario no encontrado en esa comunidad"},
+                                  status=404)
+                    return
+                nombre_quien = str(quien.get("nombre") or "ese propietario")
+
+                # (1) Legitimación (art. 18.2): sólo quien salvó su voto, estuvo ausente
+                # o fue privado indebidamente de votar. Quien votó a favor, no.
+                nominales = punto.get("votos_nominales") or {}
+                voto_a_favor = any(str(v.get("nombre")) == nombre_quien
+                                   for v in (nominales.get("favor") or []))
+                if voto_a_favor:
+                    json_response(
+                        self,
+                        {"error": f"{nombre_quien} votó a favor de ese acuerdo. Están legitimados "
+                                  f"para impugnar los que salvaron su voto, los ausentes y los que "
+                                  f"fueron privados indebidamente de votar (art. 18.2).",
+                         "code": "no_legitimado"},
+                        status=409,
+                    )
+                    return
+
+                # (2) Estar al corriente (art. 18.2, párrafo segundo). Se exceptúan los
+                # acuerdos sobre el establecimiento o alteración de las cuotas de
+                # participación, que el deudor sí puede impugnar.
+                privados = {str(x.get("vecino_id")) for x in (recuento.get("sin_derecho_voto") or [])}
+                afecta_cuotas = str(payload.get("afecta_cuotas") or "").strip().lower() in {"1", "true", "si", "sí"}
+                if vecino_id in privados and not afecta_cuotas:
+                    json_response(
+                        self,
+                        {"error": f"{nombre_quien} no está al corriente de pago. Para impugnar hay "
+                                  f"que estarlo, o consignar judicialmente lo debido (art. 18.2). "
+                                  f"Se exceptúan los acuerdos sobre el establecimiento o la "
+                                  f"alteración de las cuotas de participación: si es el caso, "
+                                  f"márcalo.",
+                         "code": "no_esta_al_corriente"},
+                        status=409,
+                    )
+                    return
+
+                # (3) Caducidad (art. 18.3). No se bloquea —el hecho ocurrió y hay que
+                # poder anotarlo— pero no se registra en silencio como si estuviera en
+                # plazo: se dice hasta cuándo era y se pide confirmar.
+                plazo = punto.get("plazo_impugnacion") or {}
+                es_ausente = not bool(quien.get("asiste"))
+                meses = FINCAS_MOTIVOS_IMPUGNACION[motivo]["meses"]
+                clave_vence = ("vence_un_ano" if meses == 12 else "vence_tres_meses")
+                if es_ausente and plazo.get(clave_vence + "_ausentes"):
+                    clave_vence += "_ausentes"
+                limite = plazo.get(clave_vence) or ""
+                fecha = str(payload.get("fecha") or "").strip()[:10] or datetime.now().date().isoformat()
+                if limite and fecha > limite and not _quiere_confirmar(payload):
+                    json_response(
+                        self,
+                        {"error": f"El plazo para impugnar por ese motivo terminó el {limite} "
+                                  f"({meses} meses, art. 18.3){' contados desde que se le comunicó el acuerdo' if es_ausente else ''}. "
+                                  f"Si aun así quieres dejarlo anotado, confírmalo.",
+                         "code": "fuera_de_plazo",
+                         "requiere_confirmacion": True,
+                         "vence": limite},
+                        status=409,
+                    )
+                    return
+                conn.execute(
+                    "DELETE FROM workspace_fincas_junta_impugnaciones "
+                    "WHERE acuerdo_id = ? AND vecino_id = ? AND workspace_id = ?",
+                    (acuerdo_id, vecino_id, workspace_id),
+                )
+                conn.execute(
+                    "INSERT INTO workspace_fincas_junta_impugnaciones "
+                    "(id, workspace_id, junta_id, acuerdo_id, vecino_id, motivo, fecha, notas, "
+                    " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
+                    (os.urandom(16).hex(), workspace_id, junta_id, acuerdo_id, vecino_id, motivo,
+                     fecha, str(payload.get("notas") or "").strip() or None, now, now),
+                )
+                conn.commit()
+                json_response(self, {
+                    "ok": True,
+                    # Lo que más se olvida, y lo que peor sale: el acuerdo se sigue
+                    # ejecutando mientras no lo suspenda un juez.
+                    "aviso": "Anotada. La impugnación NO suspende la ejecución del acuerdo "
+                             "(art. 18.4): sigue ejecutándose salvo que el juez lo suspenda "
+                             "cautelarmente.",
+                    "vence": limite,
+                    "recuento": calcular_recuento_junta(conn, workspace_id, junta_id),
+                })
                 return
 
             if parsed.path == "/api/workspace_fincas_junta_voto":
