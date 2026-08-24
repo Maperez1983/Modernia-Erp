@@ -483,11 +483,21 @@ convierte quedándose con lo de antes del punto:
 2.450,75 € + 100,00 €  =  102,45 €
 ```
 
-El panel cuadraba solo, con dos mil cuatrocientos cincuenta euros convertidos en dos
-euros con cuarenta y cinco. Sin error, sin aviso, y el apunte se veía bien en su ficha:
-sólo fallaba al sumar. Es la misma familia que el importe en formato inglés que se
-arregló en tres analizadores al principio de la campaña; éste se quedó fuera porque no
-analizaba nada.
+**Con una corrección importante sobre el alcance**, porque la primera versión de esta
+nota lo contaba peor de lo que es. Eso pasa en SQLite, que es donde corren el desarrollo
+y la suite. En producción la base es PostgreSQL y la columna es `numeric`, que **rechaza**
+el texto: `invalid input syntax for type numeric: "2.450,75"`. O sea que en producción el
+síntoma no era un panel descuadrado en silencio, sino que el apunte **no se llegaba a
+guardar** y quien teclease un importe en formato español se encontraba un error.
+
+Se comprobó contra la base de producción: los 656 apuntes existentes son todos numéricos
+válidos, sin negativos, sumando 757.234,29 €. **No hay ni un dato mal.** Los importes
+pequeños que aparecen son comisiones bancarias de verdad, no miles mal leídos.
+
+Sigue siendo un fallo —no se podía teclear un importe como se teclea en España— y el
+arreglo lo resuelve en las dos bases. Es la misma familia que el importe en formato
+inglés que se arregló en tres analizadores al principio de la campaña; éste se quedó
+fuera porque no analizaba nada.
 
 Y de paso, los otros dos criterios que ya se fijaron en fincas, aplicados igual aquí: los
 negativos se rechazan y lo absurdo se pregunta. En los dos caminos, alta y edición.
