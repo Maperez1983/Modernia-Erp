@@ -593,11 +593,29 @@ Hoy cubre los movimientos bancarios —con los cuatro estados que hay que saber
 distinguir— y la contabilidad de gestoría, comprobando que los importes llegan **como
 número y no como texto** y que su suma cuadra con la de la base. Sale limpio.
 
-**Lo que no ve:** el HTML y el CSS. Un número correcto pintado fuera de su columna, o una
-etiqueta con el color cambiado, esto no lo detecta. Eso sigue necesitando un navegador, y
-en esta sesión no se pudo completar: el panel del navegador quedó oculto y cada acción
-agotaba el tiempo. Lo que sí se comprobó a mano: la aplicación carga, el acceso funciona
-y las 27 llamadas del arranque responden 200.
+**Lo que no ve:** el HTML y el CSS.
+
+Para eso hay una segunda vía que **sí funciona sin navegador**: ejecutar con jsdom la
+función que pinta la tabla y mirar lo que sale. Está en
+`tests/test_punteado_no_es_conciliado.py::LoQueSePintaTests`, y comprueba los cuatro
+casos del punteo bancario tal y como los ve quien concilia:
+
+```
+Transferencia ACME    Punteado (92%)      ocr-badge ok
+Compra Apple.com      Por revisar (0%)    ocr-badge media   ← los 7 de producción
+Recibo luz            Pendiente           ocr-badge danger
+Cuota gestoría        Por revisar (40%)   ocr-badge media
+pie: Movimientos: 4 · Punteados 1 · Por revisar 2 · Pendientes 1
+```
+
+Antes ese pie decía «Punteados 3». Es la forma de auditar la pantalla que ha resultado
+más fiable: determinista, sin depender de que el navegador esté visible, y comprobando
+el resultado en vez del código fuente.
+
+Lo que sigue sin cubrirse es la **maquetación**: que la columna esté donde toca, que el
+ámbar se distinga del verde en pantalla, que quepa en un móvil. Eso necesita ojos. Del
+recorrido con navegador en esta sesión se llegó hasta: la aplicación carga, el acceso
+funciona y las 27 llamadas del arranque responden 200.
 
 ## Qué NO cubre esto todavía
 

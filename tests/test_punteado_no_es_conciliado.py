@@ -22,13 +22,75 @@ al importar el extracto. Si aquí fuera otro, la pantalla y el resumen dirían c
 distintas sobre los mismos movimientos.
 """
 
+import json
 import re
+import shutil
+import subprocess
 import unittest
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[1]
 APP = (RAIZ / "web" / "app.js").read_text(encoding="utf-8")
 SERVER = (RAIZ / "web" / "server.py").read_text(encoding="utf-8")
+
+
+class LoQueSePintaTests(unittest.TestCase):
+    """Ejecuta la función real que pinta la tabla, con jsdom, y mira lo que sale.
+
+    Las comprobaciones de más abajo miran el código fuente; éstas miran el resultado,
+    que es lo que ve quien concilia. Los cuatro movimientos son los mismos que siembra
+    `scripts/contrasta_pantalla_con_la_base.py`.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not shutil.which("node"):
+            raise unittest.SkipTest("node no está disponible")
+        guion = RAIZ / "tests" / "_pinta_punteo_banco.js"
+        r = subprocess.run(["node", str(guion)], capture_output=True, text=True, cwd=str(RAIZ))
+        if r.returncode:
+            if "Cannot find module 'jsdom'" in (r.stderr or ""):
+                raise unittest.SkipTest("falta jsdom: ejecuta `npm install` en la raíz")
+            raise AssertionError(f"node falló:\n{r.stdout}\n{r.stderr}")
+        cls.pintado = json.loads(r.stdout)
+        cls.por_concepto = {f["concepto"]: f for f in cls.pintado["filas"]}
+
+    def test_el_conciliado_de_verdad_sale_en_verde(self):
+        f = self.por_concepto["Transferencia ACME"]
+        self.assertEqual(f["etiqueta"], "Punteado")
+        self.assertIn("ok", f["clase"])
+        self.assertIn("92%", f["celda"])
+
+    def test_el_de_confianza_cero_ya_no_se_disfraza(self):
+        """Era el caso exacto de los siete de producción."""
+        f = self.por_concepto["Compra Apple.com"]
+        self.assertEqual(f["etiqueta"], "Por revisar")
+        self.assertIn("media", f["clase"])
+        self.assertNotIn("ok", f["clase"])
+
+    def test_y_enseña_el_cero_en_vez_de_esconderlo(self):
+        self.assertIn("(0%)", self.por_concepto["Compra Apple.com"]["celda"])
+
+    def test_y_dice_en_el_título_por_qué(self):
+        titulo = self.por_concepto["Compra Apple.com"]["titulo"]
+        self.assertIn("pendiente", titulo)
+        self.assertIn("0 % de confianza", titulo)
+
+    def test_el_punteado_con_poca_confianza_tambien_avisa(self):
+        """Estado «auto», pero 40 % está por debajo del umbral."""
+        f = self.por_concepto["Cuota gestoría"]
+        self.assertEqual(f["etiqueta"], "Por revisar")
+        self.assertIn("(40%)", f["celda"])
+
+    def test_el_que_no_esta_punteado_sigue_en_rojo(self):
+        f = self.por_concepto["Recibo luz"]
+        self.assertEqual(f["etiqueta"], "Pendiente")
+        self.assertIn("danger", f["clase"])
+
+    def test_el_pie_separa_los_tres(self):
+        """Antes decía «Punteados 3» de cuatro; dos de esos había que revisarlos."""
+        self.assertEqual(self.pintado["pie"],
+                         "Movimientos: 4 · Punteados 1 · Por revisar 2 · Pendientes 1")
 
 
 class PunteadoNoEsConciliadoTests(unittest.TestCase):
