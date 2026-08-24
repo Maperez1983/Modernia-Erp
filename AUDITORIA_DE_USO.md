@@ -637,10 +637,31 @@ esa clase ni `data-label` en las celdas. Por debajo de 760 px el propio sistema 
 el scroll horizontal, así que la columna de punteo salía partida y la del asiento no se
 alcanzaba: justo las dos que se vienen a mirar aquí.
 
-Las dos arregladas y comprobadas a ojo en las tres vistas. Queda apuntado que **ninguna
-tabla pintada por JavaScript lleva `ui-table`** —`ui-table-scroll` aparece 3 veces en el
-HTML y 0 en `app.js`—: se arregló la del punteo, que es la que se estaba auditando, no
-las demás.
+Las dos arregladas y comprobadas a ojo en las tres vistas.
+
+### Y después, las 137 tablas
+
+Lo anterior arregló una. `app.js` pinta del orden de **137** y sólo esa llevaba
+`ui-table`. Con un listado de asientos de diez columnas, en el móvil se veían Fecha,
+Nº asiento, Concepto, Cliente y media de Cuenta: **Debe, Haber, Factura, Punteo y
+Acciones no existían** para quien mira desde el teléfono. Comprobado con una captura, no
+deducido.
+
+No se etiquetaron las 137 llamadas a mano —son 137 sitios donde equivocarse y habría que
+escribir un `data-label` por celda—. Se hizo con **una pieza**: una función que envuelve
+cualquier tabla y deriva las etiquetas de su propia cabecera, más un observador que la
+aplica también a las que se pintan al llegar los datos, que son casi todas. Se prueba
+entera y se quita de una vez si molesta.
+
+Las cuatro formas que se dan en el CRM están cubiertas y ninguna se rompe: la pelada, la
+que ya llevaba `ui-table` —no se envuelve dos veces—, la que no tiene cabecera —se
+envuelve pero no se inventan etiquetas— y la fila de «sin resultados» con `colspan`,
+donde la posición ya no dice la columna y etiquetar mal sería peor que no etiquetar.
+
+En escritorio la tabla se ve igual que antes; en móvil se apila con sus diez campos.
+Las dos vistas miradas a ojo.
+
+Prueba: `tests/test_todas_las_tablas_se_ven_en_movil.py`.
 
 ## Qué NO cubre esto todavía
 

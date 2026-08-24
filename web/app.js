@@ -93564,6 +93564,70 @@ if (authActivateForm) {
   });
 }
 
+// --- Todas las tablas dentro del sistema de diseño ------------------------------
+//
+// En `app.js` hay del orden de 137 tablas y sólo una llevaba `ui-table`. Sin esa clase
+// una tabla no se apila en tarjetas en el móvil, y como el propio sistema desactiva el
+// scroll horizontal por debajo de 760 px, lo que sobra se corta y no hay forma de
+// llegar a ello: en un listado de asientos de diez columnas se perdían Debe, Haber,
+// Factura, Punteo y Acciones.
+//
+// Se hace aquí y no en las 137 llamadas a propósito: son 137 sitios donde equivocarse,
+// y esto es una pieza que se prueba y se quita de una vez si molesta.
+const UI_TABLA_MARCA = "uiTablaLista";
+
+const aplicaSistemaDeDisenoATabla = (tabla) => {
+  if (!tabla || tabla.dataset[UI_TABLA_MARCA]) return;
+  tabla.dataset[UI_TABLA_MARCA] = "1";
+  const padre = tabla.parentElement;
+  if (padre && !tabla.closest(".ui-table")) {
+    const caja = document.createElement("div");
+    caja.className = "ui-table ui-table-scroll";
+    padre.insertBefore(caja, tabla);
+    caja.appendChild(tabla);
+  }
+  // Apilada no hay cabecera, así que cada celda tiene que decir de qué columna es.
+  const cabeceras = Array.from(tabla.querySelectorAll("thead th"))
+    .map((th) => (th.textContent || "").trim());
+  if (!cabeceras.length) return;
+  tabla.querySelectorAll("tbody tr").forEach((fila) => {
+    const celdas = Array.from(fila.children).filter((c) => c.tagName === "TD");
+    // Con celdas combinadas la posición ya no dice la columna: mejor no etiquetar que
+    // etiquetar mal.
+    if (celdas.some((c) => Number(c.getAttribute("colspan") || 1) > 1)) return;
+    celdas.forEach((celda, i) => {
+      if (celda.hasAttribute("data-label")) return;
+      if (cabeceras[i]) celda.setAttribute("data-label", cabeceras[i]);
+    });
+  });
+};
+
+const repasaLasTablas = (raiz) => {
+  try {
+    (raiz || document).querySelectorAll("table").forEach(aplicaSistemaDeDisenoATabla);
+  } catch (e) {}
+};
+
+const vigilaLasTablasQueLleguen = () => {
+  if (typeof MutationObserver === "undefined" || !document.body) return;
+  let pedido = 0;
+  const observador = new MutationObserver(() => {
+    if (pedido) return;
+    // Agrupado en un fotograma: pintar una tabla dispara muchas mutaciones seguidas.
+    pedido = window.requestAnimationFrame(() => {
+      pedido = 0;
+      // Sin escucharse a sí mismo: envolver una tabla es otra mutación.
+      observador.disconnect();
+      repasaLasTablas(document.body);
+      observador.observe(document.body, { childList: true, subtree: true });
+    });
+  });
+  repasaLasTablas(document.body);
+  observador.observe(document.body, { childList: true, subtree: true });
+};
+
+vigilaLasTablasQueLleguen();
+
 initDensityToggle();
 activarPatronDePestanas();
 UI?.boot(state);
