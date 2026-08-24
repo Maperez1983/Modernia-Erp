@@ -200,6 +200,7 @@ python scripts/simula_ciclo_financiaciones.py  # del estudio a la firma
 python scripts/simula_ciclo_gestoria.py        # expediente, trabajos y modelos
 python scripts/simula_portales.py              # los tres portales de cliente
 python scripts/auditoria_endpoints_inmo.py     # barrido de los endpoints del módulo
+python scripts/mide_la_cobertura.py            # qué parte del servidor se prueba
 ```
 
 Y en la suite, las pruebas nuevas que vigilan lo encontrado: búsquense por
@@ -212,7 +213,58 @@ Y en la suite, las pruebas nuevas que vigilan lo encontrado: búsquense por
 
 ---
 
-## 5. Lo que queda abierto
+## 5. Cuánto del servidor se prueba: 45,05 %
+
+Medido el **2026-08-24** sobre `main`, con la suite entera (3.042 pruebas, 0 fallos).
+Era la primera vez: la herramienta llevaba configurada en `pyproject.toml` desde siempre
+y nunca se había ejecutado —no había ni un `.coverage`—, así que «está bien probado» era
+una impresión y no un dato.
+
+| | sentencias | cubierto |
+|---|---:|---:|
+| **`web/server.py`** | **55.884** | **43,7 %** |
+| `web/db_backend.py` | 618 | 37,5 % |
+| `branded_pdf_vector.py` | 590 | 88,7 % |
+| `document_pdf.py` | 506 | 73,2 % |
+| `hipotecas_pdf.py` | 353 | 69,5 % |
+| `security_utils.py` | 168 | 83,9 % |
+| `public_links.py` | 55 | 92,2 % |
+| `auth_security.py` | 48 | 97,0 % |
+| **TOTAL** | **58.951** | **45,05 %** |
+
+Tres cosas que dice este reparto, y que importan más que el número:
+
+**Donde hubo intención, hay cobertura.** Los módulos pequeños que alguien decidió
+proteger están al 90 % —autenticación 97 %, enlaces públicos 92 %—. `server.py`, que es
+el 95 % del código, está al 43,7 %: **31.011 sentencias que no ejecuta ninguna prueba**.
+
+**`db_backend.py` al 37,5 % es el dato incómodo.** Es la capa que traduce entre SQLite y
+Postgres, la que hizo que el importe de gestoría se comportara distinto en cada base, y
+es de las menos probadas. El punto ciego no es sólo que la suite corra en SQLite: es que
+la pieza que gestiona esa diferencia casi no se prueba.
+
+**Y esto no mide corrección.** Los fallos de esta campaña —la derrama que se comía la
+cuota, el punteo que salía verde, el cierre que se apuntaba dos comisiones— estaban
+todos en código **cubierto**: se ejecutaba en las pruebas y hacía lo que no debía. La
+cobertura dice qué no se ha mirado nunca; no dice que lo mirado esté bien.
+
+**Falta la mitad del programa.** Esto es sólo Python. Los 95.860 líneas de `app.js` no
+las mide esta herramienta.
+
+### El suelo
+
+`fail_under = 44.5` en `pyproject.toml` —medio punto por debajo de lo medido, para que
+no dé rojo por las pruebas que se saltan si falta `node`—. No es una nota: si baja, es
+que ha entrado código que nadie ejecuta.
+
+```bash
+python scripts/mide_la_cobertura.py
+```
+
+Subirlo cuando se gane terreno es parte del trabajo. Bajarlo, una decisión que hay que
+justificar.
+
+## 6. Lo que queda abierto
 
 ### Sin auditar
 

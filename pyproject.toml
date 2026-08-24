@@ -25,6 +25,18 @@ omit = [
 show_missing = true
 skip_covered = false
 precision = 2
+# Suelo de cobertura del servidor. Medido el 2026-08-24 sobre main: 45,05 % con la
+# suite entera (3.042 pruebas). Se fija medio punto por debajo para dejar margen a las
+# pruebas que se saltan cuando falta node o jsdom, que si no daría rojo por el entorno
+# y no por el código.
+#
+# No es una nota: es un suelo. Si baja, es que ha entrado código que nadie ejecuta.
+# Subirlo cuando se gane terreno es parte del trabajo; bajarlo, una decisión que hay
+# que justificar.
+#
+#   scripts/mide_la_cobertura.py
+#
+fail_under = 44.5
 exclude_lines = [
     "pragma: no cover",
 ]
