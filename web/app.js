@@ -4907,6 +4907,11 @@ const formatDateTime = (value) => {
 
 const formatEurosCompact = (value) => formatEuros(value).replace(/\s/g, "");
 
+// Por debajo de esta confianza, el conciliador bancario no se fía del emparejamiento.
+// Es el mismo umbral con el que el servidor cuenta los de «baja confianza» al importar
+// el extracto: si aquí fuera otro, la pantalla y el resumen dirían cosas distintas.
+const CONCILIACION_CONFIANZA_MINIMA = 55;
+
 const numberFormatter = new Intl.NumberFormat("es-ES");
 const quantityFormatter = new Intl.NumberFormat("es-ES", {
   minimumFractionDigits: 0,
@@ -75373,14 +75378,26 @@ const renderGestoriaBancoMovimientos = (rows = []) => {
   items.forEach((row) => {
     const tr = document.createElement("tr");
     const score = Number(row.conciliacion_confianza || row.matched_score || 0);
-    const badge = Number(row.punteado || 0) === 1 ? `<span class="ocr-badge ok">Punteado</span>` : `<span class="ocr-badge danger">Pendiente</span>`;
+    // Un movimiento puede estar punteado y aun así ser un emparejamiento que el
+    // conciliador automático dejó marcado para revisar. La etiqueta miraba sólo
+    // `punteado`, así que salía en verde; y el porcentaje se enseñaba «si es distinto
+    // de cero», o sea que con confianza 0 —el caso más flojo— desaparecía justo la
+    // señal que avisaba. En producción hay siete así.
+    const punteado = Number(row.punteado || 0) === 1;
+    const estadoConciliacion = String(row.conciliacion_estado || "").trim().toLowerCase();
+    const porRevisar = punteado && (estadoConciliacion === "pendiente" || score < CONCILIACION_CONFIANZA_MINIMA);
+    const badge = !punteado
+      ? `<span class="ocr-badge danger">Pendiente</span>`
+      : porRevisar
+        ? `<span class="ocr-badge media" title="Punteado, pero el emparejamiento automático quedó ${estadoConciliacion || "sin validar"} con ${Math.round(score)} % de confianza. Revísalo.">Por revisar</span>`
+        : `<span class="ocr-badge ok">Punteado</span>`;
     tr.innerHTML = `
       <td>${escapeHtml(row.fecha_operacion || row.fecha_valor || "-")}</td>
       <td>${escapeHtml(row.concepto || "-")}</td>
       <td style="white-space:nowrap;">${euroFormatter.format(parseMoneyValue(row.importe || 0))}</td>
       <td style="white-space:nowrap;">${row.saldo != null ? euroFormatter.format(parseMoneyValue(row.saldo)) : "-"}</td>
       <td>${escapeHtml([row.banco_nombre, row.iban].filter(Boolean).join(" · ") || "-")}</td>
-      <td>${badge}${score ? ` <span class="muted">(${Math.round(score)}%)</span>` : ""}</td>
+      <td>${badge}${punteado ? ` <span class="muted">(${Math.round(score)}%)</span>` : ""}</td>
       <td>${row.asiento_id ? escapeHtml(row.asiento_referencia || row.asiento_concepto || row.asiento_id) : "-"}</td>
     `;
     tbody.appendChild(tr);
@@ -75392,7 +75409,12 @@ const renderGestoriaBancoMovimientos = (rows = []) => {
   });
   if (gestoriaBancoMovimientosInfo) {
     const punteados = items.filter((row) => Number(row.punteado || 0) === 1).length;
-    gestoriaBancoMovimientosInfo.textContent = `Movimientos: ${items.length} · Punteados ${punteados} · Pendientes ${Math.max(0, items.length - punteados)}`;
+    const porRevisarTotal = items.filter((row) => Number(row.punteado || 0) === 1
+      && (String(row.conciliacion_estado || "").trim().toLowerCase() === "pendiente"
+          || Number(row.conciliacion_confianza || row.matched_score || 0) < CONCILIACION_CONFIANZA_MINIMA)).length;
+    gestoriaBancoMovimientosInfo.textContent = `Movimientos: ${items.length} · Punteados ${punteados - porRevisarTotal}`
+      + (porRevisarTotal ? ` · Por revisar ${porRevisarTotal}` : "")
+      + ` · Pendientes ${Math.max(0, items.length - punteados)}`;
   }
 };
 

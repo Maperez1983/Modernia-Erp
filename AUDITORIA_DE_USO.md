@@ -512,6 +512,43 @@ comisión **a propósito** — el asesoramiento no tiene esos campos, así que n
 arrastrar y el asesor los completa después. La máquina de estados del expediente
 —denegada, cancelada, pospuesta— lleva cada caso a su sitio.
 
+### Un emparejamiento con cero de confianza salía en verde
+
+El conciliador bancario guarda tres cosas de cada movimiento: si está punteado, en qué
+estado dejó la conciliación y con cuánta confianza. La pantalla sólo miraba la primera.
+
+En producción hay **siete movimientos** con `punteado = 1`, `conciliacion_estado =
+'pendiente'` y `conciliacion_confianza = 0.0`: el emparejador automático los enlazó, no
+se fio nada, y los dejó marcados para revisar. La tabla los pintaba en verde y el
+contador los sumaba a «Punteados».
+
+Y un detalle que lo remataba: el porcentaje de confianza se enseñaba junto a la etiqueta
+**sólo si era distinto de cero**. Con confianza 0 —el caso más flojo de todos—
+desaparecía justo la señal que habría avisado.
+
+Ahora hay tres estados: sin puntear, punteado, y **por revisar** en ámbar con el porqué
+en el título. El porcentaje sale siempre que esté punteado, incluido el 0. El umbral es
+55, el mismo con el que el servidor cuenta los de «baja confianza» al importar el
+extracto: si fueran distintos, la pantalla y el resumen dirían cosas diferentes de los
+mismos movimientos, y hay una prueba que lo ata.
+
+Prueba: `tests/test_punteado_no_es_conciliado.py`.
+
+### En nóminas no había nada que arreglar
+
+Se comprobó: la importación parte el PDF por NIF, y el que no encuentra a nadie en la
+plantilla lo cuenta aparte y **lo devuelve como `persona_not_found`**, que es justo el
+nombre con el que el front lo lee y lo enseña. No se pierde ninguna nómina en silencio.
+
+### Un endpoint de conciliación escrito y sin enganchar
+
+`/api/gestoria_conciliacion_validar` existe, valida un movimiento contra un asiento con
+su confianza y sus notas… y **no está en la lista blanca de POST ni lo llama nadie**. Hoy
+no rompe nada porque ningún botón apunta ahí. Si algún día se engancha, hacen falta dos
+cosas: darlo de alta en las **dos** listas —la blanca y el grupo que despacha— y añadirle
+la comprobación de importes, que no la tiene: hoy dejaría conciliar un movimiento de
+500 € contra un asiento de 5.000 €.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
@@ -519,8 +556,8 @@ Conviene tenerlo claro para no dar por auditado lo que no lo está:
 - **Los caminos que se salen de lo normal, salvo en fincas.** Ahí ya están: derrama,
   cambio de propietario, recibo devuelto, censo descuadrado y cierre de ejercicio.
   En seguros ya están los de la póliza: cambio de compañía, anulación y recibo
-  devuelto. Están los seis módulos. Queda dentro de RRHH la parte de nóminas, y en
-  gestoría la conciliación bancaria. En fincas ya están: ciclo mensual, caminos raros, junta completa, cómputo de ausentes e impugnación.
+  devuelto. Están los seis módulos, con sus caminos raros, las nóminas y la conciliación
+  bancaria. En fincas ya están: ciclo mensual, caminos raros, junta completa, cómputo de ausentes e impugnación.
 - **La interfaz.** Las simulaciones comprueban la API y la base. Una pantalla puede
   enseñar mal un dato correcto, y eso sólo se ve en el navegador.
 
