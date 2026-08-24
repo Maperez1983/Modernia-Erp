@@ -472,6 +472,36 @@ lo que quiere quien está corrigiendo.
 
 Prueba: `tests/test_cerrar_dos_veces_el_mismo_piso.py`.
 
+### Un apunte de 2.450,75 € contaba como 2,45 € al sumarlo
+
+El importe de un apunte de contabilidad de gestoría entraba tal cual venía del
+formulario, **sin pasar por el analizador de importes**. La columna es `REAL`, así que un
+importe tecleado en español normal se guardaba como texto —`'2.450,75'`—, y SQLite lo
+convierte quedándose con lo de antes del punto:
+
+```
+2.450,75 € + 100,00 €  =  102,45 €
+```
+
+El panel cuadraba solo, con dos mil cuatrocientos cincuenta euros convertidos en dos
+euros con cuarenta y cinco. Sin error, sin aviso, y el apunte se veía bien en su ficha:
+sólo fallaba al sumar. Es la misma familia que el importe en formato inglés que se
+arregló en tres analizadores al principio de la campaña; éste se quedó fuera porque no
+analizaba nada.
+
+Y de paso, los otros dos criterios que ya se fijaron en fincas, aplicados igual aquí: los
+negativos se rechazan y lo absurdo se pregunta. En los dos caminos, alta y edición.
+
+Prueba: `tests/test_el_importe_de_gestoria_era_texto.py`.
+
+### En financiaciones no había nada que arreglar
+
+Se comprobó y conviene dejarlo dicho para no repetirlo: convertir un asesoramiento en
+hipoteca **dos veces no duplica** la hipoteca, y la hipoteca nace sin banco, precio ni
+comisión **a propósito** — el asesoramiento no tiene esos campos, así que no hay nada que
+arrastrar y el asesor los completa después. La máquina de estados del expediente
+—denegada, cancelada, pospuesta— lleva cada caso a su sitio.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
@@ -479,8 +509,8 @@ Conviene tenerlo claro para no dar por auditado lo que no lo está:
 - **Los caminos que se salen de lo normal, salvo en fincas.** Ahí ya están: derrama,
   cambio de propietario, recibo devuelto, censo descuadrado y cierre de ejercicio.
   En seguros ya están los de la póliza: cambio de compañía, anulación y recibo
-  devuelto. En RRHH ya están las ausencias y en inmobiliaria los cierres. Quedan los de
-  gestoría y financiaciones: devoluciones parciales y nóminas. En fincas ya están: ciclo mensual, caminos raros, junta completa, cómputo de ausentes e impugnación.
+  devuelto. Están los seis módulos. Queda dentro de RRHH la parte de nóminas, y en
+  gestoría la conciliación bancaria. En fincas ya están: ciclo mensual, caminos raros, junta completa, cómputo de ausentes e impugnación.
 - **La interfaz.** Las simulaciones comprueban la API y la base. Una pantalla puede
   enseñar mal un dato correcto, y eso sólo se ve en el navegador.
 

@@ -9583,6 +9583,43 @@ def close_actions_for_related(conn, *, empresa_id, servicio, related_tipo, relat
     )
 
 
+def importe_de_apunte_de_gestoria(payload, actual=None):
+    """Convierte a número el importe de un apunte de gestoría, o dice qué pasa.
+
+    El importe entraba tal cual venía del formulario, sin pasar por el analizador. La
+    columna es REAL, así que un importe tecleado en español normal —«2.450,75»— se
+    guardaba COMO TEXTO, y SQLite lo convierte a 2,45 al sumarlo:
+
+        2.450,75 € + 100,00 €  =  102,45 €
+
+    Un apunte de dos mil cuatrocientos cincuenta euros contaba como dos euros con
+    cuarenta y cinco, y el panel cuadraba solo. Es la misma familia que el importe en
+    formato inglés que se arregló en los otros tres analizadores; éste se quedó fuera.
+
+    Devuelve `(valor, error, requiere_confirmacion)`.
+    """
+    crudo = payload.get("importe")
+    if str(crudo if crudo is not None else "").strip() == "":
+        return (actual, None, False)
+    # `parse_money_value` devuelve 0 para lo que no sabe leer, y un apunte de 0 € por
+    # haber tecleado «dos mil» es peor que un error: se guarda y no se nota.
+    if not any(c.isdigit() for c in str(crudo)):
+        return (None, f"«{crudo}» no es un importe.", False)
+    valor = parse_money_value(crudo)
+    if valor is None:
+        return (None, f"«{crudo}» no es un importe.", False)
+    if valor < 0:
+        # Mismo criterio que en fincas: el signo lo pone el tipo, no el número.
+        return (None,
+                "El importe va en positivo: lo que decide si suma o resta es el tipo "
+                "(Gasto o Ingreso). Si es un abono, anótalo como ingreso.", False)
+    if valor > FINCAS_IMPORTE_QUE_PIDE_CONFIRMACION and not _quiere_confirmar(payload):
+        return (None,
+                f"{format_export_money(valor)} es mucho para un apunte de gestoría. "
+                f"Si es correcto, confírmalo.", True)
+    return (valor, None, False)
+
+
 def anula_recibos_pendientes_de_poliza(conn, seguro_row, now, motivo=""):
     """Al dar de baja una póliza, sus recibos sin cobrar dejan de ser cobrables.
 
@@ -86836,6 +86873,15 @@ class Handler(BaseHTTPRequestHandler):
                     cliente_ids = [hipoteca_link["cliente_id"]]
                     cliente_id = hipoteca_link["cliente_id"]
             cliente_ids_json = json.dumps(cliente_ids, ensure_ascii=False) if cliente_ids else None
+            importe_apunte, error_importe, pide_confirmar = importe_de_apunte_de_gestoria(payload)
+            if error_importe:
+                json_response(
+                    self,
+                    {"error": error_importe,
+                     **({"requiere_confirmacion": True} if pide_confirmar else {})},
+                    status=409 if pide_confirmar else 400,
+                )
+                return
             conn.execute(
                 """
                 INSERT INTO gestoria_contabilidad (
@@ -86857,7 +86903,7 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("concepto"),
                     payload.get("gestion"),
                     payload.get("tipo"),
-                    payload.get("importe"),
+                    importe_apunte,
                     payload.get("notas"),
                     now,
                     now,
@@ -86890,9 +86936,24 @@ class Handler(BaseHTTPRequestHandler):
             updates = []
             values = []
             cliente_ids = None
+            # El mismo control en la edición: cambiar el importe de un apunte ya guardado
+            # entra por aquí, y sin esto se podía meter el texto por la puerta de atrás.
+            if "importe" in payload:
+                importe_apunte, error_importe, pide_confirmar = importe_de_apunte_de_gestoria(payload)
+                if error_importe:
+                    json_response(
+                        self,
+                        {"error": error_importe,
+                         **({"requiere_confirmacion": True} if pide_confirmar else {})},
+                        status=409 if pide_confirmar else 400,
+                    )
+                    return
             for field in allowed:
                 if field in payload:
-                    if field in {"seguro_id", "hipoteca_id"}:
+                    if field == "importe":
+                        updates.append("importe = ?")
+                        values.append(importe_apunte)
+                    elif field in {"seguro_id", "hipoteca_id"}:
                         updates.append(f"{field} = ?")
                         values.append((payload.get(field) or "").strip() or None)
                     elif field == "cliente_id":
