@@ -22,6 +22,7 @@ python scripts/simula_fincas_fuera_de_lo_normal.py
 python scripts/simula_junta_de_propietarios.py
 python scripts/simula_seguros_fuera_de_lo_normal.py
 python scripts/simula_rrhh_fuera_de_lo_normal.py
+python scripts/simula_inmobiliaria_fuera_de_lo_normal.py
 ```
 
 Cada uno levanta su propio servidor sobre una base temporal —borran `DATABASE_URL` antes
@@ -451,6 +452,26 @@ descuenta los días aprobados.
 
 Prueba: `tests/test_ausencias_que_no_cuadran.py`.
 
+### Cada vez que se pulsaba «cerrar», la agencia se apuntaba otra comisión
+
+El cierre es el momento en que entra el dinero, y es un botón que se pulsa una vez al año
+por inmueble: cuando falla, falla en silencio y no se nota hasta que alguien cuadra el
+año. Pulsándolo cinco veces sobre el mismo piso quedaban **cinco cierres**, y los paneles
+sumaban 417.850 € de honorarios de una venta de 285.000 €.
+
+Nadie duplica un cierre a propósito. Pero sí se pulsa dos veces cuando la primera parece
+que no ha respondido, y sí se vuelve a entrar para corregir un importe mal tecleado.
+
+Por el camino entraban tres importes imposibles: una venta en negativo, unos honorarios
+en negativo, y unos honorarios mayores que el precio de venta.
+
+Los criterios son los que ya se fijaron en fincas: los negativos se rechazan siempre, y
+lo absurdo se pregunta. Volver a cerrar avisa de lo que ya hay —tipo, fecha, importe y
+honorarios— y, si se confirma, **sustituye** aquel cierre en vez de añadir otro. Que es
+lo que quiere quien está corrigiendo.
+
+Prueba: `tests/test_cerrar_dos_veces_el_mismo_piso.py`.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
@@ -458,8 +479,8 @@ Conviene tenerlo claro para no dar por auditado lo que no lo está:
 - **Los caminos que se salen de lo normal, salvo en fincas.** Ahí ya están: derrama,
   cambio de propietario, recibo devuelto, censo descuadrado y cierre de ejercicio.
   En seguros ya están los de la póliza: cambio de compañía, anulación y recibo
-  devuelto. En RRHH ya están las ausencias. Quedan los de gestoría, financiaciones
-  e inmobiliaria: devoluciones parciales, alquileres y nóminas. En fincas ya están: ciclo mensual, caminos raros, junta completa, cómputo de ausentes e impugnación.
+  devuelto. En RRHH ya están las ausencias y en inmobiliaria los cierres. Quedan los de
+  gestoría y financiaciones: devoluciones parciales y nóminas. En fincas ya están: ciclo mensual, caminos raros, junta completa, cómputo de ausentes e impugnación.
 - **La interfaz.** Las simulaciones comprueban la API y la base. Una pantalla puede
   enseñar mal un dato correcto, y eso sólo se ve en el navegador.
 

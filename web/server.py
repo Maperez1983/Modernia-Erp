@@ -27236,11 +27236,54 @@ def create_operacion_for_inmueble_cierre(conn, empresa_id, inmueble_id, tipo_lab
     return op_id
 
 
-def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=None, fecha_cierre=None, importe_final=None, numero_citas=None, tipo=None, notas=None, archive_pending=True, honorarios=None, motivo_cierre=None, nuevo_propietario=None, workspace_id=""):
+def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=None, fecha_cierre=None, importe_final=None, numero_citas=None, tipo=None, notas=None, archive_pending=True, honorarios=None, motivo_cierre=None, nuevo_propietario=None, workspace_id="", confirmado=False):
     empresa_id = str(empresa_id or "").strip()
     inmueble_id = str(inmueble_id or "").strip()
     if not empresa_id or not inmueble_id:
         return {"ok": False, "error": "empresa_id e inmueble_id requeridos"}
+    # El cierre es el momento en que entra el dinero, y es un botón que se pulsa una vez
+    # al año por inmueble: si acepta cualquier cosa, nadie se entera hasta que cuadran.
+    if importe_final is not None and float(importe_final) < 0:
+        return {"ok": False,
+                "error": f"El importe de la operación no puede ser negativo "
+                         f"({format_export_money(importe_final)})."}
+    if honorarios is not None and float(honorarios) < 0:
+        return {"ok": False,
+                "error": f"Los honorarios no pueden ser negativos "
+                         f"({format_export_money(honorarios)})."}
+    if (importe_final is not None and honorarios is not None
+            and float(honorarios) > float(importe_final) > 0 and not confirmado):
+        # En un alquiler los honorarios suelen ser una mensualidad, o sea el importe
+        # entero; por encima ya no cuadra con nada. No se bloquea —puede haber un
+        # encargo con mínimo pactado— pero no entra sin decirlo.
+        return {"ok": False, "requiere_confirmacion": True,
+                "error": f"Los honorarios ({format_export_money(honorarios)}) son mayores "
+                         f"que el importe de la operación ({format_export_money(importe_final)}). "
+                         f"Si es correcto, confírmalo."}
+    # Cerrar dos veces el mismo inmueble apuntaba dos cierres, y los honorarios se
+    # sumaban en los paneles tantas veces como se pulsara el botón.
+    ya_cerrado = conn.execute(
+        "SELECT id, tipo, fecha_cierre, importe_final, honorarios FROM inmueble_cierres "
+        "WHERE inmueble_id = ? ORDER BY created_at DESC LIMIT 1",
+        (inmueble_id,),
+    ).fetchone()
+    if ya_cerrado and not confirmado:
+        return {
+            "ok": False,
+            "requiere_confirmacion": True,
+            "code": "ya_cerrado",
+            "error": (f"Este inmueble ya se cerró como {row_value(ya_cerrado, 'tipo', '')} el "
+                      f"{row_value(ya_cerrado, 'fecha_cierre', '') or 'sin fecha'} por "
+                      f"{format_export_money(row_value(ya_cerrado, 'importe_final', 0))} con "
+                      f"{format_export_money(row_value(ya_cerrado, 'honorarios', 0))} de "
+                      f"honorarios. Si vas a corregir aquel cierre, confírmalo y se sustituye; "
+                      f"si es una operación nueva, retoma antes la captación."),
+            "cierre_anterior": dict(ya_cerrado),
+        }
+    if ya_cerrado and confirmado:
+        # Sustituir, no acumular: es una corrección del mismo cierre.
+        conn.execute("DELETE FROM inmueble_cierres WHERE id = ?",
+                     (row_value(ya_cerrado, "id", ""),))
     tipo_norm = normalize_lookup_text(tipo or "").lower()
     tipo_key = (
         tipo_norm.replace("/", "_")
@@ -95309,9 +95352,19 @@ class Handler(BaseHTTPRequestHandler):
                 motivo_cierre=motivo_cierre,
                 nuevo_propietario=nuevo_propietario,
                 workspace_id=ws_alta,
+                confirmado=_quiere_confirmar(payload),
             )
             if not result.get("ok"):
-                json_response(self, {"error": result.get("error") or "No se pudo cerrar"}, status=400)
+                # Lo que se puede confirmar va con 409 y su bandera, para que el front
+                # pueda preguntar en vez de dar el cierre por imposible.
+                json_response(
+                    self,
+                    {"error": result.get("error") or "No se pudo cerrar",
+                     **({"requiere_confirmacion": True} if result.get("requiere_confirmacion") else {}),
+                     **({"code": result["code"]} if result.get("code") else {}),
+                     **({"cierre_anterior": result["cierre_anterior"]} if result.get("cierre_anterior") else {})},
+                    status=409 if result.get("requiere_confirmacion") else 400,
+                )
                 return
             conn.commit()
             json_response(self, result)
