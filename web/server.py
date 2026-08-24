@@ -60642,6 +60642,38 @@ def fetch_workspace_fincas_cartas(conn, workspace_id, *, sembrar=True):
     ]
 
 
+def generate_default_fincas_carta(conn, workspace_id, *, empresa_id="", plantilla_clave="",
+                                   comunidad="", direccion="", calc=None, cuota=0, colegiado=""):
+    """Redacta la carta de presentación con la primera plantilla disponible.
+
+    Mismo criterio que `/api/workspace_fincas_carta`: si no hay plantillas o la
+    plantilla elegida no resuelve ningún hueco, se devuelve cadena vacía y el PDF
+    simplemente no lleva carta (en vez de mandar un texto a medias).
+    """
+    plantillas = {c["clave"]: c for c in fetch_workspace_fincas_cartas(conn, workspace_id)}
+    plantilla = plantillas.get(str(plantilla_clave or "").strip()) or (list(plantillas.values())[0] if plantillas else None)
+    if not plantilla:
+        return ""
+    empresa = ""
+    empresa_id = str(empresa_id or "").strip()
+    if empresa_id:
+        fila = conn.execute("SELECT nombre, razon_social FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+        if fila:
+            empresa = str(row_value(fila, "nombre", "") or row_value(fila, "razon_social", "") or "").strip()
+    cuota = round(parse_money_value(cuota), 2)
+    datos = {
+        "comunidad": str(comunidad or "").strip() or "su comunidad",
+        "direccion": str(direccion or "").strip(),
+        "viviendas": str(parse_non_negative_int((calc or {}).get("num_vecinos")) or ""),
+        "unidades": describe_unidades_edificio(calc or {}),
+        "cuota": format_eur(cuota) if cuota else "",
+        # La carta la firma la marca, igual que el logo del PDF.
+        "empresa": FINCAS_NOMBRE_COMERCIAL or empresa or "nuestro despacho",
+        "colegiado": str(colegiado or "").strip(),
+    }
+    return render_carta_presentacion(plantilla["cuerpo"], datos)
+
+
 #: El equipo que firma la propuesta. Son personas reales, así que esta lista se
 #: revisó con la casa antes de darla por buena: la tilde de «Bárbara», el «de» del
 #: cargo de Daniel y a quién pertenece el número de colegiado, que es lo único que
@@ -83780,6 +83812,20 @@ class Handler(BaseHTTPRequestHandler):
                     calculo["num_aparcamientos"],
                     tarifas=tarifas,
                 )
+                # Un presupuesto sin carta de presentación se manda pelado: cuando no
+                # se ha escrito una a mano, se genera sola con la primera plantilla
+                # disponible. Así todo presupuesto de fincas sale con carta y con la
+                # foto del equipo (que solo se pega en el PDF si hay carta).
+                if not calculo["carta_presentacion"]:
+                    calculo["carta_presentacion"] = generate_default_fincas_carta(
+                        conn, workspace_id,
+                        empresa_id=empresa_id,
+                        comunidad=calculo["comunidad_denominacion"],
+                        direccion=calculo["comunidad_direccion"],
+                        calc=calculo,
+                        cuota=calculo["cuota_sugerida"],
+                        colegiado=calculo["colegiado_numero"],
+                    )
                 # Trabajos puntuales elegidos en el formulario (constitución de la
                 # comunidad y demás): van como línea propia, no en la cuota mensual.
                 elegidas = payload.get("tarifas_fijas")
@@ -86229,38 +86275,29 @@ class Handler(BaseHTTPRequestHandler):
             # porque se pide antes de crear el presupuesto.
             clave = str(payload.get("plantilla") or "").strip()
             plantillas = {c["clave"]: c for c in fetch_workspace_fincas_cartas(conn, workspace_id)}
-            plantilla = plantillas.get(clave) or (list(plantillas.values())[0] if plantillas else None)
-            if not plantilla:
+            if clave not in plantillas and not plantillas:
                 json_response(self, {"error": "No hay plantillas de carta"}, status=404)
                 return
-            empresa_id = str(payload.get("empresa_id") or "").strip()
-            empresa = ""
-            if empresa_id:
-                fila = conn.execute("SELECT nombre, razon_social FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
-                if fila:
-                    empresa = str(row_value(fila, "nombre", "") or row_value(fila, "razon_social", "") or "").strip()
             calc = {
                 "num_vecinos": payload.get("num_vecinos"),
                 "num_locales": payload.get("num_locales"),
                 "num_trasteros": payload.get("num_trasteros"),
                 "num_aparcamientos": payload.get("num_aparcamientos"),
             }
-            cuota = round(parse_money_value(payload.get("cuota")), 2)
-            datos = {
-                "comunidad": str(payload.get("comunidad") or "").strip() or "su comunidad",
-                "direccion": str(payload.get("direccion") or "").strip(),
-                "viviendas": str(parse_non_negative_int(payload.get("num_vecinos")) or ""),
-                "unidades": describe_unidades_edificio(calc),
-                "cuota": format_eur(cuota) if cuota else "",
-                # La carta la firma la marca, igual que el logo del PDF. La sociedad
-                # que emite va identificada en el propio presupuesto, no en el texto.
-                "empresa": FINCAS_NOMBRE_COMERCIAL or empresa or "nuestro despacho",
-                "colegiado": str(payload.get("colegiado") or "").strip(),
-            }
+            plantilla_usada = plantillas.get(clave) or (list(plantillas.values())[0] if plantillas else None)
             json_response(self, {
                 "ok": True,
-                "plantilla": plantilla["clave"],
-                "carta": render_carta_presentacion(plantilla["cuerpo"], datos),
+                "plantilla": plantilla_usada["clave"] if plantilla_usada else "",
+                "carta": generate_default_fincas_carta(
+                    conn, workspace_id,
+                    empresa_id=payload.get("empresa_id"),
+                    plantilla_clave=clave,
+                    comunidad=payload.get("comunidad"),
+                    direccion=payload.get("direccion"),
+                    calc=calc,
+                    cuota=payload.get("cuota"),
+                    colegiado=payload.get("colegiado"),
+                ),
             })
             return
         elif parsed.path == "/api/workspace_fincas_extracto_importar":

@@ -22113,10 +22113,18 @@ const renderWorkspaceRemittancesList = (rows = []) => {
   `;
 };
 
+// El backend resuelve `empresa_id` contra la tabla legacy `empresas` (razón
+// social, CIF, logo del PDF...), no contra `workspace_companies`. Mandar el id
+// nuevo colaba un id que no existía en `empresas`: el presupuesto se guardaba,
+// pero el emisor salía en blanco y el registro no aparecía en los listados
+// filtrados por empresa. `legacy_empresa_id` es siempre el id que hay que
+// mandar cuando existe.
+const companyLegacyId = (row) => String(row?.legacy_empresa_id || row?.id || "").trim();
+
 const hydrateWorkspaceCompanySelects = () => {
   const companies = state.currentWorkspaceDetail?.companies || [];
-  const defaultCompanyId = state.currentWorkspaceCompanyId || companies[0]?.id || "";
-  const html = companies.map((row) => `<option value="${escapeHtml(String(row.id))}">${escapeHtml(row.nombre || "-")}</option>`).join("");
+  const defaultCompanyId = state.currentWorkspaceCompanyId || companyLegacyId(companies[0]) || "";
+  const html = companies.map((row) => `<option value="${escapeHtml(companyLegacyId(row))}">${escapeHtml(row.nombre || "-")}</option>`).join("");
   [
     workspaceBillingForm,
     workspaceBudgetForm,
@@ -22140,7 +22148,7 @@ const hydrateWorkspaceCompanySelects = () => {
       const soloFincas = form === workspaceFincasBudgetQuickForm || form === workspaceFincasCommunityForm;
       const administradoras = companies.filter((c) => Number(c.administra_fincas || 0));
       select.innerHTML = soloFincas && administradoras.length
-        ? administradoras.map((c) => `<option value="${escapeHtml(String(c.id))}">${escapeHtml(c.nombre || c.razon_social || c.id)}</option>`).join("")
+        ? administradoras.map((c) => `<option value="${escapeHtml(companyLegacyId(c))}">${escapeHtml(c.nombre || c.razon_social || c.id)}</option>`).join("")
         : html;
       // En fincas, el alta nueva sale por la sociedad marcada para ello. Las
       // comunidades que ya existen conservan la suya: quien las precarga sobrescribe
@@ -22148,12 +22156,12 @@ const hydrateWorkspaceCompanySelects = () => {
       // pantalla.
       const paraAltasNuevas = soloFincas && administradoras.find((c) => Number(c.fincas_por_defecto || 0));
       if (paraAltasNuevas) {
-        select.value = paraAltasNuevas.id;
+        select.value = companyLegacyId(paraAltasNuevas);
       } else if (defaultCompanyId) {
         select.value = defaultCompanyId;
       }
-      if (!String(select.value || "").trim() && companies[0]?.id) {
-        select.value = companies[0].id;
+      if (!String(select.value || "").trim() && companies[0]) {
+        select.value = companyLegacyId(companies[0]);
       }
     }
   });
