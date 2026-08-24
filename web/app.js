@@ -81033,6 +81033,22 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     companiaInput.className = "hidden";
     form.appendChild(companiaInput);
 
+    // La prima y la comisión de la póliza NUEVA. Antes no existían estos campos y el
+    // servidor copiaba las de la compañía anterior, que es lo que se estaba arreglando.
+    const primaInput = document.createElement("input");
+    primaInput.type = "text";
+    primaInput.inputMode = "decimal";
+    primaInput.placeholder = "Prima nueva (€)";
+    primaInput.className = "hidden";
+    form.appendChild(primaInput);
+
+    const comisionInput = document.createElement("input");
+    comisionInput.type = "text";
+    comisionInput.inputMode = "decimal";
+    comisionInput.placeholder = "Comisión nueva (€)";
+    comisionInput.className = "hidden";
+    form.appendChild(comisionInput);
+
     const refInput = document.createElement("input");
     refInput.type = "text";
     refInput.placeholder = "Nueva póliza (opcional)";
@@ -81071,6 +81087,8 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     const refreshActionFields = () => {
       const mode = actionSelect.value;
       companiaInput.classList.toggle("hidden", mode !== "cambiar_compania");
+      primaInput.classList.toggle("hidden", mode !== "cambiar_compania");
+      comisionInput.classList.toggle("hidden", mode !== "cambiar_compania");
       refInput.classList.toggle("hidden", mode === "anular");
       anulaDateInput.classList.toggle("hidden", mode !== "anular");
       anulaReasonSelect.classList.toggle("hidden", mode !== "anular");
@@ -81119,6 +81137,8 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
         payload.nueva_compania = newCompany;
         payload.fecha_cambio = today;
         if (refInput.value.trim()) payload.nueva_poliza_numero = refInput.value.trim();
+        if (primaInput.value.trim()) payload.nueva_prima_total = primaInput.value.trim();
+        if (comisionInput.value.trim()) payload.nueva_comision = comisionInput.value.trim();
       } else if (mode === "anular") {
         if (!anulaDateInput.value) {
           status.textContent = "Indica la fecha de anulación.";
@@ -81152,7 +81172,13 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
           status.textContent = resp.error;
           return;
         }
-        status.textContent = "Acción aplicada.";
+        // Lo que el servidor deja a medias hay que decirlo aquí, no en el registro:
+        // la póliza nueva sin PDF queda Pendiente, y sin prima queda sin importes.
+        status.textContent = resp?.aviso
+          ? `Acción aplicada. ${resp.aviso}`
+          : (Number(resp?.recibos_anulados || 0)
+              ? `Acción aplicada. Se han anulado ${resp.recibos_anulados} recibo(s) pendiente(s) de esa póliza.`
+              : "Acción aplicada.");
         await runAfterSave();
         if (mode === "cambiar_compania" && resp?.new_id) {
           await openSeguroById(resp.new_id, row.cliente_id || cliente.id || "");

@@ -20,6 +20,7 @@ python scripts/simula_ciclo_gestoria.py
 python scripts/simula_portales.py
 python scripts/simula_fincas_fuera_de_lo_normal.py
 python scripts/simula_junta_de_propietarios.py
+python scripts/simula_seguros_fuera_de_lo_normal.py
 ```
 
 Cada uno levanta su propio servidor sobre una base temporal —borran `DATABASE_URL` antes
@@ -400,14 +401,43 @@ los importes absurdos.
 
 Prueba: `tests/test_impugnar_un_acuerdo.py`.
 
+### Cambiar de compañía cobraba la prima de la anterior
+
+Cuatro cosas en el mismo sitio, todas con 200 OK, todas de dinero:
+
+- **La póliza nueva entraba «En vigor» sin su PDF.** Por el camino normal eso se
+  rechaza; por el cambio de compañía no lo miraba nadie. Dos caminos al mismo sitio y
+  sólo uno con el control — el patrón que más veces ha salido en esta auditoría. Ahora
+  se queda en Pendiente y se dice por qué, en vez de rechazar el cambio: el cambio ha
+  ocurrido y hay que registrarlo; lo que no vale es mentir sobre el estado.
+- **Heredaba la prima.** El cliente se va de Mapfre a Generali por 415 € y la póliza
+  nueva se guardaba con los 640 € de la anterior. Nadie cambia de compañía para pagar lo
+  mismo: la prima nueva es justo el motivo del cambio.
+- **Y la comisión.** 96 € de la póliza vieja liquidados sobre la nueva.
+- **Anular dejaba el recibo pendiente cobrándose solo.** La póliza quedaba «Anulada» con
+  su fecha de baja y el recibo de 900 € seguía en «Pendiente»: sigue en el resumen y
+  entra en la remesa, o sea que se le pasa al cobro a quien ya no tiene póliza.
+
+El último va en un ayudante compartido a propósito: la interfaz anula con un
+`seguros_update` de estado y la API con `seguros_poliza_accion`. Poner el control en uno
+solo es como no ponerlo, y da la casualidad de que el que usa la gente es el otro.
+
+Lo que **no** se toca, y conviene que quede dicho: los recibos pendientes de una póliza
+*sustituida*. Una póliza que se cambia a mitad de año puede deber legítimamente la prima
+del periodo transcurrido, y anularlos ahí sería borrar deuda real. Sólo se anulan al
+anular de verdad, y nunca los ya cobrados —si hay que devolver dinero eso es un extorno—.
+
+Prueba: `tests/test_cambio_de_compania_y_anulacion.py`.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
 
 - **Los caminos que se salen de lo normal, salvo en fincas.** Ahí ya están: derrama,
   cambio de propietario, recibo devuelto, censo descuadrado y cierre de ejercicio.
-  Quedan los de los otros cinco módulos: anulaciones, devoluciones parciales, alquileres,
-  ausencias, nóminas, cambio de compañía y bajas de póliza. En fincas ya están: ciclo mensual, caminos raros, junta completa, cómputo de ausentes e impugnación.
+  En seguros ya están los de la póliza: cambio de compañía, anulación y recibo
+  devuelto. Quedan los de gestoría, financiaciones, RRHH e inmobiliaria:
+  devoluciones parciales, alquileres, ausencias y nóminas. En fincas ya están: ciclo mensual, caminos raros, junta completa, cómputo de ausentes e impugnación.
 - **La interfaz.** Las simulaciones comprueban la API y la base. Una pantalla puede
   enseñar mal un dato correcto, y eso sólo se ve en el navegador.
 

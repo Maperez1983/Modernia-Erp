@@ -9583,6 +9583,45 @@ def close_actions_for_related(conn, *, empresa_id, servicio, related_tipo, relat
     )
 
 
+def anula_recibos_pendientes_de_poliza(conn, seguro_row, now, motivo=""):
+    """Al dar de baja una póliza, sus recibos sin cobrar dejan de ser cobrables.
+
+    La póliza quedaba «Anulada» con su fecha de baja —correcto— y su recibo seguía en
+    «Pendiente». Y ese recibo sigue apareciendo en el resumen y entra en la remesa: se
+    le pasa al cobro a quien ya no tiene póliza. Nadie avisaba porque anular contestaba
+    200 y el recibo era otra tabla.
+
+    Sólo se tocan los que no se han cobrado. Lo cobrado no se deshace desde aquí: si
+    hay que devolver dinero, eso es un extorno y se anota como tal.
+
+    Se llama desde los DOS caminos que anulan —`seguros_update` con estado «Anulada» y
+    `seguros_poliza_accion`— porque la interfaz usa el primero y la API el segundo, y
+    poner el control en uno solo es como no ponerlo.
+    """
+    poliza_id = str(row_value(seguro_row, "id", "") or "")
+    if not poliza_id:
+        return 0
+    try:
+        pendientes = conn.execute(
+            "SELECT id FROM seguros_recibos WHERE seguro_id = ? "
+            "AND LOWER(COALESCE(estado, '')) NOT IN ('cobrado', 'anulado', 'liquidado')",
+            (poliza_id,),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return 0
+    if not pendientes:
+        return 0
+    nota = f"Anulado con la póliza{(': ' + motivo) if motivo else ''}"
+    for fila in pendientes:
+        conn.execute(
+            "UPDATE seguros_recibos SET estado = 'Anulado', "
+            "notas = TRIM(COALESCE(notas, '') || ? ), updated_at = datetime(?) WHERE id = ?",
+            (f"\n{nota}", now, row_value(fila, "id", "")),
+        )
+    return len(pendientes)
+
+
 def seguros_sync_activation_action(conn, seguro_row, now):
     if not seguro_row:
         return
@@ -88664,11 +88703,17 @@ class Handler(BaseHTTPRequestHandler):
             row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
             if row and row["cliente_id"]:
                 ensure_cliente_servicio_link(conn, row["cliente_id"], row["empresa_id"], "seguros", now)
+            recibos_anulados = 0
             if row:
                 ensure_seguro_doc_link(conn, row, now)
                 log_seguro_event(conn, row, "actualizacion", now, payload={"campos": sorted(list(updates.keys()))})
                 upsert_seguro_comision_contabilidad(conn, row, now, movimiento="emision")
                 seguros_sync_activation_action(conn, row, now)
+                # La interfaz anula por aquí, no por `seguros_poliza_accion`: si el
+                # control estuviera sólo allí, el camino que usa la gente se lo saltaría.
+                if str(updates.get("estado") or "").strip().lower() in {"anulada", "baja"}:
+                    recibos_anulados = anula_recibos_pendientes_de_poliza(
+                        conn, row, now, str(updates.get("motivo_baja") or "").strip())
             if row:
                 missing = []
                 for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
@@ -88778,7 +88823,33 @@ class Handler(BaseHTTPRequestHandler):
                 nueva_poliza = (payload.get("nueva_poliza_ref") or row["nueva_poliza_ref"] or row["poliza_numero"] or "").strip()
             nueva_fecha_efecto = payload.get("nueva_fecha_efecto") or payload.get("fecha_efecto") or row["fecha_efecto"]
             nueva_fecha_venc = payload.get("nueva_fecha_vencimiento") or payload.get("fecha_vencimiento") or row["fecha_vencimiento"]
+            # La prima y la comisión NO se heredan. Nadie cambia de compañía para pagar
+            # lo mismo: la prima nueva es justo el motivo del cambio. Copiarlas dejaba al
+            # cliente facturado con el importe de la compañía anterior y a la correduría
+            # liquidándose una comisión que no le corresponde, con un 200 OK.
+            def _importe_nuevo(*claves):
+                for clave in claves:
+                    crudo = payload.get(clave)
+                    if str(crudo or "").strip() != "":
+                        return parse_money_value(crudo)
+                return None
+            nueva_prima_neta = _importe_nuevo("nueva_prima_neta", "prima_neta")
+            nueva_prima_total = _importe_nuevo("nueva_prima_total", "prima_total")
+            nueva_comision = _importe_nuevo("nueva_comision", "comision")
+            faltan_importes = [
+                etiqueta for etiqueta, valor in (("prima", nueva_prima_total),
+                                                 ("comisión", nueva_comision))
+                if valor is None
+            ]
+            # El PDF de la póliza nueva: el camino normal no deja ponerla en vigor sin
+            # él, y por aquí entraba «En vigor» con el hueco vacío. No se rechaza el
+            # cambio —ha ocurrido y hay que registrarlo—: se queda Pendiente y se dice.
+            nueva_poliza_key = str(payload.get("poliza_key") or "").strip()
+            nueva_poliza_url = str(payload.get("poliza_url") or "").strip()
             nuevo_estado = payload.get("nuevo_estado") or "En vigor"
+            sin_pdf = not (nueva_poliza_key or nueva_poliza_url)
+            if sin_pdf and str(nuevo_estado).strip().lower() in {"en vigor", "contratada"}:
+                nuevo_estado = "Pendiente"
             nuevo_cliente_id = payload.get("cliente_id") or row["cliente_id"]
             if nuevo_cliente_id:
                 cliente_access = resolve_cliente_scope_access(conn, nuevo_cliente_id, empresa_id=row["empresa_id"])
@@ -88864,9 +88935,9 @@ class Handler(BaseHTTPRequestHandler):
                     nueva_compania,
                     row["ramo"],
                     nueva_poliza or row["poliza_numero"],
-                    row["prima_neta"],
-                    row["prima_total"],
-                    row["comision"],
+                    nueva_prima_neta,
+                    nueva_prima_total,
+                    nueva_comision,
                     row["produccion"],
                     row["colaborador"],
                     nuevo_estado,
@@ -88940,6 +89011,18 @@ class Handler(BaseHTTPRequestHandler):
                 upsert_seguro_comision_contabilidad(conn, new_row, now, movimiento="emision")
                 seguros_sync_activation_action(conn, new_row, now)
             conn.commit()
+            # Los recibos pendientes de la póliza que sale NO se tocan: una póliza
+            # sustituida a mitad de año puede deber legítimamente la prima del periodo
+            # ya transcurrido, y anularlos aquí sería borrar deuda real. Eso sólo se
+            # hace al anular de verdad.
+            pendiente = []
+            if faltan_importes:
+                pendiente.append("Falta " + " y ".join(faltan_importes)
+                                 + " de la póliza nueva: no se hereda la de la anterior, "
+                                   "porque cambiar de compañía es cambiar de precio.")
+            if sin_pdf:
+                pendiente.append("Queda en Pendiente hasta que adjuntes el PDF de la póliza "
+                                 "nueva, igual que en el alta normal.")
             json_response(
                 self,
                 {
@@ -88947,6 +89030,8 @@ class Handler(BaseHTTPRequestHandler):
                     "old_id": record_id,
                     "new_id": new_id,
                     "version_grupo": version_grupo,
+                    "estado_nueva": nuevo_estado,
+                    "aviso": " ".join(pendiente),
                 },
             )
             return
@@ -89249,6 +89334,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
                 seguros_sync_activation_action(conn, row, now)
+                recibos_anulados = anula_recibos_pendientes_de_poliza(conn, row, now, motivo_baja)
                 log_seguro_event(conn, row, "anulacion", now, motivo=motivo_baja, payload={"fecha_baja": fecha_baja})
                 try:
                     create_seguro_movimiento(
@@ -89263,7 +89349,8 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 conn.commit()
-                json_response(self, {"ok": True, "id": record_id, "accion": "anular"})
+                json_response(self, {"ok": True, "id": record_id, "accion": "anular",
+                                     "recibos_anulados": recibos_anulados})
                 return
             json_response(self, {"error": "Accion no soportada"}, status=400)
             return
