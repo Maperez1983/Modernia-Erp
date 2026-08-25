@@ -818,6 +818,90 @@ Sin urgencia, porque queda muy por encima de lo que hay, pero anotado:
 La comunidad más grande de producción tiene 59 propietarios, así que ninguna de las dos
 molesta hoy.
 
+## Concurrencia: dos personas a la vez
+
+Todo lo anterior se midió con **un usuario**. Modernia tiene 19, el servidor va con
+hilos, y dos administradoras pueden estar en la misma comunidad a la misma hora.
+
+```bash
+CRM_POSTGRES_PRUEBAS=postgresql://postgres@127.0.0.1:55432/crm_pruebas \
+    python scripts/prueba_de_concurrencia.py --a-la-vez 6 --vueltas 3
+```
+
+Va **contra Postgres a la fuerza**: SQLite serializa las escrituras con un cerrojo de
+base entera, así que esconde justo esta clase de fallo.
+
+### Numerar una factura estaba roto en Postgres
+
+No es un fallo de concurrencia: es que no funcionaba. El `SELECT` pedía dos columnas sin
+nombre —`COALESCE(prefijo,'')` y `COALESCE(siguiente_numero,1)`— y en Postgres la fila
+vuelve como diccionario: **las dos se llaman «coalesce» y una pisa a la otra**, así que
+la fila es `{'id': …, 'coalesce': 1}` y `series_row[1]` revienta con `KeyError`.
+
+Traducido: rellenar la serie y dejar el número en blanco —que es lo que dice el
+formulario, «Autogenerado»— devolvía un 500. En SQLite las filas se indexan por posición
+y no se notaba. Producción no tiene ninguna serie creada todavía, así que nadie lo ha
+pisado; el primero que lo haga, sí.
+
+### Y la numeración era una carrera
+
+Leer el contador, componer el número y guardar el siguiente son tres pasos. Dos
+peticiones leían el mismo y salían **dos facturas con el mismo número**, que en una
+numeración correlativa no es una molestia sino un problema.
+
+Ahora es un `UPDATE … RETURNING`: el contador se reserva y se lee de una vez, con la
+fila bloqueada mientras tanto. Y un índice único de `(workspace, empresa, serie, número)`
+detrás, porque una comprobación antes de insertar no ve lo que otra petición está
+escribiendo sin confirmar; el índice sí. Medido: en ninguna ejecución se repite un
+número.
+
+### Emitir los recibos del mes a la vez daba un 500
+
+El bucle mira si el recibo existe y lo inserta. Con dos personas las dos pasan la
+comprobación y una choca con el índice único. **Que choque es lo que hay que querer** —el
+índice es lo que impide cobrar dos veces al vecindario, y funciona: nunca aparece un
+propietario con dos recibos—. Lo que no valía es que saliera como error del servidor.
+Ahora responde «los recibos acaban de emitirse desde otro sitio, recarga para verlos».
+
+### Lo que se deja abierto, y por qué
+
+**La serie se bloquea durante toda la petición.** El `UPDATE` retiene la fila hasta que
+la petición confirma, y eso no pasa hasta el final, después de guardar la factura y de
+correr las automatizaciones. Con seis personas a la vez, medido, **ocho de cuarenta y
+ocho facturas no salen**: unas con 500 por `lock_timeout`, otras rechazadas por número
+duplicado. Fallan a la vista, y el número nunca se repite, pero fallan.
+
+Lo suyo sería confirmar la reserva en el acto y soltar el candado, aceptando que un
+fallo posterior deje un hueco en la numeración. Se probó: sube a **47 de 48** y
+desaparecen los 500. Pero **una de esas 48 devolvía 200 sin guardar la factura**, y no se
+ha encontrado por qué. Cambiar un fallo que se ve por uno que no se ve, en facturación,
+es peor negocio. Queda anotado en el código, donde se va a leer.
+
+### Dar de alta el mismo cliente a la vez creaba fichas duplicadas
+
+Seis peticiones con el mismo NIF a la vez dejaron **cuatro fichas**. La comprobación de
+duplicados mira lo confirmado, así que no ve a las otras cinco. Y una ficha duplicada no
+se arregla sola: hay que fusionarla a mano decidiendo cuál es la buena.
+
+Arreglado con un índice único que usa **el mismo criterio que la comprobación** —NIF en
+mayúsculas y sin espacios, puntos ni guiones, dentro del workspace—. Si usara otro,
+rechazaría altas que la aplicación considera distintas. El choque devuelve el 409
+«Cliente duplicado» de siempre, con el id de la ficha que ganó, para acabar en la ficha
+buena en vez de en un error. Medido después: seis altas simultáneas, **una ficha**.
+
+Y si algún día no se puede crear el índice, **el arranque lo dice** con la cuenta de
+grupos pendientes de fusionar. Un `try/except` mudo ahí dejaría creer que existe.
+
+Para poder crearlo hubo que tocar producción. Tres clientes tenían `nif = 'ES'`, que no
+es un NIF: **Caja Diaria** y **DOMINGO ALVAREZ DE LOS SANTOS**, éste dos veces. No se
+borraron las fichas —son reales y las tres tenían vínculo con su empresa—: se vació el
+campo del NIF, que era lo que estorbaba. Los 2.262 clientes siguen ahí y el estado previo
+quedó guardado antes de tocar nada.
+
+Queda una decisión aparte: **las dos fichas de DOMINGO ALVAREZ DE LOS SANTOS siguen
+siendo un duplicado** y hay que fusionarlas. El índice ya no lo impide porque ninguna
+tiene NIF, pero el duplicado sigue ahí.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
@@ -832,8 +916,9 @@ Conviene tenerlo claro para no dar por auditado lo que no lo está:
 - **La suite entera sobre Postgres.** Se cubre la capa donde las dos bases se separan
   (arriba), no las 3.000 pruebas. Para eso habría que reescribir los 68 ficheros que
   abren SQLite a mano.
-- **Concurrencia.** Todo se ha medido con un usuario. Dos administradoras emitiendo a
-  la vez sobre la misma comunidad no se ha probado.
+- **Concurrencia bajo carga sostenida.** Se han probado seis personas a la vez (arriba);
+  no se ha probado el sistema entero con todo el equipo trabajando a la vez durante
+  horas, ni qué hace el pool de conexiones ahí.
 - **Migrar una base antigua** y **restaurar desde copia**: siguen sin una sola prueba.
 
 ## Anotaciones menores

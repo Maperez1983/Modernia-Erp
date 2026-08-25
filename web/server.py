@@ -41982,6 +41982,58 @@ def _ensure_tables_sin_red(db_path, _abiertas):
             _migration_mark(conn, "perf_indexes_renta_v1")
     except Exception:
         pass
+
+    # Dos fichas del mismo cliente, creadas a la vez, con el mismo NIF.
+    #
+    # El alta comprueba si ya existe antes de insertar, pero una comprobación no ve lo
+    # que otra petición está escribiendo sin confirmar todavía. Medido: seis altas
+    # simultáneas del mismo NIF dejaron cuatro fichas. Y una ficha duplicada no se
+    # arregla sola: hay que fusionarla a mano decidiendo cuál es la buena.
+    #
+    # El índice usa **el mismo criterio que la comprobación**: el NIF en mayúsculas y
+    # sin espacios, puntos ni guiones, dentro del mismo workspace. Si se usara otro, el
+    # índice rechazaría altas que la aplicación considera distintas.
+    #
+    # Sin `try/except` mudo: si esto no se puede crear es porque hay duplicados ya
+    # dentro, y eso hay que verlo. Al arrancar se dice; no se calla y se sigue como si
+    # el índice existiera.
+    try:
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_nif_unico_por_workspace
+            ON clientes (
+              COALESCE(workspace_id, ''),
+              REPLACE(REPLACE(REPLACE(UPPER(COALESCE(nif, '')), ' ', ''), '-', ''), '.', '')
+            )
+            WHERE COALESCE(nif, '') <> ''
+            """
+        )
+    except Exception as exc:
+        _rollback_best_effort(conn)
+        try:
+            repetidos = conn.execute(
+                """
+                SELECT COUNT(*) AS n FROM (
+                  SELECT 1 FROM clientes
+                  WHERE COALESCE(nif, '') <> ''
+                  GROUP BY COALESCE(workspace_id, ''),
+                           REPLACE(REPLACE(REPLACE(UPPER(COALESCE(nif, '')), ' ', ''), '-', ''), '.', '')
+                  HAVING COUNT(*) > 1
+                ) x
+                """
+            ).fetchone()
+            cuantos = int(row_value(repetidos, "n", 0) or 0)
+        except Exception:
+            _rollback_best_effort(conn)
+            cuantos = -1
+        print(
+            f"[AVISO] No se pudo crear idx_clientes_nif_unico_por_workspace: {exc}. "
+            f"Grupos de clientes con el mismo NIF pendientes de fusionar: "
+            f"{cuantos if cuantos >= 0 else 'no se pudo contar'}. "
+            f"Mientras no exista el índice, dos altas simultáneas del mismo NIF "
+            f"pueden crear fichas duplicadas.",
+            file=sys.stderr,
+        )
     # Backfill/compat: algunos datasets legacy no tenían todavía tablas base usadas en el dashboard.
     # Evita 500 en endpoints como `/api/dashboard` cuando se despliegan nuevas vistas.
     try:
@@ -44543,6 +44595,24 @@ def ensure_workspace_facturacion_table(conn):
     )
     ensure_column(conn, "workspace_facturacion", "remesa_id", "remesa_id TEXT")
     ensure_column(conn, "workspace_facturacion", "conciliacion_estado", "conciliacion_estado TEXT")
+    # Dos facturas no pueden llevar el mismo número dentro de la misma serie.
+    #
+    # Había una comprobación antes de insertar, pero una comprobación no ve lo que otra
+    # petición está escribiendo sin confirmar todavía: con dos personas facturando a la
+    # vez las dos preguntaban, las dos veían el número libre y las dos lo usaban. El
+    # índice es lo único que no se puede saltar.
+    #
+    # Sólo cuenta cuando hay número: una factura en borrador puede no tenerlo.
+    try:
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_facturacion_serie_numero
+            ON workspace_facturacion (workspace_id, empresa_id, serie, numero)
+            WHERE COALESCE(numero, '') <> ''
+            """
+        )
+    except Exception:
+        _rollback_best_effort(conn)
 
 
 def ensure_workspace_product_tables(conn):
@@ -79615,22 +79685,74 @@ class Handler(BaseHTTPRequestHandler):
             numero = (payload.get("numero") or "").strip() or None
             prefijo = ""
             if serie and not numero:
-                series_row = conn.execute(
-                    """
-                    SELECT id, COALESCE(prefijo, ''), COALESCE(siguiente_numero, 1)
-                    FROM workspace_facturacion_series
-                    WHERE workspace_id = ? AND empresa_id = ? AND serie = ? AND COALESCE(activa, 1) = 1
-                    LIMIT 1
-                    """,
-                    (workspace_id, empresa_id, serie),
-                ).fetchone()
+                # Coger número y avanzar el contador, en UNA sentencia.
+                #
+                # Antes eran tres —leer el contador, componer el número, guardar el
+                # siguiente— y eso tiene dos fallos, cada uno por su lado:
+                #
+                # 1. Sobre Postgres ni siquiera llegaba a correr. El SELECT pedía dos
+                #    columnas sin nombre, `COALESCE(prefijo,'')` y
+                #    `COALESCE(siguiente_numero,1)`, y la fila vuelve como diccionario:
+                #    las dos se llaman «coalesce», una pisa a la otra, y `series_row[1]`
+                #    revienta con KeyError. O sea que dejar el número en blanco —que es
+                #    lo que dice el formulario, «Autogenerado»— devolvía un 500.
+                #    En SQLite las filas se indexan por posición y no se notaba.
+                #
+                # 2. Dos facturas a la vez leían el mismo contador y salían con el mismo
+                #    número. La numeración de facturas tiene que ser correlativa y sin
+                #    repetir; no es una preferencia.
+                #
+                # Con `UPDATE … RETURNING` el contador se reserva y se lee de una vez, y
+                # la fila queda bloqueada mientras tanto: la segunda petición espera y se
+                # lleva el siguiente. Va en las dos bases (SQLite lo admite desde 3.35).
+                try:
+                    series_row = conn.execute(
+                        """
+                        UPDATE workspace_facturacion_series
+                        SET siguiente_numero = COALESCE(siguiente_numero, 1) + 1,
+                            updated_at = ?
+                        WHERE workspace_id = ? AND empresa_id = ? AND serie = ?
+                          AND COALESCE(activa, 1) = 1
+                        RETURNING id AS serie_id,
+                                  COALESCE(prefijo, '') AS prefijo,
+                                  COALESCE(siguiente_numero, 1) - 1 AS asignado
+                        """,
+                        (now, workspace_id, empresa_id, serie),
+                    ).fetchone()
+                except Exception:
+                    # El UPDATE bloquea la fila de la serie, y hay un `lock_timeout`
+                    # puesto. Si aun así se agota, es que alguien la tiene cogida: se
+                    # dice, en vez de devolver un 500 sin explicación.
+                    _rollback_best_effort(conn)
+                    json_response(self, {
+                        "error": "La serie está ocupada ahora mismo por otra factura. "
+                                 "Vuelve a darle en un momento.",
+                        "reintentar": True,
+                    }, status=409)
+                    return
                 if series_row:
-                    prefijo = series_row[1]
-                    numero = f"{prefijo}{int(series_row[2] or 1):04d}"
-                    conn.execute(
-                        "UPDATE workspace_facturacion_series SET siguiente_numero = ?, updated_at = datetime(?) WHERE id = ?",
-                        (int(series_row[2] or 1) + 1, now, series_row[0]),
-                    )
+                    prefijo = str(row_value(series_row, "prefijo", "") or "")
+                    numero = f"{prefijo}{int(row_value(series_row, 'asignado', 1) or 1):04d}"
+                    # PENDIENTE, a propósito: la reserva NO se confirma aquí.
+                    #
+                    # El `UPDATE` deja la fila de la serie bloqueada hasta que la petición
+                    # confirme, y eso no pasa hasta el final, después de guardar la
+                    # factura y de correr las automatizaciones. O sea que la serie queda
+                    # tomada durante toda la petición: con seis personas facturando a la
+                    # vez, medido, ocho de cuarenta y ocho facturas no salen —unas con
+                    # 500 por `lock_timeout`, otras rechazadas por número duplicado—.
+                    #
+                    # Lo suyo sería confirmar la reserva aquí mismo y soltar el candado,
+                    # aceptando que un fallo posterior deje un hueco en la numeración
+                    # (un hueco se audita; dos facturas con el mismo número, no). Se
+                    # probó: sube a 47 de 48 y desaparecen los 500 y los duplicados.
+                    #
+                    # Pero una de esas 48 devolvía 200 **sin guardar la factura**, y no
+                    # se ha encontrado por qué. Cambiar un fallo que se ve por uno que no
+                    # se ve, en facturación, es peor negocio. Se deja como está hasta
+                    # entender la pérdida.
+                    #
+                    # Lo que sí está resuelto es lo grave: el número nunca se repite.
             if serie and numero:
                 duplicate = conn.execute(
                     """
@@ -85332,6 +85454,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             reparto, por_partes = reparte_por_coeficiente(total, propietarios)
             creados = 0
+            ya_estaban = 0
             sin_iban = []
             for vecino, importe in reparto:
                 vecino_id = row_value(vecino, "id", "")
@@ -85344,21 +85467,43 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 if not iban_valido(row_value(vecino, "iban", "")):
                     sin_iban.append(row_value(vecino, "piso", "") or row_value(vecino, "nombre", ""))
-                conn.execute(
-                    "INSERT INTO workspace_fincas_recibos "
-                    "(id, workspace_id, comunidad_id, vecino_id, periodo, concepto, importe, coeficiente, estado, "
-                    " fecha_emision, vecino_nombre, vecino_nif, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?, datetime(?), datetime(?))",
-                    (os.urandom(16).hex(), workspace_id, comunidad_id, vecino_id, periodo, concepto, importe,
-                     row_value(vecino, "coeficiente", None), datetime.now().date().isoformat(),
-                     # A nombre de quién se emite, congelado aquí: la ficha del vecino
-                     # cambia cuando el piso cambia de dueño, y el recibo no debe cambiar.
-                     str(row_value(vecino, "nombre", "") or "").strip() or None,
-                     str(row_value(vecino, "nif", "") or "").strip() or None,
-                     now, now),
-                )
-                creados += 1
+                try:
+                    conn.execute(
+                        "INSERT INTO workspace_fincas_recibos "
+                        "(id, workspace_id, comunidad_id, vecino_id, periodo, concepto, importe, coeficiente, estado, "
+                        " fecha_emision, vecino_nombre, vecino_nif, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?, datetime(?), datetime(?))",
+                        (os.urandom(16).hex(), workspace_id, comunidad_id, vecino_id, periodo, concepto, importe,
+                         row_value(vecino, "coeficiente", None), datetime.now().date().isoformat(),
+                         # A nombre de quién se emite, congelado aquí: la ficha del vecino
+                         # cambia cuando el piso cambia de dueño, y el recibo no debe cambiar.
+                         str(row_value(vecino, "nombre", "") or "").strip() or None,
+                         str(row_value(vecino, "nif", "") or "").strip() or None,
+                         now, now),
+                    )
+                    creados += 1
+                except Exception:
+                    # Otra persona ha emitido este mismo cargo entre la comprobación de
+                    # arriba y este INSERT. La comprobación mira lo confirmado, así que
+                    # con dos administradoras dándole a la vez las dos la pasan y una
+                    # choca con el índice único.
+                    #
+                    # Que choque es lo que hay que querer: el índice es lo que impide
+                    # cobrar dos veces al vecindario. Lo que no vale es que salga como
+                    # un 500. Se cuenta y se sigue; al final se dice quién lo emitió.
+                    _rollback_best_effort(conn)
+                    ya_estaban += 1
             conn.commit()
+            if not creados and ya_estaban:
+                json_response(
+                    self,
+                    {"error": f"Los recibos de {periodo} para «{concepto}» acaban de "
+                              f"emitirse desde otro sitio. Recarga para verlos.",
+                     "code": "ya_emitido",
+                     "emitidos_por_otro": ya_estaban},
+                    status=409,
+                )
+                return
             json_response(self, {
                 "ok": True,
                 "creados": creados,
@@ -96574,10 +96719,31 @@ class Handler(BaseHTTPRequestHandler):
                 insert_cols.insert(1, "empresa_id")
                 values.insert(1, empresa["id"])
             placeholders = ", ".join(["?"] * len(insert_cols))
-            conn.execute(
-                f"INSERT INTO clientes ({', '.join(insert_cols)}) VALUES ({placeholders})",
-                tuple(values),
-            )
+            try:
+                conn.execute(
+                    f"INSERT INTO clientes ({', '.join(insert_cols)}) VALUES ({placeholders})",
+                    tuple(values),
+                )
+            except Exception:
+                # Otra persona ha dado de alta este mismo NIF entre la comprobación de
+                # duplicados de arriba y este INSERT. La comprobación mira lo confirmado,
+                # así que con dos altas a la vez las dos la pasan y una choca con
+                # `idx_clientes_nif_unico_por_workspace`.
+                #
+                # Que choque es lo que se busca: una ficha duplicada no se arregla sola,
+                # hay que fusionarla a mano. Se devuelve la misma respuesta que cuando el
+                # duplicado se detecta a tiempo, con el id de la ficha que ganó, para que
+                # quien lo pidió acabe en la ficha buena en vez de en un error.
+                _rollback_best_effort(conn)
+                gemelo = resolve_cliente_duplicate_id(
+                    conn, nombre_norm, nif, workspace_id=workspace_id,
+                    empresa_id=empresa_scope_id,
+                )
+                if gemelo:
+                    json_response(self, {"error": "Cliente duplicado", "id": gemelo},
+                                  status=409)
+                    return
+                raise
             conn.commit()
             json_response(self, {"ok": True, "id": cliente_id})
             return
