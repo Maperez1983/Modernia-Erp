@@ -46328,6 +46328,11 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    # Etiqueta libre para mostrar en la lista ("Ficha catastral", "Nota simple",
+    # "Foto salón"...). No entra en `_payload_de_evidencia_pericial`: es solo
+    # para humanos, el hash de integridad sigue dependiendo únicamente del
+    # archivo y su procedencia, no de cómo lo llamó quien lo subió.
+    ensure_column(conn, "workspace_pericial_evidencias", "nombre", "nombre TEXT")
     # Documentos del expediente (informe, justificante de firma, ficha catastral).
     # Tabla propia y no `inmueble_docs`: como `inmueble_id` es opcional en el
     # expediente, no siempre hay dónde colgar el documento por esa vía.
@@ -46444,7 +46449,7 @@ def _payload_de_evidencia_pericial(fila, prev_hash):
     ])
 
 
-def apunta_evidencia_de_peritaje(conn, pericial_id, testigo_id, tipo, doc_key, hash_archivo, quien, *, now=None):
+def apunta_evidencia_de_peritaje(conn, pericial_id, testigo_id, tipo, doc_key, hash_archivo, quien, *, now=None, nombre=None):
     """Una fila más en la evidencia del expediente, encadenada a la anterior
     DEL MISMO expediente.
 
@@ -46480,13 +46485,15 @@ def apunta_evidencia_de_peritaje(conn, pericial_id, testigo_id, tipo, doc_key, h
         "hash_archivo": str(hash_archivo or ""),
         "quien": str(quien or "")[:200],
         "created_at": now,
+        "nombre": str(nombre or "").strip()[:200] or None,
     }
     integridad = hashlib.sha256(_payload_de_evidencia_pericial(registro, prev_hash).encode("utf-8")).hexdigest()
     conn.execute(
         "INSERT INTO workspace_pericial_evidencias (id, pericial_id, testigo_id, tipo, doc_key, hash_archivo, "
-        "quien, created_at, prev_hash, integrity_hash) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        "quien, created_at, prev_hash, integrity_hash, nombre) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
         (registro["id"], registro["pericial_id"], registro["testigo_id"], registro["tipo"],
-         registro["doc_key"], registro["hash_archivo"], registro["quien"], now, prev_hash, integridad),
+         registro["doc_key"], registro["hash_archivo"], registro["quien"], now, prev_hash, integridad,
+         registro["nombre"]),
     )
     return registro["id"]
 
@@ -46643,14 +46650,16 @@ PERICIAL_DECLARACION_IMPARCIALIDAD = (
 
 
 def build_pericial_valoracion_pdf(pericial, workspace, company, inmueble, cliente, perito,
-                                   testigos, fotos_visita):
+                                   testigos, fotos_visita, documentos_aportados=None):
     """El informe pericial de valoración, con el esqueleto de la UNE 197001:
     identificación, objeto, antecedentes, metodología, testigos, análisis,
     conclusión, anexo fotográfico y declaración de imparcialidad.
 
     `fotos_visita` ya viene como lista de `(imagen_pil, caption)` — resolver la
     evidencia (S3 → bytes → PIL) es responsabilidad de quien llama, no de esta
-    función, que solo maqueta.
+    función, que solo maqueta. `documentos_aportados` es la documentación de
+    respaldo (ficha catastral, nota simple...): se lista por nombre, no se
+    embebe como imagen — son documentos de varias páginas, no una foto.
     """
     pericial = pericial or {}
     workspace = workspace or {}
@@ -46729,6 +46738,14 @@ def build_pericial_valoracion_pdf(pericial, workspace, company, inmueble, client
             ("Motivo de la superficie usada", str(pericial.get("motivo_superficie_usada") or "—")),
         ],
     }))
+
+    if documentos_aportados:
+        sections.append(("Documentación aportada", [
+            "Para la elaboración de este informe se ha tenido a la vista la siguiente documentación:",
+            *[f"• {d.get('nombre') or 'Documento aportado'}"
+              + (f" (aportado el {d['created_at']})" if d.get("created_at") else "")
+              for d in documentos_aportados],
+        ]))
 
     activos = [t for t in (testigos or []) if str(t.get("estado") or "activo") == "activo"]
     if activos:
@@ -47123,10 +47140,17 @@ def fetch_workspace_pericial_detalle(conn, pericial_id, *, workspace_id):
     ).fetchall()
     verificacion = verifica_evidencias_del_peritaje(conn, pericial_id)
     checklist = checklist_une197001_pericial(dict(row), [dict(t) for t in testigos], verificacion)
+    bucket, region = s3_config()
+    evidencias_out = []
+    for e in evidencias:
+        ed = dict(e)
+        doc_key = str(ed.get("doc_key") or "")
+        ed["doc_url"] = f"https://{bucket}.s3.{region}.amazonaws.com/{doc_key}" if (bucket and region and doc_key) else ""
+        evidencias_out.append(ed)
     return {
         "pericial": dict(row),
         "testigos": [dict(t) for t in testigos],
-        "evidencias": [dict(e) for e in evidencias],
+        "evidencias": evidencias_out,
         "docs": [dict(d) for d in docs],
         "verificacion_evidencias": verificacion,
         "checklist_pendiente": checklist,
@@ -47166,9 +47190,11 @@ def fetch_workspace_pericial_pdf_payload(conn, pericial_id, *, workspace_id):
             cliente = dict(cli)
     perito = {}
     if pericial.get("perito_usuario_id"):
-        per = conn.execute("SELECT nombre FROM usuarios WHERE id = ? LIMIT 1", (pericial["perito_usuario_id"],)).fetchone()
+        per = conn.execute(
+            "SELECT nombre, apellido FROM usuarios WHERE id = ? LIMIT 1", (pericial["perito_usuario_id"],)
+        ).fetchone()
         if per:
-            perito = dict(per)
+            perito = {"nombre": " ".join(p for p in (per["nombre"], per["apellido"]) if p).strip()}
     testigos_rows = conn.execute(
         "SELECT * FROM workspace_pericial_testigos WHERE pericial_id = ? ORDER BY orden ASC, created_at ASC",
         (pericial_id,),
@@ -47176,7 +47202,7 @@ def fetch_workspace_pericial_pdf_payload(conn, pericial_id, *, workspace_id):
     testigos = [dict(t) for t in testigos_rows]
     fotos_visita = []
     evidencias_fotos = conn.execute(
-        "SELECT doc_key, created_at FROM workspace_pericial_evidencias "
+        "SELECT doc_key, nombre, created_at FROM workspace_pericial_evidencias "
         "WHERE pericial_id = ? AND tipo = 'foto_visita' ORDER BY created_at ASC",
         (pericial_id,),
     ).fetchall()
@@ -47186,8 +47212,20 @@ def fetch_workspace_pericial_pdf_payload(conn, pericial_id, *, workspace_id):
             continue
         imagen = _load_image_from_bytes(raw_bytes, max_width=1200)
         if imagen is not None:
-            fotos_visita.append((imagen, f"Foto de la visita — {str(ev['created_at'] or '')[:10]}"))
-    return pericial, workspace, company, inmueble, cliente, perito, testigos, fotos_visita
+            etiqueta = str(ev["nombre"] or "").strip() or f"Foto de la visita — {str(ev['created_at'] or '')[:10]}"
+            fotos_visita.append((imagen, etiqueta))
+    # No se embeben como imágenes (una nota simple o una ficha catastral son
+    # documentos de varias páginas, no una foto): se referencian por nombre,
+    # como haría el propio perito al listar lo que ha tenido a la vista.
+    documentos_aportados = [
+        {"nombre": str(d["nombre"] or "").strip() or "Documento aportado", "created_at": str(d["created_at"] or "")[:10]}
+        for d in conn.execute(
+            "SELECT nombre, created_at FROM workspace_pericial_evidencias "
+            "WHERE pericial_id = ? AND tipo = 'documento_aportado' ORDER BY created_at ASC",
+            (pericial_id,),
+        ).fetchall()
+    ]
+    return pericial, workspace, company, inmueble, cliente, perito, testigos, fotos_visita, documentos_aportados
 
 
 def infer_workspace_doc_classification(nombre, tipo, servicio):
@@ -85556,8 +85594,9 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 quien = ""
             testigo_id = str(payload.get("testigo_id") or "").strip() or None
+            nombre = str(payload.get("nombre") or "").strip() or None
             evidencia_id = apunta_evidencia_de_peritaje(
-                conn, pericial_id, testigo_id, tipo, doc_key, hash_archivo, quien, now=now
+                conn, pericial_id, testigo_id, tipo, doc_key, hash_archivo, quien, now=now, nombre=nombre
             )
             if testigo_id:
                 conn.execute(

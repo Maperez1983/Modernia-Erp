@@ -33,7 +33,9 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from io import BytesIO
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ["DATABASE_URL"] = ""
 os.environ["POSTGRES_URL"] = ""
@@ -402,6 +404,100 @@ class ElListadoYLaFichaFuncionanTests(Base):
         data = json.loads(r["cuerpo"].decode("utf-8"))
         self.assertIn("checklist_pendiente", data)
         self.assertTrue(data["checklist_pendiente"])  # sin testigos, no puede firmarse todavía
+
+
+class LasFotosYLaDocumentacionAparecenEnElInformeTests(Base):
+    """Ambas cuelgan de `/api/workspace_pericial_evidencia` (el mismo endpoint
+    con hash-chain), pero se tratan distinto en el PDF: la foto se embebe,
+    la documentación (ficha catastral, nota simple...) solo se lista por
+    nombre — es texto de varias páginas, no una imagen."""
+
+    @staticmethod
+    def _png_1x1():
+        from PIL import Image
+        buf = BytesIO()
+        Image.new("RGB", (2, 2), color=(10, 20, 30)).save(buf, format="PNG")
+        return buf.getvalue()
+
+    def test_subir_foto_y_documento_devuelve_id_y_hash(self):
+        pericial_id = self._crear_pericial()
+        with patch.object(S, "s3_get_object_bytes", return_value=(self._png_1x1(), None)):
+            r = self._post("/api/workspace_pericial_evidencia", {
+                "workspace_id": self.ws, "pericial_id": pericial_id,
+                "doc_key": "periciales/foto1.png", "tipo": "foto_visita",
+            })
+        self.assertEqual(r["estado"], 200, r["json"])
+        self.assertTrue(r["json"]["hash_archivo"])
+        with patch.object(S, "s3_get_object_bytes", return_value=(b"%PDF-1.4 contenido falso", None)):
+            r = self._post("/api/workspace_pericial_evidencia", {
+                "workspace_id": self.ws, "pericial_id": pericial_id,
+                "doc_key": "periciales/nota_simple.pdf", "tipo": "documento_aportado",
+                "nombre": "Nota simple registral",
+            })
+        self.assertEqual(r["estado"], 200, r["json"])
+
+    def test_la_ficha_devuelve_nombre_y_doc_url_de_cada_evidencia(self):
+        pericial_id = self._crear_pericial()
+        with patch.object(S, "s3_get_object_bytes", return_value=(self._png_1x1(), None)):
+            self._post("/api/workspace_pericial_evidencia", {
+                "workspace_id": self.ws, "pericial_id": pericial_id,
+                "doc_key": "periciales/foto1.png", "tipo": "documento_aportado",
+                "nombre": "Ficha catastral",
+            })
+        with patch.object(S, "s3_config", return_value=("bucket-test", "eu-west-1")):
+            r = self._get(f"/api/workspace_pericial?id={pericial_id}&workspace_id={self.ws}")
+        data = json.loads(r["cuerpo"].decode("utf-8"))
+        ev = data["evidencias"][0]
+        self.assertEqual(ev["nombre"], "Ficha catastral")
+        self.assertIn("foto1.png", ev["doc_url"])
+
+    def test_un_expediente_firmado_no_admite_nueva_evidencia(self):
+        pericial_id = self._crear_pericial()
+        self._anade_testigos(pericial_id)
+        self._post("/api/workspace_pericial_pdf", {"workspace_id": self.ws, "id": pericial_id})
+        r = self._post("/api/workspace_pericial_firmar", {
+            "workspace_id": self.ws, "pericial_id": pericial_id,
+            "signer_nombre": "Ana Perito", "signer_nif": "12345678Z",
+        })
+        token = r["json"]["solicitud"]["token"]
+        _resultado, status = S.sign_pericial_signature_request(
+            self.conn, token,
+            {"signed_name": "Ana Perito", "signed_nif": "12345678Z", "acceptance_text": "Acepto y firmo"},
+            now="2026-08-25 10:00:00",
+        )
+        self.conn.commit()
+        self.assertEqual(status, 200)
+        with patch.object(S, "s3_get_object_bytes", return_value=(self._png_1x1(), None)):
+            r = self._post("/api/workspace_pericial_evidencia", {
+                "workspace_id": self.ws, "pericial_id": pericial_id,
+                "doc_key": "periciales/tarde.png", "tipo": "foto_visita",
+            })
+        self.assertEqual(r["estado"], 409, r["json"])
+
+    def test_la_foto_aparece_en_el_anexo_y_el_documento_se_lista_por_nombre(self):
+        pericial_id = self._crear_pericial()
+        self._anade_testigos(pericial_id)
+        with patch.object(S, "s3_get_object_bytes", return_value=(self._png_1x1(), None)):
+            self._post("/api/workspace_pericial_evidencia", {
+                "workspace_id": self.ws, "pericial_id": pericial_id,
+                "doc_key": "periciales/salon.png", "tipo": "foto_visita",
+                "nombre": "Salón, orientación sur",
+            })
+            self._post("/api/workspace_pericial_evidencia", {
+                "workspace_id": self.ws, "pericial_id": pericial_id,
+                "doc_key": "periciales/catastro.pdf", "tipo": "documento_aportado",
+                "nombre": "Ficha catastral",
+            })
+            r = self._post("/api/workspace_pericial_pdf", {"workspace_id": self.ws, "id": pericial_id})
+        self.assertEqual(r["estado"], 200, r["json"])
+        with patch.object(S, "s3_get_object_bytes", return_value=(self._png_1x1(), None)):
+            servido = self._get(f"/api/workspace_pericial_pdf?id={pericial_id}&workspace_id={self.ws}")
+        from pypdf import PdfReader
+        texto = "\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(servido["cuerpo"])).pages)
+        self.assertIn("Documentación aportada", texto)
+        self.assertIn("Ficha catastral", texto)
+        self.assertIn("Anexo fotográfico", texto)
+        self.assertIn("Salón, orientación sur", texto)
 
 
 class ElCalculoEsPuroYNoNecesitaServidorTests(unittest.TestCase):

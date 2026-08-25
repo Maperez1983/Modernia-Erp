@@ -22421,6 +22421,27 @@ const openPericialModal = async (row) => {
               <span id="pericialModalTestigoStatus" class="muted"></span>
             </div>
           </form>
+          <h4>Fotos de la visita</h4>
+          <p class="muted">Aparecerán en el anexo fotográfico del informe.</p>
+          <div id="pericialModalFotos"></div>
+          <form id="pericialModalFotoForm" class="form-grid">
+            <label class="span-2">Foto<input name="file" type="file" accept="image/*" required /></label>
+            <div class="form-actions span-2">
+              <button type="submit">Subir foto</button>
+              <span id="pericialModalFotoStatus" class="muted"></span>
+            </div>
+          </form>
+          <h4>Documentación aportada</h4>
+          <p class="muted">Ficha catastral, nota simple, otros documentos tenidos a la vista. Se listan en el informe, no se embeben como imagen.</p>
+          <div id="pericialModalDocs"></div>
+          <form id="pericialModalDocForm" class="form-grid">
+            <label>Nombre<input name="nombre" placeholder="Ficha catastral, Nota simple..." required /></label>
+            <label>Archivo<input name="file" type="file" required /></label>
+            <div class="form-actions span-2">
+              <button type="submit">Subir documento</button>
+              <span id="pericialModalDocStatus" class="muted"></span>
+            </div>
+          </form>
           <div class="form-actions" style="margin-top:16px;">
             <button type="button" id="pericialModalGenerarPdf" class="secondary ghost">Generar PDF</button>
             <button type="button" id="pericialModalFirmar" class="primary">Solicitar firma</button>
@@ -22463,6 +22484,54 @@ const openPericialModal = async (row) => {
       await refreshWorkspacePericiales({ silent: true });
     } catch (error) {
       if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
+    }
+  };
+
+  const fotoForm = modal.querySelector("#pericialModalFotoForm");
+  fotoForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const statusEl = modal.querySelector("#pericialModalFotoStatus");
+    const file = fotoForm.querySelector('[name="file"]')?.files?.[0] || null;
+    if (!file) return;
+    try {
+      if (statusEl) statusEl.textContent = "Subiendo...";
+      const upload = await uploadFileToS3(file, "periciales", statusEl);
+      const doc_key = upload?.key || "";
+      if (!doc_key) throw new Error("No se pudo subir el archivo.");
+      await apiPost("/api/workspace_pericial_evidencia", {
+        workspace_id: state.currentWorkspaceId || "", pericial_id: row.id,
+        doc_key, tipo: "foto_visita",
+      });
+      fotoForm.reset();
+      if (statusEl) statusEl.textContent = "Foto añadida.";
+      await refreshPericialModalContent(row.id);
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error?.message || "No se pudo subir la foto.";
+    }
+  };
+
+  const docForm = modal.querySelector("#pericialModalDocForm");
+  docForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const statusEl = modal.querySelector("#pericialModalDocStatus");
+    const fd = new FormData(docForm);
+    const nombre = String(fd.get("nombre") || "").trim();
+    const file = docForm.querySelector('[name="file"]')?.files?.[0] || null;
+    if (!nombre || !file) return;
+    try {
+      if (statusEl) statusEl.textContent = "Subiendo...";
+      const upload = await uploadFileToS3(file, "periciales", statusEl);
+      const doc_key = upload?.key || "";
+      if (!doc_key) throw new Error("No se pudo subir el archivo.");
+      await apiPost("/api/workspace_pericial_evidencia", {
+        workspace_id: state.currentWorkspaceId || "", pericial_id: row.id,
+        doc_key, tipo: "documento_aportado", nombre,
+      });
+      docForm.reset();
+      if (statusEl) statusEl.textContent = "Documento añadido.";
+      await refreshPericialModalContent(row.id);
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error?.message || "No se pudo subir el documento.";
     }
   };
 
@@ -22530,6 +22599,33 @@ const refreshPericialModalContent = async (pericialId) => {
             <div class="workspace-billing-meta"><span>${t.valor_homogeneizado ? euroFormatter.format(Number(t.valor_homogeneizado)) + "/m²" : "—"}</span></div>
           </div>`).join("")}</div>`
       : "<p class='muted'>Sin testigos todavía.</p>";
+  }
+  const evidencias = detalle?.evidencias || [];
+  const fotosEl = modal.querySelector("#pericialModalFotos");
+  if (fotosEl) {
+    const fotos = evidencias.filter((e) => e.tipo === "foto_visita");
+    fotosEl.innerHTML = fotos.length
+      ? `<div class="workspace-billing-list">${fotos.map((f) => `
+          <div class="workspace-billing-row">
+            <div><strong>${escapeHtml(f.nombre || "Foto de visita")}</strong>
+              <div class="muted">${escapeHtml(String(f.created_at || "").slice(0, 10))}</div>
+            </div>
+            <div class="workspace-billing-meta">${f.doc_url ? `<a class="secondary ghost button-inline" href="${escapeHtml(safeHrefUrl(f.doc_url))}" target="_blank" rel="noreferrer">Ver</a>` : ""}</div>
+          </div>`).join("")}</div>`
+      : "<p class='muted'>Sin fotos todavía.</p>";
+  }
+  const docsEl = modal.querySelector("#pericialModalDocs");
+  if (docsEl) {
+    const docs = evidencias.filter((e) => e.tipo === "documento_aportado");
+    docsEl.innerHTML = docs.length
+      ? `<div class="workspace-billing-list">${docs.map((d) => `
+          <div class="workspace-billing-row">
+            <div><strong>${escapeHtml(d.nombre || "Documento aportado")}</strong>
+              <div class="muted">${escapeHtml(String(d.created_at || "").slice(0, 10))}</div>
+            </div>
+            <div class="workspace-billing-meta">${d.doc_url ? `<a class="secondary ghost button-inline" href="${escapeHtml(safeHrefUrl(d.doc_url))}" target="_blank" rel="noreferrer">Abrir</a>` : ""}</div>
+          </div>`).join("")}</div>`
+      : "<p class='muted'>Sin documentación aportada todavía.</p>";
   }
 };
 
