@@ -7637,6 +7637,7 @@ const getWorkspaceViewLabel = (value = "") => {
     overview: "Resumen",
     operations: "Operativa",
     fincas: "Fincas",
+    periciales: "Peritajes",
     rrhh: "RRHH",
     motores: "Motores",
     tenant: "Ajustes",
@@ -8270,7 +8271,7 @@ const renderWorkspaceEntryBanner = () => {
     bloqueado: "Bloqueado",
   }[normalizeSimple(goLiveStatusRaw)] || goLiveStatusRaw);
   const allowedTenantViews = mode === "tenant"
-    ? ["operations", "fincas", "rrhh", "motores", ...(canManage ? ["tenant"] : [])]
+    ? ["operations", "fincas", "periciales", "rrhh", "motores", ...(canManage ? ["tenant"] : [])]
     : ["overview", "tenant"];
   const nextView =
     mode === "tenant"
@@ -8373,7 +8374,7 @@ const shouldShowWorkspaceCompanySwitcher = () => {
   if (!Array.isArray(companies) || companies.length <= 1) return false;
   const view = String(state.currentWorkspaceView || "overview").trim().toLowerCase();
   // Solo cuando afecta al trabajo diario (evita confusión en Configuración/Clientes/Resumen).
-  return ["operations", "fincas", "rrhh", "motores"].includes(view);
+  return ["operations", "fincas", "periciales", "rrhh", "motores"].includes(view);
 };
 
 const updateWorkspaceEntryChrome = () => {
@@ -8433,14 +8434,15 @@ const updateWorkspaceEntryChrome = () => {
       // «Ajustes» (la vista `tenant`) se pintaba habilitado con `canManageWorkspace`,
       // pero `setWorkspaceView` sólo deja entrar a `isPrivilegedUser`. Cuando los dos
       // criterios discrepan, el botón parece pulsable —cursor de mano, opacidad
-      // plena— y al pulsarlo te devuelve a Operativa sin decir nada: desde fuera
-      // parece que la aplicación se ha colgado. Aquí se usa el mismo criterio que
-      // decide la navegación, para que el botón no prometa lo que no puede cumplir.
-      // El permiso no se toca: lo que se corrige es que la pantalla mienta.
+      // plena— y al pulsarlo te devuelve a Operativa sin decir nada: parece que la
+      // aplicación se ha quedado colgada. Aquí se usa el mismo criterio que decide
+      // la navegación, para que el botón no prometa lo que no puede cumplir. El
+      // permiso no se toca: lo que se corrige es que la pantalla mienta.
       const puedeAjustes = canManageWorkspace && isPrivilegedUser(authUser);
       const shouldShow =
         viewKey === "operations"
         || viewKey === "fincas"
+        || viewKey === "periciales"
         || viewKey === "rrhh"
         || (viewKey === "motores" && canManageWorkspace)
         || (viewKey === "tenant" && puedeAjustes);
@@ -8741,7 +8743,7 @@ const renderWorkspaceCompanySwitcher = (rows = []) => {
 
 const normalizeWorkspaceViewKey = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
-  if (["overview", "tenant", "clients", "operations", "rrhh", "motores", "fincas"].includes(key)) {
+  if (["overview", "tenant", "clients", "operations", "rrhh", "motores", "fincas", "periciales"].includes(key)) {
     return key;
   }
   return "overview";
@@ -34721,7 +34723,7 @@ const openHolding = (options = {}) => {
     .toLowerCase();
   if (mode === "tenant" && !canManageWorkspace) {
     const viewKey = normalizeSimple(requestedView);
-    if (viewKey && !["operations", "rrhh", "fincas", "motores"].includes(viewKey)) {
+    if (viewKey && !["operations", "rrhh", "fincas", "periciales", "motores"].includes(viewKey)) {
       requestedView = "";
     }
   }
