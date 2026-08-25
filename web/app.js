@@ -2666,6 +2666,11 @@ const workspaceFincasBudgetBrandCompany = document.getElementById("workspaceFinc
 const workspaceFincasBudgetBuildingPhoto = document.getElementById("workspaceFincasBudgetBuildingPhoto");
 const workspaceFincasBudgetBuildingPhotoPreview = document.getElementById("workspaceFincasBudgetBuildingPhotoPreview");
 const workspaceFincasBudgetBuildingPhotoStatus = document.getElementById("workspaceFincasBudgetBuildingPhotoStatus");
+const workspacePericialForm = document.getElementById("workspacePericialForm");
+const workspacePericialStatus = document.getElementById("workspacePericialStatus");
+const workspacePericialResetBtn = document.getElementById("workspacePericialResetBtn");
+const workspacePericialesTable = document.getElementById("workspacePericialesTable");
+const workspacePericialesInfo = document.getElementById("workspacePericialesInfo");
 const workspaceFincasBudgetQuickForm = document.getElementById("workspaceFincasBudgetQuickForm");
 const workspaceFincasBudgetOpenEngine = document.getElementById("workspaceFincasBudgetOpenEngine");
 const workspaceFincasBudgetResetBtn = document.getElementById("workspaceFincasBudgetResetBtn");
@@ -7341,6 +7346,12 @@ const WORKSPACE_MODULE_STRUCTURE = {
     badge: "Servicio activo",
     description: "Comunidades, incidencias, juntas y seguimiento.",
   },
+  periciales: {
+    section: "crm_services",
+    family: "Subservicio CRM",
+    badge: "Servicio activo",
+    description: "Informes periciales de valoración de inmuebles, con testigos, evidencia y firma.",
+  },
   documental: {
     section: "workspace_engines",
     family: "Transversal",
@@ -9551,7 +9562,7 @@ const setWorkspaceView = (view = "overview", options = {}) => {
   if (tenantMode && normalized === "overview") {
     normalized = "operations";
   }
-  const tenantAllowed = new Set(["operations", "fincas", "rrhh", "motores"]);
+  const tenantAllowed = new Set(["operations", "fincas", "periciales", "rrhh", "motores"]);
   if (tenantMode && !forceTenantView && normalized !== "tenant" && !tenantAllowed.has(normalized)) {
     normalized = "operations";
   }
@@ -9643,6 +9654,11 @@ const setWorkspaceView = (view = "overview", options = {}) => {
   }
   if (normalized === "fincas") {
     setWorkspaceFincasTab(state.workspaceFincasTab || "dashboard");
+  }
+  if (normalized === "periciales") {
+    hydrateWorkspaceCompanySelects();
+    void refreshWorkspacePericialPeritos();
+    void refreshWorkspacePericiales();
   }
   syncHoldingUrlParams();
   if (workspaceCompanySwitcher) {
@@ -10674,6 +10690,17 @@ const WORKSPACE_LAUNCHERS = {
       focusWorkspaceView("fincas", workspaceFincasCommunityForm);
     },
   },
+  periciales: {
+    label: "Peritajes",
+    actionLabel: "Ver módulo",
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        focusWorkspaceView("periciales", workspacePericialForm, { scroll: true, forceTenantView: true });
+        return;
+      }
+      focusWorkspaceView("periciales", workspacePericialForm);
+    },
+  },
   facturacion: {
     label: "Facturación",
     actionLabel: "Gestionar",
@@ -10848,6 +10875,17 @@ const WORKSPACE_HOME_CONTAINERS = [
     modules: ["fincas", "documental", "facturacion", "automatizaciones", "copilot"],
     action: WORKSPACE_LAUNCHERS.fincas?.action || null,
     actionLabel: "Abrir fincas",
+  },
+  {
+    key: "periciales",
+    title: "Peritajes",
+    kicker: "Vertical",
+    icon: "file-check",
+    description: "Informes periciales de valoración de inmuebles, con testigos, evidencia y firma.",
+    requireAny: ["periciales"],
+    modules: ["periciales", "documental"],
+    action: WORKSPACE_LAUNCHERS.periciales?.action || null,
+    actionLabel: "Abrir peritajes",
   },
   {
     key: "simuladores",
@@ -22157,6 +22195,7 @@ const hydrateWorkspaceCompanySelects = () => {
     workspaceRemittancesForm,
     workspaceFincasProviderForm,
     workspaceFincasBudgetQuickForm,
+    workspacePericialForm,
   ].forEach((form) => {
     const select = form?.querySelector('[name="empresa_id"]');
     if (select) {
@@ -22185,6 +22224,311 @@ const hydrateWorkspaceCompanySelects = () => {
       }
     }
   });
+};
+
+// --- Peritajes de valoración -------------------------------------------
+
+// El desplegable de perito estaba vacío: nunca se rellenaba con los usuarios
+// de verdad del workspace. Reutiliza `/api/usuarios` (mismo endpoint que ya
+// usan los selectores de responsable), acotado por workspace.
+const refreshWorkspacePericialPeritos = async () => {
+  const select = workspacePericialForm?.querySelector('[name="perito_usuario_id"]');
+  if (!select || !state.currentWorkspaceId) return;
+  let usuarios = [];
+  try {
+    const data = await api(`/api/usuarios?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`);
+    usuarios = (data?.rows || []).filter((u) => Number(u.activo ?? 1));
+  } catch (e) {
+    return;
+  }
+  const previo = select.value;
+  select.innerHTML = `<option value="">Selecciona perito</option>${usuarios
+    .map((u) => {
+      const nombre = `${u.nombre || ""} ${u.apellido || ""}`.trim() || u.usuario || u.id;
+      return `<option value="${escapeHtml(u.id)}" data-colegiado="${escapeHtml(u.colegiado_numero || "")}">${escapeHtml(nombre)}</option>`;
+    })
+    .join("")}`;
+  if (previo && Array.from(select.options).some((opt) => opt.value === previo)) {
+    select.value = previo;
+  }
+};
+
+// Al elegir perito, si el nº de colegiado del formulario está vacío se
+// autorrellena con el que ya tuviera guardado ese usuario — sin pisar lo que
+// se hubiera escrito a mano (puede firmar un sustituto con otro nº).
+workspacePericialForm?.querySelector('[name="perito_usuario_id"]')?.addEventListener("change", (ev) => {
+  const opt = ev.target.selectedOptions?.[0];
+  const colegiadoField = workspacePericialForm.querySelector('[name="colegiado_numero"]');
+  const colegiado = opt?.dataset?.colegiado || "";
+  if (colegiadoField && colegiado && !colegiadoField.value.trim()) {
+    colegiadoField.value = colegiado;
+  }
+});
+
+const fillWorkspacePericialForm = (row = null) => {
+  if (!workspacePericialForm) return;
+  workspacePericialForm.reset();
+  const set = (name, value) => {
+    const el = workspacePericialForm.querySelector(`[name="${name}"]`);
+    if (el) el.value = value == null ? "" : String(value);
+  };
+  set("id", row?.id || "");
+  set("workspace_id", state.currentWorkspaceId || "");
+  set("denominacion_manual", row?.denominacion_manual || "");
+  set("direccion_manual", row?.direccion_manual || "");
+  set("referencia_catastral_manual", row?.referencia_catastral_manual || "");
+  set("finalidad", row?.finalidad || "");
+  set("procedimiento_referencia", row?.procedimiento_referencia || "");
+  set("perito_usuario_id", row?.perito_usuario_id || "");
+  set("colegiado_numero", row?.colegiado_numero || "");
+  set("fecha_encargo", row?.fecha_encargo || "");
+  set("fecha_visita", row?.fecha_visita || "");
+  set("fecha_valoracion", row?.fecha_valoracion || "");
+  set("superficie_catastral", row?.superficie_catastral || "");
+  set("superficie_registral", row?.superficie_registral || "");
+  set("superficie_medida", row?.superficie_medida || "");
+  set("superficie_calculo_usada", row?.superficie_calculo_usada || "");
+  set("motivo_superficie_usada", row?.motivo_superficie_usada || "");
+  hydrateWorkspaceCompanySelects();
+  if (row?.empresa_id) {
+    const sel = workspacePericialForm.querySelector('[name="empresa_id"]');
+    if (sel) sel.value = row.empresa_id;
+  }
+  if (workspacePericialStatus) {
+    workspacePericialStatus.textContent = row ? `Editando: ${row.finalidad || row.id}` : "";
+  }
+};
+
+const refreshWorkspacePericiales = async ({ silent = false } = {}) => {
+  if (!state.currentWorkspaceId) return;
+  try {
+    const data = await api(`/api/workspace_periciales?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`);
+    state.workspacePericialesRows = Array.isArray(data?.rows) ? data.rows : [];
+  } catch (error) {
+    if (!silent && workspacePericialesInfo) workspacePericialesInfo.textContent = error?.message || "No se pudo cargar.";
+    return;
+  }
+  renderWorkspacePericialesList();
+};
+
+const workspacePericialEstadoBadge = (estado) => {
+  const e = String(estado || "").trim();
+  if (e === "Firmado") return "Firmado";
+  if (e === "Ratificado") return "Ratificado";
+  return e || "Encargado";
+};
+
+const renderWorkspacePericialesList = () => {
+  if (!workspacePericialesTable) return;
+  const rows = state.workspacePericialesRows || [];
+  if (workspacePericialesInfo) workspacePericialesInfo.textContent = `${rows.length} expediente${rows.length === 1 ? "" : "s"}`;
+  if (!rows.length) {
+    workspacePericialesTable.innerHTML = "<p class='muted'>Sin expedientes todavía.</p>";
+    return;
+  }
+  workspacePericialesTable.innerHTML = `
+    <div class="workspace-billing-list">
+      ${rows.map((row) => {
+        const denom = row.inmueble_denominacion || "Inmueble sin denominación";
+        const valor = row.valor_final ? euroFormatter.format(Number(row.valor_final)) : "—";
+        const firmado = String(row.estado || "") === "Firmado";
+        return `
+          <div class="workspace-billing-row">
+            <div>
+              <strong>${escapeHtml(denom)}</strong>
+              <div class="muted">${escapeHtml(row.finalidad || "-")} · ${escapeHtml(workspacePericialEstadoBadge(row.estado))} · ${escapeHtml(row.perito_nombre || "sin perito asignado")}</div>
+            </div>
+            <div class="workspace-billing-meta">
+              <span>${escapeHtml(valor)}</span>
+              <a class="secondary ghost button-inline" href="/api/workspace_pericial_pdf?id=${encodeURIComponent(row.id)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}" target="_blank" rel="noreferrer">PDF</a>
+              ${!firmado ? `<button type="button" class="secondary ghost button-inline" data-pericial-edit="${escapeHtml(row.id)}">Editar</button>` : ""}
+              <button type="button" class="secondary ghost button-inline" data-pericial-gestionar="${escapeHtml(row.id)}">Testigos / Firma</button>
+              ${!firmado ? `<button type="button" class="secondary ghost button-inline" data-pericial-delete="${escapeHtml(row.id)}">Borrar</button>` : ""}
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+  workspacePericialesTable.querySelectorAll("[data-pericial-edit]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const row = rows.find((r) => r.id === btn.dataset.pericialEdit);
+      if (row) fillWorkspacePericialForm(row);
+    });
+  });
+  workspacePericialesTable.querySelectorAll("[data-pericial-gestionar]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const row = rows.find((r) => r.id === btn.dataset.pericialGestionar);
+      if (row) void openPericialModal(row);
+    });
+  });
+  workspacePericialesTable.querySelectorAll("[data-pericial-delete]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!window.confirm("¿Borrar este expediente pericial? No se puede deshacer.")) return;
+      try {
+        await apiPost("/api/workspace_pericial_delete", { workspace_id: state.currentWorkspaceId, id: btn.dataset.pericialDelete });
+        await refreshWorkspacePericiales();
+      } catch (error) {
+        if (workspacePericialesInfo) workspacePericialesInfo.textContent = error?.message || "No se pudo borrar.";
+      }
+    });
+  });
+};
+
+workspacePericialForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const fd = new FormData(workspacePericialForm);
+  const payload = Object.fromEntries(fd.entries());
+  payload.workspace_id = state.currentWorkspaceId || "";
+  try {
+    if (workspacePericialStatus) workspacePericialStatus.textContent = "Guardando...";
+    await apiPost("/api/workspace_pericial", payload);
+    if (workspacePericialStatus) workspacePericialStatus.textContent = "Guardado.";
+    fillWorkspacePericialForm(null);
+    await refreshWorkspacePericiales();
+  } catch (error) {
+    if (workspacePericialStatus) workspacePericialStatus.textContent = error?.message || "No se pudo guardar.";
+  }
+});
+
+workspacePericialResetBtn?.addEventListener("click", () => fillWorkspacePericialForm(null));
+
+const openPericialModal = async (row) => {
+  let modal = document.getElementById("pericialModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "pericialModal";
+    modal.className = "modal hidden";
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 720px;">
+        <div class="modal-header">
+          <h3>Testigos, evidencia y firma</h3>
+          <button type="button" class="secondary ghost" data-pericial-modal-close>Cerrar</button>
+        </div>
+        <div class="modal-body">
+          <div id="pericialModalChecklist" class="muted"></div>
+          <h4>Testigos</h4>
+          <div id="pericialModalTestigos"></div>
+          <form id="pericialModalTestigoForm" class="form-grid">
+            <label>Fuente<input name="fuente" placeholder="Idealista, notaría..." required /></label>
+            <label>Fecha de captura<input name="fecha_captura" type="date" /></label>
+            <label>Precio (€)<input name="precio" inputmode="decimal" required /></label>
+            <label>Superficie (m²)<input name="superficie" inputmode="decimal" required /></label>
+            <div class="form-actions span-2">
+              <button type="submit">Añadir testigo</button>
+              <span id="pericialModalTestigoStatus" class="muted"></span>
+            </div>
+          </form>
+          <div class="form-actions" style="margin-top:16px;">
+            <button type="button" id="pericialModalGenerarPdf" class="secondary ghost">Generar PDF</button>
+            <button type="button" id="pericialModalFirmar" class="primary">Solicitar firma</button>
+          </div>
+          <div id="pericialModalStatus" class="muted"></div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    modal.querySelector("[data-pericial-modal-close]").addEventListener("click", () => {
+      modal.classList.add("hidden");
+      modal.classList.remove("open");
+    });
+    modal.addEventListener("click", (ev) => {
+      if (ev.target === modal) {
+        modal.classList.add("hidden");
+        modal.classList.remove("open");
+      }
+    });
+  }
+  modal.dataset.pericialId = row.id;
+  modal.classList.remove("hidden");
+  modal.classList.add("open");
+  await refreshPericialModalContent(row.id);
+
+  const testigoForm = modal.querySelector("#pericialModalTestigoForm");
+  testigoForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const fd = new FormData(testigoForm);
+    const payload = Object.fromEntries(fd.entries());
+    payload.workspace_id = state.currentWorkspaceId || "";
+    payload.pericial_id = row.id;
+    const statusEl = modal.querySelector("#pericialModalTestigoStatus");
+    try {
+      if (statusEl) statusEl.textContent = "Guardando...";
+      await apiPost("/api/workspace_pericial_testigo", payload);
+      testigoForm.reset();
+      if (statusEl) statusEl.textContent = "Añadido.";
+      await refreshPericialModalContent(row.id);
+      await refreshWorkspacePericiales({ silent: true });
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
+    }
+  };
+
+  modal.querySelector("#pericialModalGenerarPdf").onclick = async () => {
+    const statusEl = modal.querySelector("#pericialModalStatus");
+    try {
+      if (statusEl) statusEl.textContent = "Generando...";
+      await apiPost("/api/workspace_pericial_pdf", { workspace_id: state.currentWorkspaceId, id: row.id });
+      if (statusEl) statusEl.textContent = "PDF generado. Puedes descargarlo desde el listado.";
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error?.message || "No se pudo generar.";
+    }
+  };
+
+  modal.querySelector("#pericialModalFirmar").onclick = async () => {
+    const statusEl = modal.querySelector("#pericialModalStatus");
+    const signerNombre = window.prompt("Nombre de quien firma:", "") || "";
+    if (!signerNombre.trim()) return;
+    const signerNif = window.prompt("NIF de quien firma:", "") || "";
+    try {
+      if (statusEl) statusEl.textContent = "Solicitando firma...";
+      const res = await apiPost("/api/workspace_pericial_firmar", {
+        workspace_id: state.currentWorkspaceId, pericial_id: row.id,
+        signer_nombre: signerNombre, signer_nif: signerNif,
+      });
+      const url = res?.solicitud?.public_url ? `${window.location.origin}${res.solicitud.public_url}` : "";
+      if (statusEl) {
+        statusEl.textContent = url
+          ? `Solicitud creada. Enlace de firma (compártelo con el perito): ${url}`
+          : "Solicitud creada.";
+      }
+      await refreshWorkspacePericiales({ silent: true });
+    } catch (error) {
+      const detalle = error?.data?.faltan ? ` — ${error.data.faltan.join(" ")}` : "";
+      if (statusEl) statusEl.textContent = (error?.message || "No se pudo solicitar la firma.") + detalle;
+    }
+  };
+};
+
+const refreshPericialModalContent = async (pericialId) => {
+  const modal = document.getElementById("pericialModal");
+  if (!modal) return;
+  let detalle;
+  try {
+    detalle = await api(`/api/workspace_pericial?id=${encodeURIComponent(pericialId)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}`);
+  } catch (error) {
+    return;
+  }
+  const checklistEl = modal.querySelector("#pericialModalChecklist");
+  const faltan = detalle?.checklist_pendiente || [];
+  if (checklistEl) {
+    checklistEl.innerHTML = faltan.length
+      ? `<strong>Pendiente para poder firmar:</strong><ul>${faltan.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>`
+      : "<strong>Listo para firmar.</strong>";
+  }
+  const testigosEl = modal.querySelector("#pericialModalTestigos");
+  const testigos = (detalle?.testigos || []).filter((t) => (t.estado || "activo") === "activo");
+  if (testigosEl) {
+    testigosEl.innerHTML = testigos.length
+      ? `<div class="workspace-billing-list">${testigos.map((t) => `
+          <div class="workspace-billing-row">
+            <div><strong>${escapeHtml(t.fuente || "-")}</strong>
+              <div class="muted">${escapeHtml(t.fecha_captura || "-")} · ${euroFormatter.format(Number(t.precio || 0))} · ${Number(t.superficie || 0)} m²</div>
+            </div>
+            <div class="workspace-billing-meta"><span>${t.valor_homogeneizado ? euroFormatter.format(Number(t.valor_homogeneizado)) + "/m²" : "—"}</span></div>
+          </div>`).join("")}</div>`
+      : "<p class='muted'>Sin testigos todavía.</p>";
+  }
 };
 
 const ensureWorkspaceCompaniesLoaded = async () => {

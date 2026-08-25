@@ -1850,6 +1850,7 @@ WORKSPACE_MODULE_CATALOG = [
     {"key": "inmobiliaria", "nombre": "Inmobiliaria", "categoria": "vertical", "sort_order": 60},
     {"key": "financiacion", "nombre": "Financiación", "categoria": "vertical", "sort_order": 70},
     {"key": "fincas", "nombre": "Administración de Fincas", "categoria": "vertical", "sort_order": 80},
+    {"key": "periciales", "nombre": "Peritajes de Valoración", "categoria": "vertical", "sort_order": 85},
     {"key": "facturacion", "nombre": "Facturación", "categoria": "motor", "sort_order": 90},
     {"key": "contabilidad", "nombre": "Contabilidad", "categoria": "motor", "sort_order": 95},
     {"key": "facturas_recibidas", "nombre": "Importador Facturas", "categoria": "motor", "sort_order": 100},
@@ -1875,8 +1876,8 @@ WORKSPACE_PLAN_PACKAGES = {
     "Enterprise": {
         "label": "Enterprise",
         "pitch": "Producto multiservicio completo para tenants con automatización, portal y motores transversales listos para escalar.",
-        "focus": ["automatizaciones", "portal_cliente", "registro_horario", "facturas_recibidas", "rrhh", "fincas"],
-        "included": ["Automatizaciones", "Portal Cliente", "Registro Horario", "Facturas Recibidas", "Administración de Fincas"],
+        "focus": ["automatizaciones", "portal_cliente", "registro_horario", "facturas_recibidas", "rrhh", "fincas", "periciales"],
+        "included": ["Automatizaciones", "Portal Cliente", "Registro Horario", "Facturas Recibidas", "Administración de Fincas", "Peritajes de Valoración"],
     },
 }
 
@@ -2071,6 +2072,7 @@ WORKSPACE_USER_SERVICE_MODULE_LABELS = {
     "financiacion": "Financiación",
     "fincas": "Admin de fincas",
     "reformas": "Reformas",
+    "periciales": "Peritajes",
 }
 
 
@@ -2092,6 +2094,8 @@ def resolve_workspace_module_key_for_user_service(service):
         return "fincas"
     if key in {"reformas", "obras"}:
         return "reformas"
+    if key in {"periciales", "pericial", "peritaje", "peritajes", "valoraciones"}:
+        return "periciales"
     return ""
 
 
@@ -4867,6 +4871,11 @@ def normalize_service_key(value):
         "ADMINISTRACION DE FINCAS": "fincas",
         "ADMIN DE FINCAS": "fincas",
         "FINCAS": "fincas",
+        "PERICIAL": "periciales",
+        "PERITAJE": "periciales",
+        "PERITAJES": "periciales",
+        "VALORACION": "periciales",
+        "VALORACIONES": "periciales",
     }
     if text in aliases:
         return aliases[text]
@@ -4884,6 +4893,8 @@ def normalize_service_key(value):
             return "inmobiliaria"
         if "FINANC" in text or "HIPOTEC" in text or "LCCI" in text:
             return "financiaciones"
+        if "PERICIAL" in text or "PERITAJE" in text:
+            return "periciales"
     except Exception:
         pass
     return text.lower().strip()
@@ -44363,6 +44374,10 @@ def ensure_usuarios_schema(conn):
     ensure_column(conn, "usuarios", "email", "email TEXT")
     ensure_column(conn, "usuarios", "servicio", "servicio TEXT")
     ensure_column(conn, "usuarios", "registro_horario_activo", "registro_horario_activo INTEGER DEFAULT 0")
+    # Nº de colegiado del profesional que firma (peritajes, administración de
+    # fincas...). Se aprende solo la primera vez que alguien lo teclea en un
+    # expediente, no hace falta una pantalla de ficha aparte.
+    ensure_column(conn, "usuarios", "colegiado_numero", "colegiado_numero TEXT")
     ensure_column(conn, "usuarios", "password_hash", "password_hash TEXT")
     ensure_column(conn, "usuarios", "invite_token", "invite_token TEXT")
     ensure_column(conn, "usuarios", "invite_expires_at", "invite_expires_at TEXT")
@@ -46226,6 +46241,953 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    # El expediente pericial de valoración. `inmueble_id` es opcional a propósito:
+    # no todo peritaje judicial es sobre un inmueble ya gestionado en el CRM.
+    # `metodo` deja hueco desde ya a los cuatro de la Orden ECO/805/2003, aunque
+    # hoy solo "comparacion" tenga motor de cálculo propio.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_periciales (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          inmueble_id TEXT,
+          denominacion_manual TEXT,
+          direccion_manual TEXT,
+          referencia_catastral_manual TEXT,
+          cliente_id TEXT,
+          perito_usuario_id TEXT,
+          colegiado_numero TEXT,
+          finalidad TEXT,
+          procedimiento_referencia TEXT,
+          metodo TEXT NOT NULL DEFAULT 'comparacion',
+          estado TEXT NOT NULL DEFAULT 'Encargado',
+          motivo_estado TEXT,
+          fecha_encargo TEXT,
+          fecha_visita TEXT,
+          fecha_valoracion TEXT,
+          fecha_emision TEXT,
+          superficie_catastral REAL,
+          superficie_registral REAL,
+          superficie_medida REAL,
+          superficie_calculo_usada REAL,
+          motivo_superficie_usada TEXT,
+          valor_final NUMERIC,
+          calculo_json TEXT,
+          informe_doc_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    # Testigos/comparables. Nunca se borran de verdad: un testigo descartado sigue
+    # siendo prueba de la diligencia del trabajo (qué se consideró y por qué se
+    # rechazó). `evidencia_id_vigente` apunta a la última captura si se
+    # re-verificó el comparable más de una vez.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_pericial_testigos (
+          id TEXT PRIMARY KEY,
+          pericial_id TEXT NOT NULL,
+          orden INTEGER NOT NULL DEFAULT 1,
+          estado TEXT NOT NULL DEFAULT 'activo',
+          motivo_descarte TEXT,
+          sustituido_por_testigo_id TEXT,
+          fuente TEXT,
+          url_original TEXT,
+          fecha_captura TEXT,
+          precio NUMERIC,
+          superficie REAL,
+          caracteristicas_json TEXT,
+          coeficientes_json TEXT,
+          valor_homogeneizado NUMERIC,
+          evidencia_id_vigente TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    # Cadena de integridad de la evidencia (fotos de visita, comparables
+    # congelados, documentación aportada). `prev_hash`/`integrity_hash` encadenan
+    # cada fila con la anterior DEL MISMO `pericial_id` — a diferencia de
+    # `inmueble_oferta_eventos`, aquí la búsqueda de la punta de la cadena va
+    # siempre acotada por expediente (ver `apunta_evidencia_de_peritaje`).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_pericial_evidencias (
+          id TEXT PRIMARY KEY,
+          pericial_id TEXT NOT NULL,
+          testigo_id TEXT,
+          tipo TEXT NOT NULL,
+          doc_key TEXT,
+          hash_archivo TEXT,
+          quien TEXT,
+          created_at TEXT NOT NULL,
+          prev_hash TEXT,
+          integrity_hash TEXT
+        )
+        """
+    )
+    # Documentos del expediente (informe, justificante de firma, ficha catastral).
+    # Tabla propia y no `inmueble_docs`: como `inmueble_id` es opcional en el
+    # expediente, no siempre hay dónde colgar el documento por esa vía.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_pericial_docs (
+          id TEXT PRIMARY KEY,
+          pericial_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          tipo TEXT NOT NULL,
+          nombre TEXT,
+          doc_key TEXT,
+          version INTEGER NOT NULL DEFAULT 1,
+          plantilla_clave TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workspace_periciales_workspace ON workspace_periciales (workspace_id, estado)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workspace_periciales_inmueble ON workspace_periciales (inmueble_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pericial_testigos_pericial ON workspace_pericial_testigos (pericial_id, orden)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pericial_evidencias_pericial ON workspace_pericial_evidencias (pericial_id, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pericial_evidencias_testigo ON workspace_pericial_evidencias (testigo_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pericial_docs_pericial ON workspace_pericial_docs (pericial_id, tipo)")
+    except Exception:
+        pass
+
+
+def ensure_pericial_signature_schema(conn):
+    """Firma electrónica del informe pericial: mismo mecanismo que las firmas de
+    inmueble (token + hash del documento + OTP opcional + log de eventos), pero
+    en tablas propias, `pericial_id` en vez de `inmueble_id`.
+
+    No se generaliza `inmueble_signature_requests`: esa tabla y las funciones
+    que la usan exigen `inmueble_id` en duro (incluida la persistencia del
+    justificante de firma, que cuelga de `inmueble_docs`), y aquí un expediente
+    pericial puede no tener inmueble gestionado. Tocar ese camino para un caso
+    de uso sin relación obligaría a re-testear un flujo ya probado en
+    producción para arras y encargos.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_pericial_signature_requests (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT NOT NULL,
+          pericial_id TEXT,
+          doc_id TEXT,
+          doc_url TEXT,
+          doc_nombre TEXT,
+          signer_nombre TEXT,
+          signer_nif TEXT,
+          signer_email TEXT,
+          signer_telefono TEXT,
+          purpose TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          token_hash TEXT NOT NULL,
+          otp_hash TEXT,
+          otp_required INTEGER NOT NULL DEFAULT 0,
+          expires_at TEXT,
+          sent_at TEXT,
+          opened_at TEXT,
+          signed_at TEXT,
+          rejected_at TEXT,
+          signed_name TEXT,
+          signed_nif TEXT,
+          acceptance_text TEXT,
+          signature_data_url TEXT,
+          evidence_json TEXT,
+          document_sha256 TEXT,
+          signed_doc_id TEXT,
+          signed_doc_url TEXT,
+          created_by TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_pericial_signature_events (
+          id TEXT PRIMARY KEY,
+          request_id TEXT NOT NULL,
+          event TEXT NOT NULL,
+          ip TEXT,
+          user_agent TEXT,
+          details_json TEXT,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pericial_signature_token ON workspace_pericial_signature_requests (token_hash)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pericial_signature_pericial ON workspace_pericial_signature_requests (pericial_id, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pericial_signature_events_req ON workspace_pericial_signature_events (request_id, created_at)")
+    except Exception:
+        pass
+
+
+def _payload_de_evidencia_pericial(fila, prev_hash):
+    """El texto que se firma. Uno solo, para escribir y para verificar."""
+    return "|".join([
+        str(prev_hash or ""),
+        str(row_value(fila, "id", "") or ""),
+        str(row_value(fila, "pericial_id", "") or ""),
+        str(row_value(fila, "testigo_id", "") or ""),
+        str(row_value(fila, "tipo", "") or ""),
+        str(row_value(fila, "doc_key", "") or ""),
+        str(row_value(fila, "hash_archivo", "") or ""),
+        str(row_value(fila, "quien", "") or ""),
+        str(row_value(fila, "created_at", "") or ""),
+    ])
+
+
+def apunta_evidencia_de_peritaje(conn, pericial_id, testigo_id, tipo, doc_key, hash_archivo, quien, *, now=None):
+    """Una fila más en la evidencia del expediente, encadenada a la anterior
+    DEL MISMO expediente.
+
+    A propósito no se toca `apunta_evento_de_oferta` (mismo problema, cadena
+    global sin acotar por `oferta_id`): aquí la búsqueda de la punta y el
+    `NOT EXISTS` van siempre con `pericial_id = ?`, para que la cadena de un
+    expediente no se contamine con eventos de otro.
+    """
+    ensure_workspace_product_tables(conn)
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    pericial_id = str(pericial_id or "")
+    prev_hash = ""
+    try:
+        fila = conn.execute(
+            "SELECT a.integrity_hash FROM workspace_pericial_evidencias a "
+            "WHERE a.pericial_id = ? AND COALESCE(a.integrity_hash,'') <> '' "
+            "AND NOT EXISTS (SELECT 1 FROM workspace_pericial_evidencias b "
+            "                WHERE b.pericial_id = a.pericial_id AND COALESCE(b.prev_hash,'') = a.integrity_hash) "
+            "ORDER BY a.created_at DESC, a.id DESC LIMIT 1",
+            (pericial_id,),
+        ).fetchone()
+        if fila:
+            prev_hash = str(row_value(fila, "integrity_hash", "") or "")
+    except Exception:
+        _rollback_best_effort(conn)
+        prev_hash = ""
+    registro = {
+        "id": os.urandom(16).hex(),
+        "pericial_id": pericial_id,
+        "testigo_id": str(testigo_id or "") or None,
+        "tipo": str(tipo or ""),
+        "doc_key": str(doc_key or ""),
+        "hash_archivo": str(hash_archivo or ""),
+        "quien": str(quien or "")[:200],
+        "created_at": now,
+    }
+    integridad = hashlib.sha256(_payload_de_evidencia_pericial(registro, prev_hash).encode("utf-8")).hexdigest()
+    conn.execute(
+        "INSERT INTO workspace_pericial_evidencias (id, pericial_id, testigo_id, tipo, doc_key, hash_archivo, "
+        "quien, created_at, prev_hash, integrity_hash) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (registro["id"], registro["pericial_id"], registro["testigo_id"], registro["tipo"],
+         registro["doc_key"], registro["hash_archivo"], registro["quien"], now, prev_hash, integridad),
+    )
+    return registro["id"]
+
+
+def verifica_evidencias_del_peritaje(conn, pericial_id):
+    """Recalcula el hash de cada fila y comprueba que nadie apunte a una que ya
+    no está. Mismo criterio que `verifica_decisiones_del_propietario`: por id
+    de inserción, no por fecha (una fecha manipulada no rompería el recorrido)."""
+    try:
+        ensure_workspace_product_tables(conn)
+        filas = conn.execute(
+            "SELECT * FROM workspace_pericial_evidencias WHERE pericial_id = ? ORDER BY id ASC",
+            (str(pericial_id or ""),),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return {"ok": False, "checked": 0, "error": "no se pudo leer"}
+    firmadas = [f for f in filas or [] if str(row_value(f, "integrity_hash", "") or "")]
+    por_hash = {str(row_value(f, "integrity_hash", "") or ""): f for f in firmadas}
+    manipuladas, huecos = [], []
+    for f in firmadas:
+        anterior = str(row_value(f, "prev_hash", "") or "")
+        calculado = hashlib.sha256(_payload_de_evidencia_pericial(f, anterior).encode("utf-8")).hexdigest()
+        if calculado != str(row_value(f, "integrity_hash", "") or ""):
+            manipuladas.append(row_value(f, "id", None))
+        elif anterior and anterior not in por_hash:
+            huecos.append(row_value(f, "id", None))
+    return {"ok": not manipuladas and not huecos, "checked": len(firmadas),
+            "manipuladas": manipuladas, "huecos": huecos}
+
+
+#: Mínimo de testigos que exige un dictamen por comparación para tenerse en pie.
+#: La Orden ECO/805/2003 pide seis con carácter general y permite bajar a
+#: cuatro si se justifica por qué no hay más comparables homogéneos en la
+#: zona — aquí se exige la justificación por escrito cuando hay menos de seis,
+#: no se rechaza sin más.
+PERICIAL_TESTIGOS_MINIMO_SIN_JUSTIFICAR = 6
+PERICIAL_TESTIGOS_MINIMO_ABSOLUTO = 4
+
+
+def compute_homogenizacion_testigo(testigo, coeficientes=None):
+    """Aplica los coeficientes de homogeneización a un testigo y devuelve el
+    valor unitario homogeneizado. Cálculo puro, sin I/O: cada coeficiente es
+    un factor multiplicativo con su motivo, y el resultado final es el precio
+    unitario del testigo corregido por todos ellos en cadena.
+
+    `coeficientes` es un dict `{clave: {"factor": float, "motivo": str}}` — por
+    ejemplo `{"planta": {"factor": 1.05, "motivo": "testigo en bajo, sujeto en 2º"}}`.
+    Un factor de 1.0 es "sin ajuste"; no se admiten factores <= 0 (invalidarían
+    o invertirían el precio).
+    """
+    precio = float((testigo or {}).get("precio") or 0)
+    superficie = float((testigo or {}).get("superficie") or 0)
+    if precio <= 0 or superficie <= 0:
+        return {"valor_unitario": 0.0, "valor_homogeneizado_unitario": 0.0,
+                "coeficiente_total": 1.0, "detalle": []}
+    valor_unitario = precio / superficie
+    coeficiente_total = 1.0
+    detalle = []
+    for clave, ajuste in (coeficientes or {}).items():
+        factor = float((ajuste or {}).get("factor") or 1.0)
+        if factor <= 0:
+            factor = 1.0
+        coeficiente_total *= factor
+        detalle.append({
+            "clave": clave,
+            "factor": factor,
+            "motivo": str((ajuste or {}).get("motivo") or "").strip(),
+        })
+    return {
+        "valor_unitario": round(valor_unitario, 2),
+        "valor_homogeneizado_unitario": round(valor_unitario * coeficiente_total, 2),
+        "coeficiente_total": round(coeficiente_total, 4),
+        "detalle": detalle,
+    }
+
+
+def compute_comparacion_valoracion(testigos_homogeneizados, superficie_sujeto):
+    """A partir de los testigos ya homogeneizados (activos, no descartados),
+    calcula el valor unitario de mercado (media, mediana, desviación) y el
+    valor total del inmueble sujeto. Cálculo puro, sin I/O."""
+    valores = [float(t.get("valor_homogeneizado_unitario") or 0) for t in (testigos_homogeneizados or [])
+               if float(t.get("valor_homogeneizado_unitario") or 0) > 0]
+    n = len(valores)
+    if not n or not superficie_sujeto:
+        return {"media": 0.0, "mediana": 0.0, "desviacion": 0.0, "n_muestra": n,
+                "valor_unitario_homogeneizado": 0.0, "valor_total": 0.0}
+    media = sum(valores) / n
+    ordenados = sorted(valores)
+    mitad = n // 2
+    mediana = ordenados[mitad] if n % 2 else (ordenados[mitad - 1] + ordenados[mitad]) / 2
+    varianza = sum((v - media) ** 2 for v in valores) / n
+    desviacion = varianza ** 0.5
+    valor_total = round(media * float(superficie_sujeto), 2)
+    return {
+        "media": round(media, 2), "mediana": round(mediana, 2), "desviacion": round(desviacion, 2),
+        "n_muestra": n, "valor_unitario_homogeneizado": round(media, 2), "valor_total": valor_total,
+    }
+
+
+def checklist_une197001_pericial(pericial, testigos, evidencias_verificadas):
+    """Los apartados que la UNE 197001 no permite que falten antes de firmar.
+
+    Igual que el libro de actas: hay cosas que el sistema no debe dejar
+    avanzar si faltan, no una validación que se pueda saltar a la ligera.
+    Devuelve la lista de motivos por los que NO se puede firmar; lista vacía
+    significa que el expediente está listo.
+    """
+    pericial = pericial or {}
+    faltan = []
+    if not str(pericial.get("perito_usuario_id") or "").strip():
+        faltan.append("Falta identificar al perito que firma el informe.")
+    if not str(pericial.get("colegiado_numero") or "").strip():
+        faltan.append("Falta el número de colegiado del perito.")
+    if not str(pericial.get("finalidad") or "").strip():
+        faltan.append("Falta indicar la finalidad del peritaje (objeto y alcance del encargo).")
+    if not str(pericial.get("fecha_valoracion") or "").strip():
+        faltan.append("Falta fijar la fecha a la que se refiere la valoración.")
+    metodo = str(pericial.get("metodo") or "").strip()
+    if metodo == "comparacion":
+        activos = [t for t in (testigos or []) if str(t.get("estado") or "activo") == "activo"]
+        if len(activos) < PERICIAL_TESTIGOS_MINIMO_ABSOLUTO:
+            faltan.append(
+                f"El método de comparación exige al menos {PERICIAL_TESTIGOS_MINIMO_ABSOLUTO} testigos activos "
+                f"(hay {len(activos)})."
+            )
+        elif len(activos) < PERICIAL_TESTIGOS_MINIMO_SIN_JUSTIFICAR and not str(pericial.get("motivo_superficie_usada") or pericial.get("motivo_estado") or "").strip():
+            faltan.append(
+                f"Con menos de {PERICIAL_TESTIGOS_MINIMO_SIN_JUSTIFICAR} testigos hace falta justificar por escrito "
+                "por qué no hay más comparables homogéneos en la zona."
+            )
+    elif not metodo:
+        faltan.append("Falta indicar el método de valoración empleado.")
+    if not pericial.get("valor_final"):
+        faltan.append("Falta el valor final de tasación.")
+    if evidencias_verificadas is not None and not evidencias_verificadas.get("ok", False):
+        faltan.append("La cadena de evidencia no se ha podido verificar íntegra — revisar antes de firmar.")
+    return faltan
+
+
+#: Texto fijo de la declaración de imparcialidad. Art. 335.2 LEC: el perito debe
+#: manifestar bajo juramento o promesa que ha actuado con objetividad, aunque la
+#: parte lo hubiera propuesto y la remunere. No es negociable ni editable desde
+#: el formulario — se firma tal cual, igual que el juramento de un cargo.
+PERICIAL_DECLARACION_IMPARCIALIDAD = (
+    "El perito abajo firmante manifiesta, bajo juramento o promesa de decir "
+    "verdad, que ha actuado y actuará con la mayor objetividad posible, "
+    "tomando en consideración tanto lo que pueda favorecer como lo que sea "
+    "susceptible de causar perjuicio a cualquiera de las partes, y que "
+    "conoce las sanciones penales en las que podría incurrir si incumpliere "
+    "su deber como perito, de conformidad con el artículo 335.2 de la Ley de "
+    "Enjuiciamiento Civil."
+)
+
+
+def build_pericial_valoracion_pdf(pericial, workspace, company, inmueble, cliente, perito,
+                                   testigos, fotos_visita):
+    """El informe pericial de valoración, con el esqueleto de la UNE 197001:
+    identificación, objeto, antecedentes, metodología, testigos, análisis,
+    conclusión, anexo fotográfico y declaración de imparcialidad.
+
+    `fotos_visita` ya viene como lista de `(imagen_pil, caption)` — resolver la
+    evidencia (S3 → bytes → PIL) es responsabilidad de quien llama, no de esta
+    función, que solo maqueta.
+    """
+    pericial = pericial or {}
+    workspace = workspace or {}
+    company = company or {}
+    inmueble = inmueble or {}
+    cliente = cliente or {}
+    perito = perito or {}
+    try:
+        calculo = json.loads(pericial.get("calculo_json") or "{}") or {}
+    except Exception:
+        calculo = {}
+    comparacion = calculo.get("comparacion") or {}
+    estadisticos = comparacion.get("estadisticos") or {}
+
+    denominacion = str(pericial.get("denominacion_manual") or inmueble.get("titulo") or inmueble.get("direccion")
+                       or pericial.get("direccion_manual") or "el inmueble objeto de valoración").strip()
+    direccion = str(inmueble.get("direccion") or pericial.get("direccion_manual") or "").strip()
+    finalidad = str(pericial.get("finalidad") or "").strip()
+    subtitulo = " · ".join(p for p in (finalidad, denominacion) if p)
+
+    sections = []
+
+    sections.append(("Identificación del perito y del encargo", {
+        "items": [
+            ("Perito", str(perito.get("nombre") or "").strip()),
+            ("Colegiado nº", str(pericial.get("colegiado_numero") or "").strip()),
+            ("Solicitante", str(cliente.get("nombre") or "").strip()),
+            ("Finalidad", finalidad or "No especificada"),
+            ("Referencia del procedimiento", str(pericial.get("procedimiento_referencia") or "—").strip()),
+            ("Fecha de encargo", str(pericial.get("fecha_encargo") or "—")),
+            ("Fecha de la visita", str(pericial.get("fecha_visita") or "—")),
+            ("Fecha a la que se refiere la valoración", str(pericial.get("fecha_valoracion") or "—")),
+            ("Fecha de emisión del informe", str(pericial.get("fecha_emision") or "—")),
+        ],
+    }))
+
+    sections.append(("Objeto y alcance", [
+        f"Se emite el presente informe pericial de valoración de {denominacion}, "
+        f"a solicitud de {str(cliente.get('nombre') or 'la parte solicitante').strip()}, "
+        f"con la finalidad de {finalidad.lower() if finalidad else 'la finalidad indicada por el solicitante'}.",
+        "El alcance del encargo se limita a la determinación del valor de mercado "
+        "del inmueble descrito, a la fecha de valoración indicada, sin extenderse "
+        "a la comprobación de cargas, situación registral distinta de la "
+        "superficie, ni a la habitabilidad o legalidad urbanística del inmueble "
+        "salvo mención expresa.",
+    ]))
+
+    sections.append(("Metodología aplicada", [
+        "El presente dictamen sigue los criterios generales de la norma UNE "
+        "197001 para la redacción de informes y dictámenes periciales, y la "
+        "metodología de valoración de la Orden ECO/805/2003, de 27 de marzo, "
+        "sobre normas de valoración de bienes inmuebles.",
+        "Método empleado: comparación con testigos de mercado, homogeneizados "
+        "por sus diferencias respecto al inmueble objeto de valoración "
+        "(ubicación, superficie, estado, orientación, planta y antigüedad)."
+        if str(pericial.get("metodo") or "") == "comparacion"
+        else f"Método empleado: {pericial.get('metodo') or 'no especificado'}.",
+    ]))
+
+    sections.append(("page_break", {"kind": "page_break"}))
+
+    def _m2(valor):
+        try:
+            return f"{float(valor):.2f} m²" if valor else "—"
+        except Exception:
+            return "—"
+
+    sections.append(("Datos del inmueble objeto de valoración", {
+        "items": [
+            ("Dirección", direccion or "—"),
+            ("Referencia catastral", str(inmueble.get("referencia_catastral") or pericial.get("referencia_catastral_manual") or "—")),
+            ("Superficie catastral", _m2(pericial.get("superficie_catastral"))),
+            ("Superficie registral", _m2(pericial.get("superficie_registral"))),
+            ("Superficie medida en visita", _m2(pericial.get("superficie_medida"))),
+            ("Superficie usada en el cálculo", _m2(pericial.get("superficie_calculo_usada"))),
+            ("Motivo de la superficie usada", str(pericial.get("motivo_superficie_usada") or "—")),
+        ],
+    }))
+
+    activos = [t for t in (testigos or []) if str(t.get("estado") or "activo") == "activo"]
+    if activos:
+        filas = []
+        for t in activos:
+            filas.append([
+                str(t.get("fuente") or "—"),
+                str(t.get("fecha_captura") or "—"),
+                format_eur(t.get("precio")) if t.get("precio") else "—",
+                _m2(t.get("superficie")),
+                format_eur(t.get("valor_homogeneizado")) if t.get("valor_homogeneizado") else "—",
+            ])
+        sections.append(("Testigos utilizados (método de comparación)", {
+            "kind": "table",
+            "columns": [
+                {"label": "Fuente", "width": 2.2},
+                {"label": "Fecha", "width": 1.1},
+                {"label": "Precio", "width": 1.3, "align": "right"},
+                {"label": "Superficie", "width": 1.3, "align": "right"},
+                {"label": "Valor unit. homogeneizado", "width": 1.6, "align": "right"},
+            ],
+            "rows": filas,
+        }))
+
+    if estadisticos:
+        sections.append(("Análisis y homogeneización", {
+            "kind": "kpi_cards",
+            "items": [
+                {"label": "Valor unitario medio", "value": format_eur(estadisticos.get("media")) + "/m²" if estadisticos.get("media") else "—"},
+                {"label": "Mediana", "value": format_eur(estadisticos.get("mediana")) + "/m²" if estadisticos.get("mediana") else "—"},
+                {"label": "Desviación", "value": format_eur(estadisticos.get("desviacion")) + "/m²" if estadisticos.get("desviacion") else "—"},
+                {"label": "Testigos usados", "value": str(estadisticos.get("n_muestra") or len(activos))},
+            ],
+        }))
+
+    sections.append(("page_break", {"kind": "page_break"}))
+
+    sections.append(("Conclusión", {
+        "kind": "waterfall",
+        "items": [
+            {"label": "Valor unitario homogeneizado", "value": (format_eur(estadisticos.get("valor_unitario_homogeneizado")) + "/m²") if estadisticos.get("valor_unitario_homogeneizado") else "—"},
+            {"label": "Superficie de cálculo", "value": _m2(pericial.get("superficie_calculo_usada"))},
+            {"label": "Valor de tasación", "value": format_eur(pericial.get("valor_final")), "accent": 1},
+        ],
+    }))
+    justificacion = str((calculo.get("conclusion") or {}).get("justificacion_metodo") or "").strip()
+    if justificacion:
+        sections.append(("", [justificacion]))
+
+    if fotos_visita:
+        for idx, (imagen, caption) in enumerate(fotos_visita, start=1):
+            if imagen is None:
+                continue
+            sections.append((
+                "Anexo fotográfico" if idx == 1 else "",
+                {"kind": "image", "image": imagen, "height": 220, "caption": caption or f"Foto {idx}"},
+            ))
+
+    sections.append(("Declaración de imparcialidad", [PERICIAL_DECLARACION_IMPARCIALIDAD]))
+
+    fecha_firma = str(pericial.get("fecha_emision") or "").strip()
+    sections.append(("Firma", {
+        "kind": "columns",
+        "items": [
+            ["El perito", f"En {str(workspace.get('nombre') or '').strip() or 'lugar indicado'}, a {fecha_firma or 'la fecha indicada'}"],
+            ["", ""],
+            [f"Fdo.: {str(perito.get('nombre') or '').strip()}", f"Colegiado nº {str(pericial.get('colegiado_numero') or '').strip()}"],
+        ],
+    }))
+
+    footer_lines = [
+        f"Informe pericial de valoración — {denominacion}. Documento con validez a la fecha de valoración indicada.",
+    ]
+
+    try:
+        from .branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    except ImportError:
+        from branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    return build_modernia_branded_document_pdf_vector(
+        "INFORME PERICIAL DE VALORACIÓN",
+        subtitulo,
+        sections,
+        footer_lines=footer_lines,
+        company=company,
+        brand_color=workspace.get("primary_color"),
+        paginar=True,
+    )
+
+
+def persist_pericial_generated_doc(conn, pericial_id, tipo, nombre, pdf_bytes, filename_base, now,
+                                    *, workspace_id, empresa_id=None, plantilla_clave=None):
+    """Mismo patrón que `persist_generated_inmueble_pdf`, pero en
+    `workspace_pericial_docs`: el expediente pericial puede no tener
+    `inmueble_id` (no siempre es un inmueble gestionado en el CRM), así que no
+    hay dónde colgar el documento por esa vía. Guarda a disco local, igual que
+    el resto de documentos generados por el sistema (nada de esto pasa por S3
+    hoy en el repo — S3 es para lo que sube el usuario, no lo que genera el
+    servidor)."""
+    if not pericial_id or not tipo or not pdf_bytes:
+        return None
+    folder = UPLOADS / "periciales" / "generated"
+    folder.mkdir(parents=True, exist_ok=True)
+    safe_base = slugify_text(filename_base or nombre or tipo)[:80] or "documento_pericial"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    existing = conn.execute(
+        "SELECT id, version FROM workspace_pericial_docs WHERE pericial_id = ? AND tipo = ? "
+        "ORDER BY version DESC, updated_at DESC, created_at DESC LIMIT 1",
+        (pericial_id, tipo),
+    ).fetchone()
+    next_version = int(existing["version"] or 1) + 1 if existing else 1
+    doc_id = os.urandom(16).hex()
+    filename = f"{safe_base}_{timestamp}_{doc_id[:8]}.pdf"
+    file_path = folder / filename
+    file_path.write_bytes(pdf_bytes)
+    url = f"/uploads/periciales/generated/{filename}"
+    conn.execute(
+        "INSERT INTO workspace_pericial_docs (id, pericial_id, workspace_id, empresa_id, tipo, nombre, "
+        "doc_key, version, plantilla_clave, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,datetime(?),datetime(?))",
+        (doc_id, pericial_id, workspace_id, empresa_id or None, tipo, nombre or tipo, url,
+         next_version, plantilla_clave or slugify_text(tipo) or None, now, now),
+    )
+    return {"id": doc_id, "url": url, "version": next_version}
+
+
+def _pericial_doc_local_sha256(url):
+    """Hash del documento ya persistido a disco (mismo criterio que
+    `compute_signature_document_sha256`, pero sobre `/uploads/periciales/...`)."""
+    path = _signature_url_to_local_path(url)
+    if not path or not path.exists() or not path.is_file():
+        return ""
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def record_pericial_signature_event(conn, request_id, event, handler=None, details=None, now=None):
+    if not request_id or not event:
+        return
+    now_value = now or datetime.now(timezone.utc).isoformat()
+    ip, ua = "", ""
+    if handler is not None:
+        try:
+            ip = _get_client_ip(handler)
+        except Exception:
+            ip = ""
+        try:
+            ua = str(handler.headers.get("User-Agent") or "")[:500]
+        except Exception:
+            ua = ""
+    details_text = ""
+    if details:
+        try:
+            details_text = json.dumps(details, ensure_ascii=False)
+        except Exception:
+            details_text = str(details)
+    conn.execute(
+        "INSERT INTO workspace_pericial_signature_events (id, request_id, event, ip, user_agent, details_json, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, datetime(?))",
+        (os.urandom(16).hex(), request_id, event, ip, ua, details_text, now_value),
+    )
+
+
+def create_pericial_signature_request(conn, *, empresa_id, pericial_id, doc_id="", doc_url="", doc_nombre="",
+                                       signer_nombre="", signer_nif="", signer_email="", signer_telefono="",
+                                       purpose="Informe pericial", otp_required=False, expires_days=15,
+                                       created_by="", now=None):
+    """Igual que `create_inmueble_signature_request`, en tablas propias.
+
+    No se generaliza la de inmueble: exige `inmueble_id` en duro (incluida la
+    persistencia del justificante, que cuelga de `inmueble_docs`) y aquí un
+    expediente pericial puede no tener inmueble gestionado.
+    """
+    ensure_pericial_signature_schema(conn)
+    now_value = now or datetime.now(timezone.utc).isoformat()
+    if doc_id:
+        doc_row = conn.execute(
+            "SELECT id, pericial_id, nombre, doc_key FROM workspace_pericial_docs WHERE id = ? LIMIT 1",
+            (doc_id,),
+        ).fetchone()
+        if not doc_row:
+            raise ValueError("Documento no encontrado")
+        pericial_id = str(doc_row["pericial_id"] or pericial_id or "").strip()
+        doc_url = str(doc_row["doc_key"] or doc_url or "").strip()
+        doc_nombre = str(doc_row["nombre"] or doc_nombre or "").strip()
+    if not empresa_id or not pericial_id:
+        raise ValueError("empresa_id y pericial_id requeridos")
+    if not doc_url and not doc_id:
+        raise ValueError("Documento requerido")
+    try:
+        days = max(1, min(90, int(expires_days or 15)))
+    except Exception:
+        days = 15
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+    token = make_signature_token()
+    otp = f"{secrets.randbelow(1000000):06d}" if otp_required else ""
+    request_id = os.urandom(16).hex()
+    conn.execute(
+        "INSERT INTO workspace_pericial_signature_requests (id, empresa_id, pericial_id, doc_id, doc_url, "
+        "doc_nombre, signer_nombre, signer_nif, signer_email, signer_telefono, purpose, status, token_hash, "
+        "otp_hash, otp_required, expires_at, sent_at, document_sha256, created_by, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,datetime(?),?,?,datetime(?),datetime(?))",
+        (request_id, empresa_id, pericial_id, doc_id or None, doc_url or "", doc_nombre or "Informe pericial",
+         signer_nombre or "", signer_nif or "", signer_email or "", signer_telefono or "",
+         purpose or "Informe pericial", hash_signature_token(token), hash_signature_token(otp) if otp else "",
+         1 if otp_required else 0, expires_at, now_value, _pericial_doc_local_sha256(doc_url),
+         created_by or "", now_value, now_value),
+    )
+    record_pericial_signature_event(conn, request_id, "created", details={"otp_required": bool(otp_required)}, now=now_value)
+    return {
+        "id": request_id,
+        "token": token,
+        "public_url": build_public_fragment_url("firma_pericial", token),
+        "otp": otp,
+        "expires_at": expires_at,
+    }
+
+
+def al_completar_firma_pericial(conn, fila, now=None):
+    """Efectos de negocio al cerrarse la firma: el expediente pasa a
+    "Firmado", con fecha de emisión si no la tenía. Es la ÚNICA vía por la que
+    un expediente pericial alcanza ese estado — el endpoint público de
+    edición nunca lo acepta como valor de entrada (ver guard en
+    `/api/workspace_pericial`)."""
+    pericial_id = str(row_value(fila, "pericial_id", "") or "")
+    if not pericial_id:
+        return
+    now_value = now or datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE workspace_periciales SET estado = 'Firmado', "
+        "fecha_emision = COALESCE(NULLIF(fecha_emision, ''), ?), updated_at = datetime(?) "
+        "WHERE id = ? AND estado != 'Firmado'",
+        (now_value[:10], now_value, pericial_id),
+    )
+
+
+def sign_pericial_signature_request(conn, token, payload, *, handler=None, now=None):
+    """Igual que `sign_inmueble_signature_request`: token de un solo uso, OTP
+    opcional con intentos limitados, texto de aceptación explícito, evidencia
+    (IP/user-agent/hash del documento) y justificante generado al firmar."""
+    ensure_pericial_signature_schema(conn)
+    row = conn.execute(
+        "SELECT * FROM workspace_pericial_signature_requests WHERE token_hash = ? LIMIT 1",
+        (hash_signature_token(token),),
+    ).fetchone()
+    if not row:
+        return {"error": "Solicitud no encontrada"}, 404
+    data = dict(row)
+    status = str(data.get("status") or "").strip().lower()
+    if status == "signed":
+        return {"error": "Solicitud ya firmada", "signed_doc_url": data.get("signed_doc_url") or ""}, 409
+    if status == "rejected":
+        return {"error": "Solicitud rechazada"}, 409
+    expires_dt = _parse_iso_dt_utc(data.get("expires_at"))
+    if expires_dt and expires_dt < datetime.now(timezone.utc):
+        conn.execute(
+            "UPDATE workspace_pericial_signature_requests SET status = 'expired', updated_at = datetime(?) WHERE id = ?",
+            (now or datetime.now(timezone.utc).isoformat(), data["id"]),
+        )
+        record_pericial_signature_event(conn, data["id"], "expired", handler=handler, now=now)
+        return {"error": "Solicitud caducada"}, 410
+    if int(data.get("otp_required") or 0):
+        fallidos = contar_intentos_de_otp(conn, data["id"], desde=data.get("sent_at"))
+        if fallidos >= SIGNATURE_OTP_MAX_ATTEMPTS:
+            record_pericial_signature_event(conn, data["id"], "otp_blocked", handler=handler, now=now)
+            return {"error": "Demasiados intentos con el código. Pide que te lo envíen de nuevo."}, 429
+        otp = str(payload.get("otp") or "").strip()
+        if not otp or not hmac.compare_digest(hash_signature_token(otp), str(data.get("otp_hash") or "")):
+            record_pericial_signature_event(conn, data["id"], "otp_failed", handler=handler, now=now)
+            restantes = max(0, SIGNATURE_OTP_MAX_ATTEMPTS - (fallidos + 1))
+            return {"error": "Código OTP inválido", "intentos_restantes": restantes}, 403
+    signed_name = str(payload.get("signed_name") or "").strip()
+    signed_nif = str(payload.get("signed_nif") or "").strip()
+    acceptance_text = str(payload.get("acceptance_text") or "").strip()
+    signature_data_url = str(payload.get("signature_data_url") or "").strip()
+    if not signed_name or not signed_nif:
+        return {"error": "Nombre y NIF requeridos"}, 400
+    if "acepto" not in acceptance_text.lower() and "firmo" not in acceptance_text.lower():
+        return {"error": "Texto de aceptación requerido"}, 400
+    now_value = now or datetime.now(timezone.utc).isoformat()
+    try:
+        ip = _get_client_ip(handler) if handler is not None else ""
+    except Exception:
+        ip = ""
+    try:
+        ua = str(handler.headers.get("User-Agent") or "")[:500] if handler is not None else ""
+    except Exception:
+        ua = ""
+    document_sha = data.get("document_sha256") or _pericial_doc_local_sha256(data.get("doc_url"))
+    evidence = {
+        "request_id": data["id"], "signed_at": now_value, "signed_name": signed_name,
+        "signed_nif": signed_nif, "acceptance_text": acceptance_text, "document_sha256": document_sha,
+        "ip": ip, "user_agent": ua,
+    }
+    conn.execute(
+        "UPDATE workspace_pericial_signature_requests SET status = 'signed', signed_at = datetime(?), "
+        "signed_name = ?, signed_nif = ?, acceptance_text = ?, signature_data_url = ?, evidence_json = ?, "
+        "document_sha256 = ?, updated_at = datetime(?) WHERE id = ?",
+        (now_value, signed_name, signed_nif, acceptance_text, signature_data_url[:250000],
+         json.dumps(evidence, ensure_ascii=False), document_sha or "", now_value, data["id"]),
+    )
+    row_after = conn.execute(
+        "SELECT * FROM workspace_pericial_signature_requests WHERE id = ? LIMIT 1", (data["id"],)
+    ).fetchone()
+    try:
+        al_completar_firma_pericial(conn, row_after, now=now_value)
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("firma_pericial/al_completar", _fallo_tragado)
+    doc = None
+    try:
+        try:
+            from .document_pdf import build_signature_evidence_pdf as _build_evidence_pdf
+        except ImportError:
+            from document_pdf import build_signature_evidence_pdf as _build_evidence_pdf
+        pericial_row = conn.execute(
+            "SELECT workspace_id, empresa_id FROM workspace_periciales WHERE id = ? LIMIT 1",
+            (data.get("pericial_id"),),
+        ).fetchone()
+        evidence_pdf = _build_evidence_pdf(row_after, evidence)
+        doc = persist_pericial_generated_doc(
+            conn, data.get("pericial_id") or "", "justificante_firma",
+            f"Justificante firma · {data.get('doc_nombre') or 'Informe pericial'}",
+            evidence_pdf, f"justificante_firma_{data['id']}", now_value,
+            workspace_id=str(row_value(pericial_row, "workspace_id", "") or ""),
+            empresa_id=data.get("empresa_id") or "",
+            plantilla_clave="firma_electronica_interna",
+        )
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("firma_pericial/justificante", _fallo_tragado)
+    if doc:
+        conn.execute(
+            "UPDATE workspace_pericial_signature_requests SET signed_doc_id = ?, signed_doc_url = ?, "
+            "updated_at = datetime(?) WHERE id = ?",
+            (doc.get("id"), doc.get("url"), now_value, data["id"]),
+        )
+        evidence["signed_doc_id"] = doc.get("id")
+        evidence["signed_doc_url"] = doc.get("url")
+    record_pericial_signature_event(conn, data["id"], "signed", handler=handler, details=evidence, now=now_value)
+    return {"ok": True, "id": data["id"], "signed_doc_url": (doc or {}).get("url") or ""}, 200
+
+
+def fetch_workspace_periciales(conn, workspace_id, limit=100):
+    try:
+        limit = max(1, min(500, int(limit or 100)))
+    except Exception:
+        limit = 100
+    rows = conn.execute(
+        """
+        SELECT
+          p.id, p.workspace_id, p.empresa_id, p.inmueble_id, p.cliente_id,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          COALESCE(c.nombre, '') AS cliente_nombre,
+          COALESCE(u.nombre, '') AS perito_nombre,
+          COALESCE(i.direccion, i.titulo, p.denominacion_manual, p.direccion_manual, '') AS inmueble_denominacion,
+          p.perito_usuario_id, p.colegiado_numero, p.finalidad, p.procedimiento_referencia,
+          p.metodo, p.estado, p.motivo_estado, p.fecha_encargo, p.fecha_visita,
+          p.fecha_valoracion, p.fecha_emision, p.valor_final, p.created_at, p.updated_at
+        FROM workspace_periciales p
+        LEFT JOIN empresas e ON e.id = p.empresa_id
+        LEFT JOIN clientes c ON c.id = p.cliente_id
+        LEFT JOIN usuarios u ON u.id = p.perito_usuario_id
+        LEFT JOIN inmuebles i ON i.id = p.inmueble_id
+        WHERE p.workspace_id = ?
+        ORDER BY COALESCE(p.fecha_encargo, p.updated_at, p.created_at) DESC, p.updated_at DESC
+        LIMIT ?
+        """,
+        (workspace_id, limit),
+    ).fetchall()
+    return {"rows": [dict(r) for r in rows]}
+
+
+def fetch_workspace_pericial_detalle(conn, pericial_id, *, workspace_id):
+    row = conn.execute(
+        "SELECT * FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+        (pericial_id, workspace_id),
+    ).fetchone()
+    if not row:
+        return None
+    testigos = conn.execute(
+        "SELECT * FROM workspace_pericial_testigos WHERE pericial_id = ? ORDER BY orden ASC, created_at ASC",
+        (pericial_id,),
+    ).fetchall()
+    evidencias = conn.execute(
+        "SELECT * FROM workspace_pericial_evidencias WHERE pericial_id = ? ORDER BY created_at ASC",
+        (pericial_id,),
+    ).fetchall()
+    docs = conn.execute(
+        "SELECT id, tipo, nombre, doc_key, version, created_at FROM workspace_pericial_docs "
+        "WHERE pericial_id = ? ORDER BY created_at DESC",
+        (pericial_id,),
+    ).fetchall()
+    verificacion = verifica_evidencias_del_peritaje(conn, pericial_id)
+    checklist = checklist_une197001_pericial(dict(row), [dict(t) for t in testigos], verificacion)
+    return {
+        "pericial": dict(row),
+        "testigos": [dict(t) for t in testigos],
+        "evidencias": [dict(e) for e in evidencias],
+        "docs": [dict(d) for d in docs],
+        "verificacion_evidencias": verificacion,
+        "checklist_pendiente": checklist,
+    }
+
+
+def fetch_workspace_pericial_pdf_payload(conn, pericial_id, *, workspace_id):
+    row = conn.execute(
+        "SELECT * FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+        (pericial_id, workspace_id),
+    ).fetchone()
+    if not row:
+        return None
+    pericial = dict(row)
+    ws = conn.execute(
+        "SELECT nombre, primary_color, accent_color FROM workspaces WHERE id = ? LIMIT 1", (workspace_id,)
+    ).fetchone()
+    workspace = dict(ws) if ws else {}
+    company = {}
+    if pericial.get("empresa_id"):
+        emp = conn.execute(
+            "SELECT nombre, razon_social, nif, logo_url FROM empresas WHERE id = ? LIMIT 1", (pericial["empresa_id"],)
+        ).fetchone()
+        if emp:
+            company = dict(emp)
+    inmueble = {}
+    if pericial.get("inmueble_id"):
+        inm = conn.execute(
+            "SELECT titulo, direccion, referencia_catastral FROM inmuebles WHERE id = ? LIMIT 1", (pericial["inmueble_id"],)
+        ).fetchone()
+        if inm:
+            inmueble = dict(inm)
+    cliente = {}
+    if pericial.get("cliente_id"):
+        cli = conn.execute("SELECT nombre, nif FROM clientes WHERE id = ? LIMIT 1", (pericial["cliente_id"],)).fetchone()
+        if cli:
+            cliente = dict(cli)
+    perito = {}
+    if pericial.get("perito_usuario_id"):
+        per = conn.execute("SELECT nombre FROM usuarios WHERE id = ? LIMIT 1", (pericial["perito_usuario_id"],)).fetchone()
+        if per:
+            perito = dict(per)
+    testigos_rows = conn.execute(
+        "SELECT * FROM workspace_pericial_testigos WHERE pericial_id = ? ORDER BY orden ASC, created_at ASC",
+        (pericial_id,),
+    ).fetchall()
+    testigos = [dict(t) for t in testigos_rows]
+    fotos_visita = []
+    evidencias_fotos = conn.execute(
+        "SELECT doc_key, created_at FROM workspace_pericial_evidencias "
+        "WHERE pericial_id = ? AND tipo = 'foto_visita' ORDER BY created_at ASC",
+        (pericial_id,),
+    ).fetchall()
+    for ev in evidencias_fotos:
+        raw_bytes, _err = s3_get_object_bytes(ev["doc_key"])
+        if not raw_bytes:
+            continue
+        imagen = _load_image_from_bytes(raw_bytes, max_width=1200)
+        if imagen is not None:
+            fotos_visita.append((imagen, f"Foto de la visita — {str(ev['created_at'] or '')[:10]}"))
+    return pericial, workspace, company, inmueble, cliente, perito, testigos, fotos_visita
 
 
 def infer_workspace_doc_classification(nombre, tipo, servicio):
@@ -51593,7 +52555,7 @@ def fetch_api_usuarios(conn, session, *, workspace_id="", privileged=False):
             rows = conn.execute(
                 f"""
                 SELECT DISTINCT
-                       u.id, u.nombre, u.apellido, u.usuario, u.servicio, u.rol, u.activo,
+                       u.id, u.nombre, u.apellido, u.usuario, u.servicio, u.rol, u.activo, u.colegiado_numero,
                        COALESCE(u.registro_horario_activo, 0) AS registro_horario_activo
                 FROM usuarios u
                 JOIN workspace_miembros mem ON mem.usuario_id = u.id
@@ -51608,7 +52570,7 @@ def fetch_api_usuarios(conn, session, *, workspace_id="", privileged=False):
         if uid:
             rows = conn.execute(
                 """
-                SELECT id, nombre, apellido, usuario, servicio, rol, activo,
+                SELECT id, nombre, apellido, usuario, servicio, rol, activo, colegiado_numero,
                        COALESCE(registro_horario_activo, 0) AS registro_horario_activo
                 FROM usuarios
                 WHERE id = ? AND COALESCE(activo, 1) = 1
@@ -51624,7 +52586,7 @@ def fetch_api_usuarios(conn, session, *, workspace_id="", privileged=False):
         rows = conn.execute(
             """
             SELECT DISTINCT
-                   u.id, u.nombre, u.apellido, u.usuario, u.email, u.servicio, u.rol, u.activo,
+                   u.id, u.nombre, u.apellido, u.usuario, u.email, u.servicio, u.rol, u.activo, u.colegiado_numero,
                    COALESCE(u.registro_horario_activo, 0) AS registro_horario_activo
             FROM usuarios u
             JOIN workspace_miembros mem ON mem.usuario_id = u.id
@@ -51656,7 +52618,7 @@ def fetch_api_usuarios(conn, session, *, workspace_id="", privileged=False):
     rows = conn.execute(
         f"""
         SELECT DISTINCT
-               u.id, u.nombre, u.apellido, u.usuario, u.email, u.servicio, u.rol, u.activo,
+               u.id, u.nombre, u.apellido, u.usuario, u.email, u.servicio, u.rol, u.activo, u.colegiado_numero,
                COALESCE(u.registro_horario_activo, 0) AS registro_horario_activo
         FROM usuarios u
         JOIN workspace_miembros mem ON mem.usuario_id = u.id
@@ -71257,6 +72219,12 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_portal_revocar",
             "/api/workspace_fincas_vecino_delete",
             "/api/workspace_presupuesto_delete",
+            "/api/workspace_pericial",
+            "/api/workspace_pericial_delete",
+            "/api/workspace_pericial_testigo",
+            "/api/workspace_pericial_evidencia",
+            "/api/workspace_pericial_pdf",
+            "/api/workspace_pericial_firmar",
             "/api/workspace_rrhh_nominas_import",
             "/api/workspace_portal_presign",
         ):
@@ -84288,6 +85256,400 @@ class Handler(BaseHTTPRequestHandler):
             conn.execute("DELETE FROM workspace_presupuestos WHERE id = ? AND workspace_id = ?", (record_id, workspace_id))
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_pericial":
+            ensure_workspace_product_tables(conn)
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            if not workspace_id or not empresa_id:
+                json_response(self, {"error": "workspace_id y empresa_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            linked = conn.execute(
+                "SELECT 1 FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ? LIMIT 1",
+                (workspace_id, empresa_id),
+            ).fetchone()
+            if not linked:
+                json_response(self, {"error": "Esa empresa no pertenece a este workspace"}, status=403)
+                return
+            current = None
+            if record_id:
+                current = conn.execute(
+                    "SELECT * FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (record_id, workspace_id),
+                ).fetchone()
+                if not current:
+                    json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                    return
+                # Un expediente firmado no se toca: es el mismo criterio que ya usa
+                # la firma de inmueble («no se puede anular una firma ya firmada»),
+                # aquí aplicado también a la edición. Solo el propio flujo de firma
+                # (que no pasa por este endpoint) puede llevar un expediente a
+                # "Firmado" — este POST nunca lo acepta como valor de entrada.
+                if str(current["estado"] or "") == "Firmado":
+                    json_response(self, {"error": "El expediente ya está firmado y no se puede editar."}, status=409)
+                    return
+            estado_payload = str(payload.get("estado") or "").strip()
+            if estado_payload == "Firmado":
+                estado_payload = ""  # se ignora: ese estado solo se alcanza firmando.
+            estado = estado_payload or (str(current["estado"]) if current else "") or "Encargado"
+            metodo = str(payload.get("metodo") or (current["metodo"] if current else "") or "comparacion").strip()
+            calculo = {}
+            try:
+                calculo = json.loads((current["calculo_json"] if current else None) or "{}") or {}
+            except Exception:
+                calculo = {}
+            calculo.setdefault("schema_version", 1)
+            calculo["metodo_activo"] = metodo
+            calculo.setdefault("comparacion", None)
+            calculo.setdefault("coste", None)
+            calculo.setdefault("capitalizacion", None)
+            calculo.setdefault("residual", None)
+            calculo.setdefault("conclusion", {})
+            justificacion = payload.get("justificacion_metodo")
+            if justificacion is not None:
+                calculo["conclusion"]["justificacion_metodo"] = str(justificacion or "").strip()
+            # Edición parcial: si el campo no viene en el payload, se conserva lo que
+            # ya había — mandar solo `direccion_manual` no puede vaciar el resto del
+            # expediente. Mismo criterio que ya usa `workspace_presupuestos`.
+            def _campo(nombre, transform=str):
+                if nombre in payload:
+                    crudo = payload.get(nombre)
+                    valor = transform(crudo).strip() if transform is str else transform(crudo)
+                    return valor or None
+                return (current[nombre] if current else None)
+
+            values = (
+                workspace_id, empresa_id,
+                _campo("inmueble_id"),
+                _campo("denominacion_manual"),
+                _campo("direccion_manual"),
+                _campo("referencia_catastral_manual"),
+                _campo("cliente_id"),
+                _campo("perito_usuario_id"),
+                _campo("colegiado_numero"),
+                _campo("finalidad"),
+                _campo("procedimiento_referencia"),
+                metodo, estado,
+                _campo("motivo_estado"),
+                _campo("fecha_encargo"),
+                _campo("fecha_visita"),
+                _campo("fecha_valoracion"),
+                _campo("fecha_emision"),
+                _campo("superficie_catastral", parse_money_value),
+                _campo("superficie_registral", parse_money_value),
+                _campo("superficie_medida", parse_money_value),
+                _campo("superficie_calculo_usada", parse_money_value),
+                _campo("motivo_superficie_usada"),
+                _campo("valor_final", parse_money_value),
+                json.dumps(calculo, ensure_ascii=False),
+            )
+            if record_id:
+                conn.execute(
+                    "UPDATE workspace_periciales SET workspace_id=?, empresa_id=?, inmueble_id=?, "
+                    "denominacion_manual=?, direccion_manual=?, referencia_catastral_manual=?, cliente_id=?, "
+                    "perito_usuario_id=?, colegiado_numero=?, finalidad=?, procedimiento_referencia=?, metodo=?, "
+                    "estado=?, motivo_estado=?, fecha_encargo=?, fecha_visita=?, fecha_valoracion=?, fecha_emision=?, "
+                    "superficie_catastral=?, superficie_registral=?, superficie_medida=?, superficie_calculo_usada=?, "
+                    "motivo_superficie_usada=?, valor_final=?, calculo_json=?, updated_at=datetime(?) "
+                    "WHERE id = ? AND workspace_id = ?",
+                    (*values, now, record_id, workspace_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    "INSERT INTO workspace_periciales (id, workspace_id, empresa_id, inmueble_id, "
+                    "denominacion_manual, direccion_manual, referencia_catastral_manual, cliente_id, "
+                    "perito_usuario_id, colegiado_numero, finalidad, procedimiento_referencia, metodo, estado, "
+                    "motivo_estado, fecha_encargo, fecha_visita, fecha_valoracion, fecha_emision, "
+                    "superficie_catastral, superficie_registral, superficie_medida, superficie_calculo_usada, "
+                    "motivo_superficie_usada, valor_final, calculo_json, created_at, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime(?),datetime(?))",
+                    (record_id, *values, now, now),
+                )
+            # El nº de colegiado se aprende del perito la primera vez que se
+            # teclea: no hace falta una pantalla de "ficha del perito" aparte.
+            # Si ya tenía uno guardado no se pisa aquí (para eso está la
+            # edición del propio usuario).
+            perito_id_final = values[7]
+            colegiado_final = values[8]
+            if perito_id_final and colegiado_final:
+                try:
+                    conn.execute(
+                        "UPDATE usuarios SET colegiado_numero = ? "
+                        "WHERE id = ? AND COALESCE(colegiado_numero, '') = ''",
+                        (colegiado_final, perito_id_final),
+                    )
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("workspace_pericial/aprender_colegiado", _fallo_tragado)
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_pericial_delete":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            if not workspace_id or not record_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            row = conn.execute(
+                "SELECT id, estado FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (record_id, workspace_id),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                return
+            if str(row["estado"] or "") == "Firmado":
+                json_response(self, {"error": "El expediente ya está firmado y no se puede borrar."}, status=409)
+                return
+            conn.execute("DELETE FROM workspace_periciales WHERE id = ? AND workspace_id = ?", (record_id, workspace_id))
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_pericial_testigo":
+            ensure_workspace_product_tables(conn)
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            pericial_id = str(payload.get("pericial_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            if not workspace_id or not pericial_id:
+                json_response(self, {"error": "workspace_id y pericial_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            pericial = conn.execute(
+                "SELECT id, estado FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (pericial_id, workspace_id),
+            ).fetchone()
+            if not pericial:
+                json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                return
+            if str(pericial["estado"] or "") == "Firmado":
+                json_response(self, {"error": "El expediente ya está firmado y no se puede editar."}, status=409)
+                return
+            # Nunca se borra un testigo de verdad: uno descartado sigue siendo
+            # prueba de la diligencia del trabajo. Solo cambia de estado.
+            estado_testigo = str(payload.get("estado") or "activo").strip() or "activo"
+            coeficientes = payload.get("coeficientes") or {}
+            if isinstance(coeficientes, str):
+                try:
+                    coeficientes = json.loads(coeficientes)
+                except Exception:
+                    coeficientes = {}
+            homogeneizacion = compute_homogenizacion_testigo(
+                {"precio": payload.get("precio"), "superficie": payload.get("superficie")}, coeficientes
+            )
+            caracteristicas = payload.get("caracteristicas") or {}
+            if isinstance(caracteristicas, str):
+                try:
+                    caracteristicas = json.loads(caracteristicas)
+                except Exception:
+                    caracteristicas = {}
+            values = (
+                pericial_id,
+                str(payload.get("orden") or 1),
+                estado_testigo,
+                str(payload.get("motivo_descarte") or "").strip() or None,
+                str(payload.get("sustituido_por_testigo_id") or "").strip() or None,
+                str(payload.get("fuente") or "").strip() or None,
+                str(payload.get("url_original") or "").strip() or None,
+                str(payload.get("fecha_captura") or "").strip() or None,
+                parse_money_value(payload.get("precio")) or None,
+                parse_money_value(payload.get("superficie")) or None,
+                json.dumps(caracteristicas, ensure_ascii=False),
+                json.dumps(coeficientes, ensure_ascii=False),
+                homogeneizacion["valor_homogeneizado_unitario"] or None,
+            )
+            if record_id:
+                conn.execute(
+                    "UPDATE workspace_pericial_testigos SET pericial_id=?, orden=?, estado=?, motivo_descarte=?, "
+                    "sustituido_por_testigo_id=?, fuente=?, url_original=?, fecha_captura=?, precio=?, superficie=?, "
+                    "caracteristicas_json=?, coeficientes_json=?, valor_homogeneizado=?, updated_at=datetime(?) "
+                    "WHERE id = ? AND pericial_id = ?",
+                    (*values, now, record_id, pericial_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    "INSERT INTO workspace_pericial_testigos (id, pericial_id, orden, estado, motivo_descarte, "
+                    "sustituido_por_testigo_id, fuente, url_original, fecha_captura, precio, superficie, "
+                    "caracteristicas_json, coeficientes_json, valor_homogeneizado, created_at, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime(?),datetime(?))",
+                    (record_id, *values, now, now),
+                )
+            # Recalcula el valor del expediente con los testigos activos que
+            # queden, para que la conclusión no se quede atrasada respecto a los
+            # comparables que de verdad están en juego.
+            activos = conn.execute(
+                "SELECT superficie, valor_homogeneizado FROM workspace_pericial_testigos "
+                "WHERE pericial_id = ? AND estado = 'activo'", (pericial_id,),
+            ).fetchall()
+            pericial_row = conn.execute(
+                "SELECT calculo_json, superficie_calculo_usada FROM workspace_periciales WHERE id = ?", (pericial_id,),
+            ).fetchone()
+            try:
+                calculo = json.loads((pericial_row["calculo_json"] if pericial_row else None) or "{}") or {}
+            except Exception:
+                calculo = {}
+            superficie_sujeto = (pericial_row["superficie_calculo_usada"] if pericial_row else None) or 0
+            stats = compute_comparacion_valoracion(
+                [{"valor_homogeneizado_unitario": r["valor_homogeneizado"]} for r in activos], superficie_sujeto
+            )
+            calculo.setdefault("comparacion", {})
+            calculo["comparacion"] = {**(calculo.get("comparacion") or {}), "estadisticos": stats,
+                                       "valor_unitario_homogeneizado": stats["valor_unitario_homogeneizado"],
+                                       "valor_total": stats["valor_total"]}
+            conn.execute(
+                "UPDATE workspace_periciales SET calculo_json = ?, valor_final = COALESCE(NULLIF(valor_final, 0), ?), "
+                "updated_at = datetime(?) WHERE id = ?",
+                (json.dumps(calculo, ensure_ascii=False), stats["valor_total"] or None, now, pericial_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "homogeneizacion": homogeneizacion, "estadisticos": stats})
+            return
+        elif parsed.path == "/api/workspace_pericial_evidencia":
+            ensure_workspace_product_tables(conn)
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            pericial_id = str(payload.get("pericial_id") or "").strip()
+            doc_key = str(payload.get("doc_key") or "").strip()
+            tipo = str(payload.get("tipo") or "").strip() or "foto_visita"
+            if not workspace_id or not pericial_id or not doc_key:
+                json_response(self, {"error": "workspace_id, pericial_id y doc_key requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            pericial = conn.execute(
+                "SELECT id, estado FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (pericial_id, workspace_id),
+            ).fetchone()
+            if not pericial:
+                json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                return
+            if str(pericial["estado"] or "") == "Firmado":
+                json_response(self, {"error": "El expediente ya está firmado y no admite nueva evidencia."}, status=409)
+                return
+            # El hash se calcula del propio archivo ya subido a S3, no del que
+            # dice el cliente: confiar en un hash mandado por el navegador
+            # invalidaría el propósito de la cadena de integridad.
+            raw_bytes, s3_err = s3_get_object_bytes(doc_key)
+            if not raw_bytes:
+                json_response(self, {"error": f"No se pudo leer el archivo subido: {s3_err or 'desconocido'}"}, status=400)
+                return
+            hash_archivo = hashlib.sha256(raw_bytes).hexdigest()
+            quien = ""
+            try:
+                quien = str(session.get("nombre") or session.get("usuario") or "").strip()
+            except Exception:
+                quien = ""
+            testigo_id = str(payload.get("testigo_id") or "").strip() or None
+            evidencia_id = apunta_evidencia_de_peritaje(
+                conn, pericial_id, testigo_id, tipo, doc_key, hash_archivo, quien, now=now
+            )
+            if testigo_id:
+                conn.execute(
+                    "UPDATE workspace_pericial_testigos SET evidencia_id_vigente = ?, updated_at = datetime(?) "
+                    "WHERE id = ? AND pericial_id = ?",
+                    (evidencia_id, now, testigo_id, pericial_id),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": evidencia_id, "hash_archivo": hash_archivo})
+            return
+        elif parsed.path == "/api/workspace_pericial_pdf":
+            ensure_workspace_product_tables(conn)
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            pericial_id = str(payload.get("id") or payload.get("pericial_id") or "").strip()
+            if not workspace_id or not pericial_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            paquete = fetch_workspace_pericial_pdf_payload(conn, pericial_id, workspace_id=workspace_id)
+            if not paquete:
+                json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                return
+            pdf_bytes = build_pericial_valoracion_pdf(*paquete)
+            doc = persist_pericial_generated_doc(
+                conn, pericial_id, "informe_pericial", "Informe pericial de valoración", pdf_bytes,
+                f"informe_pericial_{pericial_id}", now, workspace_id=workspace_id,
+                empresa_id=paquete[0].get("empresa_id"), plantilla_clave="pericial_valoracion",
+            )
+            conn.execute(
+                "UPDATE workspace_periciales SET informe_doc_id = ?, updated_at = datetime(?) WHERE id = ?",
+                ((doc or {}).get("id"), now, pericial_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "doc": doc})
+            return
+        elif parsed.path == "/api/workspace_pericial_firmar":
+            ensure_workspace_product_tables(conn)
+            ensure_pericial_signature_schema(conn)
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            pericial_id = str(payload.get("pericial_id") or "").strip()
+            if not workspace_id or not pericial_id:
+                json_response(self, {"error": "workspace_id y pericial_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            pericial = conn.execute(
+                "SELECT * FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (pericial_id, workspace_id),
+            ).fetchone()
+            if not pericial:
+                json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                return
+            if str(pericial["estado"] or "") == "Firmado":
+                json_response(self, {"error": "El expediente ya está firmado."}, status=409)
+                return
+            testigos = conn.execute(
+                "SELECT * FROM workspace_pericial_testigos WHERE pericial_id = ?", (pericial_id,),
+            ).fetchall()
+            verificacion = verifica_evidencias_del_peritaje(conn, pericial_id)
+            faltan = checklist_une197001_pericial(dict(pericial), [dict(t) for t in testigos], verificacion)
+            if faltan:
+                json_response(self, {"error": "El expediente no cumple los requisitos para firmarse.",
+                                      "faltan": faltan, "verificacion": verificacion}, status=422)
+                return
+            doc_actual = conn.execute(
+                "SELECT id, doc_key, nombre FROM workspace_pericial_docs WHERE pericial_id = ? AND tipo = 'informe_pericial' "
+                "ORDER BY version DESC LIMIT 1", (pericial_id,),
+            ).fetchone()
+            if not doc_actual:
+                json_response(self, {"error": "Genera primero el PDF del informe antes de firmarlo."}, status=422)
+                return
+            try:
+                solicitud = create_pericial_signature_request(
+                    conn, empresa_id=str(pericial["empresa_id"] or ""), pericial_id=pericial_id,
+                    doc_id=doc_actual["id"],
+                    signer_nombre=str(payload.get("signer_nombre") or "").strip(),
+                    signer_nif=str(payload.get("signer_nif") or "").strip(),
+                    signer_email=str(payload.get("signer_email") or "").strip(),
+                    purpose="Informe pericial", otp_required=bool(payload.get("otp_required")), now=now,
+                )
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            conn.commit()
+            json_response(self, {"ok": True, "solicitud": solicitud})
             return
         elif parsed.path == "/api/workspace_fincas_comunidades":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -102016,6 +103378,74 @@ class Handler(BaseHTTPRequestHandler):
                 return
             pdf_bytes = build_workspace_budget_pdf(payload["budget"], payload["workspace"], payload["company"], payload["client"], payload["lineas"])
             filename = f"presupuesto_{budget_id}.pdf"
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
+            return
+
+        if path == "/api/workspace_periciales":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            limit = params.get("limit", ["100"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_periciales(conn, workspace_id, limit=limit))
+            return
+
+        if path == "/api/workspace_pericial":
+            pericial_id = (params.get("id", [""])[0] or "").strip()
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            if not pericial_id or not workspace_id:
+                json_response(self, {"error": "id y workspace_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            detalle = fetch_workspace_pericial_detalle(conn, pericial_id, workspace_id=workspace_id)
+            if not detalle:
+                json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                return
+            json_response(self, detalle)
+            return
+
+        if path == "/api/workspace_pericial_pdf":
+            pericial_id = (params.get("id", [""])[0] or "").strip()
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            if not pericial_id or not workspace_id:
+                json_response(self, {"error": "id y workspace_id requeridos"}, status=400)
+                return
+            paquete = fetch_workspace_pericial_pdf_payload(conn, pericial_id, workspace_id=workspace_id)
+            if not paquete:
+                json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                return
+            pericial_dict = paquete[0]
+            pdf_bytes = None
+            # Si ya está firmado, se sirve el fichero congelado que se firmó —
+            # nunca se regenera: sería otro documento, con otro hash, y dejaría
+            # de coincidir con lo que el firmante aceptó.
+            if str(pericial_dict.get("estado") or "") == "Firmado":
+                doc_firmado = conn.execute(
+                    "SELECT doc_key FROM workspace_pericial_docs WHERE pericial_id = ? AND tipo = 'informe_pericial' "
+                    "ORDER BY version DESC LIMIT 1", (pericial_id,),
+                ).fetchone()
+                if doc_firmado:
+                    local_path = _signature_url_to_local_path(doc_firmado["doc_key"])
+                    if local_path and local_path.exists():
+                        pdf_bytes = local_path.read_bytes()
+            if pdf_bytes is None:
+                pdf_bytes = build_pericial_valoracion_pdf(*paquete)
+            filename = f"pericial_{pericial_id}.pdf"
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 

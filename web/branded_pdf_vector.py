@@ -162,22 +162,32 @@ def _es_destacado(item):
 class _Lienzo:
     """Envoltorio del canvas que lleva la cuenta del hueco que queda."""
 
-    def __init__(self, c, cabecera, color=None):
+    def __init__(self, c, cabecera, color=None, pie_pagina=None):
         self.c = c
         self.cabecera = cabecera
         self.color = color or VERDE
+        self.pie_pagina = pie_pagina
         self.y = 0.0
         self.pagina = 0
         self.nueva_pagina()
 
     def nueva_pagina(self):
         if self.pagina:
+            # El pie de la página que se cierra se dibuja antes del showPage: una
+            # vez pasada de página el canvas ya no vuelve atrás.
+            if self.pie_pagina:
+                self.pie_pagina(self.c, self.pagina)
             self.c.showPage()
         self.pagina += 1
         self.y = self.cabecera(self.c, self.pagina)
         # Para saber si estamos recién abierta la página: al principio no se separa
         # nada, porque el hueco lo da ya la cabecera.
         self.y_inicial = self.y
+
+    def cerrar(self):
+        """Pie de la última página — no hay `nueva_pagina()` después que lo dibuje."""
+        if self.pie_pagina:
+            self.pie_pagina(self.c, self.pagina)
 
     def recien_abierta(self):
         return self.y >= getattr(self, "y_inicial", self.y) - 0.5
@@ -388,6 +398,20 @@ def _dibuja_cabecera(titulo, subtitulo, meta_empresa, logo_marca=None, color=Non
         return y
 
     return cabecera
+
+
+def _dibuja_pie_paginado(total_paginas=None):
+    """«Página N» o «Página N de M» si ya se conoce el total, esquina inferior
+    derecha. Documentos legales (informes periciales, actas...) se esperan
+    foliados; este motor no pintaba número de página en absoluto hasta ahora."""
+
+    def pie(c, pagina):
+        c.setFillColorRGB(*APAGADO)
+        c.setFont(PDF_FONT_REGULAR, 7.5)
+        texto = f"Página {pagina} de {total_paginas}" if total_paginas else f"Página {pagina}"
+        c.drawRightString(A4_ANCHO - MARGEN_X, 20, texto)
+
+    return pie
 
 
 def _tarjetas_kpi(lienzo, bloque):
@@ -725,9 +749,33 @@ def _color_de(valor, defecto=VERDE):
 
 def build_modernia_branded_document_pdf_vector(
     title, subtitle, sections, footer_lines=None, company=None, brand_logo_url=None,
-    brand_color=None, seal_logo_url=None, seal_image=None,
+    brand_color=None, seal_logo_url=None, seal_image=None, paginar=False,
 ):
-    """Mismo documento que el motor de imagen, dibujado como texto."""
+    """Mismo documento que el motor de imagen, dibujado como texto.
+
+    `paginar=True` añade «Página N de M» al pie de cada página. Como M no se
+    sabe hasta terminar de maquetar, se hace un pre-pase silencioso (mismo
+    canvas, mismo cálculo de saltos de página) solo para contar cuántas
+    páginas hará falta; ese primer PDF se tira entero y solo se devuelve el
+    de la segunda pasada, que ya sabe el total desde la primera página.
+    """
+    total_paginas = None
+    if paginar:
+        _, total_paginas = _construir_documento_pdf_vector(
+            title, subtitle, sections, footer_lines, company, brand_logo_url,
+            brand_color, seal_logo_url, seal_image, pintar_folio=True, total_paginas=None,
+        )
+    pdf_bytes, _ = _construir_documento_pdf_vector(
+        title, subtitle, sections, footer_lines, company, brand_logo_url,
+        brand_color, seal_logo_url, seal_image, pintar_folio=paginar, total_paginas=total_paginas,
+    )
+    return pdf_bytes
+
+
+def _construir_documento_pdf_vector(
+    title, subtitle, sections, footer_lines, company, brand_logo_url,
+    brand_color, seal_logo_url, seal_image, *, pintar_folio=False, total_paginas=None,
+):
     from reportlab.pdfgen import canvas as rl_canvas
 
     company = company or {}
@@ -770,6 +818,7 @@ def build_modernia_branded_document_pdf_vector(
         c,
         _dibuja_cabecera(title, subtitle, meta, logo_marca, color=color_marca, sello=sello),
         color=color_marca,
+        pie_pagina=_dibuja_pie_paginado(total_paginas) if pintar_folio else None,
     )
 
     for seccion in sections or []:
@@ -826,5 +875,7 @@ def build_modernia_branded_document_pdf_vector(
         lienzo.sitio(11)
         lienzo.linea_texto(_texto(pie), PDF_FONT_REGULAR, 7.5, APAGADO)
 
+    # El pie de la última página no lo dibuja ningún `nueva_pagina()` posterior.
+    lienzo.cerrar()
     c.save()
-    return buffer.getvalue()
+    return buffer.getvalue(), lienzo.pagina
