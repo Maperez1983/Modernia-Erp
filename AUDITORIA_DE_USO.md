@@ -902,6 +902,68 @@ Queda una decisión aparte: **las dos fichas de DOMINGO ALVAREZ DE LOS SANTOS si
 siendo un duplicado** y hay que fusionarlas. El índice ya no lo impide porque ninguna
 tiene NIF, pero el duplicado sigue ahí.
 
+## Los duplicados de clientes: qué los hizo
+
+Producción tenía **42 grupos de fichas repetidas, 71 de más**. Revisados uno a uno, no
+eran un problema sino tres.
+
+### Una ficha por póliza en vez de una por titular
+
+20 grupos se crearon **el mismo segundo**, `2026-08-04 12:20`, todos de seguros. Copias
+exactas: comprobadas columna por columna, ninguna difiere. Y cada ficha con **una sola
+póliza**: GARCISA MASAE ×10 = 10 pólizas, JUAN RAMOS ×8 = 8 pólizas.
+
+Lo hizo `scripts/alta_titulares_como_clientes.py`. Carga el índice de clientes **una
+vez, antes de decidir**, y el bucle que crea nunca lo actualiza: diez pólizas del mismo
+tomador consultan las diez el mismo índice vacío y las diez concluyen «no existe ficha».
+La huella de su `INSERT` —`id, empresa_id, nombre, estado='Activo', workspace_id,
+created_at, updated_at` y nada más— coincide exactamente con lo que había en la base.
+
+El guion ya se cuidaba de no elegir mal entre varias candidatas. No vigilaba fabricarlas
+él mismo. Arreglado: la primera fila de cada nombre crea, las demás se enlazan.
+
+Otros 7 grupos son la misma historia en otra tanda: el `2026-04-21 06:02` se crearon 78
+fichas, **ninguna con NIF**, gemelas de gente que ya existía. La buena es la del
+`2026-03-24`: 619 clientes, todos con su documento.
+
+### Y una trampa peor, que no llegó a saltar
+
+`clave_de_nombre` **borraba los dígitos** al comparar nombres. En una administración de
+fincas eso significa que «Sierra Bermeja 5» = «Sierra Bermeja 7», «Emilio Prados 26» =
+«Emilio Prados 6», «Barcenillas 6» = «Barcenillas 12». Y el guion **enlaza sin preguntar
+cuando encuentra una sola candidata**: la póliza de un edificio se habría colgado del
+edificio de al lado, en silencio.
+
+Comprobado antes de tocarlo: **no llegó a pasar** —0 de 392 pólizas y 0 de 108 hipotecas
+estaban enlazadas a una ficha que sólo difiriera en el número—. Arreglado conservando los
+números, lo que hace la clave más estricta: como mucho deja un duplicado, que se ve.
+
+### La limpieza
+
+`scripts/fusiona_clientes_duplicados.py` deja una ficha por cliente. Busca las columnas
+que apuntan a clientes **en el esquema**, no en una lista escrita a mano; mueve todo lo
+que colgaba de las retiradas; hereda los datos que sólo tenían ellas sin pisar los de la
+que se queda; y **descarta el grupo si sus fichas tienen documentos distintos**, porque
+mezclar a dos personas no se deshace mirando la base.
+
+Aplicado el 2026-08-25: **69 fichas retiradas, 210 referencias movidas, 2.261 → 2.192
+clientes**, cero referencias sueltas. Con respaldo completo en `clientes_fusion_backup`.
+
+Quedan **2 grupos sin fusionar, a propósito**: VILLABA BAEZ GLADYS RAQUEL (un DNI de
+persona y un CIF de sociedad) y LOPEZ CONDE JOSE (dos DNI). Ésos los decide una persona.
+
+### Lo que se aprendió por las malas
+
+Dos cosas fallaron durante la propia limpieza, y las dos están arregladas en el guion:
+
+- **Preguntar por ficha y por tabla** eran 3.588 consultas contra un servidor al otro
+  lado de Europa. La conexión se cayó a mitad. Sin daño —va en una transacción— pero sin
+  terminar. Ahora se pregunta una vez por tabla: 52.
+- **Una lista de ids dentro de un JSON** (`cliente_ids_json`) no se cambia con un
+  `UPDATE` de igualdad: el valor es `["abc…"]`, nunca el id pelado. Se quedaron tres
+  apuntes de contabilidad nombrando a una ficha retirada. Corregidos, y el guion ahora
+  sustituye dentro del texto comprobando que siga siendo JSON válido.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
