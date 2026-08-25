@@ -111,6 +111,30 @@ class ElCandadoDeProduccionTests(unittest.TestCase):
         self.assertIn("ARRANCA", salida)
         self.assertNotIn("BLOQUEADO", salida)
 
+    # --- un Postgres en el propio equipo no es producción ------------------------------
+
+    def test_un_postgres_local_arranca_sin_pedir_permiso(self):
+        """Antes lo bloqueaba, y la salida era --permitir-produccion.
+
+        Eso convertía en costumbre la bandera que sí abre la base real. Un Postgres en
+        127.0.0.1 es justo lo que hace falta para probar lo que SQLite esconde.
+        """
+        for sitio in ("127.0.0.1", "localhost", "[::1]"):
+            salida = arranca({"DATABASE_URL": f"postgresql://postgres@{sitio}:55432/crm_pruebas"})
+            self.assertIn("ARRANCA", salida, sitio)
+            self.assertNotIn("BLOQUEADO", salida, sitio)
+
+    def test_pero_lo_dice_por_si_creías_estar_en_sqlite(self):
+        salida = arranca({"DATABASE_URL": "postgresql://postgres@127.0.0.1:55432/crm_pruebas"})
+        self.assertIn("Postgres local", salida)
+        self.assertIn("crm_pruebas", salida)
+
+    def test_y_un_host_que_sólo_empieza_parecido_no_cuela(self):
+        """«localhost.atacante.com» no es local."""
+        salida = arranca({"DATABASE_URL": "postgresql://u:p@localhost.example.com/x"})
+        self.assertIn("BLOQUEADO 2", salida)
+        self.assertNotIn("ARRANCA", salida)
+
     # --- y que siga siendo lo que dice ser -------------------------------------------
 
     def test_la_opcion_existe_y_está_explicada(self):

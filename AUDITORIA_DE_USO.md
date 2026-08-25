@@ -733,6 +733,91 @@ CRM_POSTGRES_PRUEBAS=postgresql://postgres@127.0.0.1:55432/crm_pruebas \
 Sin la variable se salta limpiamente, que es como corre en la suite normal. Cómo levantar
 el Postgres está en la cabecera de `tests/_postgres_de_pruebas.py`.
 
+## Volumen: qué pasa con los datos que hay de verdad
+
+Todo lo auditado en esta campaña se probó con **cuatro vecinos y tres clientes**. La
+escala real, medida en producción el 2026-08-25:
+
+| | |
+|---|---|
+| clientes | **2.262** |
+| vecinos / comunidades | 318 en 14 (la mayor, **59**) |
+| recibos de fincas | **0** — el módulo está cargado y todavía no ha facturado |
+| reglas de importación de gestoría | 16.528 |
+| asientos de gestoría | 1.225 |
+| pólizas | 408 |
+
+Dos guiones lo montan y lo miden, sembrando la base y luego **usando el CRM por la
+puerta de delante**:
+
+```bash
+CRM_POSTGRES_PRUEBAS=postgresql://postgres@127.0.0.1:55432/crm_pruebas \
+    python scripts/mide_el_volumen.py --escalas 2262,10000,25000
+    python scripts/mide_el_volumen_fincas.py --vecinos 59 --meses 12
+```
+
+### Lo que aguanta
+
+El servidor escala bien, y eso es un resultado, no una suposición:
+
+- La lista de clientes: 14 ms con 2.262, 119 ms con **25.000**. Lineal, sin consultas
+  por fila escondidas.
+- Emitir un mes de recibos para 318 propietarios: 165 ms el primer mes y **162 ms el
+  duodécimo**, con 3.498 recibos ya dentro. Plano — emitir no repasa lo emitido.
+- La remesa SEPA de 318 adeudos sale con su `CtrlSum` cuadrando al céntimo. Un fichero
+  que no cuadra lo rechaza el banco entero, no una línea.
+
+### La lista de clientes enseñaba 120 de 2.262 y no lo decía
+
+La pantalla de clientes del workspace pide 120 y pinta 120. Con una gestoría pequeña
+eso ES la lista completa; con la de verdad son los 120 primeros por orden alfabético y
+**nada lo distinguía**. El pie decía «CRM 360 cargado.»
+
+Se puede llegar a los demás —el buscador manda la consulta al servidor y encuentra al
+último del abecedario, comprobado— pero hay que saber que hay más para buscarlos.
+
+Arreglado: el servidor devuelve el total, y la lista dice «120 de 2.262 clientes · busca
+por nombre, DNI, teléfono o email para llegar al resto». El total sólo se cuenta cuando
+la lista viene llena, para no pagar un `COUNT` en cada tecleo.
+
+Prueba: `tests/test_una_lista_cortada_lo_dice.py`.
+
+### Los importes de los recibos se sumaban sobre la página
+
+Con 1.200 recibos y 120.000 € emitidos, el panel de recibos decía **800 recibos ·
+80.000 € emitido · 80.000 € pendiente**. La lista tiene un tope de 800 filas —razonable—
+pero el resumen se calculaba sobre esas 800.
+
+**Hoy la pantalla no lo alcanza**: el front siempre pide un mes concreto, y un mes son
+59 recibos en la comunidad más grande. Para llenar la lista haría falta una comunidad de
+más de 800 pisos. O sea que no hay ninguna cifra mal en producción — esto quita la
+trampa antes de pisarla, que es justo el momento de hacerlo: fincas tiene cero recibos y
+está a punto de empezar a emitir.
+
+Arreglado: el resumen sale de un agregado sobre todos los recibos del filtro. Y si el
+agregado falla, se devuelven las cifras de la página **marcadas como parciales**: antes
+un número pequeño y honesto que uno grande y falso.
+
+Prueba: `tests/test_el_resumen_no_se_calcula_sobre_una_pagina.py`.
+
+### El candado dejaba pasar el bucle local
+
+El candado bloqueaba **cualquier** Postgres fuera de la nube, también uno en 127.0.0.1.
+La salida era `--permitir-produccion`, y esa bandera convertida en costumbre sí abre la
+base real. Ahora el bucle local pasa —diciendo a qué base se conecta— y lo remoto sigue
+preguntando. Un `localhost.loquesea.com` no cuela.
+
+### Lo que se dobla por encima de la escala real
+
+Sin urgencia, porque queda muy por encima de lo que hay, pero anotado:
+
+- **Morosidad** pasa de 5 ms con 318 vecinos a **2,8 s con 1.000**. Crece mucho más
+  rápido que los datos.
+- **Balance** hace lo mismo: 39 ms con 59 vecinos, 1,2 s con 1.000.
+
+La comunidad más grande de producción tiene 59 propietarios, así que ninguna de las dos
+molesta hoy.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
@@ -747,6 +832,9 @@ Conviene tenerlo claro para no dar por auditado lo que no lo está:
 - **La suite entera sobre Postgres.** Se cubre la capa donde las dos bases se separan
   (arriba), no las 3.000 pruebas. Para eso habría que reescribir los 68 ficheros que
   abren SQLite a mano.
+- **Concurrencia.** Todo se ha medido con un usuario. Dos administradoras emitiendo a
+  la vez sobre la misma comunidad no se ha probado.
+- **Migrar una base antigua** y **restaurar desde copia**: siguen sin una sola prueba.
 
 ## Anotaciones menores
 

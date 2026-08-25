@@ -15606,3 +15606,10 @@ samp {
 :root[data-theme="dark"] img[src$="verifika2_wordmark_traced.svg"] {
   content: url("/assets/verifika2/verifika2_wordmark_traced_light.svg");
 }
+
+/* El recuento de la base de clientes: «120 de 2.262 · busca para ver el resto».
+   Sin él, una lista cortada se ve igual que una lista completa. */
+.workspace-client-count {
+  margin: 0 0 8px;
+  font-size: 12px;
+}

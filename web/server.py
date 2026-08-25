@@ -47367,6 +47367,7 @@ def fetch_workspace_clientes(conn, workspace_id, q="", limit=60):
     if not empresa_ids:
         return {"rows": []}
     try:
+        tope = max(1, min(int(limit or 60), 150))
         placeholders = ",".join(["?"] * len(empresa_ids))
         where = [f"ce.empresa_id IN ({placeholders})"]
         values = list(empresa_ids)
@@ -47391,11 +47392,30 @@ def fetch_workspace_clientes(conn, workspace_id, q="", limit=60):
             ORDER BY c.nombre COLLATE NOCASE ASC
             LIMIT ?
             """,
-            [*values, max(1, min(int(limit or 60), 150))],
+            [*values, tope],
         ).fetchall()
-        return {"rows": [dict(row) for row in rows]}
+        # Cuántos hay de verdad. Sin esto, una lista de 120 sobre 2.262 clientes se ve
+        # exactamente igual que la lista completa de una gestoría pequeña: nada en la
+        # pantalla distingue «éstos son todos» de «éstos son los primeros». El buscador
+        # sí llega a los demás, pero hay que saber que hay demás.
+        total = len(rows)
+        if len(rows) >= tope:
+            try:
+                fila = conn.execute(
+                    f"""
+                    SELECT COUNT(DISTINCT c.id) AS n
+                    FROM clientes c
+                    JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                    WHERE {' AND '.join(where)}
+                    """,
+                    values,
+                ).fetchone()
+                total = int(row_value(fila, "n") or row_value(fila, 0) or len(rows))
+            except Exception:
+                total = len(rows)
+        return {"rows": [dict(row) for row in rows], "total": total, "limite": tope}
     except Exception:
-        return {"rows": []}
+        return {"rows": [], "total": 0, "limite": 0}
 
 
 def fetch_workspace_cliente_360(conn, workspace_id, cliente_id):
@@ -55580,6 +55600,7 @@ def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None, primeros=No
 
 def fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo="", limit=800):
     """Recibos de una comunidad, con el propietario al lado y el estado de cobro."""
+    tope = max(1, min(int(limit or 800), 2000))
     condiciones = ["r.workspace_id = ?", "r.comunidad_id = ?"]
     valores = [workspace_id, comunidad_id]
     if periodo:
@@ -55602,7 +55623,7 @@ def fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo="",
         ORDER BY r.periodo DESC, v.piso, v.nombre
         LIMIT ?
         """,
-        (*valores, max(1, min(int(limit or 800), 2000))),
+        (*valores, tope),
     ).fetchall()
     filas = [dict(f) for f in filas]
     for fila in filas:
@@ -55611,18 +55632,65 @@ def fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo="",
         crudo = fila.pop("iban", "")
         fila["iban_ok"] = iban_valido(crudo)
         fila["iban_cola"] = normalizar_iban(crudo)[-4:] if crudo else ""
-    def suma(estado):
-        return round(sum(parse_money_value(f["importe"]) for f in filas if f["estado"] == estado), 2)
-    return {
-        "rows": filas,
-        "resumen": {
+    # El resumen se calcula sobre TODOS los recibos que cumplen el filtro, no sobre las
+    # filas que caben en la lista. Se sumaban las que se enseñan, y con el tope en 800
+    # una comunidad con un año y medio emitido veía «80.000 € pendiente» teniendo
+    # 120.000: la lista cortada es incómoda, pero un importe cortado es un número mal
+    # en una pantalla de contabilidad, y sin nada que lo delatara.
+    #
+    # Un vecino de 59 pisos llega a 800 recibos en catorce meses.
+    resumen = {"recibos": len(filas), "emitido": 0.0, "cobrado": 0.0,
+               "pendiente": 0.0, "devuelto": 0.0, "sin_iban": 0}
+    try:
+        agregado = conn.execute(
+            f"""
+            SELECT COUNT(*) AS n,
+                   COALESCE(SUM(r.importe), 0) AS emitido,
+                   COALESCE(SUM(CASE WHEN r.estado = 'Cobrado'  THEN r.importe ELSE 0 END), 0) AS cobrado,
+                   COALESCE(SUM(CASE WHEN r.estado = 'Pendiente' THEN r.importe ELSE 0 END), 0) AS pendiente,
+                   COALESCE(SUM(CASE WHEN r.estado = 'Devuelto'  THEN r.importe ELSE 0 END), 0) AS devuelto
+            FROM workspace_fincas_recibos r
+            WHERE {" AND ".join(condiciones)}
+            """,
+            valores,
+        ).fetchone()
+        resumen["recibos"] = int(row_value(agregado, "n", 0) or 0)
+        for clave in ("emitido", "cobrado", "pendiente", "devuelto"):
+            resumen[clave] = round(parse_money_value(row_value(agregado, clave, 0)), 2)
+        # El IBAN no se puede validar en SQL —hay que comprobar el dígito de control—,
+        # así que se traen sólo los IBAN, una columna, y se cuentan aquí.
+        ibans = conn.execute(
+            f"""
+            SELECT COALESCE(v.iban, '') AS iban
+            FROM workspace_fincas_recibos r
+            LEFT JOIN workspace_fincas_vecinos v ON v.id = r.vecino_id
+            WHERE {" AND ".join(condiciones)}
+            """,
+            valores,
+        ).fetchall()
+        resumen["sin_iban"] = sum(1 for f in ibans if not iban_valido(row_value(f, "iban", "")))
+    except Exception:
+        _rollback_best_effort(conn)
+        apunta_escritura_tragada("fincas · resumen de recibos", "no se pudo agregar")
+        # Antes que dar cifras cortadas por buenas, se dan las de la página y se dice
+        # cuántas son: un número pequeño y honesto en vez de uno grande y falso.
+        def suma(estado):
+            return round(sum(parse_money_value(f["importe"])
+                             for f in filas if f["estado"] == estado), 2)
+        resumen = {
             "recibos": len(filas),
             "emitido": round(sum(parse_money_value(f["importe"]) for f in filas), 2),
             "cobrado": suma("Cobrado"),
             "pendiente": suma("Pendiente"),
             "devuelto": suma("Devuelto"),
             "sin_iban": sum(1 for f in filas if not f["iban_ok"]),
-        },
+            "parcial": True,
+        }
+    return {
+        "rows": filas,
+        "total": resumen["recibos"],
+        "limite": tope,
+        "resumen": resumen,
     }
 
 
@@ -116924,16 +116992,26 @@ def main():
     # DATABASE_URL de producción. Levantar el CRM en un portátil abría, sin decir nada,
     # un CRM local escribiendo en la base real: misma pantalla, mismos botones, datos de
     # verdad. En la nube eso es lo correcto y por eso sólo se pregunta fuera de ella.
-    if db_is_postgres_enabled() and not os.environ.get("RENDER") and not args.permitir_produccion:
+    # Un Postgres en el propio equipo no es producción, es lo que hace falta para probar
+    # de verdad: la suite corre sobre SQLite y producción es Postgres, así que el único
+    # sitio donde se ven las diferencias es un Postgres local. Si el candado lo bloqueara
+    # también, la salida sería --permitir-produccion, y esa costumbre sí abre la de
+    # verdad. Se distingue por el host: el bucle local pasa, lo demás pregunta.
+    destino = ""
+    es_local = False
+    try:
+        crudo = (os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or "").strip()
+        partes = urllib.parse.urlparse(crudo)
+        # Sin usuario ni contraseña: esto se imprime en una terminal.
+        destino = (f" ({partes.hostname}/{(partes.path or '').lstrip('/')})"
+                   if partes.hostname else "")
+        es_local = (partes.hostname or "").lower() in ("127.0.0.1", "::1", "localhost")
+    except Exception:
         destino = ""
-        try:
-            crudo = (os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or "").strip()
-            partes = urllib.parse.urlparse(crudo)
-            # Sin usuario ni contraseña: esto se imprime en una terminal.
-            destino = (f" ({partes.hostname}/{(partes.path or '').lstrip('/')})"
-                       if partes.hostname else "")
-        except Exception:
-            destino = ""
+        es_local = False
+
+    if (db_is_postgres_enabled() and not os.environ.get("RENDER")
+            and not args.permitir_produccion and not es_local):
         print(
             f"\n  ALTO: esto va a conectarse a la base de PRODUCCIÓN{destino}.\n"
             f"\n  Estás fuera de la nube, así que probablemente no es lo que quieres:"
@@ -116945,6 +117023,9 @@ def main():
             file=sys.stderr,
         )
         raise SystemExit(2)
+    if db_is_postgres_enabled() and es_local and not os.environ.get("RENDER"):
+        # Pasa, pero se dice: si alguien creía estar sobre SQLite, que lo vea.
+        print(f"  Base: Postgres local{destino}.", file=sys.stderr)
     try:
         raw_port = str(args.port or "").strip()
         if raw_port in {"$PORT", "${PORT}", "PORT"}:

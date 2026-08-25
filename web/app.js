@@ -10942,6 +10942,12 @@ const loadWorkspaceClients = async (query = "") => {
   const rows = Array.isArray(data.rows) ? data.rows : [];
   state.currentWorkspaceClients = rows;
   syncWorkspaceClientOptions(rows);
+  // El total va a la lista, no a la línea de estado: esa la pisa `openWorkspaceClient360`
+  // un momento después con el cliente seleccionado, que es lo suyo. Y va guardado en
+  // `state` junto a las filas, no pasado por parámetro: hay seis sitios que repintan
+  // esta lista, y los otros cinco lo perderían.
+  state.currentWorkspaceClientsTotal = Number(data?.total || rows.length);
+  state.currentWorkspaceClientsQuery = query || "";
   renderWorkspaceClientBase(rows);
   const currentId = String(state.currentWorkspaceClientId || "");
   const stillExists = rows.some((row) => String(row.id || "") === currentId);
@@ -11486,11 +11492,25 @@ const renderWorkspaceTenantSummary = (workspace = {}) => {
 const renderWorkspaceClientBase = (rows = []) => {
   if (!workspaceClientBase) return;
   const items = Array.isArray(rows) ? rows : [];
+  const total = Number(state.currentWorkspaceClientsTotal || 0);
+  const busqueda = String(state.currentWorkspaceClientsQuery || "");
   if (!items.length) {
-    workspaceClientBase.innerHTML = "<p class='muted'>Sin clientes finales vinculados todavía a este workspace.</p>";
+    workspaceClientBase.innerHTML = busqueda
+      ? `<p class='muted'>Ningún cliente coincide con «${escapeHtml(busqueda)}».</p>`
+      : "<p class='muted'>Sin clientes finales vinculados todavía a este workspace.</p>";
     return;
   }
+  // Una lista de 120 sobre 2.262 clientes se ve exactamente igual que la lista completa
+  // de una gestoría pequeña: nada distingue «éstos son todos» de «éstos son los
+  // primeros». El buscador sí llega a los demás, pero primero hay que saber que los hay.
+  const hayMas = Number(total || 0) > items.length;
+  const recuento = hayMas
+    ? (busqueda
+        ? `${items.length} de ${Number(total).toLocaleString("es-ES")} coincidencias · afina la búsqueda para ver el resto`
+        : `${items.length} de ${Number(total).toLocaleString("es-ES")} clientes · busca por nombre, DNI, teléfono o email para llegar al resto`)
+    : `${items.length} cliente${items.length === 1 ? "" : "s"}`;
   workspaceClientBase.innerHTML = `
+    <p class="muted workspace-client-count">${escapeHtml(recuento)}</p>
     <div class="workspace-billing-list">
       ${items
         .map(
@@ -24330,6 +24350,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
             <div class="workspace-mini-kpi"><span>Devuelto</span><strong>${euroFormatter.format(r.devuelto || 0)}</strong></div>
           </div>
           ${r.sin_iban ? `<p class="censo-aviso">${r.sin_iban} recibo(s) sin cuenta válida: quedarán fuera de la remesa. Un IBAN mal tecleado tumba el fichero entero en el banco.</p>` : ""}
+          ${Number(data?.total || 0) > filas.length ? `<p class="muted">Se listan ${numberFormatter.format(filas.length)} de ${numberFormatter.format(Number(data.total))} recibos. Los importes de arriba sí son los de todos.</p>` : ""}
         ` : "";
         panel.querySelector("[data-recibos-list]").innerHTML = filas.length ? `
           <div class="workspace-billing-list">
@@ -29248,6 +29269,9 @@ const loadWorkspaceDetail = async (workspaceId) => {
     fincasMeetings = boot?.fincas_meetings || await safeWorkspaceApi(`/api/workspace_fincas_juntas?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
   }
   state.currentWorkspaceClients = workspaceClients.rows || [];
+  // La carga inicial trae 60; el total dice de cuántos son esos 60.
+  state.currentWorkspaceClientsTotal = Number(workspaceClients.total || (workspaceClients.rows || []).length);
+  state.currentWorkspaceClientsQuery = "";
   state.currentWorkspaceData = {
     docs,
     billingRows: billingRows.rows || [],
