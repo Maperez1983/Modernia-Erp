@@ -663,6 +663,76 @@ Las dos vistas miradas a ojo.
 
 Prueba: `tests/test_todas_las_tablas_se_ven_en_movil.py`.
 
+## La suite prueba SQLite; producción es Postgres
+
+Petición: «corre la suite contra Postgres». **No se puede, y conviene saber por qué.** De
+los 163 ficheros de prueba, **68 abren SQLite a mano** —`open_sqlite_conn`,
+`pragma table_info`, `import sqlite3`— y **47 fuerzan `DATABASE_URL=""`** al importarse.
+No es un interruptor que falte: es una reescritura de la mitad de la suite.
+
+Lo que sí se hizo: levantar un Postgres aislado en el bucle local, comprobar que el CRM
+**arranca y se usa sobre él** —las 156 tablas se crean sin un solo error, y login, sesión
+y lecturas responden— y luego medir una por una las divergencias entre las dos bases.
+
+### Lo que SQLite tolera y Postgres no
+
+| | SQLite | Postgres |
+|---|---|---|
+| `importe = '2.450,75'` en columna numérica | lo guarda (como 2,45) | **rechaza la fila** |
+| `WHERE columna_de_texto = 1` | empareja por afinidad de tipo | **la consulta no compila** |
+| `GROUP_CONCAT` sobre columna numérica | devuelve el texto | **no existe esa función** |
+| `INSERT OR REPLACE` con unicidad que no es `id` | reemplaza en silencio | **viola la restricción** |
+| `LIKE '%modernia%'` sobre «Modernia» | 1 resultado | 0 resultados |
+
+De las cinco, **ninguna ocurre hoy en el código**: los siete `GROUP_CONCAT` van sobre
+texto, los tres `INSERT OR REPLACE` se bifurcan a mano por backend, las búsquedas usan
+`LOWER()` y no hay comparaciones texto/número en consultas. Se comprobó una por una
+contra el esquema real, no de oídas. Pero ya nos costó un diagnóstico equivocado —el
+importe de gestoría, contado primero mirando sólo SQLite—, así que queda medido y escrito.
+
+Prueba: `tests/test_lo_que_sqlite_esconde.py`, que además levanta el esquema entero sobre
+Postgres y comprueba que las migraciones de esta campaña aplicaron allí. Todo el arranque
+va envuelto en `try/except`: una migración que no traduzca no se ve al levantar, se ve el
+día que alguien abre la pantalla que usaba esa columna.
+
+### Las pruebas podían conectarse a producción
+
+Importar `web.db_backend` vuelca `.env` en el entorno —a propósito, para que el servidor
+arranque sin exportar nada—. El efecto colateral: **dentro de la suite, `DATABASE_URL` es
+la base de producción**, aunque nadie la haya exportado.
+
+`tests/test_puntos_de_retorno_postgres.py` la leía. Pedir sus pruebas de Postgres abría
+una conexión a Frankfurt y hacía DDL allí. No hizo daño porque trabaja sobre una tabla
+temporal y deshace siempre — pero era el patrón que iban a copiar las siguientes, y la
+suite crea y borra tablas.
+
+Arreglado con `tests/_postgres_de_pruebas.py`: el DSN se lee de una variable propia,
+`CRM_POSTGRES_PRUEBAS`, nunca de `DATABASE_URL` ni de `.env`; y si apunta fuera del bucle
+local **falla**, no se salta —saltar dejaría creer que se probó—. Lo que necesita base
+propia usa una de usar y tirar que se borra al terminar.
+
+El candado de `main()` protege el arranque del servidor. Éste protege la suite.
+
+### El traductor devolvía SQL inválido en silencio
+
+`_rewrite_insert_or_replace` devolvía la sentencia intacta cuando no sabía reescribirla.
+Pero `INSERT OR REPLACE` no es sintaxis de Postgres: dejarlo pasar sólo cambia dónde
+muere —del traductor al servidor— y con un mensaje que no dice nada, «error de sintaxis
+en o cerca de OR». Ahora lanza un error que nombra la tabla y dice qué escribir.
+
+Hoy no salta: los tres sitios que lo usan se bifurcan a mano. Está para el cuarto.
+`crm_meta` tiene la clave primaria en `key`, no en `id`.
+
+### Cómo se corre
+
+```
+CRM_POSTGRES_PRUEBAS=postgresql://postgres@127.0.0.1:55432/crm_pruebas \
+    .venv-test/bin/python -m pytest tests/test_lo_que_sqlite_esconde.py
+```
+
+Sin la variable se salta limpiamente, que es como corre en la suite normal. Cómo levantar
+el Postgres está en la cabecera de `tests/_postgres_de_pruebas.py`.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:
@@ -674,6 +744,9 @@ Conviene tenerlo claro para no dar por auditado lo que no lo está:
   bancaria. En fincas ya están: ciclo mensual, caminos raros, junta completa, cómputo de ausentes e impugnación.
 - **El HTML y el CSS.** El contraste de arriba cubre lo que la pantalla *recibe*; lo que
   *pinta* —columnas, colores, etiquetas— sigue pendiente de recorrer con un navegador.
+- **La suite entera sobre Postgres.** Se cubre la capa donde las dos bases se separan
+  (arriba), no las 3.000 pruebas. Para eso habría que reescribir los 68 ficheros que
+  abren SQLite a mano.
 
 ## Anotaciones menores
 

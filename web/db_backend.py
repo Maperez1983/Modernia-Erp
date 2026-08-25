@@ -126,18 +126,35 @@ def _rewrite_insert_or_ignore(sql):
 def _rewrite_insert_or_replace(sql):
     # Best-effort: INSERT OR REPLACE INTO t (a,b,...) VALUES (...)  -> INSERT ... ON CONFLICT (id) DO UPDATE ...
     # Assumes a primary key column named "id" exists and is included in the column list.
+    #
+    # Cuando no sabe reescribirlo NO devuelve el SQL tal cual: `INSERT OR REPLACE` no es
+    # sintaxis de Postgres, así que dejarlo pasar sólo cambia dónde muere —del traductor
+    # al servidor— y con un mensaje que no dice nada («error de sintaxis en o cerca de
+    # OR»). Ahí se descubre en producción. Aquí se descubre al escribirlo.
+    #
+    # Hoy los tres sitios que lo usan se bifurcan a mano por backend, así que esto no
+    # salta nunca. Está para el cuarto: `crm_meta` tiene la clave en `key`, no en `id`.
+    if not re.match(r"^\s*INSERT\s+OR\s+REPLACE\b", sql, flags=re.IGNORECASE):
+        return sql
     m = re.match(
         r"^\s*INSERT\s+OR\s+REPLACE\s+INTO\s+([A-Za-z0-9_\".]+)\s*\((?P<cols>.*?)\)\s*VALUES\s*\(",
         sql,
         flags=re.IGNORECASE | re.DOTALL,
     )
     if not m:
-        return sql
+        raise ValueError(
+            "INSERT OR REPLACE que no se sabe traducir a Postgres (se esperaba "
+            "«INTO tabla (columnas) VALUES (…)»). Escribe el INSERT … ON CONFLICT a mano."
+        )
     cols_raw = m.group("cols") or ""
     cols = [c.strip() for c in cols_raw.split(",") if c.strip()]
     cols_norm = [c.strip('"').strip().lower() for c in cols]
     if "id" not in cols_norm:
-        return sql
+        raise ValueError(
+            f"INSERT OR REPLACE INTO {m.group(1)} sin columna «id»: la traducción usa "
+            f"ON CONFLICT (id) y aquí no hay a qué agarrarse. Escribe el "
+            f"INSERT … ON CONFLICT (…) a mano indicando la clave real."
+        )
     # Build SET clause for all columns except id.
     set_cols = []
     for col, norm in zip(cols, cols_norm):

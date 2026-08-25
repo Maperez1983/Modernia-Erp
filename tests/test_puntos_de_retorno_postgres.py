@@ -19,13 +19,15 @@ Estos tests corren sin servidor, contra una conexión de mentira que imita la re
 de Postgres —tras un error, todo falla hasta que se deshaga—. Los de abajo, contra
 Postgres de verdad, sólo se ejecutan pidiéndolo:
 
-    RUN_PG_ADAPTER_TESTS=1 .venv-test/bin/python -m pytest tests/test_puntos_de_retorno_postgres.py
+    CRM_POSTGRES_PRUEBAS=postgresql://postgres@127.0.0.1:55432/crm_pruebas \
+        .venv-test/bin/python -m pytest tests/test_puntos_de_retorno_postgres.py
 """
 
 import os
 import re
 import unittest
 
+from tests._postgres_de_pruebas import salta_si_no_hay
 from web.db_backend import PostgresCompatConnection, _es_escritura
 
 
@@ -267,30 +269,17 @@ class QueCuentaComoEscrituraTests(unittest.TestCase):
         self.assertTrue(_es_escritura(""))
 
 
-@unittest.skipUnless(
-    os.environ.get("RUN_PG_ADAPTER_TESTS") == "1",
-    "necesita un Postgres de verdad; se pide con RUN_PG_ADAPTER_TESTS=1")
 class ContraPostgresDeVerdadTests(unittest.TestCase):
-    """Sobre una tabla temporal, y la transacción se deshace siempre: no toca datos."""
+    """Sobre una tabla temporal, y la transacción se deshace siempre: no toca datos.
+
+    Antes tomaba el DSN de `DATABASE_URL`, que dentro de la suite **es producción**:
+    importar `web.db_backend` vuelca `.env` en el entorno. Ahora pasa por
+    `_postgres_de_pruebas`, que sólo acepta el bucle local.
+    """
 
     def setUp(self):
-        import pathlib
-
-        import psycopg
-        dsn = (os.environ.get("DATABASE_URL") or "").strip()
-        if not dsn:
-            env = pathlib.Path(__file__).resolve().parents[1] / ".env"
-            m = re.search(r"^DATABASE_URL=(.+)$", env.read_text(encoding="utf-8"), re.M) if env.exists() else None
-            dsn = m.group(1).strip().strip('"') if m else ""
-        if not dsn:
-            self.skipTest("sin DATABASE_URL")
-        self.raw = psycopg.connect(dsn, autocommit=False)
-        self.cx = PostgresCompatConnection(self.raw)
+        self.cx = salta_si_no_hay(self)
         self.cx.execute("CREATE TEMP TABLE ensayo_puntos (id int) ON COMMIT DROP")
-
-    def tearDown(self):
-        self.raw.rollback()
-        self.raw.close()
 
     def _cuenta(self):
         return self.cx.execute("SELECT COUNT(*) FROM ensayo_puntos").fetchone()[0]
