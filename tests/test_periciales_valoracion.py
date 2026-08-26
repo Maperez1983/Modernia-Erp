@@ -836,5 +836,139 @@ class ElCalculoEsPuroYNoNecesitaServidorTests(unittest.TestCase):
         self.assertNotIn("ECO/805/2003", texto)
 
 
+class LaConsultaOverpassPideEtiquetasTests(Base):
+    """Bug real encontrado auditando por qué la descripción del entorno salía
+    pobre: la consulta usaba `out ids;`, que NO incluye las etiquetas de cada
+    elemento — así que el conteo de equipamientos daba siempre cero contra el
+    Overpass real (el mock de otros tests no lo detectaba porque devuelve
+    tags directamente, sin mirar qué se pidió)."""
+
+    def test_la_consulta_pide_tags_no_solo_ids(self):
+        capturado = {}
+
+        def urlopen_que_inspecciona(req, timeout=None):
+            # El cuerpo va como `data=<consulta urlencoded>` (POST form).
+            cuerpo = S.urllib.parse.parse_qs(req.data.decode("utf-8"))
+            capturado["consulta"] = cuerpo["data"][0]
+            return _RespuestaHttpFalsa({"elements": []})
+
+        with patch.object(S.urllib.request, "urlopen", urlopen_que_inspecciona):
+            S._fetch_overpass_pois(36.7213, -4.4214, radio_m=400)
+        self.assertIn("out tags;", capturado["consulta"])
+        self.assertNotIn("out ids;", capturado["consulta"])
+
+
+class LaFichaCatastralSeBuscaYSeAdjuntaTests(Base):
+    """Un solo botón hace las dos cosas que pedía el usuario: busca la
+    referencia catastral real (reutilizando la infraestructura de inmuebles,
+    no una copia) y adjunta la ficha generada al expediente pericial."""
+
+    RESUMEN_FALSO = {
+        "referencia_catastral": "1234567AB1234A0001XY",
+        "localizacion": "CL EJEMPLO 1",
+        "uso": "Residencial",
+        "superficie_construida_m2": 90,
+        "anio_construccion": 1995,
+        "source_url": "https://sede.catastro.gob.es/ejemplo",
+    }
+
+    def _crear_inmueble_y_pericial(self, *, con_referencia=False):
+        self._ins("inmuebles", dict(
+            id="inm1", empresa_id="emp1", direccion="Calle Ejemplo 1", m2=90,
+            poblacion="Málaga", provincia="Málaga", codigo_postal="29003",
+            referencia_catastral="1234567AB1234A0001XY" if con_referencia else "",
+            created_at=AHORA, updated_at=AHORA,
+        ))
+        return self._crear_pericial(inmueble_id="inm1", direccion_manual="", denominacion_manual="")
+
+    def test_sin_inmueble_enlazado_da_error_claro(self):
+        pericial_id = self._crear_pericial()
+        r = self._post("/api/workspace_pericial_catastro_sync", {"workspace_id": self.ws, "pericial_id": pericial_id})
+        self.assertEqual(r["estado"], 400, r["json"])
+        self.assertIn("inmueble", r["json"]["error"].lower())
+
+    def test_busca_la_referencia_y_la_deja_en_el_inmueble(self):
+        pericial_id = self._crear_inmueble_y_pericial(con_referencia=False)
+        with patch.object(S, "lookup_catastro_reference_by_address",
+                           return_value={"match_unique": True, "referencia_catastral": "1234567AB1234A0001XY"}), \
+             patch.object(S, "fetch_catastro_public_summary", return_value=(self.RESUMEN_FALSO, "<html></html>")):
+            r = self._post("/api/workspace_pericial_catastro_sync", {"workspace_id": self.ws, "pericial_id": pericial_id})
+        self.assertEqual(r["estado"], 200, r["json"])
+        self.assertEqual(r["json"]["referencia_catastral"], "1234567AB1234A0001XY")
+        fila = self.conn.execute("SELECT referencia_catastral FROM inmuebles WHERE id = 'inm1'").fetchone()
+        self.assertEqual(fila["referencia_catastral"], "1234567AB1234A0001XY")
+
+    def test_la_ficha_catastral_queda_como_documento_del_expediente(self):
+        pericial_id = self._crear_inmueble_y_pericial(con_referencia=True)
+        with patch.object(S, "fetch_catastro_public_summary", return_value=(self.RESUMEN_FALSO, "<html></html>")):
+            r = self._post("/api/workspace_pericial_catastro_sync", {"workspace_id": self.ws, "pericial_id": pericial_id})
+        self.assertEqual(r["estado"], 200, r["json"])
+        fila = self.conn.execute(
+            "SELECT tipo, nombre FROM workspace_pericial_docs WHERE pericial_id = ?", (pericial_id,),
+        ).fetchone()
+        self.assertIsNotNone(fila)
+        self.assertEqual(fila["tipo"], "ficha_catastro")
+        # También debe verse en la ficha del expediente (no solo en la tabla).
+        detalle = self._get(f"/api/workspace_pericial?id={pericial_id}&workspace_id={self.ws}")
+        docs = json.loads(detalle["cuerpo"].decode("utf-8"))["docs"]
+        self.assertTrue(any(d["tipo"] == "ficha_catastro" for d in docs))
+
+    def test_la_ficha_catastral_aparece_en_documentos_del_pdf(self):
+        pericial_id = self._crear_inmueble_y_pericial(con_referencia=True)
+        with patch.object(S, "fetch_catastro_public_summary", return_value=(self.RESUMEN_FALSO, "<html></html>")):
+            self._post("/api/workspace_pericial_catastro_sync", {"workspace_id": self.ws, "pericial_id": pericial_id})
+        self._anade_testigos(pericial_id)
+        r = self._post("/api/workspace_pericial_pdf", {"workspace_id": self.ws, "id": pericial_id})
+        self.assertEqual(r["estado"], 200, r["json"])
+        servido = self._get(f"/api/workspace_pericial_pdf?id={pericial_id}&workspace_id={self.ws}")
+        from pypdf import PdfReader
+        texto = "\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(servido["cuerpo"])).pages)
+        self.assertIn("Ficha catastral", texto)
+        # La referencia real, ya sincronizada en el inmueble, sale en el PDF.
+        self.assertIn("1234567AB1234A0001XY", texto)
+
+
+class ElPlanoDeSituacionApareceEnElPdfTests(Base):
+    """Mismo generador de mapas que ya usan los presupuestos de fincas
+    (`build_mapa_estatico`) — aquí se comprueba que se llama con las
+    coordenadas correctas y que el bloque aparece en el PDF, sin depender de
+    la red real de teselas de OpenStreetMap."""
+
+    @staticmethod
+    def _mapa_falso():
+        from PIL import Image
+        return Image.new("RGB", (900, 380), (200, 200, 200))
+
+    def test_con_coordenadas_del_inmueble_se_pinta_el_plano(self):
+        self._ins("inmuebles", dict(
+            id="inm1", empresa_id="emp1", direccion="Calle Ejemplo 1", m2=90,
+            lat=36.7213, lon=-4.4214, created_at=AHORA, updated_at=AHORA,
+        ))
+        pericial_id = self._crear_pericial(inmueble_id="inm1", direccion_manual="", denominacion_manual="")
+        self._anade_testigos(pericial_id)
+        with patch.object(S, "build_mapa_estatico", return_value=self._mapa_falso()) as mapa_mock:
+            r = self._post("/api/workspace_pericial_pdf", {"workspace_id": self.ws, "id": pericial_id})
+        self.assertEqual(r["estado"], 200, r["json"])
+        mapa_mock.assert_called_once()
+        lat_llamado, lon_llamado = mapa_mock.call_args[0][:2]
+        self.assertAlmostEqual(lat_llamado, 36.7213, places=3)
+        self.assertAlmostEqual(lon_llamado, -4.4214, places=3)
+        servido = self._get(f"/api/workspace_pericial_pdf?id={pericial_id}&workspace_id={self.ws}")
+        from pypdf import PdfReader
+        texto = "\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(servido["cuerpo"])).pages)
+        self.assertIn("Plano de situación", texto)
+
+    def test_sin_coordenadas_ni_geocodificable_no_rompe_el_pdf(self):
+        # Hay dirección (para forzar el intento de geocodificar) pero la
+        # geocodificación falla: el informe se sigue generando sin el plano.
+        pericial_id = self._crear_pericial(direccion_manual="Dirección que no existe en ningún sitio")
+        self._anade_testigos(pericial_id)
+        with patch.object(S, "fetch_geocode_coordinates", return_value={"ok": False}), \
+             patch.object(S, "build_mapa_estatico") as mapa_mock:
+            r = self._post("/api/workspace_pericial_pdf", {"workspace_id": self.ws, "id": pericial_id})
+        self.assertEqual(r["estado"], 200, r["json"])
+        mapa_mock.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

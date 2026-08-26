@@ -2666,8 +2666,6 @@ const workspaceFincasBudgetBrandCompany = document.getElementById("workspaceFinc
 const workspaceFincasBudgetBuildingPhoto = document.getElementById("workspaceFincasBudgetBuildingPhoto");
 const workspaceFincasBudgetBuildingPhotoPreview = document.getElementById("workspaceFincasBudgetBuildingPhotoPreview");
 const workspaceFincasBudgetBuildingPhotoStatus = document.getElementById("workspaceFincasBudgetBuildingPhotoStatus");
-const workspacePericialNuevoForm = document.getElementById("workspacePericialNuevoForm");
-const workspacePericialNuevoStatus = document.getElementById("workspacePericialNuevoStatus");
 const workspacePericialesTable = document.getElementById("workspacePericialesTable");
 const workspacePericialesInfo = document.getElementById("workspacePericialesInfo");
 const workspacePericialFichaTitle = document.getElementById("workspacePericialFichaTitle");
@@ -4174,6 +4172,7 @@ const inmuebleTecnoPrintMenu = document.getElementById("inmuebleTecnoPrintMenu")
 const inmuebleTecnoActions = document.getElementById("inmuebleTecnoActions");
 const inmuebleTecnoCampaignBtn = document.getElementById("inmuebleTecnoCampaignBtn");
 const inmuebleTecnoValoracionBtn = document.getElementById("inmuebleTecnoValoracionBtn");
+const inmuebleValoracionPericialBtn = document.getElementById("inmuebleValoracionPericialBtn");
   const inmuebleTecnoSideDemandasOpen = document.getElementById("inmuebleTecnoSideDemandasOpen");
   const inmuebleTecnoSideDemandasList = document.getElementById("inmuebleTecnoSideDemandasList");
   const inmuebleTecnoSideDemandasCount = document.getElementById("inmuebleTecnoSideDemandasCount");
@@ -9666,7 +9665,6 @@ const setWorkspaceView = (view = "overview", options = {}) => {
     setWorkspaceFincasTab(state.workspaceFincasTab || "dashboard");
   }
   if (normalized === "periciales") {
-    hydrateWorkspaceCompanySelects();
     void refreshWorkspacePericiales().then(() => {
       // Deep-link: si la URL ya trae un expediente concreto (compartido o
       // recargado), se abre su ficha directamente en vez del listado.
@@ -22213,7 +22211,6 @@ const hydrateWorkspaceCompanySelects = () => {
     workspaceRemittancesForm,
     workspaceFincasProviderForm,
     workspaceFincasBudgetQuickForm,
-    workspacePericialNuevoForm,
   ].forEach((form) => {
     const select = form?.querySelector('[name="empresa_id"]');
     if (select) {
@@ -22302,7 +22299,7 @@ const renderWorkspacePericialesList = () => {
   const rows = state.workspacePericialesRows || [];
   if (workspacePericialesInfo) workspacePericialesInfo.textContent = `${rows.length} expediente${rows.length === 1 ? "" : "s"}`;
   if (!rows.length) {
-    workspacePericialesTable.innerHTML = "<p class='muted'>Sin expedientes todavía.</p>";
+    workspacePericialesTable.innerHTML = "<p class='muted'>Sin expedientes todavía. Se crean desde la ficha del inmueble en el CRM inmobiliario, con el botón \"Valoración pericial\".</p>";
     return;
   }
   workspacePericialesTable.innerHTML = `
@@ -22342,23 +22339,6 @@ const renderWorkspacePericialesList = () => {
   });
 };
 
-workspacePericialNuevoForm?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const fd = new FormData(workspacePericialNuevoForm);
-  const payload = Object.fromEntries(fd.entries());
-  payload.workspace_id = state.currentWorkspaceId || "";
-  try {
-    if (workspacePericialNuevoStatus) workspacePericialNuevoStatus.textContent = "Creando...";
-    const res = await apiPost("/api/workspace_pericial", payload);
-    workspacePericialNuevoForm.reset();
-    hydrateWorkspaceCompanySelects();
-    if (workspacePericialNuevoStatus) workspacePericialNuevoStatus.textContent = "";
-    await refreshWorkspacePericiales({ silent: true });
-    if (res?.id) openWorkspacePericialFicha(res.id);
-  } catch (error) {
-    if (workspacePericialNuevoStatus) workspacePericialNuevoStatus.textContent = error?.message || "No se pudo crear.";
-  }
-});
 
 // Dos paneles dentro de la misma vista "Peritajes": el listado (con el alta
 // mínima) y la ficha de un expediente concreto. Nada de esto cambia de
@@ -22506,10 +22486,21 @@ const renderWorkspacePericialFicha = async () => {
           Descripción del entorno
           <textarea name="descripcion_entorno" rows="3" placeholder="Barrio, distrito y equipamientos cercanos. Se puede precargar con «Buscar entorno» y editar a mano.">${escapeHtml(String(pericial.descripcion_entorno || ""))}</textarea>
         </label>
+        ${pericial.inmueble_id ? `
+        <label class="span-2">
+          Referencia catastral
+          <input value="${escapeHtml(String(pericial.inmueble_referencia_catastral || "Sin sincronizar todavía"))}" disabled />
+        </label>
+        <div class="form-actions span-2" style="margin-top:-8px;">
+          <button type="button" data-pericial-ficha-catastro-sync class="secondary ghost">Buscar y adjuntar ficha catastral</button>
+          <span data-pericial-ficha-catastro-status class="muted"></span>
+        </div>
+        ` : `
         <label>
           Referencia catastral
           <input name="referencia_catastral_manual" value="${escapeHtml(String(pericial.referencia_catastral_manual || ""))}" />
         </label>
+        `}
         <label>
           Finalidad
           <select name="finalidad">
@@ -22609,12 +22600,26 @@ const renderWorkspacePericialFicha = async () => {
       }
       try {
         if (entornoStatus) entornoStatus.textContent = "Buscando...";
-        const res = await apiPost("/api/workspace_pericial_entorno", { workspace_id: state.currentWorkspaceId || "", direccion });
+        const res = await apiPost("/api/workspace_pericial_entorno", { workspace_id: state.currentWorkspaceId || "", direccion, pericial_id: pericialId });
         const campo = form.querySelector('[name="descripcion_entorno"]');
         if (campo) campo.value = res?.texto || "";
         if (entornoStatus) entornoStatus.textContent = "Encontrado. Revisa el texto antes de guardar.";
       } catch (error) {
         if (entornoStatus) entornoStatus.textContent = error?.message || "No se pudo buscar el entorno.";
+      }
+    });
+    const catastroSyncBtn = form.querySelector("[data-pericial-ficha-catastro-sync]");
+    const catastroStatus = form.querySelector("[data-pericial-ficha-catastro-status]");
+    catastroSyncBtn?.addEventListener("click", async () => {
+      try {
+        if (catastroStatus) catastroStatus.textContent = "Buscando en el Catastro...";
+        catastroSyncBtn.disabled = true;
+        await apiPost("/api/workspace_pericial_catastro_sync", { workspace_id: state.currentWorkspaceId || "", pericial_id: pericialId });
+        if (catastroStatus) catastroStatus.textContent = "Referencia encontrada y ficha catastral adjuntada.";
+        await renderWorkspacePericialFicha();
+      } catch (error) {
+        catastroSyncBtn.disabled = false;
+        if (catastroStatus) catastroStatus.textContent = error?.message || "No se pudo consultar el Catastro.";
       }
     });
     if (!firmado) {
@@ -22752,7 +22757,15 @@ const renderWorkspacePericialFicha = async () => {
   if (tab === "evidencia") {
     const evidencias = detalle?.evidencias || [];
     const fotos = evidencias.filter((e) => e.tipo === "foto_visita");
-    const docs = evidencias.filter((e) => e.tipo === "documento_aportado");
+    // Dos orígenes: lo que sube el perito a mano (evidencias, en S3, con
+    // `doc_url`) y lo que genera el propio sistema (workspace_pericial_docs,
+    // en disco local, con `doc_key` ya como URL servible — p. ej. la ficha
+    // catastral sincronizada desde el inmueble enlazado).
+    const docsSubidos = evidencias.filter((e) => e.tipo === "documento_aportado")
+      .map((d) => ({ nombre: d.nombre, created_at: d.created_at, href: d.doc_url }));
+    const docsGenerados = (detalle?.docs || [])
+      .map((d) => ({ nombre: d.nombre, created_at: d.created_at, href: d.doc_key }));
+    const docs = [...docsGenerados, ...docsSubidos];
     workspacePericialFichaPanel.innerHTML = `
       <h4>Fotos de la visita</h4>
       <p class="muted">Aparecerán en el anexo fotográfico del informe.</p>
@@ -22781,7 +22794,7 @@ const renderWorkspacePericialFicha = async () => {
               <div><strong>${escapeHtml(d.nombre || "Documento aportado")}</strong>
                 <div class="muted">${escapeHtml(String(d.created_at || "").slice(0, 10))}</div>
               </div>
-              <div class="workspace-billing-meta">${d.doc_url ? `<a class="secondary ghost button-inline" href="${escapeHtml(safeHrefUrl(d.doc_url))}" target="_blank" rel="noreferrer">Abrir</a>` : ""}</div>
+              <div class="workspace-billing-meta">${d.href ? `<a class="secondary ghost button-inline" href="${escapeHtml(safeHrefUrl(d.href))}" target="_blank" rel="noreferrer">Abrir</a>` : ""}</div>
             </div>`).join("")}</div>`
         : "<p class='muted'>Sin documentación aportada todavía.</p>"}</div>
       ${firmado ? "" : `
@@ -91254,6 +91267,44 @@ if (inmuebleTecnoValoracionBtn) {
       return;
     }
     alert("Informe de valoración: pendiente de configurar en este entorno.");
+  });
+}
+
+if (inmuebleValoracionPericialBtn) {
+  inmuebleValoracionPericialBtn.addEventListener("click", async () => {
+    const inmuebleId = String(state.currentInmuebleId || "").trim();
+    if (!inmuebleId) return;
+    const textoOriginal = inmuebleValoracionPericialBtn.textContent;
+    inmuebleValoracionPericialBtn.disabled = true;
+    inmuebleValoracionPericialBtn.textContent = "Creando...";
+    try {
+      // Se relee /api/inmueble en el momento del clic (no se confía en el
+      // estado ya cargado): así se tiene siempre el workspace_id resuelto
+      // fresco y los datos actuales del inmueble (m2, empresa_id).
+      const data = await api(`/api/inmueble?id=${encodeURIComponent(inmuebleId)}`);
+      const inmueble = data?.inmueble || {};
+      const workspaceId = String(data?.workspace_id || "").trim();
+      if (!workspaceId) {
+        alert("Esta empresa no está vinculada a un único workspace; no se puede crear el expediente automáticamente.");
+        return;
+      }
+      const hoy = new Date().toISOString().slice(0, 10);
+      const res = await apiPost("/api/workspace_pericial", {
+        workspace_id: workspaceId,
+        empresa_id: inmueble.empresa_id || "",
+        inmueble_id: inmuebleId,
+        fecha_valoracion: hoy,
+        superficie_calculo_usada: inmueble.m2 || "",
+      });
+      if (!res?.id) throw new Error("No se pudo crear el expediente.");
+      openHolding({ mode: "tenant", workspace: workspaceId, view: "periciales" });
+      openWorkspacePericialFicha(res.id);
+    } catch (error) {
+      alert(error?.message || "No se pudo crear la valoración pericial.");
+    } finally {
+      inmuebleValoracionPericialBtn.disabled = false;
+      inmuebleValoracionPericialBtn.textContent = textoOriginal;
+    }
   });
 }
 

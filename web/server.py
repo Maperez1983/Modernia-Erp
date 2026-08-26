@@ -26693,7 +26693,7 @@ def ensure_inmueble_doc_cliente_link(conn, inmueble_row, doc_row, cliente_id, no
     return doc_id
 
 
-def sync_inmueble_docs_for_inmueble(conn, inmueble_id, now, only_cliente_id=None):
+def sync_inmueble_docs_for_inmueble(conn, inmueble_id, now):
     if not inmueble_id:
         return {"linked": 0, "removed": 0}
     tables = {
@@ -26750,12 +26750,7 @@ def sync_inmueble_docs_for_inmueble(conn, inmueble_id, now, only_cliente_id=None
     linked = 0
     if owner_ids:
         ensure_cliente_servicio_link(conn, owner_ids[0], inmueble["empresa_id"], "inmobiliaria", now)
-    # Con fincas/comunidades de muchos copropietarios, sincronizar TODOS los vecinos en cada
-    # visita a la ficha de UNO de ellos multiplica las idas y vueltas a la base por el número de
-    # vecinos (visto: miles de round-trips → la ficha se queda colgada). Cada propietario ya se
-    # sincroniza cuando se abre SU PROPIA ficha, así que aquí basta con el que motivó la llamada.
-    targets = [cid for cid in owner_ids if cid == only_cliente_id] if only_cliente_id else owner_ids
-    for cliente_id in targets:
+    for cliente_id in owner_ids:
         ensure_cliente_servicio_link(conn, cliente_id, inmueble["empresa_id"], "inmobiliaria", now)
         for row in docs_rows:
             if ensure_inmueble_doc_cliente_link(conn, inmueble, row, cliente_id, now):
@@ -26791,7 +26786,7 @@ def autolink_inmueble_docs_for_cliente(conn, cliente_id, empresa_id, now):
     linked = 0
     removed = 0
     for inmueble_id in inmueble_ids:
-        result = sync_inmueble_docs_for_inmueble(conn, inmueble_id, now, only_cliente_id=cliente_id)
+        result = sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
         linked += int(result.get("linked") or 0)
         removed += int(result.get("removed") or 0)
     if inmueble_ids:
@@ -34736,6 +34731,11 @@ ENTORNO_CATEGORIAS_OSM = [
     ("shop", "supermarket", "supermercado", "supermercados"),
     ("leisure", "park", "parque", "parques"),
     ("public_transport", "stop_position", "parada de transporte público", "paradas de transporte público"),
+    ("highway", "bus_stop", "parada de autobús", "paradas de autobús"),
+    ("railway", "station", "estación de tren/metro", "estaciones de tren/metro"),
+    ("amenity", "restaurant", "restaurante", "restaurantes"),
+    ("amenity", "bank", "banco/cajero", "bancos/cajeros"),
+    ("amenity", "place_of_worship", "templo religioso", "templos religiosos"),
 ]
 
 
@@ -34747,7 +34747,11 @@ def _fetch_overpass_pois(lat, lon, radio_m=400):
         f'node["{clave}"="{valor}"](around:{radio_m},{lat},{lon});'
         for clave, valor, _etq_sing, _etq_plur in ENTORNO_CATEGORIAS_OSM
     )
-    consulta = f"[out:json][timeout:10];({condiciones});out count;out ids;"
+    # `out ids;` NO incluye las etiquetas (`tags`) de cada elemento — solo
+    # id/type. Con eso el conteo de abajo (que compara `tags.get(clave)`)
+    # daba siempre cero, pasara lo que pasara alrededor del inmueble. Con
+    # `out tags;` sí llegan las etiquetas necesarias para contar de verdad.
+    consulta = f"[out:json][timeout:10];({condiciones});out count;out tags;"
     req = urllib.request.Request(
         "https://overpass-api.de/api/interpreter",
         data=urllib.parse.urlencode({"data": consulta}).encode("utf-8"),
@@ -34779,7 +34783,7 @@ def fetch_descripcion_entorno(direccion, *, municipio="", provincia="", codigo_p
         return {"ok": False, "error": "No se pudo localizar la dirección para describir el entorno."}
     lat, lon = geo["lat"], geo["lon"]
 
-    barrio = distrito = municipio_nombre = ""
+    barrio = distrito = municipio_nombre = via = codigo_postal_osm = ""
     try:
         reverso = _fetch_nominatim_reverse(lat, lon)
         direccion_osm = reverso.get("address") or {}
@@ -34788,6 +34792,10 @@ def fetch_descripcion_entorno(direccion, *, municipio="", provincia="", codigo_p
         municipio_nombre = str(
             direccion_osm.get("city") or direccion_osm.get("town") or direccion_osm.get("village") or ""
         ).strip()
+        # `road`/`postcode` ya venían en la misma respuesta (addressdetails=1)
+        # y se descartaban sin usar — sin llamada de red adicional.
+        via = str(direccion_osm.get("road") or "").strip()
+        codigo_postal_osm = str(direccion_osm.get("postcode") or "").strip()
     except Exception:
         pass
 
@@ -34797,6 +34805,13 @@ def fetch_descripcion_entorno(direccion, *, municipio="", provincia="", codigo_p
         frases.append(f"El inmueble se ubica en {ubicacion}.")
     elif geo.get("display_name"):
         frases.append(f"Ubicación de referencia: {geo['display_name']}.")
+    # La vía y el código postal no van en la frase de ubicación (para no
+    # duplicar lo que ya se ve en el campo "Dirección" del informe) pero sí
+    # aportan si faltaba contexto de barrio/distrito.
+    if via and not ubicacion:
+        frases.append(f"Vía: {via}" + (f", C.P. {codigo_postal_osm}." if codigo_postal_osm else "."))
+    elif codigo_postal_osm and codigo_postal_osm not in (codigo_postal or ""):
+        frases.append(f"Código postal: {codigo_postal_osm}.")
 
     conteos = {}
     try:
@@ -47017,6 +47032,28 @@ def build_pericial_valoracion_pdf(pericial, workspace, company, inmueble, client
         ],
     }))
 
+    # Plano de situación: mismo generador de mapas ya usado en los
+    # presupuestos de fincas (teselas de OpenStreetMap con chincheta). Se
+    # prefieren las coordenadas ya guardadas del inmueble enlazado; si no
+    # las hay, se geocodifica la dirección — igual que hace "Buscar
+    # entorno". Si no se consigue nada, no se pinta el bloque: un informe
+    # no se queda a medias porque un servidor de mapas no conteste.
+    try:
+        lat = inmueble.get("lat")
+        lon = inmueble.get("lon")
+        if not (lat and lon) and direccion:
+            geo = fetch_geocode_coordinates(direccion)
+            if geo.get("ok"):
+                lat, lon = geo.get("lat"), geo.get("lon")
+        if lat and lon:
+            mapa = build_mapa_estatico(lat, lon)
+            if mapa is not None:
+                sections.append(("Plano de situación", {
+                    "kind": "image", "image": mapa, "height": 190, "caption": direccion or None,
+                }))
+    except Exception:
+        pass
+
     descripcion_entorno = str(pericial.get("descripcion_entorno") or "").strip()
     if descripcion_entorno:
         sections.append(("Descripción del entorno", [descripcion_entorno]))
@@ -47416,7 +47453,9 @@ def fetch_workspace_pericial_detalle(conn, pericial_id, *, workspace_id):
     # tenga que volver a escribirla a mano.
     row = conn.execute(
         """
-        SELECT p.*, COALESCE(i.direccion, i.titulo, p.denominacion_manual, p.direccion_manual, '') AS inmueble_denominacion
+        SELECT p.*, COALESCE(i.direccion, i.titulo, p.denominacion_manual, p.direccion_manual, '') AS inmueble_denominacion,
+               i.referencia_catastral AS inmueble_referencia_catastral,
+               i.lat AS inmueble_lat, i.lon AS inmueble_lon
         FROM workspace_periciales p
         LEFT JOIN inmuebles i ON i.id = p.inmueble_id
         WHERE p.id = ? AND p.workspace_id = ? LIMIT 1
@@ -47487,7 +47526,8 @@ def fetch_workspace_pericial_pdf_payload(conn, pericial_id, *, workspace_id):
     inmueble = {}
     if pericial.get("inmueble_id"):
         inm = conn.execute(
-            "SELECT titulo, direccion, referencia_catastral FROM inmuebles WHERE id = ? LIMIT 1", (pericial["inmueble_id"],)
+            "SELECT titulo, direccion, referencia_catastral, lat, lon FROM inmuebles WHERE id = ? LIMIT 1",
+            (pericial["inmueble_id"],),
         ).fetchone()
         if inm:
             inmueble = dict(inm)
@@ -47525,11 +47565,21 @@ def fetch_workspace_pericial_pdf_payload(conn, pericial_id, *, workspace_id):
     # No se embeben como imágenes (una nota simple o una ficha catastral son
     # documentos de varias páginas, no una foto): se referencian por nombre,
     # como haría el propio perito al listar lo que ha tenido a la vista.
+    # Dos orígenes distintos: lo que sube el perito a mano (evidencias, S3) y
+    # lo que genera el propio sistema (workspace_pericial_docs, disco local —
+    # p. ej. la ficha catastral sincronizada desde el inmueble enlazado).
     documentos_aportados = [
         {"nombre": str(d["nombre"] or "").strip() or "Documento aportado", "created_at": str(d["created_at"] or "")[:10]}
         for d in conn.execute(
             "SELECT nombre, created_at FROM workspace_pericial_evidencias "
             "WHERE pericial_id = ? AND tipo = 'documento_aportado' ORDER BY created_at ASC",
+            (pericial_id,),
+        ).fetchall()
+    ] + [
+        {"nombre": str(d["nombre"] or "").strip() or "Ficha catastral", "created_at": str(d["created_at"] or "")[:10]}
+        for d in conn.execute(
+            "SELECT nombre, created_at FROM workspace_pericial_docs "
+            "WHERE pericial_id = ? AND tipo = 'ficha_catastro' ORDER BY created_at ASC",
             (pericial_id,),
         ).fetchall()
     ]
@@ -72568,6 +72618,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_pericial",
             "/api/workspace_pericial_delete",
             "/api/workspace_pericial_entorno",
+            "/api/workspace_pericial_catastro_sync",
             "/api/workspace_pericial_testigos_sugeridos",
             "/api/workspace_pericial_testigo",
             "/api/workspace_pericial_evidencia",
@@ -85753,8 +85804,27 @@ class Handler(BaseHTTPRequestHandler):
             if not ok:
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
+            # Si el expediente cuelga de un inmueble gestionado, sus datos ya
+            # sabidos (municipio/provincia/código postal) afinan la
+            # geocodificación sin coste añadido — no hace falta pedírselos
+            # de nuevo al perito.
+            municipio_ctx = provincia_ctx = cp_ctx = ""
+            pericial_id_ctx = str(payload.get("pericial_id") or "").strip()
+            if pericial_id_ctx:
+                fila_ctx = conn.execute(
+                    "SELECT i.poblacion, i.provincia, i.codigo_postal FROM workspace_periciales p "
+                    "JOIN inmuebles i ON i.id = p.inmueble_id "
+                    "WHERE p.id = ? AND p.workspace_id = ? LIMIT 1",
+                    (pericial_id_ctx, workspace_id),
+                ).fetchone()
+                if fila_ctx:
+                    municipio_ctx = str(fila_ctx["poblacion"] or "").strip()
+                    provincia_ctx = str(fila_ctx["provincia"] or "").strip()
+                    cp_ctx = str(fila_ctx["codigo_postal"] or "").strip()
             try:
-                resultado = fetch_descripcion_entorno(direccion)
+                resultado = fetch_descripcion_entorno(
+                    direccion, municipio=municipio_ctx, provincia=provincia_ctx, codigo_postal=cp_ctx,
+                )
             except Exception as fallo:
                 json_response(self, {"error": f"No se pudo consultar el entorno: {fallo}"}, status=502)
                 return
@@ -85763,6 +85833,75 @@ class Handler(BaseHTTPRequestHandler):
                 return
             json_response(self, resultado)
             return
+        elif parsed.path == "/api/workspace_pericial_catastro_sync":
+            # Busca la referencia catastral (si falta) y adjunta la ficha
+            # catastral al expediente, en un solo botón. Reutiliza tal cual
+            # la infraestructura ya construida para inmuebles
+            # (`sync_catastro_for_inmueble`): la referencia y los datos
+            # objetivos quedan en la propia ficha del inmueble (fuente única
+            # de verdad), y el PDF generado se registra como documento del
+            # expediente pericial vía `persist_pericial_generated_doc` — esa
+            # función va a disco local, no a S3, así que no pasa por
+            # `workspace_pericial_evidencias` (esa tabla asume S3 para poder
+            # verificar su cadena de hash).
+            try:
+                workspace_id = str(payload.get("workspace_id") or "").strip()
+                pericial_id = str(payload.get("pericial_id") or "").strip()
+                if not workspace_id or not pericial_id:
+                    json_response(self, {"error": "workspace_id y pericial_id requeridos"}, status=400)
+                    return
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+                pericial_row = conn.execute(
+                    "SELECT * FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (pericial_id, workspace_id),
+                ).fetchone()
+                if not pericial_row:
+                    json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                    return
+                inmueble_id = str(pericial_row["inmueble_id"] or "").strip()
+                if not inmueble_id:
+                    json_response(
+                        self,
+                        {"error": "Este expediente no está enlazado a un inmueble gestionado en el CRM."},
+                        status=400,
+                    )
+                    return
+                ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+                if not ok_acc:
+                    json_response(self, {"error": err_acc}, status=404 if err_acc == "Inmueble no encontrado" else 403)
+                    return
+                result = sync_catastro_for_inmueble(conn, inmueble_id, now, usuario=session.get("usuario") if session else None)
+                doc = persist_pericial_generated_doc(
+                    conn, pericial_id, "ficha_catastro", "Ficha catastral (Sede Electrónica del Catastro)",
+                    result["pdf_bytes"], f"ficha_catastral_{pericial_id}", now,
+                    workspace_id=workspace_id, empresa_id=pericial_row["empresa_id"],
+                    plantilla_clave="catastro_ficha",
+                )
+                conn.commit()
+                json_response(self, {
+                    "ok": True,
+                    "referencia_catastral": result["summary"].get("referencia_catastral") or "",
+                    "doc": doc,
+                })
+                return
+            except ValueError as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": f"catastro_sync_error: {type(exc).__name__}: {exc}"}, status=502)
+                return
         elif parsed.path == "/api/workspace_pericial_testigos_sugeridos":
             # Igual que el de entorno: solo busca, no guarda. Cada candidato se
             # añade como testigo real vía /api/workspace_pericial_testigo,
@@ -113000,6 +113139,10 @@ class Handler(BaseHTTPRequestHandler):
                 (inmueble_id,),
             ).fetchone()
             servicios = get_inmueble_servicios(conn, inmueble_id)
+            # Puente empresa -> workspace: la ficha de Inmueble necesita saber a qué
+            # workspace tenant pertenece para poder lanzar acciones que viven allí
+            # (p. ej. crear una valoración pericial) sin una llamada aparte.
+            workspace_id_de_empresa = resolve_workspace_id_for_empresa(conn, inmueble["empresa_id"])
             json_response(
                 self,
                 {
@@ -113008,6 +113151,7 @@ class Handler(BaseHTTPRequestHandler):
                     "docs": [dict(r) for r in docs],
                     "captacion": dict(captacion) if captacion else {},
                     "servicios": servicios,
+                    "workspace_id": workspace_id_de_empresa,
                 },
             )
             return

@@ -3034,32 +3034,7 @@
             <div class="section-head">
               <div>
                 <h3>Peritajes de valoración</h3>
-                <p class="muted">Informes periciales de valoración de inmuebles: testigos, evidencia y firma.</p>
-              </div>
-            </div>
-            <form id="workspacePericialNuevoForm" class="form-grid">
-              <input type="hidden" name="workspace_id" />
-              <label class="span-2">
-                Empresa emisora
-                <select name="empresa_id" required></select>
-              </label>
-              <label class="span-2">
-                Denominación del inmueble (si no está gestionado en el CRM)
-                <input name="denominacion_manual" placeholder="Ej. Vivienda C/ Mayor 12" />
-              </label>
-              <label class="span-2">
-                Dirección
-                <input name="direccion_manual" placeholder="Calle, número, localidad" />
-              </label>
-              <div class="form-actions span-2">
-                <button type="submit">Crear expediente</button>
-                <span id="workspacePericialNuevoStatus" class="muted"></span>
-              </div>
-            </form>
-            <div class="section-head" style="margin-top:24px;">
-              <div>
-                <h3>Expedientes</h3>
-                <p class="muted">Testigos, evidencia, generación del informe y firma.</p>
+                <p class="muted">Informes periciales de valoración de inmuebles: testigos, evidencia y firma. Los expedientes se crean desde la ficha del inmueble en el CRM inmobiliario, con el botón "Valoración pericial".</p>
               </div>
             </div>
             <p id="workspacePericialesInfo" class="muted"></p>
@@ -4822,6 +4797,7 @@
 	                </div>
 	              </div>
 	              <button type="button" class="secondary ghost" id="inmuebleTecnoValoracionBtn">Informe valoración</button>
+			              <button type="button" class="secondary ghost" id="inmuebleValoracionPericialBtn">Valoración pericial</button>
 	            </div>
 					            <div class="tabs crm-lightning-subbar" id="inmuebleTabs">
 				              <button class="tab active" type="button" data-tab="datos">Información</button>
@@ -12128,7 +12104,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=934",
+              "app.js?v=935",
               // Panel de la operación en la ficha del inmueble.
               "inmo_operacion.js?v=1",
             ];
