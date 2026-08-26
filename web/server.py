@@ -46817,6 +46817,56 @@ def compute_comparacion_valoracion(testigos_homogeneizados, superficie_sujeto):
     }
 
 
+def build_justificacion_metodo_automatica(n_testigos, estadisticos):
+    """El párrafo que explica CÓMO se ha llegado al valor — a partir de los
+    números que ya se han calculado, no inventado. Se usa como redacción de
+    partida cuando el perito no ha escrito la suya en `justificacion_metodo`:
+    un informe pericial no debería salir nunca sin explicar el porqué de la
+    cifra final, aunque sea con el texto automático como borrador.
+    """
+    estadisticos = estadisticos or {}
+    if not n_testigos:
+        return ("No se han incorporado testigos de mercado al expediente: el valor de tasación "
+                "queda pendiente de determinar hasta que se añada al menos un comparable.")
+    media = float(estadisticos.get("media") or 0)
+    mediana = float(estadisticos.get("mediana") or 0)
+    desviacion = float(estadisticos.get("desviacion") or 0)
+    frases = [
+        f"El valor se ha obtenido por comparación con {n_testigos} "
+        f"testigo{'s' if n_testigos != 1 else ''} de mercado, homogeneizados por sus diferencias "
+        "de superficie respecto al inmueble objeto de valoración."
+    ]
+    if n_testigos == 1:
+        frases.append(
+            "Al tratarse de un único testigo, su valor unitario homogeneizado se traslada "
+            "directamente al inmueble objeto de valoración, sin promediar con otros comparables."
+        )
+    else:
+        dispersion_pct = (desviacion / media * 100) if media else 0.0
+        frases.append(
+            f"El valor unitario medio de los testigos es de {format_eur(media)}/m² "
+            f"(mediana {format_eur(mediana)}/m²), con una desviación de {format_eur(desviacion)}/m² "
+            f"({dispersion_pct:.1f} % sobre la media)."
+        )
+        if dispersion_pct > 15:
+            frases.append(
+                "Esta dispersión es relativamente alta, lo que indica heterogeneidad entre los "
+                "comparables disponibles; se recomienda revisar los coeficientes correctores "
+                "aplicados o ampliar la muestra antes de dar el informe por definitivo."
+            )
+        else:
+            frases.append(
+                "La dispersión entre los testigos es reducida, lo que aporta consistencia al "
+                "valor de mercado obtenido."
+            )
+    if n_testigos < PERICIAL_TESTIGOS_MINIMO_ABSOLUTO:
+        frases.append(
+            "La Orden ECO/805/2003 exige un mínimo de testigos para dar solidez estadística al "
+            "método de comparación; se recomienda ampliar la muestra antes de firmar el informe."
+        )
+    return " ".join(frases)
+
+
 def checklist_une197001_pericial(pericial, testigos, evidencias_verificadas):
     """Los apartados que la UNE 197001 no permite que falten antes de firmar.
 
@@ -47019,8 +47069,12 @@ def build_pericial_valoracion_pdf(pericial, workspace, company, inmueble, client
         ],
     }))
     justificacion = str((calculo.get("conclusion") or {}).get("justificacion_metodo") or "").strip()
-    if justificacion:
-        sections.append(("", [justificacion]))
+    if not justificacion:
+        # El perito no ha escrito la suya: mejor un borrador automático,
+        # calculado sobre los mismos números que ya se ven en la tabla de
+        # arriba, que dejar la conclusión sin explicar el porqué de la cifra.
+        justificacion = build_justificacion_metodo_automatica(len(activos), estadisticos)
+    sections.append(("", [justificacion]))
 
     if fotos_visita:
         for idx, (imagen, caption) in enumerate(fotos_visita, start=1):

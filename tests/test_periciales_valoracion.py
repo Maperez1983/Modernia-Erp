@@ -628,6 +628,38 @@ class LaDescripcionDelEntornoSeBuscaPorDireccionTests(Base):
         self.assertIn("Texto editado a mano", texto)
 
 
+class LaConclusionSiempreExplicaElValorTests(Base):
+    """Un informe pericial no debería salir nunca con la cifra final sin
+    explicar de dónde sale. Si el perito no ha escrito su propia
+    justificación, el PDF lleva un borrador automático — no una conclusión
+    muda."""
+
+    def test_sin_justificacion_escrita_el_pdf_trae_una_automatica(self):
+        pericial_id = self._crear_pericial()
+        self._anade_testigos(pericial_id)  # TESTIGOS_SEIS: 6 testigos
+        r = self._post("/api/workspace_pericial_pdf", {"workspace_id": self.ws, "id": pericial_id})
+        self.assertEqual(r["estado"], 200, r["json"])
+        servido = self._get(f"/api/workspace_pericial_pdf?id={pericial_id}&workspace_id={self.ws}")
+        from pypdf import PdfReader
+        texto = "\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(servido["cuerpo"])).pages)
+        self.assertIn("comparación con 6 testigos de mercado", texto)
+
+    def test_la_justificacion_escrita_a_mano_pisa_a_la_automatica(self):
+        pericial_id = self._crear_pericial()
+        self._anade_testigos(pericial_id)
+        self._post("/api/workspace_pericial", {
+            "workspace_id": self.ws, "id": pericial_id, "empresa_id": "emp1",
+            "justificacion_metodo": "Texto propio del perito, no el redactado por el sistema.",
+        })
+        r = self._post("/api/workspace_pericial_pdf", {"workspace_id": self.ws, "id": pericial_id})
+        self.assertEqual(r["estado"], 200, r["json"])
+        servido = self._get(f"/api/workspace_pericial_pdf?id={pericial_id}&workspace_id={self.ws}")
+        from pypdf import PdfReader
+        texto = "\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(servido["cuerpo"])).pages)
+        self.assertIn("Texto propio del perito", texto)
+        self.assertNotIn("comparación con 6 testigos de mercado", texto)
+
+
 class LosTestigosPropiosSeBuscanEnElInventarioTests(Base):
     """Fase 2: comparables del propio inventario en vez de pegar enlaces de
     portales a mano. El geocode mock (`_urlopen_falso_para_entorno`) sitúa
@@ -753,6 +785,28 @@ class ElCalculoEsPuroYNoNecesitaServidorTests(unittest.TestCase):
     def test_checklist_exige_declaracion_de_imparcialidad_fija(self):
         self.assertIn("335.2", S.PERICIAL_DECLARACION_IMPARCIALIDAD)
         self.assertIn("juramento", S.PERICIAL_DECLARACION_IMPARCIALIDAD.lower())
+
+    def test_justificacion_automatica_sin_testigos_lo_dice_claro(self):
+        texto = S.build_justificacion_metodo_automatica(0, {})
+        self.assertIn("pendiente de determinar", texto)
+
+    def test_justificacion_automatica_con_un_testigo_no_promedia(self):
+        texto = S.build_justificacion_metodo_automatica(1, {"media": 2000, "mediana": 2000, "desviacion": 0})
+        self.assertIn("único testigo", texto)
+        self.assertIn("sin promediar", texto)
+
+    def test_justificacion_automatica_avisa_de_dispersion_alta(self):
+        texto = S.build_justificacion_metodo_automatica(5, {"media": 2000, "mediana": 1950, "desviacion": 500})
+        self.assertIn("dispersión", texto.lower())
+        self.assertIn("relativamente alta", texto)
+
+    def test_justificacion_automatica_con_pocos_testigos_avisa_del_minimo(self):
+        texto = S.build_justificacion_metodo_automatica(2, {"media": 2000, "mediana": 2000, "desviacion": 50})
+        self.assertIn("ECO/805/2003", texto)
+
+    def test_justificacion_automatica_con_muestra_suficiente_no_avisa_del_minimo(self):
+        texto = S.build_justificacion_metodo_automatica(6, {"media": 2000, "mediana": 2000, "desviacion": 50})
+        self.assertNotIn("ECO/805/2003", texto)
 
 
 if __name__ == "__main__":

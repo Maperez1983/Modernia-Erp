@@ -22294,6 +22294,7 @@ const fillWorkspacePericialForm = (row = null) => {
   set("superficie_calculo_usada", row?.superficie_calculo_usada || "");
   set("motivo_superficie_usada", row?.motivo_superficie_usada || "");
   set("descripcion_entorno", row?.descripcion_entorno || "");
+  set("justificacion_metodo", row?.justificacion_metodo || "");
   // Si el expediente cuelga de un inmueble gestionado (sin dirección manual
   // propia), "Buscar entorno" necesita algo por donde tirar: la dirección
   // resuelta ya viaja en el listado como `inmueble_denominacion`.
@@ -22361,9 +22362,19 @@ const renderWorkspacePericialesList = () => {
     </div>
   `;
   workspacePericialesTable.querySelectorAll("[data-pericial-edit]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const row = rows.find((r) => r.id === btn.dataset.pericialEdit);
-      if (row) fillWorkspacePericialForm(row);
+      if (!row) return;
+      // El listado no trae `calculo_json` (va dentro, no es una columna
+      // suelta): para poder editar la justificación del método hace falta
+      // la ficha completa, no la fila resumida del listado.
+      let justificacionGuardada = "";
+      try {
+        const detalle = await api(`/api/workspace_pericial?id=${encodeURIComponent(row.id)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}`);
+        const calculo = JSON.parse(detalle?.pericial?.calculo_json || "{}");
+        justificacionGuardada = calculo?.conclusion?.justificacion_metodo || "";
+      } catch (e) { /* si falla, se edita sin precargar la justificación */ }
+      fillWorkspacePericialForm({ ...row, justificacion_metodo: justificacionGuardada });
     });
   });
   workspacePericialesTable.querySelectorAll("[data-pericial-gestionar]").forEach((btn) => {
