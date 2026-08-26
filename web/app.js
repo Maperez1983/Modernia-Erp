@@ -22377,6 +22377,24 @@ const renderWorkspacePericialesList = () => {
   });
 };
 
+const PERICIAL_CAMPOS_OBLIGATORIOS_LABEL = {
+  fecha_valoracion: "Fecha de valoración",
+  superficie_calculo_usada: "Usada en el cálculo (m²)",
+};
+
+workspacePericialForm?.querySelector('button[type="submit"]')?.addEventListener("click", (event) => {
+  if (workspacePericialForm.checkValidity()) return;
+  event.preventDefault();
+  const faltan = Array.from(workspacePericialForm.querySelectorAll(":invalid"))
+    .map((el) => PERICIAL_CAMPOS_OBLIGATORIOS_LABEL[el.name] || el.name);
+  if (workspacePericialStatus) {
+    workspacePericialStatus.textContent = faltan.length
+      ? `Falta rellenar: ${faltan.join(", ")}.`
+      : "Revisa los campos marcados.";
+  }
+  workspacePericialForm.reportValidity();
+});
+
 workspacePericialForm?.addEventListener("submit", async (event) => {
   event.preventDefault();
   const fd = new FormData(workspacePericialForm);

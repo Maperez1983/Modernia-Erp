@@ -3086,7 +3086,7 @@
               <input name="fecha_visita" type="date" />
             </label>
             <label>
-              Fecha de valoración
+              Fecha de valoración *
               <input name="fecha_valoracion" type="date" required />
             </label>
             <div class="form-grid-section">Superficies</div>
@@ -3103,17 +3103,20 @@
               <input name="superficie_medida" inputmode="decimal" />
             </label>
             <label>
-              Usada en el cálculo (m²)
+              Usada en el cálculo (m²) *
               <input name="superficie_calculo_usada" inputmode="decimal" required />
             </label>
             <label class="span-2">
               Motivo de la superficie usada
               <input name="motivo_superficie_usada" placeholder="Por qué se usa esta superficie y no otra" />
             </label>
-            <div class="form-actions span-2">
-              <button type="submit">Guardar expediente</button>
-              <button type="button" id="workspacePericialResetBtn" class="secondary ghost">Nuevo</button>
-              <span id="workspacePericialStatus" class="muted"></span>
+            <div class="form-actions span-2" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+              <span class="muted">* Fecha de valoración y superficie usada en el cálculo son obligatorias.</span>
+              <div class="form-actions">
+                <button type="submit">Guardar expediente</button>
+                <button type="button" id="workspacePericialResetBtn" class="secondary ghost">Nuevo</button>
+                <span id="workspacePericialStatus" class="muted"></span>
+              </div>
             </div>
           </form>
           <div class="section-head" style="margin-top:24px;">
@@ -12165,7 +12168,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=927",
+              "app.js?v=928",
               // Panel de la operación en la ficha del inmueble.
               "inmo_operacion.js?v=1",
             ];
