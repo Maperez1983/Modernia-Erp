@@ -22294,6 +22294,11 @@ const fillWorkspacePericialForm = (row = null) => {
   set("superficie_calculo_usada", row?.superficie_calculo_usada || "");
   set("motivo_superficie_usada", row?.motivo_superficie_usada || "");
   set("descripcion_entorno", row?.descripcion_entorno || "");
+  // Si el expediente cuelga de un inmueble gestionado (sin dirección manual
+  // propia), "Buscar entorno" necesita algo por donde tirar: la dirección
+  // resuelta ya viaja en el listado como `inmueble_denominacion`.
+  workspacePericialForm.dataset.direccionInmuebleResuelta =
+    (!row?.direccion_manual && row?.inmueble_denominacion) ? row.inmueble_denominacion : "";
   hydrateWorkspaceCompanySelects();
   if (row?.empresa_id) {
     const sel = workspacePericialForm.querySelector('[name="empresa_id"]');
@@ -22418,7 +22423,8 @@ workspacePericialForm?.addEventListener("submit", async (event) => {
 workspacePericialResetBtn?.addEventListener("click", () => fillWorkspacePericialForm(null));
 
 workspacePericialBuscarEntornoBtn?.addEventListener("click", async () => {
-  const direccion = String(workspacePericialForm?.querySelector('[name="direccion_manual"]')?.value || "").trim();
+  const direccionManual = String(workspacePericialForm?.querySelector('[name="direccion_manual"]')?.value || "").trim();
+  const direccion = direccionManual || String(workspacePericialForm?.dataset.direccionInmuebleResuelta || "").trim();
   if (!direccion) {
     if (workspacePericialEntornoStatus) workspacePericialEntornoStatus.textContent = "Escribe antes la dirección.";
     return;
@@ -22541,7 +22547,7 @@ const openPericialModal = async (row) => {
   buscarInventarioBtn.onclick = async () => {
     const statusEl = modal.querySelector("#pericialModalInventarioStatus");
     const resultadosEl = modal.querySelector("#pericialModalInventarioResultados");
-    const direccion = String(row.direccion_manual || "").trim();
+    const direccion = String(row.direccion_manual || row.inmueble_denominacion || "").trim();
     if (!direccion) {
       if (statusEl) statusEl.textContent = "El expediente no tiene dirección guardada todavía.";
       return;

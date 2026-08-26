@@ -34889,7 +34889,15 @@ def buscar_testigos_propios(conn, workspace_id, direccion, *, superficie_objetiv
                 distancia_km = None
         cp_candidato = str(row_value(fila, "codigo_postal", "") or "").strip()
         mismo_cp = bool(codigo_postal_obj) and cp_candidato == codigo_postal_obj
-        if distancia_km is not None and distancia_km > radio_km and not mismo_cp:
+        # Si hay distancia real, manda ella (con el código postal como excepción
+        # para el limítrofe que cae justo fuera del radio). Si NO hay distancia
+        # —falta lat/lon en cualquiera de los dos lados—, el código postal es lo
+        # único que queda para decidir "cerca": sin él, no hay filtro que aplicar,
+        # y "sin filtro" es exactamente el fallo que devolvía toda la cartera.
+        if distancia_km is not None:
+            if distancia_km > radio_km and not mismo_cp:
+                continue
+        elif not mismo_cp:
             continue
         candidatos.append({
             "inmueble_id": row_value(fila, "inmueble_id", ""),

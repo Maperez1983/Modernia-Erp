@@ -670,6 +670,21 @@ class LosTestigosPropiosSeBuscanEnElInventarioTests(Base):
         self.assertEqual(len(r["json"]["testigos"]), 1)
         self.assertTrue(r["json"]["testigos"][0]["mismo_codigo_postal"])
 
+    def test_sin_coordenadas_y_sin_codigo_postal_coincidente_no_devuelve_nada(self):
+        # El bug real: cuando ni el candidato ni el objetivo tienen coordenadas,
+        # "caer al código postal" significaba en el código "no filtrar nada" —
+        # se colaba toda la cartera cerrada del workspace, viniera de donde
+        # viniera. Probado en vivo el 2026-08-26 con un inmueble real: una
+        # búsqueda en Torremolinos devolvía ventas de Málaga capital.
+        self._seed_operacion("op-otra-ciudad", direccion="Calle Lejana 1, Madrid",
+                              precio_escritura=300000, codigo_postal="28001")
+        with patch.object(S.urllib.request, "urlopen", _urlopen_falso_para_entorno):
+            r = self._post("/api/workspace_pericial_testigos_sugeridos", {
+                "workspace_id": self.ws, "direccion": "Calle Ejemplo 1, 29010 Málaga",
+            })
+        self.assertEqual(r["estado"], 200, r["json"])
+        self.assertEqual(r["json"]["testigos"], [])
+
     def test_ignora_alquileres_y_operaciones_sin_escriturar(self):
         self._seed_operacion("op-alquiler", direccion="Calle Vecina 5, Málaga",
                               precio_escritura=900, lat=36.7214, lon=-4.4213, tipo_operacion="alquiler")
