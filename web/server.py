@@ -46785,7 +46785,7 @@ def build_pericial_valoracion_pdf(pericial, workspace, company, inmueble, client
 
     sections.append(("Conclusión", {
         "kind": "waterfall",
-        "items": [
+        "steps": [
             {"label": "Valor unitario homogeneizado", "value": (format_eur(estadisticos.get("valor_unitario_homogeneizado")) + "/m²") if estadisticos.get("valor_unitario_homogeneizado") else "—"},
             {"label": "Superficie de cálculo", "value": _m2(pericial.get("superficie_calculo_usada"))},
             {"label": "Valor de tasación", "value": format_eur(pericial.get("valor_final")), "accent": 1},

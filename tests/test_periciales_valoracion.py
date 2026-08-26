@@ -498,6 +498,12 @@ class LasFotosYLaDocumentacionAparecenEnElInformeTests(Base):
         self.assertIn("Ficha catastral", texto)
         self.assertIn("Anexo fotográfico", texto)
         self.assertIn("Salón, orientación sur", texto)
+        # La cascada de conclusión usaba la clave "items" en vez de "steps"
+        # (la que de verdad lee `_cascada` en branded_pdf_vector.py) y la
+        # sección se quedaba muda: sin valor de tasación, lo más importante
+        # del informe. Este assert es justo el que lo habría detectado.
+        self.assertIn("Valor de tasación", texto)
+        self.assertIn("Valor unitario homogeneizado", texto)
 
 
 class ElCalculoEsPuroYNoNecesitaServidorTests(unittest.TestCase):
