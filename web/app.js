@@ -22456,6 +22456,11 @@ const openPericialModal = async (row) => {
           <div id="pericialModalChecklist" class="muted"></div>
           <h4>Testigos</h4>
           <div id="pericialModalTestigos"></div>
+          <div class="form-actions">
+            <button type="button" id="pericialModalBuscarInventarioBtn" class="secondary ghost">Buscar en nuestro inventario</button>
+            <span id="pericialModalInventarioStatus" class="muted"></span>
+          </div>
+          <div id="pericialModalInventarioResultados"></div>
           <form id="pericialModalTestigoForm" class="form-grid">
             <label>Fuente<input name="fuente" placeholder="Idealista, notaría..." required /></label>
             <label>Fecha de captura<input name="fecha_captura" type="date" /></label>
@@ -22529,6 +22534,61 @@ const openPericialModal = async (row) => {
       await refreshWorkspacePericiales({ silent: true });
     } catch (error) {
       if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
+    }
+  };
+
+  const buscarInventarioBtn = modal.querySelector("#pericialModalBuscarInventarioBtn");
+  buscarInventarioBtn.onclick = async () => {
+    const statusEl = modal.querySelector("#pericialModalInventarioStatus");
+    const resultadosEl = modal.querySelector("#pericialModalInventarioResultados");
+    const direccion = String(row.direccion_manual || "").trim();
+    if (!direccion) {
+      if (statusEl) statusEl.textContent = "El expediente no tiene dirección guardada todavía.";
+      return;
+    }
+    try {
+      if (statusEl) statusEl.textContent = "Buscando en el inventario...";
+      const res = await apiPost("/api/workspace_pericial_testigos_sugeridos", {
+        workspace_id: state.currentWorkspaceId || "", direccion,
+      });
+      const candidatos = res?.testigos || [];
+      if (statusEl) {
+        statusEl.textContent = candidatos.length
+          ? `${candidatos.length} candidato(s) encontrado(s).`
+          : "Sin ventas propias cerca de esta dirección.";
+      }
+      if (resultadosEl) {
+        resultadosEl.innerHTML = candidatos.length
+          ? `<div class="workspace-billing-list">${candidatos.map((c, idx) => `
+              <div class="workspace-billing-row">
+                <div><strong>${escapeHtml(c.direccion || "-")}</strong>
+                  <div class="muted">${escapeHtml(c.fecha || "-")} · ${euroFormatter.format(Number(c.precio || 0))} · ${c.superficie ? `${Number(c.superficie)} m²` : "sin superficie"}${c.distancia_km != null ? ` · ${c.distancia_km} km` : (c.mismo_codigo_postal ? " · mismo código postal" : "")}</div>
+                </div>
+                <div class="workspace-billing-meta"><button type="button" class="secondary ghost" data-inventario-anadir="${idx}">Añadir</button></div>
+              </div>`).join("")}</div>`
+          : "";
+        resultadosEl.querySelectorAll("[data-inventario-anadir]").forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const c = candidatos[Number(btn.dataset.inventarioAnadir)];
+            if (!c) return;
+            try {
+              btn.disabled = true;
+              await apiPost("/api/workspace_pericial_testigo", {
+                workspace_id: state.currentWorkspaceId || "", pericial_id: row.id,
+                fuente: `CRM propio — ${c.direccion || "venta escriturada"}`,
+                fecha_captura: c.fecha || "", precio: c.precio, superficie: c.superficie,
+              });
+              btn.textContent = "Añadido";
+              await refreshPericialModalContent(row.id);
+            } catch (error) {
+              btn.disabled = false;
+              btn.textContent = error?.message || "Error";
+            }
+          });
+        });
+      }
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error?.message || "No se pudo buscar en el inventario.";
     }
   };
 

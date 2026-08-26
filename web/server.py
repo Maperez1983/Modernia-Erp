@@ -34824,6 +34824,95 @@ def fetch_descripcion_entorno(direccion, *, municipio="", provincia="", codigo_p
     }
 
 
+def _distancia_km(lat1, lon1, lat2, lon2):
+    """Haversine, en km. Sin dependencias — `math` ya está importado en todo
+    el fichero (se usa para la proyección del mapa estático)."""
+    r = 6371.0
+    f1, f2 = math.radians(lat1), math.radians(lat2)
+    df = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(df / 2) ** 2 + math.cos(f1) * math.cos(f2) * math.sin(dl / 2) ** 2
+    return r * 2 * math.asin(min(1.0, math.sqrt(a)))
+
+
+def buscar_testigos_propios(conn, workspace_id, direccion, *, superficie_objetivo=None, radio_km=3.0, limite=8):
+    """Comparables para el método de comparación, buscados en el propio
+    inventario del CRM en vez de en portales de terceros: sin riesgo legal de
+    scraping, y es dato propio — ya se sabe que es de fiar.
+
+    Solo ventas ya escrituradas (`precio_escritura > 0`): un encargo activo
+    todavía no es un precio de mercado confirmado, es una expectativa (ver
+    la convención de precio_encargo vs. precio_escritura). El precio de venta
+    vive en `operaciones_inmobiliarias`, no en la ficha del inmueble.
+
+    Si el inmueble tiene coordenadas guardadas, se ordena por distancia real
+    (haversine); si no las tiene ninguno de los dos lados, se cae a
+    coincidencia de código postal — mejor eso que no ofrecer nada.
+    """
+    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+    if not empresa_ids:
+        return {"ok": True, "testigos": [], "geocodificado": False}
+
+    geo = None
+    try:
+        geo = fetch_geocode_coordinates(direccion)
+    except Exception:
+        geo = None
+    geocodificado = bool(geo and geo.get("ok"))
+    lat_obj = geo.get("lat") if geocodificado else None
+    lon_obj = geo.get("lon") if geocodificado else None
+
+    placeholders = ",".join("?" for _ in empresa_ids)
+    filas = conn.execute(
+        f"""
+        SELECT o.id, o.direccion, o.precio_escritura, o.fecha_escritura, o.inmueble_id,
+               i.m2, i.lat, i.lon, i.codigo_postal
+        FROM operaciones_inmobiliarias o
+        LEFT JOIN inmuebles i ON i.id = o.inmueble_id
+        WHERE o.empresa_id IN ({placeholders})
+          AND LOWER(COALESCE(o.tipo_operacion, 'venta')) = 'venta'
+          AND o.precio_escritura > 0
+        """,
+        tuple(empresa_ids),
+    ).fetchall()
+
+    cp_match = re.search(r"\b(\d{5})\b", str(direccion or ""))
+    codigo_postal_obj = cp_match.group(1) if cp_match else ""
+    candidatos = []
+    for fila in filas:
+        lat_c, lon_c = row_value(fila, "lat", None), row_value(fila, "lon", None)
+        distancia_km = None
+        if geocodificado and lat_c not in (None, "") and lon_c not in (None, ""):
+            try:
+                distancia_km = round(_distancia_km(lat_obj, lon_obj, float(lat_c), float(lon_c)), 2)
+            except (TypeError, ValueError):
+                distancia_km = None
+        cp_candidato = str(row_value(fila, "codigo_postal", "") or "").strip()
+        mismo_cp = bool(codigo_postal_obj) and cp_candidato == codigo_postal_obj
+        if distancia_km is not None and distancia_km > radio_km and not mismo_cp:
+            continue
+        candidatos.append({
+            "inmueble_id": row_value(fila, "inmueble_id", ""),
+            "direccion": row_value(fila, "direccion", "") or "",
+            "precio": row_value(fila, "precio_escritura", 0) or 0,
+            "fecha": row_value(fila, "fecha_escritura", "") or "",
+            "superficie": row_value(fila, "m2", None),
+            "distancia_km": distancia_km,
+            "mismo_codigo_postal": mismo_cp,
+        })
+
+    def _orden(c):
+        # Sin distancia (ni geocoding propio ni del candidato) va al final;
+        # entre esos, el que comparte código postal se antepone.
+        return (
+            0 if c["distancia_km"] is not None else (1 if c["mismo_codigo_postal"] else 2),
+            c["distancia_km"] if c["distancia_km"] is not None else 0,
+        )
+
+    candidatos.sort(key=_orden)
+    return {"ok": True, "testigos": candidatos[:limite], "geocodificado": geocodificado}
+
+
 def _strip_html_fragment(value):
     raw = re.sub(r"<br\s*/?>", " ", str(value or ""), flags=re.I)
     raw = re.sub(r"<[^>]+>", "", raw)
@@ -72394,6 +72483,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_pericial",
             "/api/workspace_pericial_delete",
             "/api/workspace_pericial_entorno",
+            "/api/workspace_pericial_testigos_sugeridos",
             "/api/workspace_pericial_testigo",
             "/api/workspace_pericial_evidencia",
             "/api/workspace_pericial_pdf",
@@ -85585,6 +85675,28 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if not resultado.get("ok"):
                 json_response(self, {"error": resultado.get("error") or "No se pudo localizar el entorno."}, status=400)
+                return
+            json_response(self, resultado)
+            return
+        elif parsed.path == "/api/workspace_pericial_testigos_sugeridos":
+            # Igual que el de entorno: solo busca, no guarda. Cada candidato se
+            # añade como testigo real vía /api/workspace_pericial_testigo,
+            # el mismo endpoint que usa el alta manual — no hay un camino
+            # aparte que se pueda desincronizar de la cadena de evidencia.
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            direccion = str(payload.get("direccion") or "").strip()
+            if not workspace_id or not direccion:
+                json_response(self, {"error": "workspace_id y direccion requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            try:
+                resultado = buscar_testigos_propios(conn, workspace_id, direccion)
+            except Exception as fallo:
+                json_response(self, {"error": f"No se pudo buscar en el inventario: {fallo}"}, status=502)
                 return
             json_response(self, resultado)
             return

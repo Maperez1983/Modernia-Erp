@@ -628,6 +628,82 @@ class LaDescripcionDelEntornoSeBuscaPorDireccionTests(Base):
         self.assertIn("Texto editado a mano", texto)
 
 
+class LosTestigosPropiosSeBuscanEnElInventarioTests(Base):
+    """Fase 2: comparables del propio inventario en vez de pegar enlaces de
+    portales a mano. El geocode mock (`_urlopen_falso_para_entorno`) sitúa
+    la dirección buscada en (36.7213, -4.4214) — Málaga capital."""
+
+    def _seed_operacion(self, oid, *, direccion, precio_escritura, lat=None, lon=None,
+                         codigo_postal=None, tipo_operacion="venta", m2=90):
+        base = dict(created_at="2026-01-01", updated_at="2026-01-01")
+        self._ins("inmuebles", dict(
+            id=f"inm-{oid}", empresa_id="emp1", direccion=direccion, m2=m2,
+            lat=lat, lon=lon, codigo_postal=codigo_postal, **base,
+        ))
+        self._ins("operaciones_inmobiliarias", dict(
+            id=oid, empresa_id="emp1", tipo_operacion=tipo_operacion, inmueble_id=f"inm-{oid}",
+            direccion=direccion, precio_escritura=precio_escritura, fecha_escritura="2026-06-01", **base,
+        ))
+
+    def test_encuentra_ventas_cercanas_y_descarta_las_lejanas(self):
+        self._seed_operacion("op-cerca", direccion="Calle Vecina 3, Málaga",
+                              precio_escritura=180000, lat=36.7220, lon=-4.4205)
+        self._seed_operacion("op-lejos", direccion="Calle Otra Ciudad 1, Madrid",
+                              precio_escritura=300000, lat=40.4168, lon=-3.7038)
+        with patch.object(S.urllib.request, "urlopen", _urlopen_falso_para_entorno):
+            r = self._post("/api/workspace_pericial_testigos_sugeridos", {
+                "workspace_id": self.ws, "direccion": "Calle Ejemplo 1, Málaga",
+            })
+        self.assertEqual(r["estado"], 200, r["json"])
+        direcciones = [t["direccion"] for t in r["json"]["testigos"]]
+        self.assertIn("Calle Vecina 3, Málaga", direcciones)
+        self.assertNotIn("Calle Otra Ciudad 1, Madrid", direcciones)
+
+    def test_sin_coordenadas_cae_a_mismo_codigo_postal(self):
+        self._seed_operacion("op-cp", direccion="Calle Sin Coordenadas 9, 29010 Málaga",
+                              precio_escritura=175000, codigo_postal="29010")
+        with patch.object(S.urllib.request, "urlopen", _urlopen_falso_para_entorno):
+            r = self._post("/api/workspace_pericial_testigos_sugeridos", {
+                "workspace_id": self.ws, "direccion": "Calle Ejemplo 1, 29010 Málaga",
+            })
+        self.assertEqual(r["estado"], 200, r["json"])
+        self.assertEqual(len(r["json"]["testigos"]), 1)
+        self.assertTrue(r["json"]["testigos"][0]["mismo_codigo_postal"])
+
+    def test_ignora_alquileres_y_operaciones_sin_escriturar(self):
+        self._seed_operacion("op-alquiler", direccion="Calle Vecina 5, Málaga",
+                              precio_escritura=900, lat=36.7214, lon=-4.4213, tipo_operacion="alquiler")
+        self._seed_operacion("op-sin-cerrar", direccion="Calle Vecina 7, Málaga",
+                              precio_escritura=0, lat=36.7216, lon=-4.4211)
+        with patch.object(S.urllib.request, "urlopen", _urlopen_falso_para_entorno):
+            r = self._post("/api/workspace_pericial_testigos_sugeridos", {
+                "workspace_id": self.ws, "direccion": "Calle Ejemplo 1, Málaga",
+            })
+        self.assertEqual(r["estado"], 200, r["json"])
+        self.assertEqual(r["json"]["testigos"], [])
+
+    def test_un_candidato_se_puede_anadir_como_testigo_real(self):
+        self._seed_operacion("op-real", direccion="Calle Vecina 3, Málaga",
+                              precio_escritura=180000, lat=36.7220, lon=-4.4205, m2=88)
+        with patch.object(S.urllib.request, "urlopen", _urlopen_falso_para_entorno):
+            r = self._post("/api/workspace_pericial_testigos_sugeridos", {
+                "workspace_id": self.ws, "direccion": "Calle Ejemplo 1, Málaga",
+            })
+        candidato = r["json"]["testigos"][0]
+        pericial_id = self._crear_pericial()
+        alta = self._post("/api/workspace_pericial_testigo", {
+            "workspace_id": self.ws, "pericial_id": pericial_id,
+            "fuente": f"CRM propio — {candidato['direccion']}",
+            "fecha_captura": candidato["fecha"], "precio": candidato["precio"],
+            "superficie": candidato["superficie"],
+        })
+        self.assertEqual(alta["estado"], 200, alta["json"])
+        detalle = self._get(f"/api/workspace_pericial?id={pericial_id}&workspace_id={self.ws}")
+        testigo_guardado = json.loads(detalle["cuerpo"].decode("utf-8"))["testigos"][0]
+        self.assertEqual(testigo_guardado["precio"], 180000)
+        self.assertTrue(testigo_guardado["valor_homogeneizado"])
+
+
 class ElCalculoEsPuroYNoNecesitaServidorTests(unittest.TestCase):
     def test_homogenizacion_sin_coeficientes_es_precio_entre_superficie(self):
         r = S.compute_homogenizacion_testigo({"precio": 200000, "superficie": 100}, {})
