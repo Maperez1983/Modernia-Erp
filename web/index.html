@@ -3051,6 +3051,14 @@
               Dirección
               <input name="direccion_manual" placeholder="Calle, número, localidad" />
             </label>
+            <div class="form-actions span-2" style="margin-top:-8px;">
+              <button type="button" id="workspacePericialBuscarEntornoBtn" class="secondary ghost">Buscar entorno</button>
+              <span id="workspacePericialEntornoStatus" class="muted"></span>
+            </div>
+            <label class="span-2">
+              Descripción del entorno
+              <textarea name="descripcion_entorno" rows="3" placeholder="Barrio, distrito y equipamientos cercanos. Se puede precargar con «Buscar entorno» y editar a mano."></textarea>
+            </label>
             <label>
               Referencia catastral
               <input name="referencia_catastral_manual" />
@@ -12168,7 +12176,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=929",
+              "app.js?v=930",
               // Panel de la operación en la ficha del inmueble.
               "inmo_operacion.js?v=1",
             ];

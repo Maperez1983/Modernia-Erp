@@ -398,6 +398,22 @@ class ElListadoYLaFichaFuncionanTests(Base):
         self.assertEqual(len(data["rows"]), 1)
         self.assertEqual(data["rows"][0]["inmueble_denominacion"], "Piso sin gestionar")
 
+    def test_el_listado_trae_lo_que_hace_falta_para_editar_sin_vaciar_nada(self):
+        # El botón "Editar" del listado rellena el formulario con esta misma
+        # fila (no con la ficha completa) y, al guardar, cualquier campo
+        # ausente del payload se manda como cadena vacía y se pisa a NULL. Si
+        # el listado no trae dirección/superficies, "editar y guardar" sin
+        # tocar nada real vacía el expediente.
+        self._crear_pericial(
+            direccion_manual="Calle Real 5", referencia_catastral_manual="1234567AB1234A0001XY",
+            superficie_calculo_usada="90", motivo_superficie_usada="Medida en visita",
+        )
+        r = self._get(f"/api/workspace_periciales?workspace_id={self.ws}")
+        fila = json.loads(r["cuerpo"].decode("utf-8"))["rows"][0]
+        for campo in ("direccion_manual", "referencia_catastral_manual",
+                      "superficie_calculo_usada", "motivo_superficie_usada"):
+            self.assertTrue(fila.get(campo), f"falta {campo} en el listado")
+
     def test_ficha_devuelve_checklist_pendiente(self):
         pericial_id = self._crear_pericial()
         r = self._get(f"/api/workspace_pericial?id={pericial_id}&workspace_id={self.ws}")
@@ -504,6 +520,112 @@ class LasFotosYLaDocumentacionAparecenEnElInformeTests(Base):
         # del informe. Este assert es justo el que lo habría detectado.
         self.assertIn("Valor de tasación", texto)
         self.assertIn("Valor unitario homogeneizado", texto)
+
+
+class _RespuestaHttpFalsa:
+    def __init__(self, datos):
+        self._datos = json.dumps(datos).encode("utf-8")
+
+    def read(self):
+        return self._datos
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_a):
+        return False
+
+
+_urlopen_real = urllib.request.urlopen
+
+
+def _urlopen_falso_para_entorno(req, timeout=None):
+    # `S.urllib.request` es el mismo módulo que este test usa para hablar con
+    # su propio servidor local: lo que no sea Nominatim/Overpass pasa tal
+    # cual al urlopen real, o el _post/_get del propio harness se rompería.
+    url = req.full_url if hasattr(req, "full_url") else str(req)
+    if "nominatim.openstreetmap.org/reverse" in url:
+        return _RespuestaHttpFalsa({
+            "address": {"suburb": "El Palo", "city_district": "Distrito Este", "city": "Málaga"},
+        })
+    if "nominatim.openstreetmap.org/search" in url:
+        return _RespuestaHttpFalsa([
+            {"lat": "36.7213", "lon": "-4.4214", "display_name": "Calle Ejemplo 1, Málaga"},
+        ])
+    if "photon.komoot.io" in url:
+        return _RespuestaHttpFalsa({"features": []})
+    if "geocode.arcgis.com" in url:
+        return _RespuestaHttpFalsa({"candidates": []})
+    if "overpass-api.de" in url:
+        return _RespuestaHttpFalsa({
+            "elements": [
+                {"tags": {"amenity": "school"}}, {"tags": {"amenity": "school"}},
+                {"tags": {"amenity": "pharmacy"}},
+                {"tags": {"public_transport": "stop_position"}},
+                {"tags": {"public_transport": "stop_position"}}, {"tags": {"public_transport": "stop_position"}},
+            ],
+        })
+    return _urlopen_real(req, timeout=timeout)
+
+
+class LaDescripcionDelEntornoSeBuscaPorDireccionTests(Base):
+    """Barrio/distrito por reverse-geocoding + equipamientos cercanos por
+    Overpass, con la fuente citada en el propio texto. Un fallo de red en
+    cualquiera de las dos partes no debe tirar la petición entera si al
+    menos se pudo geocodificar — media respuesta es mejor que un 502."""
+
+    def test_arma_el_parrafo_con_barrio_distrito_y_equipamientos(self):
+        with patch.object(S.urllib.request, "urlopen", _urlopen_falso_para_entorno):
+            r = self._post("/api/workspace_pericial_entorno", {
+                "workspace_id": self.ws, "direccion": "Calle Ejemplo 1, Málaga",
+            })
+        self.assertEqual(r["estado"], 200, r["json"])
+        texto = r["json"]["texto"]
+        self.assertIn("El Palo", texto)
+        self.assertIn("Distrito Este", texto)
+        self.assertIn("Málaga", texto)
+        self.assertIn("2 colegios", texto)
+        self.assertIn("1 farmacia", texto)
+        self.assertIn("3 paradas de transporte público", texto)
+        self.assertIn("OpenStreetMap", texto)
+
+    def test_si_overpass_falla_sigue_dando_la_ubicacion(self):
+        def urlopen_sin_overpass(req, timeout=None):
+            if "overpass-api.de" in req.full_url:
+                raise OSError("sin red")
+            return _urlopen_falso_para_entorno(req, timeout=timeout)
+
+        with patch.object(S.urllib.request, "urlopen", urlopen_sin_overpass):
+            r = self._post("/api/workspace_pericial_entorno", {
+                "workspace_id": self.ws, "direccion": "Calle Ejemplo 1, Málaga",
+            })
+        self.assertEqual(r["estado"], 200, r["json"])
+        self.assertIn("El Palo", r["json"]["texto"])
+
+    def test_no_geocodificable_da_error_claro_no_500(self):
+        def urlopen_sin_resultados(req, timeout=None):
+            if "nominatim.openstreetmap.org/search" in req.full_url:
+                return _RespuestaHttpFalsa([])
+            return _urlopen_falso_para_entorno(req, timeout=timeout)
+
+        with patch.object(S.urllib.request, "urlopen", urlopen_sin_resultados):
+            r = self._post("/api/workspace_pericial_entorno", {
+                "workspace_id": self.ws, "direccion": "Dirección que no existe en ningún sitio",
+            })
+        self.assertEqual(r["estado"], 400, r["json"])
+
+    def test_el_texto_se_guarda_editable_en_el_expediente_y_sale_en_el_pdf(self):
+        pericial_id = self._crear_pericial(
+            descripcion_entorno="Zona residencial tranquila, a pie de playa. [Texto editado a mano.]"
+        )
+        self._anade_testigos(pericial_id)
+        r = self._post("/api/workspace_pericial_pdf", {"workspace_id": self.ws, "id": pericial_id})
+        self.assertEqual(r["estado"], 200, r["json"])
+        servido = self._get(f"/api/workspace_pericial_pdf?id={pericial_id}&workspace_id={self.ws}")
+        from pypdf import PdfReader
+        texto = "\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(servido["cuerpo"])).pages)
+        self.assertIn("Descripción del entorno", texto)
+        self.assertIn("Texto editado a mano", texto)
 
 
 class ElCalculoEsPuroYNoNecesitaServidorTests(unittest.TestCase):

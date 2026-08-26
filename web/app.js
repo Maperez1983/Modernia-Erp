@@ -2671,6 +2671,8 @@ const workspacePericialStatus = document.getElementById("workspacePericialStatus
 const workspacePericialResetBtn = document.getElementById("workspacePericialResetBtn");
 const workspacePericialesTable = document.getElementById("workspacePericialesTable");
 const workspacePericialesInfo = document.getElementById("workspacePericialesInfo");
+const workspacePericialBuscarEntornoBtn = document.getElementById("workspacePericialBuscarEntornoBtn");
+const workspacePericialEntornoStatus = document.getElementById("workspacePericialEntornoStatus");
 const workspaceFincasBudgetQuickForm = document.getElementById("workspaceFincasBudgetQuickForm");
 const workspaceFincasBudgetOpenEngine = document.getElementById("workspaceFincasBudgetOpenEngine");
 const workspaceFincasBudgetResetBtn = document.getElementById("workspaceFincasBudgetResetBtn");
@@ -22291,6 +22293,7 @@ const fillWorkspacePericialForm = (row = null) => {
   set("superficie_medida", row?.superficie_medida || "");
   set("superficie_calculo_usada", row?.superficie_calculo_usada || "");
   set("motivo_superficie_usada", row?.motivo_superficie_usada || "");
+  set("descripcion_entorno", row?.descripcion_entorno || "");
   hydrateWorkspaceCompanySelects();
   if (row?.empresa_id) {
     const sel = workspacePericialForm.querySelector('[name="empresa_id"]');
@@ -22413,6 +22416,29 @@ workspacePericialForm?.addEventListener("submit", async (event) => {
 });
 
 workspacePericialResetBtn?.addEventListener("click", () => fillWorkspacePericialForm(null));
+
+workspacePericialBuscarEntornoBtn?.addEventListener("click", async () => {
+  const direccion = String(workspacePericialForm?.querySelector('[name="direccion_manual"]')?.value || "").trim();
+  if (!direccion) {
+    if (workspacePericialEntornoStatus) workspacePericialEntornoStatus.textContent = "Escribe antes la dirección.";
+    return;
+  }
+  try {
+    if (workspacePericialEntornoStatus) workspacePericialEntornoStatus.textContent = "Buscando...";
+    const res = await apiPost("/api/workspace_pericial_entorno", {
+      workspace_id: state.currentWorkspaceId || "", direccion,
+    });
+    const campo = workspacePericialForm?.querySelector('[name="descripcion_entorno"]');
+    if (campo) campo.value = res?.texto || "";
+    if (workspacePericialEntornoStatus) {
+      workspacePericialEntornoStatus.textContent = "Encontrado. Revisa el texto antes de guardar.";
+    }
+  } catch (error) {
+    if (workspacePericialEntornoStatus) {
+      workspacePericialEntornoStatus.textContent = error?.message || "No se pudo buscar el entorno.";
+    }
+  }
+});
 
 const openPericialModal = async (row) => {
   let modal = document.getElementById("pericialModal");

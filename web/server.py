@@ -34703,6 +34703,127 @@ def fetch_geocode_coordinates(address, municipio="", provincia="", codigo_postal
     }
 
 
+def _fetch_nominatim_reverse(lat, lon):
+    """Barrio/distrito/municipio a partir de una coordenada. Mismo proveedor e
+    identificación que `_fetch_nominatim_query`, en su endpoint de reverse."""
+    params = urllib.parse.urlencode(
+        {"format": "jsonv2", "lat": lat, "lon": lon, "zoom": 16, "addressdetails": 1}
+    )
+    req = urllib.request.Request(
+        f"https://nominatim.openstreetmap.org/reverse?{params}",
+        headers={
+            "User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)",
+            "Accept-Language": "es",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=8) as response:
+        return json.loads(response.read().decode("utf-8", errors="ignore"))
+
+
+#: Qué se cuenta como "cercano" para el párrafo de entorno, y con qué etiqueta
+#: en español aparece. `tag` es la clave OSM que se consulta en Overpass.
+ENTORNO_CATEGORIAS_OSM = [
+    ("amenity", "school", "colegio", "colegios"),
+    ("amenity", "kindergarten", "escuela infantil", "escuelas infantiles"),
+    ("amenity", "pharmacy", "farmacia", "farmacias"),
+    ("amenity", "hospital", "hospital", "hospitales"),
+    ("amenity", "clinic", "centro de salud", "centros de salud"),
+    ("shop", "supermarket", "supermercado", "supermercados"),
+    ("leisure", "park", "parque", "parques"),
+    ("public_transport", "stop_position", "parada de transporte público", "paradas de transporte público"),
+]
+
+
+def _fetch_overpass_pois(lat, lon, radio_m=400):
+    """Equipamientos en un radio alrededor del punto, vía Overpass API
+    (OpenStreetMap) — mismo dato que ya usa el mapa estático del presupuesto,
+    consultado aquí por tipo en vez de por tesela."""
+    condiciones = "".join(
+        f'node["{clave}"="{valor}"](around:{radio_m},{lat},{lon});'
+        for clave, valor, _etq_sing, _etq_plur in ENTORNO_CATEGORIAS_OSM
+    )
+    consulta = f"[out:json][timeout:10];({condiciones});out count;out ids;"
+    req = urllib.request.Request(
+        "https://overpass-api.de/api/interpreter",
+        data=urllib.parse.urlencode({"data": consulta}).encode("utf-8"),
+        headers={"User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)"},
+    )
+    with urllib.request.urlopen(req, timeout=12) as response:
+        payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+    conteos = {f"{clave}={valor}": 0 for clave, valor, _s, _p in ENTORNO_CATEGORIAS_OSM}
+    for elemento in payload.get("elements") or []:
+        tags = elemento.get("tags") or {}
+        for clave, valor, _s, _p in ENTORNO_CATEGORIAS_OSM:
+            if tags.get(clave) == valor:
+                conteos[f"{clave}={valor}"] += 1
+    return conteos
+
+
+def fetch_descripcion_entorno(direccion, *, municipio="", provincia="", codigo_postal="", radio_m=400):
+    """El párrafo de "descripción del entorno" del informe pericial: barrio,
+    distrito y equipamientos a `radio_m` metros, con fuente citada. Texto de
+    partida editable, no un dato que se dé por bueno sin poder corregirlo —
+    igual que las cifras legales precargadas en fincas.
+
+    Devuelve `{"ok": False, "error": ...}` si no se pudo geocodificar; un
+    fallo de Overpass no tira el resultado entero, solo omite esa parte
+    (la ubicación por sí sola ya es útil).
+    """
+    geo = fetch_geocode_coordinates(direccion, municipio=municipio, provincia=provincia, codigo_postal=codigo_postal)
+    if not geo.get("ok"):
+        return {"ok": False, "error": "No se pudo localizar la dirección para describir el entorno."}
+    lat, lon = geo["lat"], geo["lon"]
+
+    barrio = distrito = municipio_nombre = ""
+    try:
+        reverso = _fetch_nominatim_reverse(lat, lon)
+        direccion_osm = reverso.get("address") or {}
+        barrio = str(direccion_osm.get("suburb") or direccion_osm.get("neighbourhood") or "").strip()
+        distrito = str(direccion_osm.get("city_district") or direccion_osm.get("borough") or "").strip()
+        municipio_nombre = str(
+            direccion_osm.get("city") or direccion_osm.get("town") or direccion_osm.get("village") or ""
+        ).strip()
+    except Exception:
+        pass
+
+    frases = []
+    ubicacion = ", ".join(p for p in (barrio, distrito, municipio_nombre) if p)
+    if ubicacion:
+        frases.append(f"El inmueble se ubica en {ubicacion}.")
+    elif geo.get("display_name"):
+        frases.append(f"Ubicación de referencia: {geo['display_name']}.")
+
+    conteos = {}
+    try:
+        conteos = _fetch_overpass_pois(lat, lon, radio_m=radio_m)
+    except Exception:
+        conteos = {}
+    equipamientos = []
+    for clave, valor, etiqueta_sing, etiqueta_plur in ENTORNO_CATEGORIAS_OSM:
+        n = conteos.get(f"{clave}={valor}", 0)
+        if n == 1:
+            equipamientos.append(f"1 {etiqueta_sing}")
+        elif n > 1:
+            equipamientos.append(f"{n} {etiqueta_plur}")
+    if equipamientos:
+        frases.append(
+            f"En un radio aproximado de {radio_m} m se han localizado: {', '.join(equipamientos)}."
+        )
+
+    hoy = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    frases.append(f"Fuente: OpenStreetMap (Nominatim/Overpass), consultado el {hoy}.")
+
+    return {
+        "ok": True,
+        "texto": " ".join(frases),
+        "lat": lat,
+        "lon": lon,
+        "barrio": barrio,
+        "distrito": distrito,
+        "municipio": municipio_nombre,
+    }
+
+
 def _strip_html_fragment(value):
     raw = re.sub(r"<br\s*/?>", " ", str(value or ""), flags=re.I)
     raw = re.sub(r"<[^>]+>", "", raw)
@@ -46280,6 +46401,11 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    # Párrafo de "descripción del entorno" (barrio/distrito + equipamientos
+    # cercanos). Se precarga con `fetch_descripcion_entorno` citando su fuente,
+    # pero es texto libre editable — igual que las cifras legales de fincas,
+    # no se da nada por bueno sin poder corregirlo.
+    ensure_column(conn, "workspace_periciales", "descripcion_entorno", "descripcion_entorno TEXT")
     # Testigos/comparables. Nunca se borran de verdad: un testigo descartado sigue
     # siendo prueba de la diligencia del trabajo (qué se consideró y por qué se
     # rechazó). `evidencia_id_vigente` apunta a la última captura si se
@@ -46739,6 +46865,10 @@ def build_pericial_valoracion_pdf(pericial, workspace, company, inmueble, client
         ],
     }))
 
+    descripcion_entorno = str(pericial.get("descripcion_entorno") or "").strip()
+    if descripcion_entorno:
+        sections.append(("Descripción del entorno", [descripcion_entorno]))
+
     if documentos_aportados:
         sections.append(("Documentación aportada", [
             "Para la elaboración de este informe se ha tenido a la vista la siguiente documentación:",
@@ -47101,9 +47231,13 @@ def fetch_workspace_periciales(conn, workspace_id, limit=100):
           COALESCE(c.nombre, '') AS cliente_nombre,
           COALESCE(u.nombre, '') AS perito_nombre,
           COALESCE(i.direccion, i.titulo, p.denominacion_manual, p.direccion_manual, '') AS inmueble_denominacion,
+          p.denominacion_manual, p.direccion_manual, p.referencia_catastral_manual,
+          p.descripcion_entorno,
           p.perito_usuario_id, p.colegiado_numero, p.finalidad, p.procedimiento_referencia,
           p.metodo, p.estado, p.motivo_estado, p.fecha_encargo, p.fecha_visita,
-          p.fecha_valoracion, p.fecha_emision, p.valor_final, p.created_at, p.updated_at
+          p.fecha_valoracion, p.fecha_emision, p.valor_final, p.created_at, p.updated_at,
+          p.superficie_catastral, p.superficie_registral, p.superficie_medida,
+          p.superficie_calculo_usada, p.motivo_superficie_usada
         FROM workspace_periciales p
         LEFT JOIN empresas e ON e.id = p.empresa_id
         LEFT JOIN clientes c ON c.id = p.cliente_id
@@ -72259,6 +72393,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_presupuesto_delete",
             "/api/workspace_pericial",
             "/api/workspace_pericial_delete",
+            "/api/workspace_pericial_entorno",
             "/api/workspace_pericial_testigo",
             "/api/workspace_pericial_evidencia",
             "/api/workspace_pericial_pdf",
@@ -85386,6 +85521,7 @@ class Handler(BaseHTTPRequestHandler):
                 _campo("motivo_superficie_usada"),
                 _campo("valor_final", parse_money_value),
                 json.dumps(calculo, ensure_ascii=False),
+                _campo("descripcion_entorno"),
             )
             if record_id:
                 conn.execute(
@@ -85394,7 +85530,7 @@ class Handler(BaseHTTPRequestHandler):
                     "perito_usuario_id=?, colegiado_numero=?, finalidad=?, procedimiento_referencia=?, metodo=?, "
                     "estado=?, motivo_estado=?, fecha_encargo=?, fecha_visita=?, fecha_valoracion=?, fecha_emision=?, "
                     "superficie_catastral=?, superficie_registral=?, superficie_medida=?, superficie_calculo_usada=?, "
-                    "motivo_superficie_usada=?, valor_final=?, calculo_json=?, updated_at=datetime(?) "
+                    "motivo_superficie_usada=?, valor_final=?, calculo_json=?, descripcion_entorno=?, updated_at=datetime(?) "
                     "WHERE id = ? AND workspace_id = ?",
                     (*values, now, record_id, workspace_id),
                 )
@@ -85406,8 +85542,8 @@ class Handler(BaseHTTPRequestHandler):
                     "perito_usuario_id, colegiado_numero, finalidad, procedimiento_referencia, metodo, estado, "
                     "motivo_estado, fecha_encargo, fecha_visita, fecha_valoracion, fecha_emision, "
                     "superficie_catastral, superficie_registral, superficie_medida, superficie_calculo_usada, "
-                    "motivo_superficie_usada, valor_final, calculo_json, created_at, updated_at) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime(?),datetime(?))",
+                    "motivo_superficie_usada, valor_final, calculo_json, descripcion_entorno, created_at, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime(?),datetime(?))",
                     (record_id, *values, now, now),
                 )
             # El nº de colegiado se aprende del perito la primera vez que se
@@ -85427,6 +85563,30 @@ class Handler(BaseHTTPRequestHandler):
                     apunta_escritura_tragada("workspace_pericial/aprender_colegiado", _fallo_tragado)
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_pericial_entorno":
+            # Solo busca y devuelve el texto — no guarda nada. El formulario lo
+            # precarga en el campo editable; hace falta un "Guardar expediente"
+            # aparte para que quede, igual que el resto de campos manuales.
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            direccion = str(payload.get("direccion") or "").strip()
+            if not workspace_id or not direccion:
+                json_response(self, {"error": "workspace_id y direccion requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            try:
+                resultado = fetch_descripcion_entorno(direccion)
+            except Exception as fallo:
+                json_response(self, {"error": f"No se pudo consultar el entorno: {fallo}"}, status=502)
+                return
+            if not resultado.get("ok"):
+                json_response(self, {"error": resultado.get("error") or "No se pudo localizar el entorno."}, status=400)
+                return
+            json_response(self, resultado)
             return
         elif parsed.path == "/api/workspace_pericial_delete":
             workspace_id = str(payload.get("workspace_id") or "").strip()
