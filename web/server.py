@@ -26693,7 +26693,7 @@ def ensure_inmueble_doc_cliente_link(conn, inmueble_row, doc_row, cliente_id, no
     return doc_id
 
 
-def sync_inmueble_docs_for_inmueble(conn, inmueble_id, now):
+def sync_inmueble_docs_for_inmueble(conn, inmueble_id, now, only_cliente_id=None):
     if not inmueble_id:
         return {"linked": 0, "removed": 0}
     tables = {
@@ -26750,7 +26750,12 @@ def sync_inmueble_docs_for_inmueble(conn, inmueble_id, now):
     linked = 0
     if owner_ids:
         ensure_cliente_servicio_link(conn, owner_ids[0], inmueble["empresa_id"], "inmobiliaria", now)
-    for cliente_id in owner_ids:
+    # Con fincas/comunidades de muchos copropietarios, sincronizar TODOS los vecinos en cada
+    # visita a la ficha de UNO de ellos multiplica las idas y vueltas a la base por el número de
+    # vecinos (visto: miles de round-trips → la ficha se queda colgada). Cada propietario ya se
+    # sincroniza cuando se abre SU PROPIA ficha, así que aquí basta con el que motivó la llamada.
+    targets = [cid for cid in owner_ids if cid == only_cliente_id] if only_cliente_id else owner_ids
+    for cliente_id in targets:
         ensure_cliente_servicio_link(conn, cliente_id, inmueble["empresa_id"], "inmobiliaria", now)
         for row in docs_rows:
             if ensure_inmueble_doc_cliente_link(conn, inmueble, row, cliente_id, now):
@@ -26786,7 +26791,7 @@ def autolink_inmueble_docs_for_cliente(conn, cliente_id, empresa_id, now):
     linked = 0
     removed = 0
     for inmueble_id in inmueble_ids:
-        result = sync_inmueble_docs_for_inmueble(conn, inmueble_id, now)
+        result = sync_inmueble_docs_for_inmueble(conn, inmueble_id, now, only_cliente_id=cliente_id)
         linked += int(result.get("linked") or 0)
         removed += int(result.get("removed") or 0)
     if inmueble_ids:
