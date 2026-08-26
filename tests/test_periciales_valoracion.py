@@ -970,5 +970,100 @@ class ElPlanoDeSituacionApareceEnElPdfTests(Base):
         mapa_mock.assert_not_called()
 
 
+class ElTestigoSeEditaSeDescartaYSeHomogeneizaTests(Base):
+    """Un testigo nunca se borra de verdad — solo cambia de estado — y la
+    homogeneización ahora puede llevar coeficientes reales, no solo
+    precio÷m². El backend ya lo soportaba todo; esto prueba que el POST que
+    usa la ficha (id para editar, estado/motivo_descarte para descartar,
+    coeficientes) se comporta como se espera."""
+
+    def _crea_testigo(self, pericial_id, **overrides):
+        payload = dict(
+            workspace_id=self.ws, pericial_id=pericial_id, fuente="Idealista",
+            fecha_captura="2026-07-01", precio=200000, superficie=100,
+        )
+        payload.update(overrides)
+        r = self._post("/api/workspace_pericial_testigo", payload)
+        self.assertEqual(r["estado"], 200, r["json"])
+        return r["json"]["id"]
+
+    def test_editar_con_id_actualiza_no_duplica(self):
+        pericial_id = self._crear_pericial()
+        testigo_id = self._crea_testigo(pericial_id, precio=200000, superficie=100)
+        self._post("/api/workspace_pericial_testigo", {
+            "id": testigo_id, "workspace_id": self.ws, "pericial_id": pericial_id,
+            "fuente": "Idealista (corregido)", "fecha_captura": "2026-07-01",
+            "precio": 210000, "superficie": 100,
+        })
+        filas = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM workspace_pericial_testigos WHERE pericial_id = ?", (pericial_id,),
+        ).fetchone()
+        self.assertEqual(filas["n"], 1)
+        fila = self.conn.execute(
+            "SELECT fuente, precio FROM workspace_pericial_testigos WHERE id = ?", (testigo_id,),
+        ).fetchone()
+        self.assertEqual(fila["fuente"], "Idealista (corregido)")
+        self.assertEqual(fila["precio"], 210000)
+
+    def test_descartar_guarda_motivo_y_sale_del_calculo(self):
+        pericial_id = self._crear_pericial()
+        testigo_id = self._crea_testigo(pericial_id)
+        self._post("/api/workspace_pericial_testigo", {
+            "id": testigo_id, "workspace_id": self.ws, "pericial_id": pericial_id,
+            "estado": "descartado", "motivo_descarte": "Superficie no comparable",
+            "fuente": "Idealista", "fecha_captura": "2026-07-01", "precio": 200000, "superficie": 100,
+        })
+        fila = self.conn.execute(
+            "SELECT estado, motivo_descarte FROM workspace_pericial_testigos WHERE id = ?", (testigo_id,),
+        ).fetchone()
+        self.assertEqual(fila["estado"], "descartado")
+        self.assertEqual(fila["motivo_descarte"], "Superficie no comparable")
+        detalle = self._get(f"/api/workspace_pericial?id={pericial_id}&workspace_id={self.ws}")
+        cuerpo = json.loads(detalle["cuerpo"].decode("utf-8"))
+        # Sin testigos activos, la muestra recalculada queda vacía (el
+        # `valor_final` ya fijado no se pisa a la baja — es deliberado, para
+        # que un valor manual no desaparezca solo por tocar un testigo).
+        estadisticos = cuerpo["calculo"].get("comparacion", {}).get("estadisticos", {})
+        self.assertEqual(estadisticos.get("n_muestra"), 0)
+        self.assertIn("El método de comparación exige al menos", " ".join(cuerpo["checklist_pendiente"]))
+
+    def test_descartado_aparece_en_el_pdf_como_descartado(self):
+        pericial_id = self._crear_pericial()
+        self._anade_testigos(pericial_id)
+        testigo_a_descartar_id = self._crea_testigo(pericial_id, fuente="Notaría dudosa", precio=500000, superficie=100)
+        self._post("/api/workspace_pericial_testigo", {
+            "id": testigo_a_descartar_id, "workspace_id": self.ws, "pericial_id": pericial_id,
+            "estado": "descartado", "motivo_descarte": "Precio muy alejado del resto de la muestra",
+            "fuente": "Notaría dudosa", "fecha_captura": "2026-07-01", "precio": 500000, "superficie": 100,
+        })
+        r = self._post("/api/workspace_pericial_pdf", {"workspace_id": self.ws, "id": pericial_id})
+        self.assertEqual(r["estado"], 200, r["json"])
+        servido = self._get(f"/api/workspace_pericial_pdf?id={pericial_id}&workspace_id={self.ws}")
+        from pypdf import PdfReader
+        texto = "\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(servido["cuerpo"])).pages)
+        self.assertIn("Testigos descartados", texto)
+        self.assertIn("Notaría dudosa", texto)
+        self.assertIn("Precio muy alejado del resto de la muestra", texto)
+
+    def test_coeficiente_no_neutro_se_ve_en_el_pdf(self):
+        pericial_id = self._crear_pericial()
+        self._anade_testigos(pericial_id)
+        self._post("/api/workspace_pericial_testigo", {
+            "workspace_id": self.ws, "pericial_id": pericial_id,
+            "fuente": "Idealista (planta baja)", "fecha_captura": "2026-07-01",
+            "precio": 200000, "superficie": 100,
+            "coeficientes": json.dumps({
+                "planta": {"factor": 1.08, "motivo": "testigo en planta baja, sujeto en 2ª"},
+            }),
+        })
+        r = self._post("/api/workspace_pericial_pdf", {"workspace_id": self.ws, "id": pericial_id})
+        self.assertEqual(r["estado"], 200, r["json"])
+        servido = self._get(f"/api/workspace_pericial_pdf?id={pericial_id}&workspace_id={self.ws}")
+        from pypdf import PdfReader
+        texto = "\n".join(p.extract_text() or "" for p in PdfReader(BytesIO(servido["cuerpo"])).pages)
+        self.assertIn("Ajustes de homogeneización aplicados", texto)
+        self.assertIn("testigo en planta baja, sujeto en 2ª", texto)
+
+
 if __name__ == "__main__":
     unittest.main()

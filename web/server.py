@@ -47168,27 +47168,55 @@ def build_pericial_valoracion_pdf(pericial, workspace, company, inmueble, client
         ]))
 
     activos = [t for t in (testigos or []) if str(t.get("estado") or "activo") == "activo"]
+    motivos_coeficientes = []
     if activos:
         filas = []
         for t in activos:
+            try:
+                coefs_testigo = json.loads(t.get("coeficientes_json") or "{}") or {}
+            except Exception:
+                coefs_testigo = {}
+            homog = compute_homogenizacion_testigo(
+                {"precio": t.get("precio"), "superficie": t.get("superficie")}, coefs_testigo,
+            )
+            coef_total = homog.get("coeficiente_total") or 1.0
+            for ajuste in homog.get("detalle") or []:
+                if ajuste.get("motivo"):
+                    motivos_coeficientes.append(
+                        f"{t.get('fuente') or 'Testigo'}: {ajuste['motivo']} (×{ajuste['factor']:.2f})"
+                    )
             filas.append([
                 str(t.get("fuente") or "—"),
                 str(t.get("fecha_captura") or "—"),
                 format_eur(t.get("precio")) if t.get("precio") else "—",
                 _m2(t.get("superficie")),
+                f"×{coef_total:.2f}" if abs(coef_total - 1.0) > 0.001 else "—",
                 format_eur(t.get("valor_homogeneizado")) if t.get("valor_homogeneizado") else "—",
             ])
         sections.append(("Testigos utilizados (método de comparación)", {
             "kind": "table",
             "columns": [
-                {"label": "Fuente", "width": 2.2},
-                {"label": "Fecha", "width": 1.1},
-                {"label": "Precio", "width": 1.3, "align": "right"},
-                {"label": "Superficie", "width": 1.3, "align": "right"},
-                {"label": "Valor unit. homogeneizado", "width": 1.6, "align": "right"},
+                {"label": "Fuente", "width": 2.0},
+                {"label": "Fecha", "width": 1.0},
+                {"label": "Precio", "width": 1.2, "align": "right"},
+                {"label": "Superficie", "width": 1.2, "align": "right"},
+                {"label": "Coef.", "width": 0.8, "align": "right"},
+                {"label": "Valor unit. homogeneizado", "width": 1.5, "align": "right"},
             ],
             "rows": filas,
         }))
+        if motivos_coeficientes:
+            sections.append(("Ajustes de homogeneización aplicados", [
+                f"• {m}" for m in motivos_coeficientes
+            ]))
+
+    descartados = [t for t in (testigos or []) if str(t.get("estado") or "") == "descartado"]
+    if descartados:
+        sections.append(("Testigos descartados", [
+            "Se consideraron y se descartaron los siguientes comparables, por diligencia del proceso:",
+            *[f"• {str(t.get('fuente') or 'Testigo')} — {str(t.get('motivo_descarte') or 'sin motivo registrado')}"
+              for t in descartados],
+        ]))
 
     if estadisticos:
         sections.append(("Análisis y homogeneización", {

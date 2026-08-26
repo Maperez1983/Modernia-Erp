@@ -22653,18 +22653,40 @@ const renderWorkspacePericialFicha = async () => {
   }
 
   if (tab === "testigos") {
-    const testigos = (detalle?.testigos || []).filter((t) => (t.estado || "activo") === "activo");
+    // Cinco categorías fijas, las mismas que ya cita la sección "Metodología
+    // aplicada" del PDF (ubicación, superficie, estado, orientación, planta
+    // y antigüedad — la superficie no es un coeficiente, es la unidad base
+    // precio/m² de la que se parte).
+    const COEF_CATEGORIAS = [
+      { clave: "ubicacion", etiqueta: "Ubicación" },
+      { clave: "estado_conservacion", etiqueta: "Estado de conservación" },
+      { clave: "orientacion", etiqueta: "Orientación" },
+      { clave: "planta", etiqueta: "Planta" },
+      { clave: "antiguedad", etiqueta: "Antigüedad" },
+    ];
+    // Se muestran todos los estados, no solo los activos: un testigo
+    // descartado sigue siendo prueba de la diligencia del trabajo, no algo
+    // que desaparece de la vista.
+    const testigos = detalle?.testigos || [];
     workspacePericialFichaPanel.innerHTML = `
       ${checklistHtml}
       <div data-pericial-ficha-testigos-list>
         ${testigos.length
-          ? `<div class="workspace-billing-list">${testigos.map((t) => `
-              <div class="workspace-billing-row">
+          ? `<div class="workspace-billing-list">${testigos.map((t) => {
+              const descartado = (t.estado || "activo") === "descartado";
+              return `
+              <div class="workspace-billing-row" style="${descartado ? "opacity:0.55;" : ""}">
                 <div><strong>${escapeHtml(t.fuente || "-")}</strong>
-                  <div class="muted">${escapeHtml(t.fecha_captura || "-")} · ${euroFormatter.format(Number(t.precio || 0))} · ${Number(t.superficie || 0)} m²</div>
+                  <div class="muted">${escapeHtml(t.fecha_captura || "-")} · ${euroFormatter.format(Number(t.precio || 0))} · ${Number(t.superficie || 0)} m²${descartado ? ` · Descartado: ${escapeHtml(t.motivo_descarte || "sin motivo registrado")}` : ""}</div>
                 </div>
-                <div class="workspace-billing-meta"><span>${t.valor_homogeneizado ? euroFormatter.format(Number(t.valor_homogeneizado)) + "/m²" : "—"}</span></div>
-              </div>`).join("")}</div>`
+                <div class="workspace-billing-meta">
+                  <span>${t.valor_homogeneizado ? euroFormatter.format(Number(t.valor_homogeneizado)) + "/m²" : "—"}</span>
+                  ${firmado ? "" : `
+                  <button type="button" class="secondary ghost button-inline" data-testigo-editar="${escapeHtml(t.id)}">Editar</button>
+                  ${!descartado ? `<button type="button" class="secondary ghost button-inline" data-testigo-descartar="${escapeHtml(t.id)}">Descartar</button>` : ""}`}
+                </div>
+              </div>`;
+            }).join("")}</div>`
           : "<p class='muted'>Sin testigos todavía.</p>"}
       </div>
       ${firmado ? "" : `
@@ -22674,35 +22696,122 @@ const renderWorkspacePericialFicha = async () => {
       </div>
       <div data-pericial-ficha-inventario-resultados></div>
       <form class="form-grid" data-pericial-ficha-testigo-form style="margin-top:10px;">
+        <input type="hidden" name="id" />
         <label>Fuente<input name="fuente" placeholder="Idealista, notaría..." required /></label>
         <label>Fecha de captura<input name="fecha_captura" type="date" /></label>
         <label>Precio (€)<input name="precio" inputmode="decimal" required /></label>
         <label>Superficie (m²)<input name="superficie" inputmode="decimal" required /></label>
+        <label class="span-2 hidden" data-testigo-descartado-wrap>
+          <input type="checkbox" name="descartado" style="width:auto;display:inline-block;margin-right:6px;" />
+          Marcar como descartado
+          <input name="motivo_descarte" placeholder="Motivo del descarte" style="margin-top:6px;" />
+        </label>
+        <div class="form-grid-section span-2">Coeficientes de homogeneización (opcional)</div>
+        ${COEF_CATEGORIAS.map((c) => `
+        <label>${c.etiqueta} — factor<input name="coef_${c.clave}_factor" inputmode="decimal" placeholder="1.00" /></label>
+        <label>${c.etiqueta} — motivo<input name="coef_${c.clave}_motivo" placeholder="Por qué se ajusta" /></label>`).join("")}
         <div class="form-actions span-2">
-          <button type="submit">Añadir testigo</button>
+          <button type="submit" data-testigo-submit-label>Añadir testigo</button>
+          <button type="button" class="secondary ghost hidden" data-testigo-cancelar-edicion>Cancelar edición</button>
           <span data-pericial-ficha-testigo-status class="muted"></span>
         </div>
       </form>`}
     `;
     if (firmado) return;
     const testigoForm = workspacePericialFichaPanel.querySelector("[data-pericial-ficha-testigo-form]");
+    const testigoSubmitBtn = testigoForm.querySelector("[data-testigo-submit-label]");
+    const testigoCancelarBtn = testigoForm.querySelector("[data-testigo-cancelar-edicion]");
+    const testigoDescartadoWrap = testigoForm.querySelector("[data-testigo-descartado-wrap]");
+    const resetFormularioTestigo = () => {
+      testigoForm.reset();
+      testigoForm.querySelector('[name="id"]').value = "";
+      testigoSubmitBtn.textContent = "Añadir testigo";
+      testigoCancelarBtn.classList.add("hidden");
+      testigoDescartadoWrap.classList.add("hidden");
+    };
+    testigoCancelarBtn.onclick = resetFormularioTestigo;
     testigoForm.onsubmit = async (event) => {
       event.preventDefault();
       const fd = new FormData(testigoForm);
-      const payload = Object.fromEntries(fd.entries());
-      payload.workspace_id = state.currentWorkspaceId || "";
-      payload.pericial_id = pericialId;
+      const marcadoDescartado = testigoForm.querySelector('[name="descartado"]').checked;
+      const payload = {
+        id: fd.get("id") || "", estado: marcadoDescartado ? "descartado" : "activo",
+        motivo_descarte: marcadoDescartado ? String(fd.get("motivo_descarte") || "").trim() : "",
+        fuente: fd.get("fuente") || "", fecha_captura: fd.get("fecha_captura") || "",
+        precio: fd.get("precio") || "", superficie: fd.get("superficie") || "",
+        workspace_id: state.currentWorkspaceId || "", pericial_id: pericialId,
+      };
+      // Solo se manda la clave si de verdad hay un ajuste (factor distinto
+      // de 1 o un motivo escrito) — cinco claves neutras en cada testigo
+      // solo añadirían ruido al calculo_json.
+      const coeficientes = {};
+      COEF_CATEGORIAS.forEach((c) => {
+        const factorTexto = String(fd.get(`coef_${c.clave}_factor`) || "").trim();
+        const motivo = String(fd.get(`coef_${c.clave}_motivo`) || "").trim();
+        const factor = factorTexto ? Number(factorTexto) : 1;
+        if ((factorTexto && Math.abs(factor - 1) > 0.001) || motivo) {
+          coeficientes[c.clave] = { factor: factor || 1, motivo };
+        }
+      });
+      payload.coeficientes = JSON.stringify(coeficientes);
       const statusEl = testigoForm.querySelector("[data-pericial-ficha-testigo-status]");
       try {
         if (statusEl) statusEl.textContent = "Guardando...";
         await apiPost("/api/workspace_pericial_testigo", payload);
-        if (statusEl) statusEl.textContent = "Añadido.";
+        if (statusEl) statusEl.textContent = "Guardado.";
         await refreshWorkspacePericiales({ silent: true });
         await renderWorkspacePericialFicha();
       } catch (error) {
         if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
       }
     };
+    workspacePericialFichaPanel.querySelectorAll("[data-testigo-editar]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const t = testigos.find((x) => x.id === btn.dataset.testigoEditar);
+        if (!t) return;
+        testigoForm.querySelector('[name="id"]').value = t.id;
+        testigoForm.querySelector('[name="fuente"]').value = t.fuente || "";
+        testigoForm.querySelector('[name="fecha_captura"]').value = t.fecha_captura || "";
+        testigoForm.querySelector('[name="precio"]').value = t.precio || "";
+        testigoForm.querySelector('[name="superficie"]').value = t.superficie || "";
+        testigoDescartadoWrap.classList.remove("hidden");
+        testigoForm.querySelector('[name="descartado"]').checked = (t.estado || "activo") === "descartado";
+        testigoForm.querySelector('[name="motivo_descarte"]').value = t.motivo_descarte || "";
+        let coefsGuardados = {};
+        try { coefsGuardados = JSON.parse(t.coeficientes_json || "{}") || {}; } catch (e) {}
+        COEF_CATEGORIAS.forEach((c) => {
+          const ajuste = coefsGuardados[c.clave];
+          testigoForm.querySelector(`[name="coef_${c.clave}_factor"]`).value = ajuste?.factor ?? "";
+          testigoForm.querySelector(`[name="coef_${c.clave}_motivo"]`).value = ajuste?.motivo || "";
+        });
+        testigoSubmitBtn.textContent = "Guardar cambios";
+        testigoCancelarBtn.classList.remove("hidden");
+        testigoForm.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
+    workspacePericialFichaPanel.querySelectorAll("[data-testigo-descartar]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const t = testigos.find((x) => x.id === btn.dataset.testigoDescartar);
+        if (!t) return;
+        const motivo = window.prompt("Motivo del descarte:", "");
+        if (motivo == null) return;
+        try {
+          btn.disabled = true;
+          await apiPost("/api/workspace_pericial_testigo", {
+            id: t.id, workspace_id: state.currentWorkspaceId || "", pericial_id: pericialId,
+            estado: "descartado", motivo_descarte: motivo,
+            fuente: t.fuente || "", fecha_captura: t.fecha_captura || "",
+            precio: t.precio || "", superficie: t.superficie || "",
+            coeficientes: t.coeficientes_json || "{}",
+          });
+          await refreshWorkspacePericiales({ silent: true });
+          await renderWorkspacePericialFicha();
+        } catch (error) {
+          btn.disabled = false;
+          alert(error?.message || "No se pudo descartar.");
+        }
+      });
+    });
     const buscarInventarioBtn = workspacePericialFichaPanel.querySelector("[data-pericial-ficha-buscar-inventario]");
     buscarInventarioBtn.onclick = async () => {
       const statusEl = workspacePericialFichaPanel.querySelector("[data-pericial-ficha-inventario-status]");
