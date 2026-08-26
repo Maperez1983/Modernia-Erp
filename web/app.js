@@ -22378,6 +22378,7 @@ const renderWorkspacePericialesList = () => {
 };
 
 const PERICIAL_CAMPOS_OBLIGATORIOS_LABEL = {
+  empresa_id: "Empresa emisora",
   fecha_valoracion: "Fecha de valoración",
   superficie_calculo_usada: "Usada en el cálculo (m²)",
 };
