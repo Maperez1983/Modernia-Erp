@@ -23094,6 +23094,102 @@ def ocr_pdf_all_pages(pdf_path, use_external=False):
         return text, ""
     return "", ocr_err or img_err
 
+# Etiquetas del impreso que el OCR arrastra pegadas por delante del nombre.
+_ETIQUETA_PEGADA_AL_TOMADOR = re.compile(
+    r"^\s*(?:de\s+la\s+p[oó]liza|de\s+la|del\s+seguro|de\s+seguros|"
+    r"tomador(?:\s+del\s+seguro)?|asegurado|titular|nombre|raz[oó]n\s+social)"
+    r"\s*[:.\-]?\s*", re.IGNORECASE)
+
+# Palabras que sólo salen en la letra pequeña de una póliza, nunca en el nombre de quien
+# la firma. Sacadas del corpus real de 133 pólizas de la correduría.
+_LETRA_PEQUENA_DE_POLIZA = (
+    "electricidad", "derogan", "en su caso", "profesional", "segun la siguiente",
+    "edificacion", "anexos", "conductor habitual", "datos de su", "mediador",
+    "reasegurado", "se rige por", "condiciones particulares", "condiciones generales",
+    "clausula", "franquicia", "capital asegurado", "suma asegurada", "recibo",
+    "suplemento", "el tomador", "la tomadora", "del seguro", "de seguros", "importe",
+)
+
+# Con qué no puede empezar el nombre de alguien.
+_TOMADOR_EMPIEZA_MAL = re.compile(
+    r"^(de|del|la|el|los|las|y|o|con|por|para|en|al|un|una|su|sus|que|se|es|son|"
+    r"datos|tomador|asegurado|conductor|titular|beneficiario|importe|prima|n[ºo]|no)\b",
+    re.IGNORECASE)
+
+
+def limpia_tomador(valor):
+    """Quita lo que el OCR arrastra pegado al nombre, por delante y por detrás.
+
+    El lector recorta la zona del tomador y se trae los bordes: la etiqueta del impreso
+    («de la póliza TERESA RAMOS RUEDA») o trozos de la palabra de al lado cortada por el
+    margen («up SANTANA MUÑOZ, MARIA DEL CARMEN oD», «ica KONECNY FIORE, BARBARA pl»).
+
+    En producción había fichas de cliente llamadas literalmente «de la póliza TERESA
+    RAMOS RUEDA» y «de la póliza JOSE BANDERA DOMINGUEZ». Nacieron de aquí.
+
+    Sólo se tocan los EXTREMOS, y sólo lo que va en minúscula: en estos documentos el
+    nombre va en mayúsculas, y las partículas de un apellido —«MALAGAMBA DE OÑA
+    FERNANDO»— van por dentro y se quedan.
+    """
+    bruto = re.sub(r"\s+", " ", str(valor or "")).strip(" ,;:.-")
+    if not bruto:
+        return ""
+    bruto = _ETIQUETA_PEGADA_AL_TOMADOR.sub("", bruto).strip(" ,;:.-")
+    # El documento suele ir detrás del nombre: «MIGUEL ANGEL PEREZ RODRIGUEZ NIF:
+    # 24835591F». El nombre acaba donde empieza el documento.
+    bruto = re.split(r"(?i)\b(?:nif|dni|cif|n\.i\.f|d\.n\.i)\b\s*[:.]?", bruto)[0].strip(" ,;:.-")
+    def es_resto_de_ocr(tok):
+        """Un trozo corto que no es ni sigla ni nombre: «up», «oD», «pl», «ica».
+
+        Se exige que NO sea todo mayúsculas —para no comerse «SL», «SA», «SLU»— ni un
+        nombre propio con la inicial en mayúscula, que dejaría fuera un «Ana» final.
+        """
+        return len(tok) <= 4 and not tok.isupper() and not tok.istitle()
+
+    trozos = bruto.split()
+    while trozos and es_resto_de_ocr(trozos[0]):
+        trozos.pop(0)
+    while trozos and es_resto_de_ocr(trozos[-1]):
+        trozos.pop()
+    return " ".join(trozos).strip(" ,;:.-")
+
+
+def tomador_parece_un_nombre(valor):
+    """¿Esto es el nombre de quien firma, o un trozo del contrato?
+
+    Cuando el documento no encaja con el patrón de su compañía, el lector se trae lo que
+    hubiera al lado. Medido sobre las 133 pólizas de la correduría: **40 de 122 no eran
+    nombres** —«de agua, gas, electricidad, en…», «Edificación y anexos», «El asegurado:
+    El tomador», «Y CONDUCTOR»—.
+
+    Y no falla en silencio: falla creando clientes. La ficha «Y CONDUCTOR» que había en
+    producción salió de `POLIZA AUTO Nº 2002400455146 - ADRIAN GUTIERREZ.pdf`, donde el
+    lector se quedó con el encabezado de la letra pequeña. Igual «del Seguro Por SANITAS»
+    y «Edificación y anexos».
+
+    Devolver vacío es la respuesta correcta cuando no se sabe: entonces el nombre lo pone
+    una persona. Devolver basura la escribe en la base.
+    """
+    bruto = str(valor or "").strip()
+    if len(bruto) < 5:
+        return False
+    palabras = [x for x in re.split(r"\s+", bruto) if len(x) > 1]
+    if len(palabras) < 2 or len(palabras) > 9:
+        return False
+    if _TOMADOR_EMPIEZA_MAL.match(bruto):
+        return False
+    plano = normalize_lookup_text(bruto).lower()
+    if any(x in plano for x in _LETRA_PEQUENA_DE_POLIZA):
+        return False
+    letras = sum(1 for ch in bruto if ch.isalpha())
+    if letras < 6 or letras < len(bruto) * 0.5:
+        return False
+    # Una frase del contrato lleva minúsculas de más; un nombre va en mayúsculas o con la
+    # inicial en mayúscula. Se mide por palabras, no por caracteres.
+    con_inicial = sum(1 for x in palabras if x[:1].isupper())
+    return con_inicial >= max(2, len(palabras) - 1)
+
+
 def parse_poliza_text(text, source_hint="", hinted_company=""):
     DATE_TOKEN = r"(?<!\d)(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})(?!\d)"
     cleaned = text.replace("\u00a0", " ")
@@ -25558,6 +25654,11 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             fields["ramo"] = ramo_val
         else:
             fields["ramo"] = ""
+    # El tomador se limpia y se comprueba. Si no es un nombre, se deja vacío: vacío se
+    # lo pregunta a una persona, inventado se convierte en una ficha de cliente.
+    if fields.get("tomador"):
+        limpio = limpia_tomador(fields.get("tomador"))
+        fields["tomador"] = limpio if tomador_parece_un_nombre(limpio) else ""
     return fields
 
 def parse_asesoramiento_block(block):
