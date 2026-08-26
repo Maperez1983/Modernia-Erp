@@ -3030,115 +3030,63 @@
           </div>
         </div>
         <div class="form-card crm-workspace-view" data-workspace-view="periciales">
-          <div class="section-head">
-            <div>
-              <h3>Peritajes de valoración</h3>
-              <p class="muted">Informes periciales de valoración de inmuebles: testigos, evidencia y firma.</p>
-            </div>
-          </div>
-          <form id="workspacePericialForm" class="form-grid">
-            <input type="hidden" name="id" />
-            <input type="hidden" name="workspace_id" />
-            <label class="span-2">
-              Empresa emisora
-              <select name="empresa_id" required></select>
-            </label>
-            <label class="span-2">
-              Denominación del inmueble (si no está gestionado en el CRM)
-              <input name="denominacion_manual" placeholder="Ej. Vivienda C/ Mayor 12" />
-            </label>
-            <label class="span-2">
-              Dirección
-              <input name="direccion_manual" placeholder="Calle, número, localidad" />
-            </label>
-            <div class="form-actions span-2" style="margin-top:-8px;">
-              <button type="button" id="workspacePericialBuscarEntornoBtn" class="secondary ghost">Buscar entorno</button>
-              <span id="workspacePericialEntornoStatus" class="muted"></span>
-            </div>
-            <label class="span-2">
-              Descripción del entorno
-              <textarea name="descripcion_entorno" rows="3" placeholder="Barrio, distrito y equipamientos cercanos. Se puede precargar con «Buscar entorno» y editar a mano."></textarea>
-            </label>
-            <label>
-              Referencia catastral
-              <input name="referencia_catastral_manual" />
-            </label>
-            <label>
-              Finalidad
-              <select name="finalidad">
-                <option value="Judicial - Divorcio">Judicial - Divorcio</option>
-                <option value="Judicial - Herencia">Judicial - Herencia</option>
-                <option value="Judicial - Expropiación">Judicial - Expropiación</option>
-                <option value="Judicial - Litigio de compraventa">Judicial - Litigio de compraventa</option>
-                <option value="Privada">Privada</option>
-              </select>
-            </label>
-            <label>
-              Referencia del procedimiento
-              <input name="procedimiento_referencia" placeholder="Ej. Autos 123/2026, Juzgado nº 3" />
-            </label>
-            <label>
-              Perito
-              <select name="perito_usuario_id"></select>
-            </label>
-            <label>
-              Nº de colegiado
-              <input name="colegiado_numero" />
-            </label>
-            <label>
-              Fecha de encargo
-              <input name="fecha_encargo" type="date" />
-            </label>
-            <label>
-              Fecha de la visita
-              <input name="fecha_visita" type="date" />
-            </label>
-            <label>
-              Fecha de valoración *
-              <input name="fecha_valoracion" type="date" required />
-            </label>
-            <div class="form-grid-section">Superficies</div>
-            <label>
-              Catastral (m²)
-              <input name="superficie_catastral" inputmode="decimal" />
-            </label>
-            <label>
-              Registral (m²)
-              <input name="superficie_registral" inputmode="decimal" />
-            </label>
-            <label>
-              Medida en visita (m²)
-              <input name="superficie_medida" inputmode="decimal" />
-            </label>
-            <label>
-              Usada en el cálculo (m²) *
-              <input name="superficie_calculo_usada" inputmode="decimal" required />
-            </label>
-            <label class="span-2">
-              Motivo de la superficie usada
-              <input name="motivo_superficie_usada" placeholder="Por qué se usa esta superficie y no otra" />
-            </label>
-            <label class="span-2">
-              Justificación del método (sale en la Conclusión del informe)
-              <textarea name="justificacion_metodo" rows="4" placeholder="Por qué se ha llegado a este valor: cuántos testigos, si alguno se ha descartado, qué ajustes se han aplicado..."></textarea>
-            </label>
-            <div class="form-actions span-2" style="flex-direction: column; align-items: flex-start; gap: 8px;">
-              <span class="muted">* Fecha de valoración y superficie usada en el cálculo son obligatorias.</span>
-              <div class="form-actions">
-                <button type="submit">Guardar expediente</button>
-                <button type="button" id="workspacePericialResetBtn" class="secondary ghost">Nuevo</button>
-                <span id="workspacePericialStatus" class="muted"></span>
+          <div data-periciales-tab="listado">
+            <div class="section-head">
+              <div>
+                <h3>Peritajes de valoración</h3>
+                <p class="muted">Informes periciales de valoración de inmuebles: testigos, evidencia y firma.</p>
               </div>
             </div>
-          </form>
-          <div class="section-head" style="margin-top:24px;">
-            <div>
-              <h3>Expedientes</h3>
-              <p class="muted">Testigos, evidencia, generación del informe y firma.</p>
+            <form id="workspacePericialNuevoForm" class="form-grid">
+              <input type="hidden" name="workspace_id" />
+              <label class="span-2">
+                Empresa emisora
+                <select name="empresa_id" required></select>
+              </label>
+              <label class="span-2">
+                Denominación del inmueble (si no está gestionado en el CRM)
+                <input name="denominacion_manual" placeholder="Ej. Vivienda C/ Mayor 12" />
+              </label>
+              <label class="span-2">
+                Dirección
+                <input name="direccion_manual" placeholder="Calle, número, localidad" />
+              </label>
+              <div class="form-actions span-2">
+                <button type="submit">Crear expediente</button>
+                <span id="workspacePericialNuevoStatus" class="muted"></span>
+              </div>
+            </form>
+            <div class="section-head" style="margin-top:24px;">
+              <div>
+                <h3>Expedientes</h3>
+                <p class="muted">Testigos, evidencia, generación del informe y firma.</p>
+              </div>
             </div>
+            <p id="workspacePericialesInfo" class="muted"></p>
+            <div id="workspacePericialesTable"></div>
           </div>
-          <p id="workspacePericialesInfo" class="muted"></p>
-          <div id="workspacePericialesTable"></div>
+
+          <div data-periciales-tab="ficha" class="hidden">
+            <div class="section-head" style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;">
+              <div style="flex:1;">
+                <h3 id="workspacePericialFichaTitle">Expediente pericial</h3>
+                <p class="muted" id="workspacePericialFichaSubtitle"></p>
+              </div>
+              <button type="button" class="secondary ghost" id="workspacePericialFichaBackBtn">Volver</button>
+            </div>
+            <div class="crm-workspace-tabs" style="margin-top: 8px; flex-wrap: wrap;" id="workspacePericialFichaTabs">
+              <button class="tab active" type="button" data-pericial-ficha-tab="datos">Datos</button>
+              <button class="tab" type="button" data-pericial-ficha-tab="testigos">Testigos</button>
+              <button class="tab" type="button" data-pericial-ficha-tab="evidencia">Evidencia y documentos</button>
+            </div>
+            <div class="form-actions" id="workspacePericialFichaAcciones" style="margin:14px 0;">
+              <button type="button" id="workspacePericialFichaGenerarPdfBtn" class="secondary ghost">Generar PDF</button>
+              <a id="workspacePericialFichaDescargarPdf" class="secondary ghost button-inline" href="#" target="_blank" rel="noreferrer">Descargar PDF</a>
+              <button type="button" id="workspacePericialFichaFirmarBtn" class="primary">Solicitar firma</button>
+              <span id="workspacePericialFichaAccionesStatus" class="muted"></span>
+            </div>
+            <div id="workspacePericialFichaPanel"></div>
+          </div>
         </div>
         </div>
       </section>
@@ -12180,7 +12128,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=933",
+              "app.js?v=934",
               // Panel de la operación en la ficha del inmueble.
               "inmo_operacion.js?v=1",
             ];

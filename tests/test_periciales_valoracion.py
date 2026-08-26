@@ -398,6 +398,20 @@ class ElListadoYLaFichaFuncionanTests(Base):
         self.assertEqual(len(data["rows"]), 1)
         self.assertEqual(data["rows"][0]["inmueble_denominacion"], "Piso sin gestionar")
 
+    def test_ficha_resuelve_la_direccion_de_un_inmueble_enlazado(self):
+        # Un expediente enlazado a un inmueble ya gestionado no lleva
+        # `direccion_manual` propia — la ficha (no solo el listado) tiene que
+        # poder resolver esa dirección para que "Buscar entorno" y "Buscar
+        # en nuestro inventario" tengan algo por donde tirar.
+        self._ins("inmuebles", dict(
+            id="inm-ficha-1", empresa_id="emp1", direccion="Guillermo Carrera Rubio 4",
+            m2=106, created_at="2026-01-01", updated_at="2026-01-01",
+        ))
+        pericial_id = self._crear_pericial(inmueble_id="inm-ficha-1", direccion_manual="", denominacion_manual="")
+        r = self._get(f"/api/workspace_pericial?id={pericial_id}&workspace_id={self.ws}")
+        data = json.loads(r["cuerpo"].decode("utf-8"))
+        self.assertEqual(data["pericial"]["inmueble_denominacion"], "Guillermo Carrera Rubio 4")
+
     def test_el_listado_trae_lo_que_hace_falta_para_editar_sin_vaciar_nada(self):
         # El botón "Editar" del listado rellena el formulario con esta misma
         # fila (no con la ficha completa) y, al guardar, cualquier campo
@@ -420,6 +434,19 @@ class ElListadoYLaFichaFuncionanTests(Base):
         data = json.loads(r["cuerpo"].decode("utf-8"))
         self.assertIn("checklist_pendiente", data)
         self.assertTrue(data["checklist_pendiente"])  # sin testigos, no puede firmarse todavía
+
+    def test_ficha_devuelve_el_calculo_ya_parseado(self):
+        # La ficha del expediente (que ahora vive en su propia pestaña, no
+        # repartida entre un formulario y un modal) necesita leer
+        # `justificacion_metodo` sin tener que parsear ella misma el
+        # `calculo_json` crudo — eso ya se hacía por duplicado en dos sitios
+        # del frontend antes de esta ficha.
+        pericial_id = self._crear_pericial(justificacion_metodo="Motivo de prueba")
+        r = self._get(f"/api/workspace_pericial?id={pericial_id}&workspace_id={self.ws}")
+        data = json.loads(r["cuerpo"].decode("utf-8"))
+        self.assertIn("calculo", data)
+        self.assertIsInstance(data["calculo"], dict)
+        self.assertEqual(data["calculo"].get("conclusion", {}).get("justificacion_metodo"), "Motivo de prueba")
 
 
 class LasFotosYLaDocumentacionAparecenEnElInformeTests(Base):

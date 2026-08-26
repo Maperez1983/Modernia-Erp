@@ -47404,8 +47404,18 @@ def fetch_workspace_periciales(conn, workspace_id, limit=100):
 
 
 def fetch_workspace_pericial_detalle(conn, pericial_id, *, workspace_id):
+    # Igual que en `fetch_workspace_periciales` (el listado): un expediente
+    # enlazado a un inmueble gestionado no siempre tiene `direccion_manual`
+    # propia — la ficha necesita esta dirección resuelta para poder ofrecer
+    # "Buscar entorno" y "Buscar en nuestro inventario" sin que el usuario
+    # tenga que volver a escribirla a mano.
     row = conn.execute(
-        "SELECT * FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+        """
+        SELECT p.*, COALESCE(i.direccion, i.titulo, p.denominacion_manual, p.direccion_manual, '') AS inmueble_denominacion
+        FROM workspace_periciales p
+        LEFT JOIN inmuebles i ON i.id = p.inmueble_id
+        WHERE p.id = ? AND p.workspace_id = ? LIMIT 1
+        """,
         (pericial_id, workspace_id),
     ).fetchone()
     if not row:
@@ -47432,8 +47442,16 @@ def fetch_workspace_pericial_detalle(conn, pericial_id, *, workspace_id):
         doc_key = str(ed.get("doc_key") or "")
         ed["doc_url"] = f"https://{bucket}.s3.{region}.amazonaws.com/{doc_key}" if (bucket and region and doc_key) else ""
         evidencias_out.append(ed)
+    # Parseado una sola vez aquí: sin esto, cada consumidor del frontend
+    # (edición, ficha, modal...) repetía su propio json.loads/try-except
+    # solo para leer `justificacion_metodo` o los `estadisticos`.
+    try:
+        calculo = json.loads(row["calculo_json"] or "{}") or {}
+    except Exception:
+        calculo = {}
     return {
         "pericial": dict(row),
+        "calculo": calculo,
         "testigos": [dict(t) for t in testigos],
         "evidencias": evidencias_out,
         "docs": [dict(d) for d in docs],
