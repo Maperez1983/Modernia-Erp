@@ -31780,9 +31780,11 @@ def guarda_consentimiento_de_portal(conn, acceso, *, ambito, agencia, nombre, ni
     try:
         fila = conn.execute(
             "SELECT a.integrity_hash FROM portal_consentimientos a "
-            "WHERE COALESCE(a.integrity_hash,'') <> '' AND NOT EXISTS ("
-            "  SELECT 1 FROM portal_consentimientos b WHERE COALESCE(b.prev_hash,'') = a.integrity_hash) "
-            "ORDER BY a.created_at DESC, a.id DESC LIMIT 1"
+            "WHERE a.acceso_id = ? AND COALESCE(a.integrity_hash,'') <> '' AND NOT EXISTS ("
+            "  SELECT 1 FROM portal_consentimientos b "
+            "  WHERE b.acceso_id = a.acceso_id AND COALESCE(b.prev_hash,'') = a.integrity_hash) "
+            "ORDER BY a.created_at DESC, a.id DESC LIMIT 1",
+            (registro["acceso_id"],),
         ).fetchone()
         if fila:
             prev_hash = str(row_value(fila, "integrity_hash", "") or "")
@@ -33597,9 +33599,11 @@ def apunta_evento_de_oferta(conn, oferta_id, quien, que, *, detalle="", importe=
     try:
         fila = conn.execute(
             "SELECT a.integrity_hash FROM inmueble_oferta_eventos a "
-            "WHERE COALESCE(a.integrity_hash,'') <> '' AND NOT EXISTS ("
-            "  SELECT 1 FROM inmueble_oferta_eventos b WHERE COALESCE(b.prev_hash,'') = a.integrity_hash) "
-            "ORDER BY a.created_at DESC, a.id DESC LIMIT 1"
+            "WHERE a.oferta_id = ? AND COALESCE(a.integrity_hash,'') <> '' AND NOT EXISTS ("
+            "  SELECT 1 FROM inmueble_oferta_eventos b "
+            "  WHERE b.oferta_id = a.oferta_id AND COALESCE(b.prev_hash,'') = a.integrity_hash) "
+            "ORDER BY a.created_at DESC, a.id DESC LIMIT 1",
+            (str(oferta_id or ""),),
         ).fetchone()
         if fila:
             prev_hash = str(row_value(fila, "integrity_hash", "") or "")
