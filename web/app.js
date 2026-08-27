@@ -78831,6 +78831,19 @@ const attachGestoriaRentaQuickToCliente = async (clienteId, ctx = {}) => {
 
 const submitGestoriaRentaQuick = async () => {
   if (!gestoriaRentaQuickForm) return;
+  // El auto-submit al elegir archivo (change) y el submit manual del botón "Iniciar
+  // lectura" pueden dispararse casi a la vez y ambos entran aquí antes de que el
+  // primero limpie el input: sin este guard se sube y se lee el mismo PDF dos veces.
+  if (state.gestoriaRentaQuickSubmitting) return;
+  state.gestoriaRentaQuickSubmitting = true;
+  try {
+    await submitGestoriaRentaQuickInner();
+  } finally {
+    state.gestoriaRentaQuickSubmitting = false;
+  }
+};
+
+const submitGestoriaRentaQuickInner = async () => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
     if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Sin workspace.";
