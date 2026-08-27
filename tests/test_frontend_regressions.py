@@ -2025,6 +2025,11 @@ class FrontendGestoriaLookupScopeTests(unittest.TestCase):
         run_node_script(script)
 
     def test_build_clientes_by_nif_params_carries_workspace_or_company_scope(self):
+        # Antes esto borraba empresa_id en cuanto había workspace_id (delegaba el
+        # acotado por completo en el vínculo workspace_companies). Si ese vínculo
+        # todavía no cubre la empresa activa, una búsqueda de NIF real volvía vacía y
+        # el CRM ofrecía crear un cliente duplicado que ya existía (visto en
+        # producción). Ahora manda también la empresa activa como respaldo.
         self._run(
             dedent(
                 """
@@ -2041,7 +2046,7 @@ class FrontendGestoriaLookupScopeTests(unittest.TestCase):
                 assert.strictEqual(scoped.get("nif"), "12345678A");
                 assert.strictEqual(scoped.get("limit"), "16");
                 assert.strictEqual(scoped.get("workspace_id"), "ws-1");
-                assert.strictEqual(scoped.get("empresa_id"), null);
+                assert.strictEqual(scoped.get("empresa_id"), "emp-1");
                 state.currentWorkspaceId = "";
                 const legacy = buildGestoriaClientesByNifParams("87654321B");
                 assert.strictEqual(legacy.get("nif"), "87654321B");

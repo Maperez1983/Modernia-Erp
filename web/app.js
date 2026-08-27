@@ -67104,11 +67104,23 @@ const buildGestoriaWorkspaceParams = (initial = {}) => {
   return params;
 };
 
-const buildGestoriaClientesByNifParams = (nif, limit = 6) =>
-  buildGestoriaWorkspaceParams({
+const buildGestoriaClientesByNifParams = (nif, limit = 6) => {
+  const params = buildGestoriaWorkspaceParams({
     nif: String(nif || "").trim(),
     limit: String(limit || 6).trim() || "6",
   });
+  // buildGestoriaWorkspaceParams borra empresa_id en cuanto hay workspace_id: vale para
+  // listar por todo el workspace, pero esto busca duplicados por NIF antes de crear un
+  // cliente. Si el workspace aún no tiene el vínculo en workspace_companies para la
+  // empresa activa, la búsqueda vuelve vacía y el CRM ofrece crear un cliente que ya
+  // existe (visto en producción: Fincas Velazquez con NIF real, "no hay clientes con
+  // ese DNI/NIF" siendo falso). Mandamos también la empresa activa para que el backend
+  // pueda acotar por ahí si el vínculo de workspace no alcanza.
+  const empresa = resolveCrmGestoriaEmpresa();
+  const empresaId = String(empresa?.legacy_empresa_id || empresa?.id || "").trim();
+  if (empresaId) params.set("empresa_id", empresaId);
+  return params;
+};
 
 const setGestoriaDashboardView = (viewKey = "general") => {
   const key = normalizeGestoriaDashboardView(viewKey);
