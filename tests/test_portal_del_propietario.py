@@ -1848,6 +1848,42 @@ class NadieEntraSinFirmarTests(BasePortal):
         fila = self.conn.execute("SELECT integrity_hash FROM portal_consentimientos").fetchone()
         self.assertEqual(len(fila["integrity_hash"]), 64)
 
+    def test_dos_accesos_en_paralelo_no_comparten_cadena(self):
+        """Cada acceso al portal tiene su propia historia de consentimientos: que
+        otro acceso firme justo en medio no puede colarse como su anterior."""
+        S.ensure_portal_consentimientos_schema(self.conn)
+        comun = dict(ambito="propietario", agencia="Agencia Propia", nif="11111111H",
+                     acepta_comercial=False, firma_png=None)
+        S.guarda_consentimiento_de_portal(
+            self.conn, {"id": "accA", "empresa_id": "emp1", "inmueble_id": "inm1", "cliente_id": "prop1"},
+            nombre="Firmante A", now="2026-08-12 09:00:00", **comun)
+        S.guarda_consentimiento_de_portal(
+            self.conn, {"id": "accB", "empresa_id": "emp1", "inmueble_id": "inm1", "cliente_id": "prop1"},
+            nombre="Firmante B", now="2026-08-12 09:00:01", **comun)
+        S.guarda_consentimiento_de_portal(
+            self.conn, {"id": "accA", "empresa_id": "emp1", "inmueble_id": "inm1", "cliente_id": "prop1"},
+            nombre="Firmante A otra vez", now="2026-08-12 09:00:02", **comun)
+        S.guarda_consentimiento_de_portal(
+            self.conn, {"id": "accB", "empresa_id": "emp1", "inmueble_id": "inm1", "cliente_id": "prop1"},
+            nombre="Firmante B otra vez", now="2026-08-12 09:00:03", **comun)
+        self.conn.commit()
+
+        de_a = self.conn.execute(
+            "SELECT prev_hash, integrity_hash FROM portal_consentimientos "
+            "WHERE acceso_id = 'accA' ORDER BY created_at ASC").fetchall()
+        de_b = self.conn.execute(
+            "SELECT prev_hash, integrity_hash FROM portal_consentimientos "
+            "WHERE acceso_id = 'accB' ORDER BY created_at ASC").fetchall()
+
+        self.assertEqual(de_a[0]["prev_hash"], "", "el primer consentimiento de A no puede colgar de B")
+        self.assertEqual(de_b[0]["prev_hash"], "", "el primer consentimiento de B no puede colgar de A")
+        self.assertEqual(de_a[1]["prev_hash"], de_a[0]["integrity_hash"])
+        self.assertEqual(de_b[1]["prev_hash"], de_b[0]["integrity_hash"])
+        hashes_de_a = {f["integrity_hash"] for f in de_a}
+        hashes_de_b = {f["integrity_hash"] for f in de_b}
+        self.assertNotIn(de_b[1]["prev_hash"], hashes_de_a)
+        self.assertNotIn(de_a[1]["prev_hash"], hashes_de_b)
+
     def test_si_cambia_la_version_del_texto_se_vuelve_a_pedir(self):
         self._firma()
         self.conn.execute("UPDATE portal_consentimientos SET texto_version = '2020-01-01'")
