@@ -61547,9 +61547,18 @@ const syncCrmAgendaControls = () => {
   if (crmAgendaDay && state.crmAgendaAnchorDay) crmAgendaDay.value = state.crmAgendaAnchorDay;
 };
 
+const CRM_AGENDA_DENSE_TABLE_MAX_ROWS = 500;
+
 const buildCrmAgendaDenseTableNode = (rows = []) => {
   const items = Array.isArray(rows) ? rows : [];
   if (!items.length) return null;
+  // Sin este recorte, una preset como "citas_caducadas" con miles de filas históricas
+  // construye esa misma cantidad de <tr> (6 createElement + 2 addEventListener cada
+  // una) de un tirón: bloquea la pestaña decenas de segundos. Recortamos el PINTADO,
+  // no el filtrado: renderCrmAgendaWorkspace sigue contando sobre `filtered.length`.
+  const renderItems = items.length > CRM_AGENDA_DENSE_TABLE_MAX_ROWS
+    ? items.slice(0, CRM_AGENDA_DENSE_TABLE_MAX_ROWS)
+    : items;
   const table = document.createElement("table");
   table.className = "crm-dense-table crm-agenda-table";
   const thead = document.createElement("thead");
@@ -61566,7 +61575,7 @@ const buildCrmAgendaDenseTableNode = (rows = []) => {
   `;
   table.appendChild(thead);
   const tbody = document.createElement("tbody");
-  items.forEach((row) => {
+  renderItems.forEach((row) => {
     const tr = document.createElement("tr");
     tr.dataset.actionId = String(row?.id || "").trim();
     tr.addEventListener("click", () => openCrmAgendaEditModalById(tr.dataset.actionId));
@@ -62374,6 +62383,12 @@ const renderCrmAgendaWorkspace = () => {
         crmAgendaTable.innerHTML = `<p class='muted'>Sin acciones aquí.${pista}</p>`;
       } else {
         crmAgendaTable.appendChild(node);
+        if (filtered.length > CRM_AGENDA_DENSE_TABLE_MAX_ROWS) {
+          const aviso = document.createElement("p");
+          aviso.className = "muted";
+          aviso.textContent = `Mostrando las primeras ${CRM_AGENDA_DENSE_TABLE_MAX_ROWS} de ${filtered.length} filas · afina la búsqueda, el estado o el rango de fechas para ver el resto.`;
+          crmAgendaTable.appendChild(aviso);
+        }
       }
     }
   } else {
