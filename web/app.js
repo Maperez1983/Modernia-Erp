@@ -50692,7 +50692,7 @@ const saveHipotecaFicha = async (event) => {
   if (status) status.textContent = isDraft ? "Creando hipoteca..." : "Guardando cambios...";
   const empresa = resolveCrmFinEmpresa();
   const base = {
-    empresa_id: empresa?.id || "",
+    empresa_id: resolveLegacyEmpresaId(empresa),
     empresa_nombre: empresa?.nombre || resolveCrmFinEmpresaNombre(),
   };
 
@@ -54436,7 +54436,7 @@ const sendTableUpdate = (table, recordId, column, value, statusEl = null) => {
           : resolveCrmGestoriaEmpresaNombre());
   const payload = {
     id: recordId,
-    empresa_id: empresa?.id || "",
+    empresa_id: resolveLegacyEmpresaId(empresa),
     empresa_nombre: empresaNombre,
     [column]: value,
   };
@@ -80030,7 +80030,7 @@ const deleteHipoteca = (id) => {
   return fetch("/api/hipotecas_delete", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id, empresa_id: empresa?.id || "", empresa_nombre: empresa?.nombre || resolveCrmFinEmpresaNombre() }),
+    body: JSON.stringify({ id, empresa_id: resolveLegacyEmpresaId(empresa), empresa_nombre: empresa?.nombre || resolveCrmFinEmpresaNombre() }),
   }).then((res) => res.json());
 };
 
@@ -92153,7 +92153,7 @@ if (gestoriaRentaDetallesForm) {
     const empresa = resolveCrmGestoriaEmpresa();
     const payload = {
       cliente_id: state.currentClienteId,
-      empresa_id: empresa?.id || "",
+      empresa_id: resolveLegacyEmpresaId(empresa),
       mod_renta: 1,
       renta_detalles: nextRentaPayload,
     };
