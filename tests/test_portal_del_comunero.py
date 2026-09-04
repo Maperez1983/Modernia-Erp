@@ -20,7 +20,6 @@ le sirve a otro, y que la de un documento no publicado no existe.
 
 import sys
 import unittest
-from datetime import datetime
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[1]
@@ -383,20 +382,18 @@ class SuCoeficienteYLoQueLeVieneTests(BaseDePruebaTests):
     def test_sin_recibos_futuros_estima_con_el_presupuesto_y_su_coeficiente(self):
         """La estimación salía de `cuota_mensual`, que guarda el honorario del
         administrador, no el gasto de la comunidad: le anunciaba al vecino una cifra que
-        no era la del recibo. Ahora se mensualiza el presupuesto que aprobó la junta,
-        que es de donde sale lo que se le gira."""
-        ejercicio = datetime.now().strftime("%Y")
+        no era la del recibo. Ahora se mensualiza el presupuesto que aprobó la junta."""
+        from datetime import datetime as _dt
+        ejercicio = _dt.now().strftime("%Y")
         self.conn.execute("UPDATE workspace_fincas_vecinos SET coeficiente = 2.5 WHERE id = 'v1'")
         self.conn.execute(
             "INSERT INTO workspace_fincas_presupuesto_anual "
             "(id, workspace_id, comunidad_id, ejercicio, estado, fondo_reserva_pct, created_at, updated_at) "
-            "VALUES ('pa_est', ?, 'c1', ?, 'Aprobado', 10, ?, ?)",
-            (WS, ejercicio, AHORA, AHORA))
+            "VALUES ('pa_est', ?, 'c1', ?, 'Aprobado', 10, ?, ?)", (WS, ejercicio, AHORA, AHORA))
         self.conn.execute(
             "INSERT INTO workspace_fincas_presupuesto_partidas "
             "(id, workspace_id, presupuesto_id, orden, concepto, importe, created_at, updated_at) "
-            "VALUES ('pp_est', ?, 'pa_est', 1, 'Gastos generales', 4800, ?, ?)",
-            (WS, AHORA, AHORA))
+            "VALUES ('pp_est', ?, 'pa_est', 1, 'Gastos generales', 4800, ?, ?)", (WS, AHORA, AHORA))
         self.conn.commit()
         avance = server.fetch_fincas_portal_public(self.conn, self.alta("v1", "c1"))["avance"]
         self.assertEqual(avance["emitidos"], [])

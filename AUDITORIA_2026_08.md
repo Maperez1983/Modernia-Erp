@@ -28,6 +28,33 @@ de falsos positivos que llegué a dar por buenos. Dos ejemplos que cuestan tiemp
 **Regla:** antes de afirmar un fallo, ejecutarlo. Y si el barrido es estático, comprobar
 que reconoce lo que dice reconocer.
 
+### Una simulación con datos inventados demuestra lo que tú has inventado
+
+El caso más caro de la campaña, y salió al final. Al enganchar
+`/api/portal_empresa_logo` lo probé con una empresa de mentira cuyo logotipo era
+`/assets/sur.png`, un fichero que no existe. Dio 404, lo achaqué al fichero inventado
+—correctamente— y di el endpoint por bueno.
+
+No lo era. Dentro tenía un fallo que nunca se había ejecutado, porque hasta ese día la
+ruta no era alcanzable: le pasaba a `_normalize_s3_key` la URI entera en vez de la clave,
+así que la comprobación del prefijo quedaba en falso y **ningún logotipo de S3 llegaba a
+servirse**. En producción todas las empresas con logotipo propio lo tienen en S3. El
+resultado: el escaparate público pasó de enseñar el logotipo del grupo a enseñar un
+hueco, y estuvo así hasta que lo miré en producción.
+
+Dos reglas, las dos de lo mismo:
+
+- **Los datos de la simulación tienen que existir.** Un 404 que se explica por tu propio
+  dato de mentira no distingue «el dato no está» de «el código está roto». Poner un
+  fichero real habría enseñado el fallo en el sitio, no en producción.
+- **Al enganchar código que nunca se ha ejecutado, dar por hecho que está roto.** Llevaba
+  escrito y sin usar; nadie lo había probado nunca. Que compile y que lea bien no es
+  haberlo ejecutado.
+
+Y una tercera, de después: **al publicar algo que cambia lo que se ve desde fuera,
+mirarlo desde fuera.** Bastó un `curl` al escaparate público con el commit ya desplegado.
+Ahí salieron los dos problemas de golpe: el logotipo roto y el nombre.
+
 ### Una prueba que nunca ha fallado no demuestra nada
 
 El patrón más productivo de toda la campaña fue **auditar los guardarraíles**, no el
@@ -60,7 +87,7 @@ llamadas: sólo aparecen si compruebas el resultado, no la respuesta.
 
 ## 2. Lo que se encontró
 
-Trece cambios publicados. Ordenados por lo que le pasaba a quien lo sufría.
+Veintidós cambios publicados. Ordenados por lo que le pasaba a quien lo sufría.
 
 ### Se perdían datos
 
@@ -86,6 +113,29 @@ Trece cambios publicados. Ordenados por lo que le pasaba a quien lo sufría.
 |---|---|
 | Tres botones contestaban «Endpoint no valido»: cerrar una compraventa, la preparación guiada del inmueble y reprocesar el OCR de una nómina. El manejador existía; faltaba darlo de alta en una lista. | `38962df` |
 | Un comunero no tenía forma de ejercer el art. 17: no es un cliente, y la supresión no llegaba a su ficha. | `505b0a5` |
+
+### El dato entraba mal y nadie avisaba
+
+Cuatro cifras que el CRM aceptaba con un «ok». El criterio lo decidió el cliente:
+**rechazar los negativos siempre** —porque el signo lo pone el tipo de apunte, no quien
+teclea— y **pedir confirmación por encima de un tope** en vez de bloquear, porque una
+derrama grande es legítima y un tope de negocio se acaba quedando corto.
+
+| Qué pasaba | Cómo queda |
+|---|---|
+| Un **coeficiente del 250 %** entraba en la ficha del vecino. Es la parte que le toca de la finca (art. 5 LPH) y multiplica lo que se le cobra: dos veces y media el presupuesto entero. Un negativo le devolvía dinero cada mes. | 400 entre 0 y 100 |
+| **Cuota mensual negativa** en el alta de la comunidad. | 400 |
+| Un **gasto de -500 €** sumaba en vez de restar: el signo lo pone el tipo. | 400, y se indica que un abono se anota como ingreso |
+| Un apunte de **un billón de euros**. | 409 con `requiere_confirmacion`; el front pregunta y reintenta |
+
+### El escaparate llevaba la marca de otro
+
+| Qué pasaba | Cómo queda |
+|---|---|
+| Todo lo publicado salía anunciado por **«Grupo Modernia»**, fuera de quien fuera. La consulta ya traía `e.nombre` y `e.logo_url` de la empresa dueña; el armador de la respuesta pública no los miraba. Hoy no se nota porque publica una sola agencia. | Cada piso sale con la marca y el logotipo de **su** agencia |
+| `/api/portal_empresa_logo` estaba escrito y no era alcanzable desde ninguna ruta pública. | Dado de alta en la lista pública de GET, y sólo responde si esa empresa tiene algo publicado: no sirve para pasear el directorio de empresas desde fuera |
+| Dentro de ese endpoint, **ningún logotipo de S3 se servía**: se le pasaba la URI entera a `_normalize_s3_key`, que espera la clave. Nunca se había notado porque la ruta no era alcanzable; en cuanto lo fue, dejó el escaparate sin logotipo. | Se trocea como en el generador de informes. Y si aun así no se puede servir, se enseña la marca de la casa: quien mira el anuncio no tiene la culpa |
+| Al publicarlo, los seis anuncios pasaron a decir **«Estudio Velazquez 2012 SL»**: es la empresa dueña, correcto en la base y malo en un escaparate. | Un campo **nombre comercial** en la ficha de la empresa, editable. Vacío = «Grupo Modernia», que es lo que había siempre |
 
 ### Seguridad
 
@@ -150,6 +200,7 @@ python scripts/simula_ciclo_financiaciones.py  # del estudio a la firma
 python scripts/simula_ciclo_gestoria.py        # expediente, trabajos y modelos
 python scripts/simula_portales.py              # los tres portales de cliente
 python scripts/auditoria_endpoints_inmo.py     # barrido de los endpoints del módulo
+python scripts/mide_la_cobertura.py            # qué parte del servidor se prueba
 ```
 
 Y en la suite, las pruebas nuevas que vigilan lo encontrado: búsquense por
@@ -157,11 +208,63 @@ Y en la suite, las pruebas nuevas que vigilan lo encontrado: búsquense por
 `test_ningun_campo_de_la_base_sin_escapar`, `test_importe_en_formato_ingles`,
 `test_una_fecha_que_no_existe`, `test_documento_de_firma_no_se_ejecuta`,
 `test_borrar_captacion_no_arrastra_el_cierre`, `test_una_venta_cerrada_figura_vendida`,
-`test_supresion_rgpd`, `test_morosidad_y_certificado`.
+`test_supresion_rgpd`, `test_morosidad_y_certificado`,
+`test_cifras_que_no_pueden_ser`, `test_el_anuncio_lleva_su_agencia`.
 
 ---
 
-## 5. Lo que queda abierto
+## 5. Cuánto del servidor se prueba: 45,05 %
+
+Medido el **2026-08-24** sobre `main`, con la suite entera (3.042 pruebas, 0 fallos).
+Era la primera vez: la herramienta llevaba configurada en `pyproject.toml` desde siempre
+y nunca se había ejecutado —no había ni un `.coverage`—, así que «está bien probado» era
+una impresión y no un dato.
+
+| | sentencias | cubierto |
+|---|---:|---:|
+| **`web/server.py`** | **55.884** | **43,7 %** |
+| `web/db_backend.py` | 618 | 37,5 % |
+| `branded_pdf_vector.py` | 590 | 88,7 % |
+| `document_pdf.py` | 506 | 73,2 % |
+| `hipotecas_pdf.py` | 353 | 69,5 % |
+| `security_utils.py` | 168 | 83,9 % |
+| `public_links.py` | 55 | 92,2 % |
+| `auth_security.py` | 48 | 97,0 % |
+| **TOTAL** | **58.951** | **45,05 %** |
+
+Tres cosas que dice este reparto, y que importan más que el número:
+
+**Donde hubo intención, hay cobertura.** Los módulos pequeños que alguien decidió
+proteger están al 90 % —autenticación 97 %, enlaces públicos 92 %—. `server.py`, que es
+el 95 % del código, está al 43,7 %: **31.011 sentencias que no ejecuta ninguna prueba**.
+
+**`db_backend.py` al 37,5 % es el dato incómodo.** Es la capa que traduce entre SQLite y
+Postgres, la que hizo que el importe de gestoría se comportara distinto en cada base, y
+es de las menos probadas. El punto ciego no es sólo que la suite corra en SQLite: es que
+la pieza que gestiona esa diferencia casi no se prueba.
+
+**Y esto no mide corrección.** Los fallos de esta campaña —la derrama que se comía la
+cuota, el punteo que salía verde, el cierre que se apuntaba dos comisiones— estaban
+todos en código **cubierto**: se ejecutaba en las pruebas y hacía lo que no debía. La
+cobertura dice qué no se ha mirado nunca; no dice que lo mirado esté bien.
+
+**Falta la mitad del programa.** Esto es sólo Python. Los 95.860 líneas de `app.js` no
+las mide esta herramienta.
+
+### El suelo
+
+`fail_under = 44.5` en `pyproject.toml` —medio punto por debajo de lo medido, para que
+no dé rojo por las pruebas que se saltan si falta `node`—. No es una nota: si baja, es
+que ha entrado código que nadie ejecuta.
+
+```bash
+python scripts/mide_la_cobertura.py
+```
+
+Subirlo cuando se gane terreno es parte del trabajo. Bajarlo, una decisión que hay que
+justificar.
+
+## 6. Lo que queda abierto
 
 ### Sin auditar
 
@@ -174,12 +277,6 @@ Y en la suite, las pruebas nuevas que vigilan lo encontrado: búsquense por
 
 ### Decisiones pendientes del cliente
 
-- **Valores absurdos que el sistema acepta**: gastos negativos, importes de un billón,
-  **coeficientes negativos o del 250 %** —que multiplican lo que se cobra a cada vecino—
-  y cuotas mensuales negativas. No se bloquean porque un negativo puede ser un abono
-  legítimo; hace falta el criterio de negocio.
-- El nombre público **«Grupo Modernia»** está fijo en el código del listado público.
-- `/api/portal_empresa_logo` no es alcanzable desde ninguna ruta pública.
 - Datos de fincas: coeficientes por cargar, referencia catastral de Sierra Bermeja 5,
   recuento de unidades de cinco comunidades, 39 correos truncados.
 - El **500 de `/api/gestoria_docs`** (clave ajena), sin tocar por ser área de trabajo

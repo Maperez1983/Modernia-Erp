@@ -1172,6 +1172,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/session_state",
     "/api/auth_invite_status",
     "/api/portal_inmuebles",
+    "/api/portal_empresa_logo",
     "/api/portal_inmueble_foto",
     "/api/portal_inmueble",
     "/api/inmueble_portal_feed",
@@ -1181,6 +1182,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/workspace_fincas_portal_public",
     "/api/workspace_fincas_portal_doc",
     "/api/workspace_fincas_portal_junta",
+    "/api/workspace_fincas_portal_certificado_pdf",
     "/portal-comunidad",
     # Portal del propietario de un inmueble en venta. La llave es el token del
     # enlace; no hay sesión del CRM detrás y no debe haberla.
@@ -1228,6 +1230,13 @@ AUTH_PUBLIC_POST_ENDPOINTS = {
     "/api/portal_busqueda_derechos",
     "/api/portal_busqueda_retirar",
     "/api/portal_busqueda_visita",
+    "/api/portal_busqueda_oferta",
+    "/api/portal_busqueda_oferta_decision",
+    "/api/portal_busqueda_justificante",
+    # El comunero comunica una incidencia desde su enlace. Sin sesión: la llave es
+    # el token, y el tope de envíos está dentro.
+    "/api/workspace_fincas_portal_incidencia",
+    "/api/workspace_fincas_portal_certificado",
     "/api/workspace_portal_upload",
     "/api/workspace_portal_presign",
     "/api/workspace_portal_public_request",
@@ -1841,6 +1850,7 @@ WORKSPACE_MODULE_CATALOG = [
     {"key": "inmobiliaria", "nombre": "Inmobiliaria", "categoria": "vertical", "sort_order": 60},
     {"key": "financiacion", "nombre": "Financiación", "categoria": "vertical", "sort_order": 70},
     {"key": "fincas", "nombre": "Administración de Fincas", "categoria": "vertical", "sort_order": 80},
+    {"key": "periciales", "nombre": "Peritajes de Valoración", "categoria": "vertical", "sort_order": 85},
     {"key": "facturacion", "nombre": "Facturación", "categoria": "motor", "sort_order": 90},
     {"key": "contabilidad", "nombre": "Contabilidad", "categoria": "motor", "sort_order": 95},
     {"key": "facturas_recibidas", "nombre": "Importador Facturas", "categoria": "motor", "sort_order": 100},
@@ -1866,8 +1876,8 @@ WORKSPACE_PLAN_PACKAGES = {
     "Enterprise": {
         "label": "Enterprise",
         "pitch": "Producto multiservicio completo para tenants con automatización, portal y motores transversales listos para escalar.",
-        "focus": ["automatizaciones", "portal_cliente", "registro_horario", "facturas_recibidas", "rrhh", "fincas"],
-        "included": ["Automatizaciones", "Portal Cliente", "Registro Horario", "Facturas Recibidas", "Administración de Fincas"],
+        "focus": ["automatizaciones", "portal_cliente", "registro_horario", "facturas_recibidas", "rrhh", "fincas", "periciales"],
+        "included": ["Automatizaciones", "Portal Cliente", "Registro Horario", "Facturas Recibidas", "Administración de Fincas", "Peritajes de Valoración"],
     },
 }
 
@@ -2062,6 +2072,7 @@ WORKSPACE_USER_SERVICE_MODULE_LABELS = {
     "financiacion": "Financiación",
     "fincas": "Admin de fincas",
     "reformas": "Reformas",
+    "periciales": "Peritajes",
 }
 
 
@@ -2083,6 +2094,8 @@ def resolve_workspace_module_key_for_user_service(service):
         return "fincas"
     if key in {"reformas", "obras"}:
         return "reformas"
+    if key in {"periciales", "pericial", "peritaje", "peritajes", "valoraciones"}:
+        return "periciales"
     return ""
 
 
@@ -4858,6 +4871,11 @@ def normalize_service_key(value):
         "ADMINISTRACION DE FINCAS": "fincas",
         "ADMIN DE FINCAS": "fincas",
         "FINCAS": "fincas",
+        "PERICIAL": "periciales",
+        "PERITAJE": "periciales",
+        "PERITAJES": "periciales",
+        "VALORACION": "periciales",
+        "VALORACIONES": "periciales",
     }
     if text in aliases:
         return aliases[text]
@@ -4875,6 +4893,8 @@ def normalize_service_key(value):
             return "inmobiliaria"
         if "FINANC" in text or "HIPOTEC" in text or "LCCI" in text:
             return "financiaciones"
+        if "PERICIAL" in text or "PERITAJE" in text:
+            return "periciales"
     except Exception:
         pass
     return text.lower().strip()
@@ -5626,8 +5646,15 @@ def parse_money_value(value):
     has_comma = "," in text
     has_dot = "." in text
     if has_comma and has_dot:
-        # es-ES: dots thousands, comma decimals (ej: 20.000,50)
-        text = text.replace(".", "").replace(",", ".")
+        # Con los dos separadores manda el último: es el decimal. Suponer siempre es-ES
+        # convertía "1,234.56" —lo que sale de una factura o un Excel en inglés, y lo que
+        # se pega tal cual— en 1,23 €. Mil veces menos, guardado con un «ok» y sin aviso.
+        if text.rfind(",") > text.rfind("."):
+            # es-ES: puntos de millar, coma decimal (ej: 20.000,50)
+            text = text.replace(".", "").replace(",", ".")
+        else:
+            # en-US: comas de millar, punto decimal (ej: 20,000.50)
+            text = text.replace(",", "")
     elif has_comma:
         # Coma como decimal (ej: 20000,50)
         text = text.replace(",", ".")
@@ -5852,6 +5879,11 @@ def derive_hipoteca_financing(precio, importe_hipoteca):
         "precio": round(precio_num, 2),
         "importe_hipoteca": round(hipoteca_num, 2),
         "porcentaje": porcentaje,
+        # La ficha enseña «Entrada» al lado de «% financiación», y salía en blanco con el
+        # precio y el importe delante: la misma resta que el asesor acababa haciendo a
+        # mano. Sólo se rellena si está vacía —quien la haya puesto a mano puede estar
+        # contando también gastos e impuestos, y eso no se pisa—.
+        "entrada": round(max(precio_num - hipoteca_num, 0.0), 2),
     }
 
 
@@ -6678,16 +6710,28 @@ def normalize_hipoteca_estado(value):
 # borrar de más tampoco tiene vuelta atrás.
 
 # Datos personales sin obligación de conservación: se borran.
+# El orden importa: `inmueble_compradores` apunta a `demandas`, así que borrar la
+# demanda primero rompía la clave ajena y tumbaba la supresión entera. Los hijos van
+# antes que sus padres.
 RGPD_TABLAS_A_BORRAR = (
     ("cliente_profesional", "cliente_id"),      # actividad, IAE
+    ("inmueble_compradores", "cliente_id"),     # cruces: cuelgan de `demandas`
+    ("inmueble_propietarios", "cliente_id"),
     ("demandas", "cliente_id"),                 # preferencias de búsqueda
     ("acciones", "cliente_id"),                 # notas de seguimiento comercial
     ("seguros_eventos", "cliente_id"),          # trazas de gestión
-    ("inmueble_compradores", "cliente_id"),
-    ("inmueble_propietarios", "cliente_id"),
     ("fiscal_scenarios", "cliente_id"),         # simulaciones fiscales
     ("gestoria_import_reglas", "cliente_id"),   # reglas de conciliación por cliente
     ("gestoria_docs", "cliente_id"),            # documentación aportada (DNI, nóminas...)
+)
+
+# Filas que se conservan pero apuntan a algo que sí se borra. No se tocan sus datos:
+# sólo se suelta el vínculo, porque si no la clave ajena impide la supresión. Una visita
+# se queda —no está listada para borrar— pero deja de señalar a una demanda que ya no
+# existe; el cliente al que apunta habrá quedado anónimo, que es el criterio de arriba.
+RGPD_VINCULOS_A_SOLTAR = (
+    ("visitas", "demanda_id", "demandas", "cliente_id"),
+    ("gestoria_import_documentos", "gestoria_doc_id", "gestoria_docs", "cliente_id"),
 )
 
 # Obligación legal de conservación: se quedan, apuntando a una ficha ya anónima.
@@ -6703,6 +6747,56 @@ RGPD_TABLAS_QUE_SE_CONSERVAN = (
     ("workspace_presupuestos", "presupuestos"),
     ("clientes_empresas", "vínculo de servicio"),
 )
+
+# --- Supresión de un comunero -------------------------------------------------
+# Un vecino de comunidad no es un `cliente`: vive en `workspace_fincas_vecinos` con su
+# propio nombre, NIF, teléfono, correo e IBAN, y hasta ahora no había forma de ejercer
+# el art. 17 sobre él. Mismo criterio que con el cliente: no se borra la fila —los
+# recibos, los apuntes y las actas cuelgan de ella y hay que conservarlos—, se le quita
+# la identidad.
+#
+# Lo que se conserva y por qué:
+#   - recibos, apuntes y certificados: contabilidad de la comunidad (LGT, y art. 17.3 b)
+#   - asistentes y votos de junta: el acta debe reflejar quién asistió y cómo votó
+#     (LPH art. 19.2), así que la fila se queda apuntando a una ficha ya anónima
+#   - coeficientes: son del piso, no de la persona
+RGPD_FINCAS_BORRAR_DEL_VECINO = (
+    ("workspace_fincas_portal_accesos", "vecino_id"),   # enlaces y tokens del portal
+)
+
+RGPD_FINCAS_CONSERVAR_DEL_VECINO = (
+    ("workspace_fincas_recibos", "recibos emitidos"),
+    ("workspace_fincas_apuntes", "apuntes contables"),
+    ("workspace_fincas_certificados", "certificados emitidos"),
+    ("workspace_fincas_junta_asistentes", "asistencia a juntas (LPH art. 19.2)"),
+    ("workspace_fincas_junta_votos", "votos en junta (LPH art. 19.2)"),
+    ("workspace_fincas_coeficientes", "coeficiente del piso"),
+    ("workspace_fincas_incidencias", "incidencias de la comunidad"),
+)
+
+# Del vecino se vacía todo lo que señala a la persona. `mandato_ref` entra porque en la
+# práctica lleva el NIF dentro, y sin IBAN el mandato ya no sirve para cobrar.
+RGPD_FINCAS_IDENTIDAD_DEL_VECINO = (
+    "nif", "telefono", "email", "iban", "mandato_ref", "mandato_fecha", "notas",
+)
+
+
+# La misma persona puede estar copiada en otras tablas que NO cuelgan de `clientes`:
+# un cliente puede ser además vecino de una comunidad, socio de una sociedad o firmante
+# de un acta, y ahí su nombre, NIF, teléfono e IBAN están escritos otra vez. Suprimir el
+# cliente no las toca —y no debe tocarlas a ciegas: mientras sea propietario de un piso
+# hay base legal para conservar sus datos en la comunidad—. Lo que no vale es responder
+# «la ficha ya no identifica a nadie» cuando queda una copia entera en otra pantalla.
+# Esto no borra: mira y avisa, para que quien atiende la solicitud sepa qué queda.
+RGPD_TABLAS_CON_COPIA_DE_IDENTIDAD = (
+    ("workspace_fincas_vecinos", "vecinos de comunidad"),
+    ("workspace_fincas_proveedores", "proveedores de comunidad"),
+    ("gestoria_socios", "socios de sociedad"),
+    ("gestoria_acta_firmas", "firmantes de actas"),
+    ("gestoria_terceros", "terceros de contabilidad"),
+    ("workspace_registro_personal", "fichas de plantilla"),
+)
+
 
 # Columnas de `clientes` que identifican a una persona. Se vacían todas.
 RGPD_COLUMNAS_IDENTIFICATIVAS = (
@@ -9498,6 +9592,82 @@ def close_actions_for_related(conn, *, empresa_id, servicio, related_tipo, relat
         """,
         (estado or "Hecho", now_ts, empresa_id, servicio, related_tipo, related_id),
     )
+
+
+def importe_de_apunte_de_gestoria(payload, actual=None):
+    """Convierte a número el importe de un apunte de gestoría, o dice qué pasa.
+
+    El importe entraba tal cual venía del formulario, sin pasar por el analizador. La
+    columna es REAL, así que un importe tecleado en español normal —«2.450,75»— se
+    guardaba COMO TEXTO, y SQLite lo convierte a 2,45 al sumarlo:
+
+        2.450,75 € + 100,00 €  =  102,45 €
+
+    Un apunte de dos mil cuatrocientos cincuenta euros contaba como dos euros con
+    cuarenta y cinco, y el panel cuadraba solo. Es la misma familia que el importe en
+    formato inglés que se arregló en los otros tres analizadores; éste se quedó fuera.
+
+    Devuelve `(valor, error, requiere_confirmacion)`.
+    """
+    crudo = payload.get("importe")
+    if str(crudo if crudo is not None else "").strip() == "":
+        return (actual, None, False)
+    # `parse_money_value` devuelve 0 para lo que no sabe leer, y un apunte de 0 € por
+    # haber tecleado «dos mil» es peor que un error: se guarda y no se nota.
+    if not any(c.isdigit() for c in str(crudo)):
+        return (None, f"«{crudo}» no es un importe.", False)
+    valor = parse_money_value(crudo)
+    if valor is None:
+        return (None, f"«{crudo}» no es un importe.", False)
+    if valor < 0:
+        # Mismo criterio que en fincas: el signo lo pone el tipo, no el número.
+        return (None,
+                "El importe va en positivo: lo que decide si suma o resta es el tipo "
+                "(Gasto o Ingreso). Si es un abono, anótalo como ingreso.", False)
+    if valor > FINCAS_IMPORTE_QUE_PIDE_CONFIRMACION and not _quiere_confirmar(payload):
+        return (None,
+                f"{format_export_money(valor)} es mucho para un apunte de gestoría. "
+                f"Si es correcto, confírmalo.", True)
+    return (valor, None, False)
+
+
+def anula_recibos_pendientes_de_poliza(conn, seguro_row, now, motivo=""):
+    """Al dar de baja una póliza, sus recibos sin cobrar dejan de ser cobrables.
+
+    La póliza quedaba «Anulada» con su fecha de baja —correcto— y su recibo seguía en
+    «Pendiente». Y ese recibo sigue apareciendo en el resumen y entra en la remesa: se
+    le pasa al cobro a quien ya no tiene póliza. Nadie avisaba porque anular contestaba
+    200 y el recibo era otra tabla.
+
+    Sólo se tocan los que no se han cobrado. Lo cobrado no se deshace desde aquí: si
+    hay que devolver dinero, eso es un extorno y se anota como tal.
+
+    Se llama desde los DOS caminos que anulan —`seguros_update` con estado «Anulada» y
+    `seguros_poliza_accion`— porque la interfaz usa el primero y la API el segundo, y
+    poner el control en uno solo es como no ponerlo.
+    """
+    poliza_id = str(row_value(seguro_row, "id", "") or "")
+    if not poliza_id:
+        return 0
+    try:
+        pendientes = conn.execute(
+            "SELECT id FROM seguros_recibos WHERE seguro_id = ? "
+            "AND LOWER(COALESCE(estado, '')) NOT IN ('cobrado', 'anulado', 'liquidado')",
+            (poliza_id,),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return 0
+    if not pendientes:
+        return 0
+    nota = f"Anulado con la póliza{(': ' + motivo) if motivo else ''}"
+    for fila in pendientes:
+        conn.execute(
+            "UPDATE seguros_recibos SET estado = 'Anulado', "
+            "notas = TRIM(COALESCE(notas, '') || ? ), updated_at = datetime(?) WHERE id = ?",
+            (f"\n{nota}", now, row_value(fila, "id", "")),
+        )
+    return len(pendientes)
 
 
 def seguros_sync_activation_action(conn, seguro_row, now):
@@ -15328,7 +15498,14 @@ def sync_gestoria_modelos_from_contabilidad(conn, *, empresa_ids=None, cliente_i
         return 0
 
     resolved_cliente_ids = set(cliente_ids)
-    if empresa_ids:
+    # Si ya viene un cliente_ids explícito (p. ej. desde la ficha de un cliente
+    # concreto), es la petición del llamante: acotar a ESE cliente, no ampliarla.
+    # Sin este guard, /api/gestoria_libros?cliente_id=X&empresa_id=Y pasaba
+    # cliente_ids=[X] pero de todos modos barría TODOS los clientes de Y —para
+    # Fincas Velazquez, 33 tras el filtro de perfil, cada uno con su propio
+    # SELECT+INSERT por año×modelo— dejando la ficha de un único cliente
+    # colgada más de un minuto sin ningún bloqueo de Postgres de por medio.
+    if empresa_ids and not resolved_cliente_ids:
         placeholders = ",".join(["?"] * len(empresa_ids))
         try:
             rows = conn.execute(
@@ -15368,6 +15545,29 @@ def sync_gestoria_modelos_from_contabilidad(conn, *, empresa_ids=None, cliente_i
                         resolved_cliente_ids.add(cid)
             except Exception:
                 pass
+
+    if not resolved_cliente_ids:
+        return 0
+
+    # IVA trimestral y retenciones son obligaciones de autónomos/empresas, no de
+    # particulares. Sin este filtro, cualquier cliente con un solo asiento contable
+    # —incluido un particular sin actividad económica— se llevaba ~10 modelos por
+    # año. En Fincas Velazquez generó 20.460 filas de golpe para ~2.000 clientes,
+    # la inmensa mayoría particulares que nunca presentan IVA.
+    try:
+        id_placeholders = ",".join(["?"] * len(resolved_cliente_ids))
+        perfil_rows = conn.execute(
+            f"""
+            SELECT id
+            FROM clientes
+            WHERE id IN ({id_placeholders})
+              AND LOWER(TRIM(COALESCE(perfil, ''))) IN ('autónomo', 'autonomo', 'empresa', 'empresas')
+            """,
+            list(resolved_cliente_ids),
+        ).fetchall()
+        resolved_cliente_ids = {str(row["id"]).strip() for row in perfil_rows}
+    except Exception:
+        resolved_cliente_ids = set()
 
     if not resolved_cliente_ids:
         return 0
@@ -22894,6 +23094,102 @@ def ocr_pdf_all_pages(pdf_path, use_external=False):
         return text, ""
     return "", ocr_err or img_err
 
+# Etiquetas del impreso que el OCR arrastra pegadas por delante del nombre.
+_ETIQUETA_PEGADA_AL_TOMADOR = re.compile(
+    r"^\s*(?:de\s+la\s+p[oó]liza|de\s+la|del\s+seguro|de\s+seguros|"
+    r"tomador(?:\s+del\s+seguro)?|asegurado|titular|nombre|raz[oó]n\s+social)"
+    r"\s*[:.\-]?\s*", re.IGNORECASE)
+
+# Palabras que sólo salen en la letra pequeña de una póliza, nunca en el nombre de quien
+# la firma. Sacadas del corpus real de 133 pólizas de la correduría.
+_LETRA_PEQUENA_DE_POLIZA = (
+    "electricidad", "derogan", "en su caso", "profesional", "segun la siguiente",
+    "edificacion", "anexos", "conductor habitual", "datos de su", "mediador",
+    "reasegurado", "se rige por", "condiciones particulares", "condiciones generales",
+    "clausula", "franquicia", "capital asegurado", "suma asegurada", "recibo",
+    "suplemento", "el tomador", "la tomadora", "del seguro", "de seguros", "importe",
+)
+
+# Con qué no puede empezar el nombre de alguien.
+_TOMADOR_EMPIEZA_MAL = re.compile(
+    r"^(de|del|la|el|los|las|y|o|con|por|para|en|al|un|una|su|sus|que|se|es|son|"
+    r"datos|tomador|asegurado|conductor|titular|beneficiario|importe|prima|n[ºo]|no)\b",
+    re.IGNORECASE)
+
+
+def limpia_tomador(valor):
+    """Quita lo que el OCR arrastra pegado al nombre, por delante y por detrás.
+
+    El lector recorta la zona del tomador y se trae los bordes: la etiqueta del impreso
+    («de la póliza TERESA RAMOS RUEDA») o trozos de la palabra de al lado cortada por el
+    margen («up SANTANA MUÑOZ, MARIA DEL CARMEN oD», «ica KONECNY FIORE, BARBARA pl»).
+
+    En producción había fichas de cliente llamadas literalmente «de la póliza TERESA
+    RAMOS RUEDA» y «de la póliza JOSE BANDERA DOMINGUEZ». Nacieron de aquí.
+
+    Sólo se tocan los EXTREMOS, y sólo lo que va en minúscula: en estos documentos el
+    nombre va en mayúsculas, y las partículas de un apellido —«MALAGAMBA DE OÑA
+    FERNANDO»— van por dentro y se quedan.
+    """
+    bruto = re.sub(r"\s+", " ", str(valor or "")).strip(" ,;:.-")
+    if not bruto:
+        return ""
+    bruto = _ETIQUETA_PEGADA_AL_TOMADOR.sub("", bruto).strip(" ,;:.-")
+    # El documento suele ir detrás del nombre: «MIGUEL ANGEL PEREZ RODRIGUEZ NIF:
+    # 24835591F». El nombre acaba donde empieza el documento.
+    bruto = re.split(r"(?i)\b(?:nif|dni|cif|n\.i\.f|d\.n\.i)\b\s*[:.]?", bruto)[0].strip(" ,;:.-")
+    def es_resto_de_ocr(tok):
+        """Un trozo corto que no es ni sigla ni nombre: «up», «oD», «pl», «ica».
+
+        Se exige que NO sea todo mayúsculas —para no comerse «SL», «SA», «SLU»— ni un
+        nombre propio con la inicial en mayúscula, que dejaría fuera un «Ana» final.
+        """
+        return len(tok) <= 4 and not tok.isupper() and not tok.istitle()
+
+    trozos = bruto.split()
+    while trozos and es_resto_de_ocr(trozos[0]):
+        trozos.pop(0)
+    while trozos and es_resto_de_ocr(trozos[-1]):
+        trozos.pop()
+    return " ".join(trozos).strip(" ,;:.-")
+
+
+def tomador_parece_un_nombre(valor):
+    """¿Esto es el nombre de quien firma, o un trozo del contrato?
+
+    Cuando el documento no encaja con el patrón de su compañía, el lector se trae lo que
+    hubiera al lado. Medido sobre las 133 pólizas de la correduría: **40 de 122 no eran
+    nombres** —«de agua, gas, electricidad, en…», «Edificación y anexos», «El asegurado:
+    El tomador», «Y CONDUCTOR»—.
+
+    Y no falla en silencio: falla creando clientes. La ficha «Y CONDUCTOR» que había en
+    producción salió de `POLIZA AUTO Nº 2002400455146 - ADRIAN GUTIERREZ.pdf`, donde el
+    lector se quedó con el encabezado de la letra pequeña. Igual «del Seguro Por SANITAS»
+    y «Edificación y anexos».
+
+    Devolver vacío es la respuesta correcta cuando no se sabe: entonces el nombre lo pone
+    una persona. Devolver basura la escribe en la base.
+    """
+    bruto = str(valor or "").strip()
+    if len(bruto) < 5:
+        return False
+    palabras = [x for x in re.split(r"\s+", bruto) if len(x) > 1]
+    if len(palabras) < 2 or len(palabras) > 9:
+        return False
+    if _TOMADOR_EMPIEZA_MAL.match(bruto):
+        return False
+    plano = normalize_lookup_text(bruto).lower()
+    if any(x in plano for x in _LETRA_PEQUENA_DE_POLIZA):
+        return False
+    letras = sum(1 for ch in bruto if ch.isalpha())
+    if letras < 6 or letras < len(bruto) * 0.5:
+        return False
+    # Una frase del contrato lleva minúsculas de más; un nombre va en mayúsculas o con la
+    # inicial en mayúscula. Se mide por palabras, no por caracteres.
+    con_inicial = sum(1 for x in palabras if x[:1].isupper())
+    return con_inicial >= max(2, len(palabras) - 1)
+
+
 def parse_poliza_text(text, source_hint="", hinted_company=""):
     DATE_TOKEN = r"(?<!\d)(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})(?!\d)"
     cleaned = text.replace("\u00a0", " ")
@@ -25358,6 +25654,11 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             fields["ramo"] = ramo_val
         else:
             fields["ramo"] = ""
+    # El tomador se limpia y se comprueba. Si no es un nombre, se deja vacío: vacío se
+    # lo pregunta a una persona, inventado se convierte en una ficha de cliente.
+    if fields.get("tomador"):
+        limpio = limpia_tomador(fields.get("tomador"))
+        fields["tomador"] = limpio if tomador_parece_un_nombre(limpio) else ""
     return fields
 
 def parse_asesoramiento_block(block):
@@ -26683,7 +26984,11 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
         "vendido": "Vendido",
         "compraventa": "Vendido",
         "cerrado_negativamente": "Cerrado negativamente",
-        "alquiler": "Alquiler",
+        # «Alquiler» se leía como «está en alquiler» cuando quiere decir «está
+        # alquilado»: la misma palabra para el escaparate y para el desenlace. Se
+        # aceptan las dos claves porque la etiqueta nueva vuelve a entrar por aquí.
+        "alquiler": "Alquilado",
+        "alquilado": "Alquilado",
     }.get(destino_key) or {
         "inmueble": "Inmueble",
         "noticia": "Noticia",
@@ -26696,7 +27001,8 @@ def sync_inmueble_stage_for_action(conn, inmueble_id, destino, now):
         "vendido": "Vendido",
         "compraventa": "Vendido",
         "cerrado negativamente": "Cerrado negativamente",
-        "alquiler": "Alquiler",
+        "alquiler": "Alquilado",
+        "alquilado": "Alquilado",
     }.get(destino_norm)
     if not inmueble_id or not destino_label:
         return
@@ -26934,7 +27240,7 @@ def ensure_inmueble_cierres_schema(conn):
 
 
 def create_operacion_for_inmueble_cierre(conn, empresa_id, inmueble_id, tipo_label, now, *, fecha_cierre=None, importe_final=None, honorarios=None, numero_citas=None, nuevo_propietario_id=None, nuevo_propietario=None, notas=None):
-    if tipo_label not in {"Vendido", "Alquiler"}:
+    if tipo_label not in {"Vendido", "Alquilado"}:
         return None
     inmueble = conn.execute("SELECT * FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
     if not inmueble:
@@ -27003,7 +27309,7 @@ def create_operacion_for_inmueble_cierre(conn, empresa_id, inmueble_id, tipo_lab
         (
             op_id,
             empresa_id,
-            "alquiler" if tipo_label == "Alquiler" else "venta",
+            "alquiler" if tipo_label == "Alquilado" else "venta",
             "Cerrada",
             "cierre_encargo",
             "CRM inmobiliario",
@@ -27032,7 +27338,7 @@ def create_operacion_for_inmueble_cierre(conn, empresa_id, inmueble_id, tipo_lab
             fecha,
             precio_encargo or None,
             importe_num if tipo_label == "Vendido" else None,
-            importe_num if tipo_label == "Alquiler" else None,
+            importe_num if tipo_label == "Alquilado" else None,
             dias_hasta_venta,
             int(numero_citas) if numero_citas is not None else None,
             honorarios_num,
@@ -27046,7 +27352,7 @@ def create_operacion_for_inmueble_cierre(conn, empresa_id, inmueble_id, tipo_lab
             now,
         ),
     )
-    if tipo_label == "Alquiler":
+    if tipo_label == "Alquilado":
         try:
             conn.execute(
                 """
@@ -27084,11 +27390,54 @@ def create_operacion_for_inmueble_cierre(conn, empresa_id, inmueble_id, tipo_lab
     return op_id
 
 
-def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=None, fecha_cierre=None, importe_final=None, numero_citas=None, tipo=None, notas=None, archive_pending=True, honorarios=None, motivo_cierre=None, nuevo_propietario=None, workspace_id=""):
+def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=None, fecha_cierre=None, importe_final=None, numero_citas=None, tipo=None, notas=None, archive_pending=True, honorarios=None, motivo_cierre=None, nuevo_propietario=None, workspace_id="", confirmado=False):
     empresa_id = str(empresa_id or "").strip()
     inmueble_id = str(inmueble_id or "").strip()
     if not empresa_id or not inmueble_id:
         return {"ok": False, "error": "empresa_id e inmueble_id requeridos"}
+    # El cierre es el momento en que entra el dinero, y es un botón que se pulsa una vez
+    # al año por inmueble: si acepta cualquier cosa, nadie se entera hasta que cuadran.
+    if importe_final is not None and float(importe_final) < 0:
+        return {"ok": False,
+                "error": f"El importe de la operación no puede ser negativo "
+                         f"({format_export_money(importe_final)})."}
+    if honorarios is not None and float(honorarios) < 0:
+        return {"ok": False,
+                "error": f"Los honorarios no pueden ser negativos "
+                         f"({format_export_money(honorarios)})."}
+    if (importe_final is not None and honorarios is not None
+            and float(honorarios) > float(importe_final) > 0 and not confirmado):
+        # En un alquiler los honorarios suelen ser una mensualidad, o sea el importe
+        # entero; por encima ya no cuadra con nada. No se bloquea —puede haber un
+        # encargo con mínimo pactado— pero no entra sin decirlo.
+        return {"ok": False, "requiere_confirmacion": True,
+                "error": f"Los honorarios ({format_export_money(honorarios)}) son mayores "
+                         f"que el importe de la operación ({format_export_money(importe_final)}). "
+                         f"Si es correcto, confírmalo."}
+    # Cerrar dos veces el mismo inmueble apuntaba dos cierres, y los honorarios se
+    # sumaban en los paneles tantas veces como se pulsara el botón.
+    ya_cerrado = conn.execute(
+        "SELECT id, tipo, fecha_cierre, importe_final, honorarios FROM inmueble_cierres "
+        "WHERE inmueble_id = ? ORDER BY created_at DESC LIMIT 1",
+        (inmueble_id,),
+    ).fetchone()
+    if ya_cerrado and not confirmado:
+        return {
+            "ok": False,
+            "requiere_confirmacion": True,
+            "code": "ya_cerrado",
+            "error": (f"Este inmueble ya se cerró como {row_value(ya_cerrado, 'tipo', '')} el "
+                      f"{row_value(ya_cerrado, 'fecha_cierre', '') or 'sin fecha'} por "
+                      f"{format_export_money(row_value(ya_cerrado, 'importe_final', 0))} con "
+                      f"{format_export_money(row_value(ya_cerrado, 'honorarios', 0))} de "
+                      f"honorarios. Si vas a corregir aquel cierre, confírmalo y se sustituye; "
+                      f"si es una operación nueva, retoma antes la captación."),
+            "cierre_anterior": dict(ya_cerrado),
+        }
+    if ya_cerrado and confirmado:
+        # Sustituir, no acumular: es una corrección del mismo cierre.
+        conn.execute("DELETE FROM inmueble_cierres WHERE id = ?",
+                     (row_value(ya_cerrado, "id", ""),))
     tipo_norm = normalize_lookup_text(tipo or "").lower()
     tipo_key = (
         tipo_norm.replace("/", "_")
@@ -27100,7 +27449,8 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
     tipo_label = {
         "vendido": "Vendido",
         "compraventa": "Vendido",
-        "alquiler": "Alquiler",
+        "alquiler": "Alquilado",
+        "alquilado": "Alquilado",
         "cerrado_negativamente": "Cerrado negativamente",
         "cerrado negativamente": "Cerrado negativamente",
     }.get(tipo_key) or {
@@ -27108,11 +27458,11 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
         "alquiler": "Alquiler",
         "cerrado negativamente": "Cerrado negativamente",
     }.get(tipo_norm) or str(tipo or "").strip()
-    if tipo_label not in {"Vendido", "Alquiler", "Cerrado negativamente"}:
+    if tipo_label not in {"Vendido", "Alquilado", "Cerrado negativamente"}:
         # fallback razonable por tipo_operacion
         row = conn.execute("SELECT tipo_operacion FROM inmuebles WHERE id = ? LIMIT 1", (inmueble_id,)).fetchone()
         op = normalize_lookup_text((row["tipo_operacion"] if row else "") or "")
-        tipo_label = "Alquiler" if op == "alquiler" else "Vendido"
+        tipo_label = "Alquilado" if op == "alquiler" else "Vendido"
     ensure_inmueble_cierres_schema(conn)
     nuevo_propietario = nuevo_propietario or {}
     nuevo_propietario_id = None
@@ -27187,10 +27537,17 @@ def close_inmueble_encargo_positive(conn, empresa_id, inmueble_id, now, usuario=
         usuario=usuario,
         reason=f"Cierre {tipo_label}",
     )
-    final_stage = "Noticia" if tipo_label == "Alquiler" else "Inmueble"
-    # Registra el cierre y deja la ficha en la fase operativa correspondiente, conservando el histórico.
+    # La ficha se queda contando lo que pasó. Antes se ponía en «Vendido» y la línea
+    # siguiente lo pisaba con «Inmueble», así que un piso vendido volvía al listado del
+    # comercial indistinguible de uno disponible: mismo estado, mismo precio, ninguna
+    # marca. Y por el otro camino de cerrar una venta —convertir la captación con destino
+    # «vendido»— sí quedaba en «Vendido»: los dos caminos acababan distinto.
+    #
+    # Si con el tiempo vuelve a salir a la venta, se retoma convirtiéndola otra vez a
+    # «Encargo», que es lo que ya hacía `captacion_convert`. Reabrir es un acto, no el
+    # estado por defecto de lo que se acaba de cerrar.
+    final_stage = tipo_label
     sync_inmueble_stage_for_action(conn, inmueble_id, tipo_label, now)
-    sync_inmueble_stage_for_action(conn, inmueble_id, final_stage, now)
     archived = 0
     if archive_pending:
         try:
@@ -33602,8 +33959,11 @@ def build_portal_de_busqueda(conn, acceso, *, registrar=True):
             "nombre": str(row_value(empresa, "nombre", "") or ""),
             "asesor": str(row_value(demanda, "responsable", "") or ""),
             "logo": hay_logo,
-            "color": paleta["fondo"],
-            "tinta": paleta["tinta"],
+            # `paleta`, no `color`/`tinta`: al pasar de un color plano a la paleta
+            # completa se cambió la línea que las calculaba pero no estas dos, que
+            # quedaron apuntando a variables inexistentes. El portal respondía 500 a
+            # cada petición con `NameError: name 'color' is not defined`, y la página
+            # ya leía `d.agencia.paleta`.
             "paleta": paleta,
         },
         # Lo que pidió, para que pueda decir «esto no era lo que buscaba» con el
@@ -34451,6 +34811,244 @@ def fetch_geocode_coordinates(address, municipio="", provincia="", codigo_postal
         "catastro": catastro,
         "provider_errors": provider_errors,
     }
+
+
+def _fetch_nominatim_reverse(lat, lon):
+    """Barrio/distrito/municipio a partir de una coordenada. Mismo proveedor e
+    identificación que `_fetch_nominatim_query`, en su endpoint de reverse."""
+    params = urllib.parse.urlencode(
+        {"format": "jsonv2", "lat": lat, "lon": lon, "zoom": 16, "addressdetails": 1}
+    )
+    req = urllib.request.Request(
+        f"https://nominatim.openstreetmap.org/reverse?{params}",
+        headers={
+            "User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)",
+            "Accept-Language": "es",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=8) as response:
+        return json.loads(response.read().decode("utf-8", errors="ignore"))
+
+
+#: Qué se cuenta como "cercano" para el párrafo de entorno, y con qué etiqueta
+#: en español aparece. `tag` es la clave OSM que se consulta en Overpass.
+ENTORNO_CATEGORIAS_OSM = [
+    ("amenity", "school", "colegio", "colegios"),
+    ("amenity", "kindergarten", "escuela infantil", "escuelas infantiles"),
+    ("amenity", "pharmacy", "farmacia", "farmacias"),
+    ("amenity", "hospital", "hospital", "hospitales"),
+    ("amenity", "clinic", "centro de salud", "centros de salud"),
+    ("shop", "supermarket", "supermercado", "supermercados"),
+    ("leisure", "park", "parque", "parques"),
+    ("public_transport", "stop_position", "parada de transporte público", "paradas de transporte público"),
+    ("highway", "bus_stop", "parada de autobús", "paradas de autobús"),
+    ("railway", "station", "estación de tren/metro", "estaciones de tren/metro"),
+    ("amenity", "restaurant", "restaurante", "restaurantes"),
+    ("amenity", "bank", "banco/cajero", "bancos/cajeros"),
+    ("amenity", "place_of_worship", "templo religioso", "templos religiosos"),
+]
+
+
+def _fetch_overpass_pois(lat, lon, radio_m=400):
+    """Equipamientos en un radio alrededor del punto, vía Overpass API
+    (OpenStreetMap) — mismo dato que ya usa el mapa estático del presupuesto,
+    consultado aquí por tipo en vez de por tesela."""
+    condiciones = "".join(
+        f'node["{clave}"="{valor}"](around:{radio_m},{lat},{lon});'
+        for clave, valor, _etq_sing, _etq_plur in ENTORNO_CATEGORIAS_OSM
+    )
+    # `out ids;` NO incluye las etiquetas (`tags`) de cada elemento — solo
+    # id/type. Con eso el conteo de abajo (que compara `tags.get(clave)`)
+    # daba siempre cero, pasara lo que pasara alrededor del inmueble. Con
+    # `out tags;` sí llegan las etiquetas necesarias para contar de verdad.
+    consulta = f"[out:json][timeout:10];({condiciones});out count;out tags;"
+    req = urllib.request.Request(
+        "https://overpass-api.de/api/interpreter",
+        data=urllib.parse.urlencode({"data": consulta}).encode("utf-8"),
+        headers={"User-Agent": "Verifika2CRM/1.0 (contacto@grupomodernia.es)"},
+    )
+    with urllib.request.urlopen(req, timeout=12) as response:
+        payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+    conteos = {f"{clave}={valor}": 0 for clave, valor, _s, _p in ENTORNO_CATEGORIAS_OSM}
+    for elemento in payload.get("elements") or []:
+        tags = elemento.get("tags") or {}
+        for clave, valor, _s, _p in ENTORNO_CATEGORIAS_OSM:
+            if tags.get(clave) == valor:
+                conteos[f"{clave}={valor}"] += 1
+    return conteos
+
+
+def fetch_descripcion_entorno(direccion, *, municipio="", provincia="", codigo_postal="", radio_m=400):
+    """El párrafo de "descripción del entorno" del informe pericial: barrio,
+    distrito y equipamientos a `radio_m` metros, con fuente citada. Texto de
+    partida editable, no un dato que se dé por bueno sin poder corregirlo —
+    igual que las cifras legales precargadas en fincas.
+
+    Devuelve `{"ok": False, "error": ...}` si no se pudo geocodificar; un
+    fallo de Overpass no tira el resultado entero, solo omite esa parte
+    (la ubicación por sí sola ya es útil).
+    """
+    geo = fetch_geocode_coordinates(direccion, municipio=municipio, provincia=provincia, codigo_postal=codigo_postal)
+    if not geo.get("ok"):
+        return {"ok": False, "error": "No se pudo localizar la dirección para describir el entorno."}
+    lat, lon = geo["lat"], geo["lon"]
+
+    barrio = distrito = municipio_nombre = via = codigo_postal_osm = ""
+    try:
+        reverso = _fetch_nominatim_reverse(lat, lon)
+        direccion_osm = reverso.get("address") or {}
+        barrio = str(direccion_osm.get("suburb") or direccion_osm.get("neighbourhood") or "").strip()
+        distrito = str(direccion_osm.get("city_district") or direccion_osm.get("borough") or "").strip()
+        municipio_nombre = str(
+            direccion_osm.get("city") or direccion_osm.get("town") or direccion_osm.get("village") or ""
+        ).strip()
+        # `road`/`postcode` ya venían en la misma respuesta (addressdetails=1)
+        # y se descartaban sin usar — sin llamada de red adicional.
+        via = str(direccion_osm.get("road") or "").strip()
+        codigo_postal_osm = str(direccion_osm.get("postcode") or "").strip()
+    except Exception:
+        pass
+
+    frases = []
+    ubicacion = ", ".join(p for p in (barrio, distrito, municipio_nombre) if p)
+    if ubicacion:
+        frases.append(f"El inmueble se ubica en {ubicacion}.")
+    elif geo.get("display_name"):
+        frases.append(f"Ubicación de referencia: {geo['display_name']}.")
+    # La vía y el código postal no van en la frase de ubicación (para no
+    # duplicar lo que ya se ve en el campo "Dirección" del informe) pero sí
+    # aportan si faltaba contexto de barrio/distrito.
+    if via and not ubicacion:
+        frases.append(f"Vía: {via}" + (f", C.P. {codigo_postal_osm}." if codigo_postal_osm else "."))
+    elif codigo_postal_osm and codigo_postal_osm not in (codigo_postal or ""):
+        frases.append(f"Código postal: {codigo_postal_osm}.")
+
+    conteos = {}
+    try:
+        conteos = _fetch_overpass_pois(lat, lon, radio_m=radio_m)
+    except Exception:
+        conteos = {}
+    equipamientos = []
+    for clave, valor, etiqueta_sing, etiqueta_plur in ENTORNO_CATEGORIAS_OSM:
+        n = conteos.get(f"{clave}={valor}", 0)
+        if n == 1:
+            equipamientos.append(f"1 {etiqueta_sing}")
+        elif n > 1:
+            equipamientos.append(f"{n} {etiqueta_plur}")
+    if equipamientos:
+        frases.append(
+            f"En un radio aproximado de {radio_m} m se han localizado: {', '.join(equipamientos)}."
+        )
+
+    hoy = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    frases.append(f"Fuente: OpenStreetMap (Nominatim/Overpass), consultado el {hoy}.")
+
+    return {
+        "ok": True,
+        "texto": " ".join(frases),
+        "lat": lat,
+        "lon": lon,
+        "barrio": barrio,
+        "distrito": distrito,
+        "municipio": municipio_nombre,
+    }
+
+
+def _distancia_km(lat1, lon1, lat2, lon2):
+    """Haversine, en km. Sin dependencias — `math` ya está importado en todo
+    el fichero (se usa para la proyección del mapa estático)."""
+    r = 6371.0
+    f1, f2 = math.radians(lat1), math.radians(lat2)
+    df = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(df / 2) ** 2 + math.cos(f1) * math.cos(f2) * math.sin(dl / 2) ** 2
+    return r * 2 * math.asin(min(1.0, math.sqrt(a)))
+
+
+def buscar_testigos_propios(conn, workspace_id, direccion, *, superficie_objetivo=None, radio_km=3.0, limite=8):
+    """Comparables para el método de comparación, buscados en el propio
+    inventario del CRM en vez de en portales de terceros: sin riesgo legal de
+    scraping, y es dato propio — ya se sabe que es de fiar.
+
+    Solo ventas ya escrituradas (`precio_escritura > 0`): un encargo activo
+    todavía no es un precio de mercado confirmado, es una expectativa (ver
+    la convención de precio_encargo vs. precio_escritura). El precio de venta
+    vive en `operaciones_inmobiliarias`, no en la ficha del inmueble.
+
+    Si el inmueble tiene coordenadas guardadas, se ordena por distancia real
+    (haversine); si no las tiene ninguno de los dos lados, se cae a
+    coincidencia de código postal — mejor eso que no ofrecer nada.
+    """
+    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
+    if not empresa_ids:
+        return {"ok": True, "testigos": [], "geocodificado": False}
+
+    geo = None
+    try:
+        geo = fetch_geocode_coordinates(direccion)
+    except Exception:
+        geo = None
+    geocodificado = bool(geo and geo.get("ok"))
+    lat_obj = geo.get("lat") if geocodificado else None
+    lon_obj = geo.get("lon") if geocodificado else None
+
+    placeholders = ",".join("?" for _ in empresa_ids)
+    filas = conn.execute(
+        f"""
+        SELECT o.id, o.direccion, o.precio_escritura, o.fecha_escritura, o.inmueble_id,
+               i.m2, i.lat, i.lon, i.codigo_postal
+        FROM operaciones_inmobiliarias o
+        LEFT JOIN inmuebles i ON i.id = o.inmueble_id
+        WHERE o.empresa_id IN ({placeholders})
+          AND LOWER(COALESCE(o.tipo_operacion, 'venta')) = 'venta'
+          AND o.precio_escritura > 0
+        """,
+        tuple(empresa_ids),
+    ).fetchall()
+
+    cp_match = re.search(r"\b(\d{5})\b", str(direccion or ""))
+    codigo_postal_obj = cp_match.group(1) if cp_match else ""
+    candidatos = []
+    for fila in filas:
+        lat_c, lon_c = row_value(fila, "lat", None), row_value(fila, "lon", None)
+        distancia_km = None
+        if geocodificado and lat_c not in (None, "") and lon_c not in (None, ""):
+            try:
+                distancia_km = round(_distancia_km(lat_obj, lon_obj, float(lat_c), float(lon_c)), 2)
+            except (TypeError, ValueError):
+                distancia_km = None
+        cp_candidato = str(row_value(fila, "codigo_postal", "") or "").strip()
+        mismo_cp = bool(codigo_postal_obj) and cp_candidato == codigo_postal_obj
+        # Si hay distancia real, manda ella (con el código postal como excepción
+        # para el limítrofe que cae justo fuera del radio). Si NO hay distancia
+        # —falta lat/lon en cualquiera de los dos lados—, el código postal es lo
+        # único que queda para decidir "cerca": sin él, no hay filtro que aplicar,
+        # y "sin filtro" es exactamente el fallo que devolvía toda la cartera.
+        if distancia_km is not None:
+            if distancia_km > radio_km and not mismo_cp:
+                continue
+        elif not mismo_cp:
+            continue
+        candidatos.append({
+            "inmueble_id": row_value(fila, "inmueble_id", ""),
+            "direccion": row_value(fila, "direccion", "") or "",
+            "precio": row_value(fila, "precio_escritura", 0) or 0,
+            "fecha": row_value(fila, "fecha_escritura", "") or "",
+            "superficie": row_value(fila, "m2", None),
+            "distancia_km": distancia_km,
+            "mismo_codigo_postal": mismo_cp,
+        })
+
+    def _orden(c):
+        # Sin distancia (ni geocoding propio ni del candidato) va al final;
+        # entre esos, el que comparte código postal se antepone.
+        return (
+            0 if c["distancia_km"] is not None else (1 if c["mismo_codigo_postal"] else 2),
+            c["distancia_km"] if c["distancia_km"] is not None else 0,
+        )
+
+    candidatos.sort(key=_orden)
+    return {"ok": True, "testigos": candidatos[:limite], "geocodificado": geocodificado}
 
 
 def _strip_html_fragment(value):
@@ -35444,8 +36042,18 @@ def portal_inmueble_row_to_public(row):
     title = data.get("titulo_anuncio") or data.get("titulo") or data.get("direccion") or "Inmueble Verifika2"
     description = data.get("descripcion_larga") or data.get("descripcion_corta") or data.get("descripcion")
     empresa_id = data.get("empresa_id")
-    empresa_nombre_publico = "Grupo Modernia"
-    empresa_logo_publico = "/assets/grupo_modernia_logo.png"
+    # El nombre y el logo salían fijos aunque la consulta ya trae los de la empresa del
+    # inmueble (`e.nombre` y `e.logo_url`). Hoy no se nota porque todo lo publicado es de
+    # la misma casa; el día que publique una segunda agencia, sus inmuebles saldrían con
+    # el nombre y el logotipo de otra. Se usa el suyo, y sólo si no lo tiene se cae a la
+    # marca de la casa.
+    # Lo que se anuncia es el nombre comercial de la agencia, no el que se usa dentro
+    # del CRM ni su razón social: nadie busca piso a «Estudio Velazquez 2012 SL». Si no
+    # lo tiene puesto se anuncia con la marca del grupo, que es lo que había siempre.
+    empresa_nombre_publico = str(data.get("empresa_nombre_comercial") or "").strip() or "Grupo Modernia"
+    empresa_logo_publico = str(data.get("empresa_logo") or "").strip() or "/assets/grupo_modernia_logo.png"
+    if empresa_logo_publico and not empresa_logo_publico.startswith(("/", "http")):
+        empresa_logo_publico = f"/api/portal_empresa_logo?id={urllib.parse.quote(str(empresa_id or ''))}"
     return {
         "id": data.get("id"),
         "referencia": data.get("referencia"),
@@ -35589,6 +36197,7 @@ def fetch_portal_inmuebles_public(conn, *, listing_id="", limit=100, filtros=Non
           i.ascensor, i.garaje, i.trastero, i.terraza, i.piscina, i.amueblado,
           i.exterior, i.aire_acondicionado, i.calefaccion, i.accesible,
           MAX(e.nombre) AS empresa_nombre, MAX(e.logo_url) AS empresa_logo,
+          MAX(e.nombre_comercial) AS empresa_nombre_comercial,
           MAX(COALESCE(c.noticia_verificada, 0)) AS noticia_verificada,
           ({photo_expr}) AS foto
         FROM inmuebles i
@@ -41079,6 +41688,25 @@ def sql_group_concat(expr: str, sep: str = " | ", *, distinct: bool = False) -> 
         return f"GROUP_CONCAT(DISTINCT {expr}, '{safe_sep}')"
     return f"GROUP_CONCAT({expr}, '{safe_sep}')"
 
+def cliente_existe(conn, cliente_id):
+    """¿Hay un cliente con ese id?
+
+    Varios endpoints insertaban con el `cliente_id` que viniera en la petición sin
+    comprobarlo. Si no existe salta la clave ajena, que sale como un 500 —y en Postgres
+    además deja la transacción abortada, así que muere también todo lo que venga después
+    en la misma petición— cuando lo que ocurre es que el id no está. Eso es un 404.
+    """
+    cid = str(cliente_id or "").strip()
+    if not cid:
+        return False
+    try:
+        return bool(conn.execute(
+            "SELECT 1 FROM clientes WHERE id = ? LIMIT 1", (cid,)).fetchone())
+    except Exception:
+        _rollback_best_effort(conn)
+        return False
+
+
 def row_value(row, key, default=None):
     if row is None:
         return default
@@ -41713,6 +42341,58 @@ def _ensure_tables_sin_red(db_path, _abiertas):
             _migration_mark(conn, "perf_indexes_renta_v1")
     except Exception:
         pass
+
+    # Dos fichas del mismo cliente, creadas a la vez, con el mismo NIF.
+    #
+    # El alta comprueba si ya existe antes de insertar, pero una comprobación no ve lo
+    # que otra petición está escribiendo sin confirmar todavía. Medido: seis altas
+    # simultáneas del mismo NIF dejaron cuatro fichas. Y una ficha duplicada no se
+    # arregla sola: hay que fusionarla a mano decidiendo cuál es la buena.
+    #
+    # El índice usa **el mismo criterio que la comprobación**: el NIF en mayúsculas y
+    # sin espacios, puntos ni guiones, dentro del mismo workspace. Si se usara otro, el
+    # índice rechazaría altas que la aplicación considera distintas.
+    #
+    # Sin `try/except` mudo: si esto no se puede crear es porque hay duplicados ya
+    # dentro, y eso hay que verlo. Al arrancar se dice; no se calla y se sigue como si
+    # el índice existiera.
+    try:
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_nif_unico_por_workspace
+            ON clientes (
+              COALESCE(workspace_id, ''),
+              REPLACE(REPLACE(REPLACE(UPPER(COALESCE(nif, '')), ' ', ''), '-', ''), '.', '')
+            )
+            WHERE COALESCE(nif, '') <> ''
+            """
+        )
+    except Exception as exc:
+        _rollback_best_effort(conn)
+        try:
+            repetidos = conn.execute(
+                """
+                SELECT COUNT(*) AS n FROM (
+                  SELECT 1 FROM clientes
+                  WHERE COALESCE(nif, '') <> ''
+                  GROUP BY COALESCE(workspace_id, ''),
+                           REPLACE(REPLACE(REPLACE(UPPER(COALESCE(nif, '')), ' ', ''), '-', ''), '.', '')
+                  HAVING COUNT(*) > 1
+                ) x
+                """
+            ).fetchone()
+            cuantos = int(row_value(repetidos, "n", 0) or 0)
+        except Exception:
+            _rollback_best_effort(conn)
+            cuantos = -1
+        print(
+            f"[AVISO] No se pudo crear idx_clientes_nif_unico_por_workspace: {exc}. "
+            f"Grupos de clientes con el mismo NIF pendientes de fusionar: "
+            f"{cuantos if cuantos >= 0 else 'no se pudo contar'}. "
+            f"Mientras no exista el índice, dos altas simultáneas del mismo NIF "
+            f"pueden crear fichas duplicadas.",
+            file=sys.stderr,
+        )
     # Backfill/compat: algunos datasets legacy no tenían todavía tablas base usadas en el dashboard.
     # Evita 500 en endpoints como `/api/dashboard` cuando se despliegan nuevas vistas.
     try:
@@ -41837,6 +42517,10 @@ def _ensure_tables_sin_red(db_path, _abiertas):
     # con la suya: esto solo decide qué sale preseleccionado al crear.
     ensure_column(conn, "empresas", "fincas_por_defecto", "fincas_por_defecto INTEGER NOT NULL DEFAULT 0")
     ensure_column(conn, "empresas", "razon_social", "razon_social TEXT")
+    # El nombre con el que la agencia se anuncia en el escaparate público, que no tiene
+    # por qué ser ni el interno ni la razón social: nadie busca piso a «Estudio
+    # Velazquez 2012 SL». Vacío = se anuncia con la marca del grupo.
+    ensure_column(conn, "empresas", "nombre_comercial", "nombre_comercial TEXT")
     ensure_column(conn, "empresas", "nif", "nif TEXT")
     ensure_column(conn, "empresas", "direccion", "direccion TEXT")
     ensure_column(conn, "empresas", "direccion_fiscal", "direccion_fiscal TEXT")
@@ -44038,6 +44722,10 @@ def ensure_usuarios_schema(conn):
     ensure_column(conn, "usuarios", "email", "email TEXT")
     ensure_column(conn, "usuarios", "servicio", "servicio TEXT")
     ensure_column(conn, "usuarios", "registro_horario_activo", "registro_horario_activo INTEGER DEFAULT 0")
+    # Nº de colegiado del profesional que firma (peritajes, administración de
+    # fincas...). Se aprende solo la primera vez que alguien lo teclea en un
+    # expediente, no hace falta una pantalla de ficha aparte.
+    ensure_column(conn, "usuarios", "colegiado_numero", "colegiado_numero TEXT")
     ensure_column(conn, "usuarios", "password_hash", "password_hash TEXT")
     ensure_column(conn, "usuarios", "invite_token", "invite_token TEXT")
     ensure_column(conn, "usuarios", "invite_expires_at", "invite_expires_at TEXT")
@@ -44270,6 +44958,24 @@ def ensure_workspace_facturacion_table(conn):
     )
     ensure_column(conn, "workspace_facturacion", "remesa_id", "remesa_id TEXT")
     ensure_column(conn, "workspace_facturacion", "conciliacion_estado", "conciliacion_estado TEXT")
+    # Dos facturas no pueden llevar el mismo número dentro de la misma serie.
+    #
+    # Había una comprobación antes de insertar, pero una comprobación no ve lo que otra
+    # petición está escribiendo sin confirmar todavía: con dos personas facturando a la
+    # vez las dos preguntaban, las dos veían el número libre y las dos lo usaban. El
+    # índice es lo único que no se puede saltar.
+    #
+    # Sólo cuenta cuando hay número: una factura en borrador puede no tenerlo.
+    try:
+        conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_facturacion_serie_numero
+            ON workspace_facturacion (workspace_id, empresa_id, serie, numero)
+            WHERE COALESCE(numero, '') <> ''
+            """
+        )
+    except Exception:
+        _rollback_best_effort(conn)
 
 
 def ensure_workspace_product_tables(conn):
@@ -45135,6 +45841,21 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_fincas_comunidades", "num_trasteros", "num_trasteros INTEGER")
     ensure_column(conn, "workspace_fincas_comunidades", "num_aparcamientos", "num_aparcamientos INTEGER")
     ensure_column(conn, "workspace_fincas_comunidades", "cuota_sugerida", "cuota_sugerida REAL")
+    # `cuota_mensual` guardaba el honorario mensual del administrador —lo rellena el
+    # subtotal del presupuesto que la comunidad acepta—, y el nombre invitaba a
+    # leerlo como la cuota que paga cada vecino. Son cosas distintas y de orden de
+    # magnitud distinto. La columna vieja se deja estar, sin borrar, hasta que no
+    # queden lecturas antiguas en circulación.
+    ensure_column(conn, "workspace_fincas_comunidades", "honorario_mensual", "honorario_mensual REAL")
+    try:
+        conn.execute(
+            "UPDATE workspace_fincas_comunidades SET honorario_mensual = cuota_mensual "
+            "WHERE honorario_mensual IS NULL AND cuota_mensual IS NOT NULL"
+        )
+    except Exception as fallo:
+        # Si este traspaso falla en silencio, las comunidades se quedan con el
+        # honorario en la columna vieja y la ficha lo enseña vacío.
+        apunta_escritura_tragada("ensure_workspace_product_tables/honorario_mensual", fallo)
     ensure_column(conn, "workspace_fincas_comunidades", "referencia_catastral", "referencia_catastral TEXT")
     ensure_column(conn, "workspace_fincas_comunidades", "foto_edificio_key", "foto_edificio_key TEXT")
     ensure_column(conn, "workspace_fincas_comunidades", "activo", "activo INTEGER")
@@ -45192,6 +45913,11 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_fincas_incidencias", "seguro_id", "seguro_id TEXT")
     ensure_column(conn, "workspace_fincas_incidencias", "siniestro_ref", "siniestro_ref TEXT")
     ensure_column(conn, "workspace_fincas_incidencias", "coste_estimado", "coste_estimado REAL")
+    # Quién la comunicó y por dónde. Una incidencia que entra por el portal hay que
+    # poder distinguirla: no la ha triado nadie todavía, y el administrador necesita
+    # saber a quién contestar.
+    ensure_column(conn, "workspace_fincas_incidencias", "vecino_id", "vecino_id TEXT")
+    ensure_column(conn, "workspace_fincas_incidencias", "origen", "origen TEXT")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_proveedores (
@@ -45242,6 +45968,60 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_junta_discrepancias (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          junta_id TEXT NOT NULL,
+          acuerdo_id TEXT NOT NULL,
+          vecino_id TEXT NOT NULL,
+          fecha TEXT,
+          medio TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_junta_discrepancia_unica "
+            "ON workspace_fincas_junta_discrepancias (acuerdo_id, vecino_id)"
+        )
+    except Exception:
+        pass
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_junta_impugnaciones (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          junta_id TEXT NOT NULL,
+          acuerdo_id TEXT NOT NULL,
+          vecino_id TEXT NOT NULL,
+          motivo TEXT NOT NULL,
+          fecha TEXT,
+          notas TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_junta_impugnacion_unica "
+            "ON workspace_fincas_junta_impugnaciones (acuerdo_id, vecino_id)"
+        )
+    except Exception:
+        pass
+    # El moroso no vota (art. 15.2), pero SÍ vota si antes de empezar la junta ha
+    # pagado, ha impugnado judicialmente la deuda o la ha consignado. Eso el CRM no
+    # puede saberlo: lo marca quien preside, y esta casilla es ese «sí lo tiene».
+    # NULL = se sigue lo que diga la deuda.
+    try:
+        ensure_column(conn, "workspace_fincas_junta_asistentes", "derecho_voto",
+                      "derecho_voto INTEGER")
+    except Exception:
+        pass
     try:
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_junta_asistente_unico "
@@ -45337,6 +46117,23 @@ def ensure_workspace_product_tables(conn):
         pass
     # En segunda convocatoria el denominador cambia: la mayoría se cuenta sobre los
     # asistentes, no sobre el total de la comunidad (LPH art. 17.7).
+    # Estas tres van aquí y no arriba porque `ensure_column` necesita que la tabla ya
+    # exista: puesto antes del CREATE no añadía nada y el fallo sólo se veía en la
+    # primera pasada, cuando nadie había llamado dos veces a esta función.
+    #
+    # La fecha en que el acta se comunicó a los propietarios (art. 9.1.h y 19.3): el día
+    # desde el que corren los 30 naturales del cómputo de ausentes. Sin ella el plazo no
+    # ha empezado y ningún acuerdo pendiente de ese cómputo es firme.
+    ensure_column(conn, "workspace_fincas_juntas", "acta_notificada", "acta_notificada TEXT")
+    # Si el cómputo de ausentes del art. 17.8 se aplica a ese tipo de acuerdo. No a
+    # todos: el propio artículo lo excluye cuando el coste no se puede repercutir a
+    # quien no votó a favor. Se siembra según la ley y se edita como el resto.
+    ensure_column(conn, "workspace_fincas_tipos_acuerdo", "computa_ausentes",
+                  "computa_ausentes INTEGER NOT NULL DEFAULT 1")
+    # De qué tipo es el acuerdo. Se recibía al crearlo, se usaba para derivar la mayoría
+    # y se tiraba; hace falta guardarlo, porque es lo que dice si a ese punto se le
+    # aplica el cómputo de ausentes.
+    ensure_column(conn, "workspace_fincas_junta_acuerdos", "tipo_acuerdo", "tipo_acuerdo TEXT")
     ensure_column(conn, "workspace_fincas_juntas", "segunda_convocatoria", "segunda_convocatoria INTEGER NOT NULL DEFAULT 0")
     # El artículo 16.2 de la LPH obliga a que la convocatoria diga el lugar y la hora de
     # primera y segunda convocatoria. La tabla solo guardaba la fecha, así que eso había
@@ -45451,6 +46248,23 @@ def ensure_workspace_product_tables(conn):
     ensure_column(conn, "workspace_fincas_comunidades", "acreedor_sepa", "acreedor_sepa TEXT")
     # Acceso del propietario a su portal. Se guarda **el hash** del token, nunca el
     # token: si alguien lee la tabla no puede entrar en el portal de nadie.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_fincas_certificados (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          comunidad_id TEXT NOT NULL,
+          vecino_id TEXT NOT NULL,
+          estado TEXT NOT NULL DEFAULT 'Solicitado',
+          importe REAL,
+          fecha_solicitud TEXT,
+          fecha_pago TEXT,
+          fecha_descarga TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_portal_accesos (
@@ -45709,14 +46523,55 @@ def ensure_workspace_product_tables(conn):
         """
     )
     try:
-        # Un propietario no puede tener dos recibos del mismo periodo: emitir dos
-        # veces el mismo mes es la forma más rápida de cobrar dos veces.
+        # Un propietario no puede tener dos recibos del mismo cargo en el mismo mes:
+        # emitirlo dos veces es la forma más rápida de cobrar dos veces.
+        #
+        # El concepto entra en la clave desde 2026-08-23. Antes era sólo el mes, y eso
+        # dejaba a la comunidad sin poder pasar una derrama: agosto ya tenía la cuota
+        # ordinaria, así que el ascensor no cabía. Lo que sí cabe —y es lo que hay que
+        # impedir— es repetir el mismo cargo. El índice viejo se retira: el nuevo es más
+        # ancho, así que nada de lo que ya está guardado lo incumple.
+        conn.execute("DROP INDEX IF EXISTS idx_fincas_recibos_unico")
+    except Exception:
+        pass
+    try:
         conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_recibos_unico "
-            "ON workspace_fincas_recibos (comunidad_id, vecino_id, periodo)"
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_fincas_recibos_unico_cargo "
+            "ON workspace_fincas_recibos (comunidad_id, vecino_id, periodo, concepto)"
         )
     except Exception:
         pass
+    # A quién se le emitió el recibo, congelado el día de emitirlo. Un piso cambia de
+    # dueño y la única forma de meter al comprador en el censo es editar la ficha del
+    # vecino, que es la misma fila: sin esto, los recibos del vendedor pasaban a figurar
+    # a nombre del comprador y el vendedor desaparecía del histórico. La deuda sí viaja
+    # con el piso (el comprador responde del año en curso y los tres anteriores), pero
+    # un recibo no puede decir que se le emitió a quien no se le emitió.
+    for columna in ("vecino_nombre", "vecino_nif"):
+        try:
+            ensure_column(conn, "workspace_fincas_recibos", columna, f"{columna} TEXT")
+        except Exception:
+            pass
+    try:
+        # Lo ya guardado se rellena una vez con el propietario que consta hoy: es
+        # exactamente lo que venía enseñándose, y a partir de aquí deja de moverse.
+        conn.execute(
+            "UPDATE workspace_fincas_recibos SET vecino_nombre = ("
+            "  SELECT v.nombre FROM workspace_fincas_vecinos v WHERE v.id = workspace_fincas_recibos.vecino_id"
+            ") WHERE vecino_nombre IS NULL OR vecino_nombre = ''"
+        )
+        conn.execute(
+            "UPDATE workspace_fincas_recibos SET vecino_nif = ("
+            "  SELECT v.nif FROM workspace_fincas_vecinos v WHERE v.id = workspace_fincas_recibos.vecino_id"
+            ") WHERE vecino_nif IS NULL OR vecino_nif = ''"
+        )
+    except Exception as _fallo_tragado:
+        # No tumba el arranque: sin relleno, el listado y el certificado se caen al
+        # nombre que consta hoy, que es lo que enseñaban antes. Pero que se sepa: en
+        # Postgres una sentencia fallida deja la transacción abortada.
+        _rollback_best_effort(conn)
+        apunta_escritura_tragada("ensure_tables/workspace_fincas_recibos.vecino_nombre",
+                                 _fallo_tragado)
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_fincas_remesas (
@@ -45734,6 +46589,1139 @@ def ensure_workspace_product_tables(conn):
         )
         """
     )
+    # El expediente pericial de valoración. `inmueble_id` es opcional a propósito:
+    # no todo peritaje judicial es sobre un inmueble ya gestionado en el CRM.
+    # `metodo` deja hueco desde ya a los cuatro de la Orden ECO/805/2003, aunque
+    # hoy solo "comparacion" tenga motor de cálculo propio.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_periciales (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          inmueble_id TEXT,
+          denominacion_manual TEXT,
+          direccion_manual TEXT,
+          referencia_catastral_manual TEXT,
+          cliente_id TEXT,
+          perito_usuario_id TEXT,
+          colegiado_numero TEXT,
+          finalidad TEXT,
+          procedimiento_referencia TEXT,
+          metodo TEXT NOT NULL DEFAULT 'comparacion',
+          estado TEXT NOT NULL DEFAULT 'Encargado',
+          motivo_estado TEXT,
+          fecha_encargo TEXT,
+          fecha_visita TEXT,
+          fecha_valoracion TEXT,
+          fecha_emision TEXT,
+          superficie_catastral REAL,
+          superficie_registral REAL,
+          superficie_medida REAL,
+          superficie_calculo_usada REAL,
+          motivo_superficie_usada TEXT,
+          valor_final NUMERIC,
+          calculo_json TEXT,
+          informe_doc_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    # Párrafo de "descripción del entorno" (barrio/distrito + equipamientos
+    # cercanos). Se precarga con `fetch_descripcion_entorno` citando su fuente,
+    # pero es texto libre editable — igual que las cifras legales de fincas,
+    # no se da nada por bueno sin poder corregirlo.
+    ensure_column(conn, "workspace_periciales", "descripcion_entorno", "descripcion_entorno TEXT")
+    # Testigos/comparables. Nunca se borran de verdad: un testigo descartado sigue
+    # siendo prueba de la diligencia del trabajo (qué se consideró y por qué se
+    # rechazó). `evidencia_id_vigente` apunta a la última captura si se
+    # re-verificó el comparable más de una vez.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_pericial_testigos (
+          id TEXT PRIMARY KEY,
+          pericial_id TEXT NOT NULL,
+          orden INTEGER NOT NULL DEFAULT 1,
+          estado TEXT NOT NULL DEFAULT 'activo',
+          motivo_descarte TEXT,
+          sustituido_por_testigo_id TEXT,
+          fuente TEXT,
+          url_original TEXT,
+          fecha_captura TEXT,
+          precio NUMERIC,
+          superficie REAL,
+          caracteristicas_json TEXT,
+          coeficientes_json TEXT,
+          valor_homogeneizado NUMERIC,
+          evidencia_id_vigente TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    # Cadena de integridad de la evidencia (fotos de visita, comparables
+    # congelados, documentación aportada). `prev_hash`/`integrity_hash` encadenan
+    # cada fila con la anterior DEL MISMO `pericial_id` — a diferencia de
+    # `inmueble_oferta_eventos`, aquí la búsqueda de la punta de la cadena va
+    # siempre acotada por expediente (ver `apunta_evidencia_de_peritaje`).
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_pericial_evidencias (
+          id TEXT PRIMARY KEY,
+          pericial_id TEXT NOT NULL,
+          testigo_id TEXT,
+          tipo TEXT NOT NULL,
+          doc_key TEXT,
+          hash_archivo TEXT,
+          quien TEXT,
+          created_at TEXT NOT NULL,
+          prev_hash TEXT,
+          integrity_hash TEXT
+        )
+        """
+    )
+    # Etiqueta libre para mostrar en la lista ("Ficha catastral", "Nota simple",
+    # "Foto salón"...). No entra en `_payload_de_evidencia_pericial`: es solo
+    # para humanos, el hash de integridad sigue dependiendo únicamente del
+    # archivo y su procedencia, no de cómo lo llamó quien lo subió.
+    ensure_column(conn, "workspace_pericial_evidencias", "nombre", "nombre TEXT")
+    # Documentos del expediente (informe, justificante de firma, ficha catastral).
+    # Tabla propia y no `inmueble_docs`: como `inmueble_id` es opcional en el
+    # expediente, no siempre hay dónde colgar el documento por esa vía.
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_pericial_docs (
+          id TEXT PRIMARY KEY,
+          pericial_id TEXT NOT NULL,
+          workspace_id TEXT NOT NULL,
+          empresa_id TEXT,
+          tipo TEXT NOT NULL,
+          nombre TEXT,
+          doc_key TEXT,
+          version INTEGER NOT NULL DEFAULT 1,
+          plantilla_clave TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workspace_periciales_workspace ON workspace_periciales (workspace_id, estado)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_workspace_periciales_inmueble ON workspace_periciales (inmueble_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pericial_testigos_pericial ON workspace_pericial_testigos (pericial_id, orden)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pericial_evidencias_pericial ON workspace_pericial_evidencias (pericial_id, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pericial_evidencias_testigo ON workspace_pericial_evidencias (testigo_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pericial_docs_pericial ON workspace_pericial_docs (pericial_id, tipo)")
+    except Exception:
+        pass
+
+
+def ensure_pericial_signature_schema(conn):
+    """Firma electrónica del informe pericial: mismo mecanismo que las firmas de
+    inmueble (token + hash del documento + OTP opcional + log de eventos), pero
+    en tablas propias, `pericial_id` en vez de `inmueble_id`.
+
+    No se generaliza `inmueble_signature_requests`: esa tabla y las funciones
+    que la usan exigen `inmueble_id` en duro (incluida la persistencia del
+    justificante de firma, que cuelga de `inmueble_docs`), y aquí un expediente
+    pericial puede no tener inmueble gestionado. Tocar ese camino para un caso
+    de uso sin relación obligaría a re-testear un flujo ya probado en
+    producción para arras y encargos.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_pericial_signature_requests (
+          id TEXT PRIMARY KEY,
+          empresa_id TEXT NOT NULL,
+          pericial_id TEXT,
+          doc_id TEXT,
+          doc_url TEXT,
+          doc_nombre TEXT,
+          signer_nombre TEXT,
+          signer_nif TEXT,
+          signer_email TEXT,
+          signer_telefono TEXT,
+          purpose TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          token_hash TEXT NOT NULL,
+          otp_hash TEXT,
+          otp_required INTEGER NOT NULL DEFAULT 0,
+          expires_at TEXT,
+          sent_at TEXT,
+          opened_at TEXT,
+          signed_at TEXT,
+          rejected_at TEXT,
+          signed_name TEXT,
+          signed_nif TEXT,
+          acceptance_text TEXT,
+          signature_data_url TEXT,
+          evidence_json TEXT,
+          document_sha256 TEXT,
+          signed_doc_id TEXT,
+          signed_doc_url TEXT,
+          created_by TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS workspace_pericial_signature_events (
+          id TEXT PRIMARY KEY,
+          request_id TEXT NOT NULL,
+          event TEXT NOT NULL,
+          ip TEXT,
+          user_agent TEXT,
+          details_json TEXT,
+          created_at TEXT NOT NULL
+        )
+        """
+    )
+    try:
+        conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_pericial_signature_token ON workspace_pericial_signature_requests (token_hash)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pericial_signature_pericial ON workspace_pericial_signature_requests (pericial_id, created_at)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_pericial_signature_events_req ON workspace_pericial_signature_events (request_id, created_at)")
+    except Exception:
+        pass
+
+
+def _payload_de_evidencia_pericial(fila, prev_hash):
+    """El texto que se firma. Uno solo, para escribir y para verificar."""
+    return "|".join([
+        str(prev_hash or ""),
+        str(row_value(fila, "id", "") or ""),
+        str(row_value(fila, "pericial_id", "") or ""),
+        str(row_value(fila, "testigo_id", "") or ""),
+        str(row_value(fila, "tipo", "") or ""),
+        str(row_value(fila, "doc_key", "") or ""),
+        str(row_value(fila, "hash_archivo", "") or ""),
+        str(row_value(fila, "quien", "") or ""),
+        str(row_value(fila, "created_at", "") or ""),
+    ])
+
+
+def apunta_evidencia_de_peritaje(conn, pericial_id, testigo_id, tipo, doc_key, hash_archivo, quien, *, now=None, nombre=None):
+    """Una fila más en la evidencia del expediente, encadenada a la anterior
+    DEL MISMO expediente.
+
+    A propósito no se toca `apunta_evento_de_oferta` (mismo problema, cadena
+    global sin acotar por `oferta_id`): aquí la búsqueda de la punta y el
+    `NOT EXISTS` van siempre con `pericial_id = ?`, para que la cadena de un
+    expediente no se contamine con eventos de otro.
+    """
+    ensure_workspace_product_tables(conn)
+    now = now or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    pericial_id = str(pericial_id or "")
+    prev_hash = ""
+    try:
+        fila = conn.execute(
+            "SELECT a.integrity_hash FROM workspace_pericial_evidencias a "
+            "WHERE a.pericial_id = ? AND COALESCE(a.integrity_hash,'') <> '' "
+            "AND NOT EXISTS (SELECT 1 FROM workspace_pericial_evidencias b "
+            "                WHERE b.pericial_id = a.pericial_id AND COALESCE(b.prev_hash,'') = a.integrity_hash) "
+            "ORDER BY a.created_at DESC, a.id DESC LIMIT 1",
+            (pericial_id,),
+        ).fetchone()
+        if fila:
+            prev_hash = str(row_value(fila, "integrity_hash", "") or "")
+    except Exception:
+        _rollback_best_effort(conn)
+        prev_hash = ""
+    registro = {
+        "id": os.urandom(16).hex(),
+        "pericial_id": pericial_id,
+        "testigo_id": str(testigo_id or "") or None,
+        "tipo": str(tipo or ""),
+        "doc_key": str(doc_key or ""),
+        "hash_archivo": str(hash_archivo or ""),
+        "quien": str(quien or "")[:200],
+        "created_at": now,
+        "nombre": str(nombre or "").strip()[:200] or None,
+    }
+    integridad = hashlib.sha256(_payload_de_evidencia_pericial(registro, prev_hash).encode("utf-8")).hexdigest()
+    conn.execute(
+        "INSERT INTO workspace_pericial_evidencias (id, pericial_id, testigo_id, tipo, doc_key, hash_archivo, "
+        "quien, created_at, prev_hash, integrity_hash, nombre) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        (registro["id"], registro["pericial_id"], registro["testigo_id"], registro["tipo"],
+         registro["doc_key"], registro["hash_archivo"], registro["quien"], now, prev_hash, integridad,
+         registro["nombre"]),
+    )
+    return registro["id"]
+
+
+def verifica_evidencias_del_peritaje(conn, pericial_id):
+    """Recalcula el hash de cada fila y comprueba que nadie apunte a una que ya
+    no está. Mismo criterio que `verifica_decisiones_del_propietario`: por id
+    de inserción, no por fecha (una fecha manipulada no rompería el recorrido)."""
+    try:
+        ensure_workspace_product_tables(conn)
+        filas = conn.execute(
+            "SELECT * FROM workspace_pericial_evidencias WHERE pericial_id = ? ORDER BY id ASC",
+            (str(pericial_id or ""),),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return {"ok": False, "checked": 0, "error": "no se pudo leer"}
+    firmadas = [f for f in filas or [] if str(row_value(f, "integrity_hash", "") or "")]
+    por_hash = {str(row_value(f, "integrity_hash", "") or ""): f for f in firmadas}
+    manipuladas, huecos = [], []
+    for f in firmadas:
+        anterior = str(row_value(f, "prev_hash", "") or "")
+        calculado = hashlib.sha256(_payload_de_evidencia_pericial(f, anterior).encode("utf-8")).hexdigest()
+        if calculado != str(row_value(f, "integrity_hash", "") or ""):
+            manipuladas.append(row_value(f, "id", None))
+        elif anterior and anterior not in por_hash:
+            huecos.append(row_value(f, "id", None))
+    return {"ok": not manipuladas and not huecos, "checked": len(firmadas),
+            "manipuladas": manipuladas, "huecos": huecos}
+
+
+#: Mínimo de testigos que exige un dictamen por comparación para tenerse en pie.
+#: La Orden ECO/805/2003 pide seis con carácter general y permite bajar a
+#: cuatro si se justifica por qué no hay más comparables homogéneos en la
+#: zona — aquí se exige la justificación por escrito cuando hay menos de seis,
+#: no se rechaza sin más.
+PERICIAL_TESTIGOS_MINIMO_SIN_JUSTIFICAR = 6
+PERICIAL_TESTIGOS_MINIMO_ABSOLUTO = 4
+
+
+def compute_homogenizacion_testigo(testigo, coeficientes=None):
+    """Aplica los coeficientes de homogeneización a un testigo y devuelve el
+    valor unitario homogeneizado. Cálculo puro, sin I/O: cada coeficiente es
+    un factor multiplicativo con su motivo, y el resultado final es el precio
+    unitario del testigo corregido por todos ellos en cadena.
+
+    `coeficientes` es un dict `{clave: {"factor": float, "motivo": str}}` — por
+    ejemplo `{"planta": {"factor": 1.05, "motivo": "testigo en bajo, sujeto en 2º"}}`.
+    Un factor de 1.0 es "sin ajuste"; no se admiten factores <= 0 (invalidarían
+    o invertirían el precio).
+    """
+    precio = float((testigo or {}).get("precio") or 0)
+    superficie = float((testigo or {}).get("superficie") or 0)
+    if precio <= 0 or superficie <= 0:
+        return {"valor_unitario": 0.0, "valor_homogeneizado_unitario": 0.0,
+                "coeficiente_total": 1.0, "detalle": []}
+    valor_unitario = precio / superficie
+    coeficiente_total = 1.0
+    detalle = []
+    for clave, ajuste in (coeficientes or {}).items():
+        factor = float((ajuste or {}).get("factor") or 1.0)
+        if factor <= 0:
+            factor = 1.0
+        coeficiente_total *= factor
+        detalle.append({
+            "clave": clave,
+            "factor": factor,
+            "motivo": str((ajuste or {}).get("motivo") or "").strip(),
+        })
+    return {
+        "valor_unitario": round(valor_unitario, 2),
+        "valor_homogeneizado_unitario": round(valor_unitario * coeficiente_total, 2),
+        "coeficiente_total": round(coeficiente_total, 4),
+        "detalle": detalle,
+    }
+
+
+def compute_comparacion_valoracion(testigos_homogeneizados, superficie_sujeto):
+    """A partir de los testigos ya homogeneizados (activos, no descartados),
+    calcula el valor unitario de mercado (media, mediana, desviación) y el
+    valor total del inmueble sujeto. Cálculo puro, sin I/O."""
+    valores = [float(t.get("valor_homogeneizado_unitario") or 0) for t in (testigos_homogeneizados or [])
+               if float(t.get("valor_homogeneizado_unitario") or 0) > 0]
+    n = len(valores)
+    if not n or not superficie_sujeto:
+        return {"media": 0.0, "mediana": 0.0, "desviacion": 0.0, "n_muestra": n,
+                "valor_unitario_homogeneizado": 0.0, "valor_total": 0.0}
+    media = sum(valores) / n
+    ordenados = sorted(valores)
+    mitad = n // 2
+    mediana = ordenados[mitad] if n % 2 else (ordenados[mitad - 1] + ordenados[mitad]) / 2
+    varianza = sum((v - media) ** 2 for v in valores) / n
+    desviacion = varianza ** 0.5
+    valor_total = round(media * float(superficie_sujeto), 2)
+    return {
+        "media": round(media, 2), "mediana": round(mediana, 2), "desviacion": round(desviacion, 2),
+        "n_muestra": n, "valor_unitario_homogeneizado": round(media, 2), "valor_total": valor_total,
+    }
+
+
+def build_justificacion_metodo_automatica(n_testigos, estadisticos):
+    """El párrafo que explica CÓMO se ha llegado al valor — a partir de los
+    números que ya se han calculado, no inventado. Se usa como redacción de
+    partida cuando el perito no ha escrito la suya en `justificacion_metodo`:
+    un informe pericial no debería salir nunca sin explicar el porqué de la
+    cifra final, aunque sea con el texto automático como borrador.
+    """
+    estadisticos = estadisticos or {}
+    if not n_testigos:
+        return ("No se han incorporado testigos de mercado al expediente: el valor de tasación "
+                "queda pendiente de determinar hasta que se añada al menos un comparable.")
+    media = float(estadisticos.get("media") or 0)
+    mediana = float(estadisticos.get("mediana") or 0)
+    desviacion = float(estadisticos.get("desviacion") or 0)
+    frases = [
+        f"El valor se ha obtenido por comparación con {n_testigos} "
+        f"testigo{'s' if n_testigos != 1 else ''} de mercado, homogeneizados por sus diferencias "
+        "de superficie respecto al inmueble objeto de valoración."
+    ]
+    if n_testigos == 1:
+        frases.append(
+            "Al tratarse de un único testigo, su valor unitario homogeneizado se traslada "
+            "directamente al inmueble objeto de valoración, sin promediar con otros comparables."
+        )
+    else:
+        dispersion_pct = (desviacion / media * 100) if media else 0.0
+        frases.append(
+            f"El valor unitario medio de los testigos es de {format_eur(media)}/m² "
+            f"(mediana {format_eur(mediana)}/m²), con una desviación de {format_eur(desviacion)}/m² "
+            f"({dispersion_pct:.1f} % sobre la media)."
+        )
+        if dispersion_pct > 15:
+            frases.append(
+                "Esta dispersión es relativamente alta, lo que indica heterogeneidad entre los "
+                "comparables disponibles; se recomienda revisar los coeficientes correctores "
+                "aplicados o ampliar la muestra antes de dar el informe por definitivo."
+            )
+        else:
+            frases.append(
+                "La dispersión entre los testigos es reducida, lo que aporta consistencia al "
+                "valor de mercado obtenido."
+            )
+    if n_testigos < PERICIAL_TESTIGOS_MINIMO_ABSOLUTO:
+        frases.append(
+            "La Orden ECO/805/2003 exige un mínimo de testigos para dar solidez estadística al "
+            "método de comparación; se recomienda ampliar la muestra antes de firmar el informe."
+        )
+    return " ".join(frases)
+
+
+def checklist_une197001_pericial(pericial, testigos, evidencias_verificadas):
+    """Los apartados que la UNE 197001 no permite que falten antes de firmar.
+
+    Igual que el libro de actas: hay cosas que el sistema no debe dejar
+    avanzar si faltan, no una validación que se pueda saltar a la ligera.
+    Devuelve la lista de motivos por los que NO se puede firmar; lista vacía
+    significa que el expediente está listo.
+    """
+    pericial = pericial or {}
+    faltan = []
+    if not str(pericial.get("perito_usuario_id") or "").strip():
+        faltan.append("Falta identificar al perito que firma el informe.")
+    if not str(pericial.get("colegiado_numero") or "").strip():
+        faltan.append("Falta el número de colegiado del perito.")
+    if not str(pericial.get("finalidad") or "").strip():
+        faltan.append("Falta indicar la finalidad del peritaje (objeto y alcance del encargo).")
+    if not str(pericial.get("fecha_valoracion") or "").strip():
+        faltan.append("Falta fijar la fecha a la que se refiere la valoración.")
+    metodo = str(pericial.get("metodo") or "").strip()
+    if metodo == "comparacion":
+        activos = [t for t in (testigos or []) if str(t.get("estado") or "activo") == "activo"]
+        if len(activos) < PERICIAL_TESTIGOS_MINIMO_ABSOLUTO:
+            faltan.append(
+                f"El método de comparación exige al menos {PERICIAL_TESTIGOS_MINIMO_ABSOLUTO} testigos activos "
+                f"(hay {len(activos)})."
+            )
+        elif len(activos) < PERICIAL_TESTIGOS_MINIMO_SIN_JUSTIFICAR and not str(pericial.get("motivo_superficie_usada") or pericial.get("motivo_estado") or "").strip():
+            faltan.append(
+                f"Con menos de {PERICIAL_TESTIGOS_MINIMO_SIN_JUSTIFICAR} testigos hace falta justificar por escrito "
+                "por qué no hay más comparables homogéneos en la zona."
+            )
+    elif not metodo:
+        faltan.append("Falta indicar el método de valoración empleado.")
+    if not pericial.get("valor_final"):
+        faltan.append("Falta el valor final de tasación.")
+    if evidencias_verificadas is not None and not evidencias_verificadas.get("ok", False):
+        faltan.append("La cadena de evidencia no se ha podido verificar íntegra — revisar antes de firmar.")
+    return faltan
+
+
+#: Texto fijo de la declaración de imparcialidad. Art. 335.2 LEC: el perito debe
+#: manifestar bajo juramento o promesa que ha actuado con objetividad, aunque la
+#: parte lo hubiera propuesto y la remunere. No es negociable ni editable desde
+#: el formulario — se firma tal cual, igual que el juramento de un cargo.
+PERICIAL_DECLARACION_IMPARCIALIDAD = (
+    "El perito abajo firmante manifiesta, bajo juramento o promesa de decir "
+    "verdad, que ha actuado y actuará con la mayor objetividad posible, "
+    "tomando en consideración tanto lo que pueda favorecer como lo que sea "
+    "susceptible de causar perjuicio a cualquiera de las partes, y que "
+    "conoce las sanciones penales en las que podría incurrir si incumpliere "
+    "su deber como perito, de conformidad con el artículo 335.2 de la Ley de "
+    "Enjuiciamiento Civil."
+)
+
+
+def build_pericial_valoracion_pdf(pericial, workspace, company, inmueble, cliente, perito,
+                                   testigos, fotos_visita, documentos_aportados=None):
+    """El informe pericial de valoración, con el esqueleto de la UNE 197001:
+    identificación, objeto, antecedentes, metodología, testigos, análisis,
+    conclusión, anexo fotográfico y declaración de imparcialidad.
+
+    `fotos_visita` ya viene como lista de `(imagen_pil, caption)` — resolver la
+    evidencia (S3 → bytes → PIL) es responsabilidad de quien llama, no de esta
+    función, que solo maqueta. `documentos_aportados` es la documentación de
+    respaldo (ficha catastral, nota simple...): se lista por nombre, no se
+    embebe como imagen — son documentos de varias páginas, no una foto.
+    """
+    pericial = pericial or {}
+    workspace = workspace or {}
+    company = company or {}
+    inmueble = inmueble or {}
+    cliente = cliente or {}
+    perito = perito or {}
+    try:
+        calculo = json.loads(pericial.get("calculo_json") or "{}") or {}
+    except Exception:
+        calculo = {}
+    comparacion = calculo.get("comparacion") or {}
+    estadisticos = comparacion.get("estadisticos") or {}
+
+    denominacion = str(pericial.get("denominacion_manual") or inmueble.get("titulo") or inmueble.get("direccion")
+                       or pericial.get("direccion_manual") or "el inmueble objeto de valoración").strip()
+    direccion = str(inmueble.get("direccion") or pericial.get("direccion_manual") or "").strip()
+    finalidad = str(pericial.get("finalidad") or "").strip()
+    subtitulo = " · ".join(p for p in (finalidad, denominacion) if p)
+
+    sections = []
+
+    sections.append(("Identificación del perito y del encargo", {
+        "items": [
+            ("Perito", str(perito.get("nombre") or "").strip()),
+            ("Colegiado nº", str(pericial.get("colegiado_numero") or "").strip()),
+            ("Solicitante", str(cliente.get("nombre") or "").strip()),
+            ("Finalidad", finalidad or "No especificada"),
+            ("Referencia del procedimiento", str(pericial.get("procedimiento_referencia") or "—").strip()),
+            ("Fecha de encargo", str(pericial.get("fecha_encargo") or "—")),
+            ("Fecha de la visita", str(pericial.get("fecha_visita") or "—")),
+            ("Fecha a la que se refiere la valoración", str(pericial.get("fecha_valoracion") or "—")),
+            ("Fecha de emisión del informe", str(pericial.get("fecha_emision") or "—")),
+        ],
+    }))
+
+    sections.append(("Objeto y alcance", [
+        f"Se emite el presente informe pericial de valoración de {denominacion}, "
+        f"a solicitud de {str(cliente.get('nombre') or 'la parte solicitante').strip()}, "
+        f"con la finalidad de {finalidad.lower() if finalidad else 'la finalidad indicada por el solicitante'}.",
+        "El alcance del encargo se limita a la determinación del valor de mercado "
+        "del inmueble descrito, a la fecha de valoración indicada, sin extenderse "
+        "a la comprobación de cargas, situación registral distinta de la "
+        "superficie, ni a la habitabilidad o legalidad urbanística del inmueble "
+        "salvo mención expresa.",
+    ]))
+
+    sections.append(("Metodología aplicada", [
+        "El presente dictamen sigue los criterios generales de la norma UNE "
+        "197001 para la redacción de informes y dictámenes periciales, y la "
+        "metodología de valoración de la Orden ECO/805/2003, de 27 de marzo, "
+        "sobre normas de valoración de bienes inmuebles.",
+        "Método empleado: comparación con testigos de mercado, homogeneizados "
+        "por sus diferencias respecto al inmueble objeto de valoración "
+        "(ubicación, superficie, estado, orientación, planta y antigüedad)."
+        if str(pericial.get("metodo") or "") == "comparacion"
+        else f"Método empleado: {pericial.get('metodo') or 'no especificado'}.",
+    ]))
+
+    sections.append(("page_break", {"kind": "page_break"}))
+
+    def _m2(valor):
+        try:
+            return f"{float(valor):.2f} m²" if valor else "—"
+        except Exception:
+            return "—"
+
+    sections.append(("Datos del inmueble objeto de valoración", {
+        "items": [
+            ("Dirección", direccion or "—"),
+            ("Referencia catastral", str(inmueble.get("referencia_catastral") or pericial.get("referencia_catastral_manual") or "—")),
+            ("Superficie catastral", _m2(pericial.get("superficie_catastral"))),
+            ("Superficie registral", _m2(pericial.get("superficie_registral"))),
+            ("Superficie medida en visita", _m2(pericial.get("superficie_medida"))),
+            ("Superficie usada en el cálculo", _m2(pericial.get("superficie_calculo_usada"))),
+            ("Motivo de la superficie usada", str(pericial.get("motivo_superficie_usada") or "—")),
+        ],
+    }))
+
+    # Plano de situación: mismo generador de mapas ya usado en los
+    # presupuestos de fincas (teselas de OpenStreetMap con chincheta). Se
+    # prefieren las coordenadas ya guardadas del inmueble enlazado; si no
+    # las hay, se geocodifica la dirección — igual que hace "Buscar
+    # entorno". Si no se consigue nada, no se pinta el bloque: un informe
+    # no se queda a medias porque un servidor de mapas no conteste.
+    try:
+        lat = inmueble.get("lat")
+        lon = inmueble.get("lon")
+        if not (lat and lon) and direccion:
+            geo = fetch_geocode_coordinates(direccion)
+            if geo.get("ok"):
+                lat, lon = geo.get("lat"), geo.get("lon")
+        if lat and lon:
+            mapa = build_mapa_estatico(lat, lon)
+            if mapa is not None:
+                sections.append(("Plano de situación", {
+                    "kind": "image", "image": mapa, "height": 190, "caption": direccion or None,
+                }))
+    except Exception:
+        pass
+
+    descripcion_entorno = str(pericial.get("descripcion_entorno") or "").strip()
+    if descripcion_entorno:
+        sections.append(("Descripción del entorno", [descripcion_entorno]))
+
+    if documentos_aportados:
+        sections.append(("Documentación aportada", [
+            "Para la elaboración de este informe se ha tenido a la vista la siguiente documentación:",
+            *[f"• {d.get('nombre') or 'Documento aportado'}"
+              + (f" (aportado el {d['created_at']})" if d.get("created_at") else "")
+              for d in documentos_aportados],
+        ]))
+
+    activos = [t for t in (testigos or []) if str(t.get("estado") or "activo") == "activo"]
+    motivos_coeficientes = []
+    if activos:
+        filas = []
+        for t in activos:
+            try:
+                coefs_testigo = json.loads(t.get("coeficientes_json") or "{}") or {}
+            except Exception:
+                coefs_testigo = {}
+            homog = compute_homogenizacion_testigo(
+                {"precio": t.get("precio"), "superficie": t.get("superficie")}, coefs_testigo,
+            )
+            coef_total = homog.get("coeficiente_total") or 1.0
+            for ajuste in homog.get("detalle") or []:
+                if ajuste.get("motivo"):
+                    motivos_coeficientes.append(
+                        f"{t.get('fuente') or 'Testigo'}: {ajuste['motivo']} (×{ajuste['factor']:.2f})"
+                    )
+            filas.append([
+                str(t.get("fuente") or "—"),
+                str(t.get("fecha_captura") or "—"),
+                format_eur(t.get("precio")) if t.get("precio") else "—",
+                _m2(t.get("superficie")),
+                f"×{coef_total:.2f}" if abs(coef_total - 1.0) > 0.001 else "—",
+                format_eur(t.get("valor_homogeneizado")) if t.get("valor_homogeneizado") else "—",
+            ])
+        sections.append(("Testigos utilizados (método de comparación)", {
+            "kind": "table",
+            "columns": [
+                {"label": "Fuente", "width": 2.0},
+                {"label": "Fecha", "width": 1.0},
+                {"label": "Precio", "width": 1.2, "align": "right"},
+                {"label": "Superficie", "width": 1.2, "align": "right"},
+                {"label": "Coef.", "width": 0.8, "align": "right"},
+                {"label": "Valor unit. homogeneizado", "width": 1.5, "align": "right"},
+            ],
+            "rows": filas,
+        }))
+        if motivos_coeficientes:
+            sections.append(("Ajustes de homogeneización aplicados", [
+                f"• {m}" for m in motivos_coeficientes
+            ]))
+
+    descartados = [t for t in (testigos or []) if str(t.get("estado") or "") == "descartado"]
+    if descartados:
+        sections.append(("Testigos descartados", [
+            "Se consideraron y se descartaron los siguientes comparables, por diligencia del proceso:",
+            *[f"• {str(t.get('fuente') or 'Testigo')} — {str(t.get('motivo_descarte') or 'sin motivo registrado')}"
+              for t in descartados],
+        ]))
+
+    if estadisticos:
+        sections.append(("Análisis y homogeneización", {
+            "kind": "kpi_cards",
+            "items": [
+                {"label": "Valor unitario medio", "value": format_eur(estadisticos.get("media")) + "/m²" if estadisticos.get("media") else "—"},
+                {"label": "Mediana", "value": format_eur(estadisticos.get("mediana")) + "/m²" if estadisticos.get("mediana") else "—"},
+                {"label": "Desviación", "value": format_eur(estadisticos.get("desviacion")) + "/m²" if estadisticos.get("desviacion") else "—"},
+                {"label": "Testigos usados", "value": str(estadisticos.get("n_muestra") or len(activos))},
+            ],
+        }))
+
+    sections.append(("page_break", {"kind": "page_break"}))
+
+    sections.append(("Conclusión", {
+        "kind": "waterfall",
+        "steps": [
+            {"label": "Valor unitario homogeneizado", "value": (format_eur(estadisticos.get("valor_unitario_homogeneizado")) + "/m²") if estadisticos.get("valor_unitario_homogeneizado") else "—"},
+            {"label": "Superficie de cálculo", "value": _m2(pericial.get("superficie_calculo_usada"))},
+            {"label": "Valor de tasación", "value": format_eur(pericial.get("valor_final")), "accent": 1},
+        ],
+    }))
+    justificacion = str((calculo.get("conclusion") or {}).get("justificacion_metodo") or "").strip()
+    if not justificacion:
+        # El perito no ha escrito la suya: mejor un borrador automático,
+        # calculado sobre los mismos números que ya se ven en la tabla de
+        # arriba, que dejar la conclusión sin explicar el porqué de la cifra.
+        justificacion = build_justificacion_metodo_automatica(len(activos), estadisticos)
+    sections.append(("", [justificacion]))
+
+    if fotos_visita:
+        for idx, (imagen, caption) in enumerate(fotos_visita, start=1):
+            if imagen is None:
+                continue
+            sections.append((
+                "Anexo fotográfico" if idx == 1 else "",
+                {"kind": "image", "image": imagen, "height": 220, "caption": caption or f"Foto {idx}"},
+            ))
+
+    sections.append(("Declaración de imparcialidad", [PERICIAL_DECLARACION_IMPARCIALIDAD]))
+
+    fecha_firma = str(pericial.get("fecha_emision") or "").strip()
+    sections.append(("Firma", {
+        "kind": "columns",
+        "items": [
+            ["El perito", f"En {str(workspace.get('nombre') or '').strip() or 'lugar indicado'}, a {fecha_firma or 'la fecha indicada'}"],
+            ["", ""],
+            [f"Fdo.: {str(perito.get('nombre') or '').strip()}", f"Colegiado nº {str(pericial.get('colegiado_numero') or '').strip()}"],
+        ],
+    }))
+
+    footer_lines = [
+        f"Informe pericial de valoración — {denominacion}. Documento con validez a la fecha de valoración indicada.",
+    ]
+
+    try:
+        from .branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    except ImportError:
+        from branded_pdf_vector import build_modernia_branded_document_pdf_vector
+    return build_modernia_branded_document_pdf_vector(
+        "INFORME PERICIAL DE VALORACIÓN",
+        subtitulo,
+        sections,
+        footer_lines=footer_lines,
+        company=company,
+        brand_color=workspace.get("primary_color"),
+        paginar=True,
+    )
+
+
+def persist_pericial_generated_doc(conn, pericial_id, tipo, nombre, pdf_bytes, filename_base, now,
+                                    *, workspace_id, empresa_id=None, plantilla_clave=None):
+    """Mismo patrón que `persist_generated_inmueble_pdf`, pero en
+    `workspace_pericial_docs`: el expediente pericial puede no tener
+    `inmueble_id` (no siempre es un inmueble gestionado en el CRM), así que no
+    hay dónde colgar el documento por esa vía. Guarda a disco local, igual que
+    el resto de documentos generados por el sistema (nada de esto pasa por S3
+    hoy en el repo — S3 es para lo que sube el usuario, no lo que genera el
+    servidor)."""
+    if not pericial_id or not tipo or not pdf_bytes:
+        return None
+    folder = UPLOADS / "periciales" / "generated"
+    folder.mkdir(parents=True, exist_ok=True)
+    safe_base = slugify_text(filename_base or nombre or tipo)[:80] or "documento_pericial"
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    existing = conn.execute(
+        "SELECT id, version FROM workspace_pericial_docs WHERE pericial_id = ? AND tipo = ? "
+        "ORDER BY version DESC, updated_at DESC, created_at DESC LIMIT 1",
+        (pericial_id, tipo),
+    ).fetchone()
+    next_version = int(existing["version"] or 1) + 1 if existing else 1
+    doc_id = os.urandom(16).hex()
+    filename = f"{safe_base}_{timestamp}_{doc_id[:8]}.pdf"
+    file_path = folder / filename
+    file_path.write_bytes(pdf_bytes)
+    url = f"/uploads/periciales/generated/{filename}"
+    conn.execute(
+        "INSERT INTO workspace_pericial_docs (id, pericial_id, workspace_id, empresa_id, tipo, nombre, "
+        "doc_key, version, plantilla_clave, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,datetime(?),datetime(?))",
+        (doc_id, pericial_id, workspace_id, empresa_id or None, tipo, nombre or tipo, url,
+         next_version, plantilla_clave or slugify_text(tipo) or None, now, now),
+    )
+    return {"id": doc_id, "url": url, "version": next_version}
+
+
+def _pericial_doc_local_sha256(url):
+    """Hash del documento ya persistido a disco (mismo criterio que
+    `compute_signature_document_sha256`, pero sobre `/uploads/periciales/...`)."""
+    path = _signature_url_to_local_path(url)
+    if not path or not path.exists() or not path.is_file():
+        return ""
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def record_pericial_signature_event(conn, request_id, event, handler=None, details=None, now=None):
+    if not request_id or not event:
+        return
+    now_value = now or datetime.now(timezone.utc).isoformat()
+    ip, ua = "", ""
+    if handler is not None:
+        try:
+            ip = _get_client_ip(handler)
+        except Exception:
+            ip = ""
+        try:
+            ua = str(handler.headers.get("User-Agent") or "")[:500]
+        except Exception:
+            ua = ""
+    details_text = ""
+    if details:
+        try:
+            details_text = json.dumps(details, ensure_ascii=False)
+        except Exception:
+            details_text = str(details)
+    conn.execute(
+        "INSERT INTO workspace_pericial_signature_events (id, request_id, event, ip, user_agent, details_json, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, datetime(?))",
+        (os.urandom(16).hex(), request_id, event, ip, ua, details_text, now_value),
+    )
+
+
+def create_pericial_signature_request(conn, *, empresa_id, pericial_id, doc_id="", doc_url="", doc_nombre="",
+                                       signer_nombre="", signer_nif="", signer_email="", signer_telefono="",
+                                       purpose="Informe pericial", otp_required=False, expires_days=15,
+                                       created_by="", now=None):
+    """Igual que `create_inmueble_signature_request`, en tablas propias.
+
+    No se generaliza la de inmueble: exige `inmueble_id` en duro (incluida la
+    persistencia del justificante, que cuelga de `inmueble_docs`) y aquí un
+    expediente pericial puede no tener inmueble gestionado.
+    """
+    ensure_pericial_signature_schema(conn)
+    now_value = now or datetime.now(timezone.utc).isoformat()
+    if doc_id:
+        doc_row = conn.execute(
+            "SELECT id, pericial_id, nombre, doc_key FROM workspace_pericial_docs WHERE id = ? LIMIT 1",
+            (doc_id,),
+        ).fetchone()
+        if not doc_row:
+            raise ValueError("Documento no encontrado")
+        pericial_id = str(doc_row["pericial_id"] or pericial_id or "").strip()
+        doc_url = str(doc_row["doc_key"] or doc_url or "").strip()
+        doc_nombre = str(doc_row["nombre"] or doc_nombre or "").strip()
+    if not empresa_id or not pericial_id:
+        raise ValueError("empresa_id y pericial_id requeridos")
+    if not doc_url and not doc_id:
+        raise ValueError("Documento requerido")
+    try:
+        days = max(1, min(90, int(expires_days or 15)))
+    except Exception:
+        days = 15
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=days)).isoformat()
+    token = make_signature_token()
+    otp = f"{secrets.randbelow(1000000):06d}" if otp_required else ""
+    request_id = os.urandom(16).hex()
+    conn.execute(
+        "INSERT INTO workspace_pericial_signature_requests (id, empresa_id, pericial_id, doc_id, doc_url, "
+        "doc_nombre, signer_nombre, signer_nif, signer_email, signer_telefono, purpose, status, token_hash, "
+        "otp_hash, otp_required, expires_at, sent_at, document_sha256, created_by, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,'pending',?,?,?,?,datetime(?),?,?,datetime(?),datetime(?))",
+        (request_id, empresa_id, pericial_id, doc_id or None, doc_url or "", doc_nombre or "Informe pericial",
+         signer_nombre or "", signer_nif or "", signer_email or "", signer_telefono or "",
+         purpose or "Informe pericial", hash_signature_token(token), hash_signature_token(otp) if otp else "",
+         1 if otp_required else 0, expires_at, now_value, _pericial_doc_local_sha256(doc_url),
+         created_by or "", now_value, now_value),
+    )
+    record_pericial_signature_event(conn, request_id, "created", details={"otp_required": bool(otp_required)}, now=now_value)
+    return {
+        "id": request_id,
+        "token": token,
+        "public_url": build_public_fragment_url("firma_pericial", token),
+        "otp": otp,
+        "expires_at": expires_at,
+    }
+
+
+def al_completar_firma_pericial(conn, fila, now=None):
+    """Efectos de negocio al cerrarse la firma: el expediente pasa a
+    "Firmado", con fecha de emisión si no la tenía. Es la ÚNICA vía por la que
+    un expediente pericial alcanza ese estado — el endpoint público de
+    edición nunca lo acepta como valor de entrada (ver guard en
+    `/api/workspace_pericial`)."""
+    pericial_id = str(row_value(fila, "pericial_id", "") or "")
+    if not pericial_id:
+        return
+    now_value = now or datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE workspace_periciales SET estado = 'Firmado', "
+        "fecha_emision = COALESCE(NULLIF(fecha_emision, ''), ?), updated_at = datetime(?) "
+        "WHERE id = ? AND estado != 'Firmado'",
+        (now_value[:10], now_value, pericial_id),
+    )
+
+
+def sign_pericial_signature_request(conn, token, payload, *, handler=None, now=None):
+    """Igual que `sign_inmueble_signature_request`: token de un solo uso, OTP
+    opcional con intentos limitados, texto de aceptación explícito, evidencia
+    (IP/user-agent/hash del documento) y justificante generado al firmar."""
+    ensure_pericial_signature_schema(conn)
+    row = conn.execute(
+        "SELECT * FROM workspace_pericial_signature_requests WHERE token_hash = ? LIMIT 1",
+        (hash_signature_token(token),),
+    ).fetchone()
+    if not row:
+        return {"error": "Solicitud no encontrada"}, 404
+    data = dict(row)
+    status = str(data.get("status") or "").strip().lower()
+    if status == "signed":
+        return {"error": "Solicitud ya firmada", "signed_doc_url": data.get("signed_doc_url") or ""}, 409
+    if status == "rejected":
+        return {"error": "Solicitud rechazada"}, 409
+    expires_dt = _parse_iso_dt_utc(data.get("expires_at"))
+    if expires_dt and expires_dt < datetime.now(timezone.utc):
+        conn.execute(
+            "UPDATE workspace_pericial_signature_requests SET status = 'expired', updated_at = datetime(?) WHERE id = ?",
+            (now or datetime.now(timezone.utc).isoformat(), data["id"]),
+        )
+        record_pericial_signature_event(conn, data["id"], "expired", handler=handler, now=now)
+        return {"error": "Solicitud caducada"}, 410
+    if int(data.get("otp_required") or 0):
+        fallidos = contar_intentos_de_otp(conn, data["id"], desde=data.get("sent_at"))
+        if fallidos >= SIGNATURE_OTP_MAX_ATTEMPTS:
+            record_pericial_signature_event(conn, data["id"], "otp_blocked", handler=handler, now=now)
+            return {"error": "Demasiados intentos con el código. Pide que te lo envíen de nuevo."}, 429
+        otp = str(payload.get("otp") or "").strip()
+        if not otp or not hmac.compare_digest(hash_signature_token(otp), str(data.get("otp_hash") or "")):
+            record_pericial_signature_event(conn, data["id"], "otp_failed", handler=handler, now=now)
+            restantes = max(0, SIGNATURE_OTP_MAX_ATTEMPTS - (fallidos + 1))
+            return {"error": "Código OTP inválido", "intentos_restantes": restantes}, 403
+    signed_name = str(payload.get("signed_name") or "").strip()
+    signed_nif = str(payload.get("signed_nif") or "").strip()
+    acceptance_text = str(payload.get("acceptance_text") or "").strip()
+    signature_data_url = str(payload.get("signature_data_url") or "").strip()
+    if not signed_name or not signed_nif:
+        return {"error": "Nombre y NIF requeridos"}, 400
+    if "acepto" not in acceptance_text.lower() and "firmo" not in acceptance_text.lower():
+        return {"error": "Texto de aceptación requerido"}, 400
+    now_value = now or datetime.now(timezone.utc).isoformat()
+    try:
+        ip = _get_client_ip(handler) if handler is not None else ""
+    except Exception:
+        ip = ""
+    try:
+        ua = str(handler.headers.get("User-Agent") or "")[:500] if handler is not None else ""
+    except Exception:
+        ua = ""
+    document_sha = data.get("document_sha256") or _pericial_doc_local_sha256(data.get("doc_url"))
+    evidence = {
+        "request_id": data["id"], "signed_at": now_value, "signed_name": signed_name,
+        "signed_nif": signed_nif, "acceptance_text": acceptance_text, "document_sha256": document_sha,
+        "ip": ip, "user_agent": ua,
+    }
+    conn.execute(
+        "UPDATE workspace_pericial_signature_requests SET status = 'signed', signed_at = datetime(?), "
+        "signed_name = ?, signed_nif = ?, acceptance_text = ?, signature_data_url = ?, evidence_json = ?, "
+        "document_sha256 = ?, updated_at = datetime(?) WHERE id = ?",
+        (now_value, signed_name, signed_nif, acceptance_text, signature_data_url[:250000],
+         json.dumps(evidence, ensure_ascii=False), document_sha or "", now_value, data["id"]),
+    )
+    row_after = conn.execute(
+        "SELECT * FROM workspace_pericial_signature_requests WHERE id = ? LIMIT 1", (data["id"],)
+    ).fetchone()
+    try:
+        al_completar_firma_pericial(conn, row_after, now=now_value)
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("firma_pericial/al_completar", _fallo_tragado)
+    doc = None
+    try:
+        try:
+            from .document_pdf import build_signature_evidence_pdf as _build_evidence_pdf
+        except ImportError:
+            from document_pdf import build_signature_evidence_pdf as _build_evidence_pdf
+        pericial_row = conn.execute(
+            "SELECT workspace_id, empresa_id FROM workspace_periciales WHERE id = ? LIMIT 1",
+            (data.get("pericial_id"),),
+        ).fetchone()
+        evidence_pdf = _build_evidence_pdf(row_after, evidence)
+        doc = persist_pericial_generated_doc(
+            conn, data.get("pericial_id") or "", "justificante_firma",
+            f"Justificante firma · {data.get('doc_nombre') or 'Informe pericial'}",
+            evidence_pdf, f"justificante_firma_{data['id']}", now_value,
+            workspace_id=str(row_value(pericial_row, "workspace_id", "") or ""),
+            empresa_id=data.get("empresa_id") or "",
+            plantilla_clave="firma_electronica_interna",
+        )
+    except Exception as _fallo_tragado:
+        apunta_escritura_tragada("firma_pericial/justificante", _fallo_tragado)
+    if doc:
+        conn.execute(
+            "UPDATE workspace_pericial_signature_requests SET signed_doc_id = ?, signed_doc_url = ?, "
+            "updated_at = datetime(?) WHERE id = ?",
+            (doc.get("id"), doc.get("url"), now_value, data["id"]),
+        )
+        evidence["signed_doc_id"] = doc.get("id")
+        evidence["signed_doc_url"] = doc.get("url")
+    record_pericial_signature_event(conn, data["id"], "signed", handler=handler, details=evidence, now=now_value)
+    return {"ok": True, "id": data["id"], "signed_doc_url": (doc or {}).get("url") or ""}, 200
+
+
+def fetch_workspace_periciales(conn, workspace_id, limit=100):
+    try:
+        limit = max(1, min(500, int(limit or 100)))
+    except Exception:
+        limit = 100
+    rows = conn.execute(
+        """
+        SELECT
+          p.id, p.workspace_id, p.empresa_id, p.inmueble_id, p.cliente_id,
+          COALESCE(e.nombre, '') AS empresa_nombre,
+          COALESCE(c.nombre, '') AS cliente_nombre,
+          COALESCE(u.nombre, '') AS perito_nombre,
+          COALESCE(i.direccion, i.titulo, p.denominacion_manual, p.direccion_manual, '') AS inmueble_denominacion,
+          p.denominacion_manual, p.direccion_manual, p.referencia_catastral_manual,
+          p.descripcion_entorno,
+          p.perito_usuario_id, p.colegiado_numero, p.finalidad, p.procedimiento_referencia,
+          p.metodo, p.estado, p.motivo_estado, p.fecha_encargo, p.fecha_visita,
+          p.fecha_valoracion, p.fecha_emision, p.valor_final, p.created_at, p.updated_at,
+          p.superficie_catastral, p.superficie_registral, p.superficie_medida,
+          p.superficie_calculo_usada, p.motivo_superficie_usada
+        FROM workspace_periciales p
+        LEFT JOIN empresas e ON e.id = p.empresa_id
+        LEFT JOIN clientes c ON c.id = p.cliente_id
+        LEFT JOIN usuarios u ON u.id = p.perito_usuario_id
+        LEFT JOIN inmuebles i ON i.id = p.inmueble_id
+        WHERE p.workspace_id = ?
+        ORDER BY COALESCE(p.fecha_encargo, p.updated_at, p.created_at) DESC, p.updated_at DESC
+        LIMIT ?
+        """,
+        (workspace_id, limit),
+    ).fetchall()
+    return {"rows": [dict(r) for r in rows]}
+
+
+def fetch_workspace_pericial_detalle(conn, pericial_id, *, workspace_id):
+    # Igual que en `fetch_workspace_periciales` (el listado): un expediente
+    # enlazado a un inmueble gestionado no siempre tiene `direccion_manual`
+    # propia — la ficha necesita esta dirección resuelta para poder ofrecer
+    # "Buscar entorno" y "Buscar en nuestro inventario" sin que el usuario
+    # tenga que volver a escribirla a mano.
+    row = conn.execute(
+        """
+        SELECT p.*, COALESCE(i.direccion, i.titulo, p.denominacion_manual, p.direccion_manual, '') AS inmueble_denominacion,
+               i.referencia_catastral AS inmueble_referencia_catastral,
+               i.lat AS inmueble_lat, i.lon AS inmueble_lon
+        FROM workspace_periciales p
+        LEFT JOIN inmuebles i ON i.id = p.inmueble_id
+        WHERE p.id = ? AND p.workspace_id = ? LIMIT 1
+        """,
+        (pericial_id, workspace_id),
+    ).fetchone()
+    if not row:
+        return None
+    testigos = conn.execute(
+        "SELECT * FROM workspace_pericial_testigos WHERE pericial_id = ? ORDER BY orden ASC, created_at ASC",
+        (pericial_id,),
+    ).fetchall()
+    evidencias = conn.execute(
+        "SELECT * FROM workspace_pericial_evidencias WHERE pericial_id = ? ORDER BY created_at ASC",
+        (pericial_id,),
+    ).fetchall()
+    docs = conn.execute(
+        "SELECT id, tipo, nombre, doc_key, version, created_at FROM workspace_pericial_docs "
+        "WHERE pericial_id = ? ORDER BY created_at DESC",
+        (pericial_id,),
+    ).fetchall()
+    verificacion = verifica_evidencias_del_peritaje(conn, pericial_id)
+    checklist = checklist_une197001_pericial(dict(row), [dict(t) for t in testigos], verificacion)
+    bucket, region = s3_config()
+    evidencias_out = []
+    for e in evidencias:
+        ed = dict(e)
+        doc_key = str(ed.get("doc_key") or "")
+        ed["doc_url"] = f"https://{bucket}.s3.{region}.amazonaws.com/{doc_key}" if (bucket and region and doc_key) else ""
+        evidencias_out.append(ed)
+    # Parseado una sola vez aquí: sin esto, cada consumidor del frontend
+    # (edición, ficha, modal...) repetía su propio json.loads/try-except
+    # solo para leer `justificacion_metodo` o los `estadisticos`.
+    try:
+        calculo = json.loads(row["calculo_json"] or "{}") or {}
+    except Exception:
+        calculo = {}
+    return {
+        "pericial": dict(row),
+        "calculo": calculo,
+        "testigos": [dict(t) for t in testigos],
+        "evidencias": evidencias_out,
+        "docs": [dict(d) for d in docs],
+        "verificacion_evidencias": verificacion,
+        "checklist_pendiente": checklist,
+    }
+
+
+def fetch_workspace_pericial_pdf_payload(conn, pericial_id, *, workspace_id):
+    row = conn.execute(
+        "SELECT * FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+        (pericial_id, workspace_id),
+    ).fetchone()
+    if not row:
+        return None
+    pericial = dict(row)
+    ws = conn.execute(
+        "SELECT nombre, primary_color, accent_color FROM workspaces WHERE id = ? LIMIT 1", (workspace_id,)
+    ).fetchone()
+    workspace = dict(ws) if ws else {}
+    company = {}
+    if pericial.get("empresa_id"):
+        emp = conn.execute(
+            "SELECT nombre, razon_social, nif, logo_url FROM empresas WHERE id = ? LIMIT 1", (pericial["empresa_id"],)
+        ).fetchone()
+        if emp:
+            company = dict(emp)
+    inmueble = {}
+    if pericial.get("inmueble_id"):
+        inm = conn.execute(
+            "SELECT titulo, direccion, referencia_catastral, lat, lon FROM inmuebles WHERE id = ? LIMIT 1",
+            (pericial["inmueble_id"],),
+        ).fetchone()
+        if inm:
+            inmueble = dict(inm)
+    cliente = {}
+    if pericial.get("cliente_id"):
+        cli = conn.execute("SELECT nombre, nif FROM clientes WHERE id = ? LIMIT 1", (pericial["cliente_id"],)).fetchone()
+        if cli:
+            cliente = dict(cli)
+    perito = {}
+    if pericial.get("perito_usuario_id"):
+        per = conn.execute(
+            "SELECT nombre, apellido FROM usuarios WHERE id = ? LIMIT 1", (pericial["perito_usuario_id"],)
+        ).fetchone()
+        if per:
+            perito = {"nombre": " ".join(p for p in (per["nombre"], per["apellido"]) if p).strip()}
+    testigos_rows = conn.execute(
+        "SELECT * FROM workspace_pericial_testigos WHERE pericial_id = ? ORDER BY orden ASC, created_at ASC",
+        (pericial_id,),
+    ).fetchall()
+    testigos = [dict(t) for t in testigos_rows]
+    fotos_visita = []
+    evidencias_fotos = conn.execute(
+        "SELECT doc_key, nombre, created_at FROM workspace_pericial_evidencias "
+        "WHERE pericial_id = ? AND tipo = 'foto_visita' ORDER BY created_at ASC",
+        (pericial_id,),
+    ).fetchall()
+    for ev in evidencias_fotos:
+        raw_bytes, _err = s3_get_object_bytes(ev["doc_key"])
+        if not raw_bytes:
+            continue
+        imagen = _load_image_from_bytes(raw_bytes, max_width=1200)
+        if imagen is not None:
+            etiqueta = str(ev["nombre"] or "").strip() or f"Foto de la visita — {str(ev['created_at'] or '')[:10]}"
+            fotos_visita.append((imagen, etiqueta))
+    # No se embeben como imágenes (una nota simple o una ficha catastral son
+    # documentos de varias páginas, no una foto): se referencian por nombre,
+    # como haría el propio perito al listar lo que ha tenido a la vista.
+    # Dos orígenes distintos: lo que sube el perito a mano (evidencias, S3) y
+    # lo que genera el propio sistema (workspace_pericial_docs, disco local —
+    # p. ej. la ficha catastral sincronizada desde el inmueble enlazado).
+    documentos_aportados = [
+        {"nombre": str(d["nombre"] or "").strip() or "Documento aportado", "created_at": str(d["created_at"] or "")[:10]}
+        for d in conn.execute(
+            "SELECT nombre, created_at FROM workspace_pericial_evidencias "
+            "WHERE pericial_id = ? AND tipo = 'documento_aportado' ORDER BY created_at ASC",
+            (pericial_id,),
+        ).fetchall()
+    ] + [
+        {"nombre": str(d["nombre"] or "").strip() or "Ficha catastral", "created_at": str(d["created_at"] or "")[:10]}
+        for d in conn.execute(
+            "SELECT nombre, created_at FROM workspace_pericial_docs "
+            "WHERE pericial_id = ? AND tipo = 'ficha_catastro' ORDER BY created_at ASC",
+            (pericial_id,),
+        ).fetchall()
+    ]
+    return pericial, workspace, company, inmueble, cliente, perito, testigos, fotos_visita, documentos_aportados
 
 
 def infer_workspace_doc_classification(nombre, tipo, servicio):
@@ -46974,6 +48962,7 @@ def fetch_workspace_clientes(conn, workspace_id, q="", limit=60):
     if not empresa_ids:
         return {"rows": []}
     try:
+        tope = max(1, min(int(limit or 60), 150))
         placeholders = ",".join(["?"] * len(empresa_ids))
         where = [f"ce.empresa_id IN ({placeholders})"]
         values = list(empresa_ids)
@@ -46998,11 +48987,30 @@ def fetch_workspace_clientes(conn, workspace_id, q="", limit=60):
             ORDER BY c.nombre COLLATE NOCASE ASC
             LIMIT ?
             """,
-            [*values, max(1, min(int(limit or 60), 150))],
+            [*values, tope],
         ).fetchall()
-        return {"rows": [dict(row) for row in rows]}
+        # Cuántos hay de verdad. Sin esto, una lista de 120 sobre 2.262 clientes se ve
+        # exactamente igual que la lista completa de una gestoría pequeña: nada en la
+        # pantalla distingue «éstos son todos» de «éstos son los primeros». El buscador
+        # sí llega a los demás, pero hay que saber que hay demás.
+        total = len(rows)
+        if len(rows) >= tope:
+            try:
+                fila = conn.execute(
+                    f"""
+                    SELECT COUNT(DISTINCT c.id) AS n
+                    FROM clientes c
+                    JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                    WHERE {' AND '.join(where)}
+                    """,
+                    values,
+                ).fetchone()
+                total = int(row_value(fila, "n") or row_value(fila, 0) or len(rows))
+            except Exception:
+                total = len(rows)
+        return {"rows": [dict(row) for row in rows], "total": total, "limite": tope}
     except Exception:
-        return {"rows": []}
+        return {"rows": [], "total": 0, "limite": 0}
 
 
 def fetch_workspace_cliente_360(conn, workspace_id, cliente_id):
@@ -48487,6 +50495,12 @@ def build_gestoria_excel_plantilla_response(conn, params, handler):
     empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
     if not empresa_ids:
         json_response(handler, {"error": "Sin empresas en el workspace", "rows": []}, status=200)
+        return
+    ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+        conn, getattr(handler, "auth_session", None) or handler._current_session(),
+        workspace_id, empresa_id)
+    if not ok_amb:
+        json_response(handler, {"error": err_amb}, status=403)
         return
     if not cliente_id:
         json_response(handler, {"error": "cliente_id requerido"}, status=400)
@@ -50930,7 +52944,8 @@ def enforce_gestoria_row_access(conn, session, tabla, row_id, *, write=False):
         return False, "id requerido"
     if tabla not in {"gestoria_docs", "gestoria_trabajos", "gestoria_contabilidad",
                      "gestoria_modelos", "gestoria_facturas", "gestoria_asientos",
-                     "gestoria_import_lotes", "gestoria_import_documentos"}:
+                     "gestoria_import_lotes", "gestoria_import_documentos",
+                     "gestoria_conta_tasks", "gestoria"}:
         return False, "Tabla no permitida"
     columnas = table_columns(conn, tabla)
     campos = [c for c in ("empresa_id", "cliente_id") if c in columnas]
@@ -51015,6 +53030,23 @@ def enforce_empresa_membership(conn, session, empresa_id, *, write=False):
     return False, last_err or "No autorizado"
 
 
+def enforce_workspace_or_empresa_scope(conn, session, workspace_id, empresa_id, *, write=False):
+    """La misma pregunta que `resolve_empresa_ids_for_request` resuelve sin hacer:
+    ¿pertenece este `workspace_id`/`empresa_id` a la sesión?
+
+    Varios endpoints de Gestoría (sociedades, socios, actas, trabajos, asientos,
+    cuentas bancarias...) resolvían su ámbito con `resolve_empresa_ids_for_request`
+    o `fetch_workspace_company_ids` —resolutores puros, sin sesión— y ejecutaban la
+    consulta directamente con lo que resultara. Con un `workspace_id` o `empresa_id`
+    ajeno bastaba para leer datos de cualquier otro tenant.
+    """
+    if workspace_id:
+        return enforce_workspace_membership(conn, session, workspace_id, write=write)
+    if empresa_id:
+        return enforce_empresa_membership(conn, session, empresa_id, write=write)
+    return False, "workspace_id o empresa_id requerido"
+
+
 def infer_workspace_id_for_empresa(conn, session, empresa_id):
     """
     Devuelve el workspace_id más probable para una empresa, a partir del usuario autenticado.
@@ -51086,7 +53118,7 @@ def fetch_api_usuarios(conn, session, *, workspace_id="", privileged=False):
             rows = conn.execute(
                 f"""
                 SELECT DISTINCT
-                       u.id, u.nombre, u.apellido, u.usuario, u.servicio, u.rol, u.activo,
+                       u.id, u.nombre, u.apellido, u.usuario, u.servicio, u.rol, u.activo, u.colegiado_numero,
                        COALESCE(u.registro_horario_activo, 0) AS registro_horario_activo
                 FROM usuarios u
                 JOIN workspace_miembros mem ON mem.usuario_id = u.id
@@ -51101,7 +53133,7 @@ def fetch_api_usuarios(conn, session, *, workspace_id="", privileged=False):
         if uid:
             rows = conn.execute(
                 """
-                SELECT id, nombre, apellido, usuario, servicio, rol, activo,
+                SELECT id, nombre, apellido, usuario, servicio, rol, activo, colegiado_numero,
                        COALESCE(registro_horario_activo, 0) AS registro_horario_activo
                 FROM usuarios
                 WHERE id = ? AND COALESCE(activo, 1) = 1
@@ -51117,7 +53149,7 @@ def fetch_api_usuarios(conn, session, *, workspace_id="", privileged=False):
         rows = conn.execute(
             """
             SELECT DISTINCT
-                   u.id, u.nombre, u.apellido, u.usuario, u.email, u.servicio, u.rol, u.activo,
+                   u.id, u.nombre, u.apellido, u.usuario, u.email, u.servicio, u.rol, u.activo, u.colegiado_numero,
                    COALESCE(u.registro_horario_activo, 0) AS registro_horario_activo
             FROM usuarios u
             JOIN workspace_miembros mem ON mem.usuario_id = u.id
@@ -51149,7 +53181,7 @@ def fetch_api_usuarios(conn, session, *, workspace_id="", privileged=False):
     rows = conn.execute(
         f"""
         SELECT DISTINCT
-               u.id, u.nombre, u.apellido, u.usuario, u.email, u.servicio, u.rol, u.activo,
+               u.id, u.nombre, u.apellido, u.usuario, u.email, u.servicio, u.rol, u.activo, u.colegiado_numero,
                COALESCE(u.registro_horario_activo, 0) AS registro_horario_activo
         FROM usuarios u
         JOIN workspace_miembros mem ON mem.usuario_id = u.id
@@ -53516,6 +55548,7 @@ def fetch_workspace_fincas_comunidades(conn, workspace_id, limit=30):
           c.num_aparcamientos,
           c.cuota_sugerida,
           c.cuota_mensual,
+          COALESCE(c.honorario_mensual, c.cuota_mensual) AS honorario_mensual,
           COALESCE(c.iban, '') AS iban,
           COALESCE(c.acreedor_sepa, '') AS acreedor_sepa,
           COALESCE(c.activo, 1) AS activo,
@@ -55162,6 +57195,7 @@ def build_remesa_sepa_xml(remesa, comunidad, recibos, *, ahora=None, primeros=No
 
 def fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo="", limit=800):
     """Recibos de una comunidad, con el propietario al lado y el estado de cobro."""
+    tope = max(1, min(int(limit or 800), 2000))
     condiciones = ["r.workspace_id = ?", "r.comunidad_id = ?"]
     valores = [workspace_id, comunidad_id]
     if periodo:
@@ -55174,6 +57208,8 @@ def fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo="",
           r.fecha_emision, r.fecha_cobro, r.motivo_devolucion, r.remesa_id,
           r.vecino_id,
           COALESCE(v.nombre, '') AS nombre,
+          -- A nombre de quién se emitió, que no tiene por qué ser quien vive allí hoy.
+          COALESCE(r.vecino_nombre, v.nombre, '') AS emitido_a,
           COALESCE(v.piso, '') AS piso,
           COALESCE(v.iban, '') AS iban
         FROM workspace_fincas_recibos r
@@ -55182,7 +57218,7 @@ def fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo="",
         ORDER BY r.periodo DESC, v.piso, v.nombre
         LIMIT ?
         """,
-        (*valores, max(1, min(int(limit or 800), 2000))),
+        (*valores, tope),
     ).fetchall()
     filas = [dict(f) for f in filas]
     for fila in filas:
@@ -55191,18 +57227,65 @@ def fetch_workspace_fincas_recibos(conn, workspace_id, comunidad_id, periodo="",
         crudo = fila.pop("iban", "")
         fila["iban_ok"] = iban_valido(crudo)
         fila["iban_cola"] = normalizar_iban(crudo)[-4:] if crudo else ""
-    def suma(estado):
-        return round(sum(parse_money_value(f["importe"]) for f in filas if f["estado"] == estado), 2)
-    return {
-        "rows": filas,
-        "resumen": {
+    # El resumen se calcula sobre TODOS los recibos que cumplen el filtro, no sobre las
+    # filas que caben en la lista. Se sumaban las que se enseñan, y con el tope en 800
+    # una comunidad con un año y medio emitido veía «80.000 € pendiente» teniendo
+    # 120.000: la lista cortada es incómoda, pero un importe cortado es un número mal
+    # en una pantalla de contabilidad, y sin nada que lo delatara.
+    #
+    # Un vecino de 59 pisos llega a 800 recibos en catorce meses.
+    resumen = {"recibos": len(filas), "emitido": 0.0, "cobrado": 0.0,
+               "pendiente": 0.0, "devuelto": 0.0, "sin_iban": 0}
+    try:
+        agregado = conn.execute(
+            f"""
+            SELECT COUNT(*) AS n,
+                   COALESCE(SUM(r.importe), 0) AS emitido,
+                   COALESCE(SUM(CASE WHEN r.estado = 'Cobrado'  THEN r.importe ELSE 0 END), 0) AS cobrado,
+                   COALESCE(SUM(CASE WHEN r.estado = 'Pendiente' THEN r.importe ELSE 0 END), 0) AS pendiente,
+                   COALESCE(SUM(CASE WHEN r.estado = 'Devuelto'  THEN r.importe ELSE 0 END), 0) AS devuelto
+            FROM workspace_fincas_recibos r
+            WHERE {" AND ".join(condiciones)}
+            """,
+            valores,
+        ).fetchone()
+        resumen["recibos"] = int(row_value(agregado, "n", 0) or 0)
+        for clave in ("emitido", "cobrado", "pendiente", "devuelto"):
+            resumen[clave] = round(parse_money_value(row_value(agregado, clave, 0)), 2)
+        # El IBAN no se puede validar en SQL —hay que comprobar el dígito de control—,
+        # así que se traen sólo los IBAN, una columna, y se cuentan aquí.
+        ibans = conn.execute(
+            f"""
+            SELECT COALESCE(v.iban, '') AS iban
+            FROM workspace_fincas_recibos r
+            LEFT JOIN workspace_fincas_vecinos v ON v.id = r.vecino_id
+            WHERE {" AND ".join(condiciones)}
+            """,
+            valores,
+        ).fetchall()
+        resumen["sin_iban"] = sum(1 for f in ibans if not iban_valido(row_value(f, "iban", "")))
+    except Exception:
+        _rollback_best_effort(conn)
+        apunta_escritura_tragada("fincas · resumen de recibos", "no se pudo agregar")
+        # Antes que dar cifras cortadas por buenas, se dan las de la página y se dice
+        # cuántas son: un número pequeño y honesto en vez de uno grande y falso.
+        def suma(estado):
+            return round(sum(parse_money_value(f["importe"])
+                             for f in filas if f["estado"] == estado), 2)
+        resumen = {
             "recibos": len(filas),
             "emitido": round(sum(parse_money_value(f["importe"]) for f in filas), 2),
             "cobrado": suma("Cobrado"),
             "pendiente": suma("Pendiente"),
             "devuelto": suma("Devuelto"),
             "sin_iban": sum(1 for f in filas if not f["iban_ok"]),
-        },
+            "parcial": True,
+        }
+    return {
+        "rows": filas,
+        "total": resumen["recibos"],
+        "limite": tope,
+        "resumen": resumen,
     }
 
 
@@ -55267,7 +57350,9 @@ FINCAS_TIPOS_ACUERDO_DEFECTO = [
     {
         "clave": "mejoras_no_necesarias", "etiqueta": "Nuevas instalaciones o mejoras no necesarias",
         "mayoria_clave": "tres_quintos", "articulo": "LPH art. 17.4",
-        "nota": "Quien vote en contra no queda obligado si su parte supera tres mensualidades ordinarias.",
+        "nota": "Quien vote en contra no queda obligado si su parte supera tres mensualidades "
+                "ordinarias. Si es el caso, quita el cómputo de ausentes: el 17.8 no se aplica "
+                "cuando el coste no se le puede repercutir a quien no votó a favor.",
         "orden": 5,
     },
     {
@@ -55280,6 +57365,9 @@ FINCAS_TIPOS_ACUERDO_DEFECTO = [
         "clave": "energias_telecom", "etiqueta": "Energías renovables o infraestructura de telecomunicaciones",
         "mayoria_clave": "un_tercio", "articulo": "LPH art. 17.1",
         "nota": "El coste lo asumen quienes lo solicitan, no la comunidad entera.",
+        # El 17.8 excluye del cómputo de ausentes los casos en que el coste no se puede
+        # repercutir a quien no votó a favor, y éste es uno.
+        "computa_ausentes": 0,
         "orden": 7,
     },
     {
@@ -55292,6 +57380,8 @@ FINCAS_TIPOS_ACUERDO_DEFECTO = [
         "clave": "recarga_electrica", "etiqueta": "Punto de recarga de vehículo eléctrico (plaza privativa)",
         "mayoria_clave": "", "articulo": "LPH art. 17.5",
         "nota": "No requiere acuerdo: basta comunicación previa a la comunidad. El coste es del interesado.",
+        # Ni hay acuerdo que computar ni coste que repercutir.
+        "computa_ausentes": 0,
         "orden": 9,
     },
 ]
@@ -55299,6 +57389,11 @@ FINCAS_TIPOS_ACUERDO_DEFECTO = [
 #: Porcentaje mínimo del fondo de reserva sobre el último presupuesto ordinario
 #: (LPH art. 9.1.f). Es un mínimo legal: la junta puede acordar uno mayor.
 FINCAS_FONDO_RESERVA_MINIMO = 10.0
+
+#: Los coeficientes se guardan con cuatro decimales y en las escrituras rara vez
+#: suman 100 clavado. Un céntimo de porcentaje sobre el presupuesto de una
+#: comunidad es calderilla; medio punto ya no lo es.
+FINCAS_COEFICIENTE_TOLERANCIA = 0.05
 
 
 def fetch_workspace_fincas_tipos_acuerdo(conn, workspace_id, *, sembrar=True):
@@ -55309,7 +57404,8 @@ def fetch_workspace_fincas_tipos_acuerdo(conn, workspace_id, *, sembrar=True):
 
     def leer():
         return conn.execute(
-            "SELECT clave, etiqueta, mayoria_clave, articulo, nota, activo, orden "
+            "SELECT clave, etiqueta, mayoria_clave, articulo, nota, activo, orden, "
+            "COALESCE(computa_ausentes, 1) AS computa_ausentes "
             "FROM workspace_fincas_tipos_acuerdo WHERE workspace_id = ? ORDER BY orden, etiqueta",
             (workspace_id,),
         ).fetchall()
@@ -55321,10 +57417,11 @@ def fetch_workspace_fincas_tipos_acuerdo(conn, workspace_id, *, sembrar=True):
             conn.execute(
                 "INSERT INTO workspace_fincas_tipos_acuerdo "
                 "(id, workspace_id, clave, etiqueta, mayoria_clave, articulo, nota, activo, orden, "
-                " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
+                " computa_ausentes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
                 (os.urandom(16).hex(), workspace_id, item["clave"], item["etiqueta"],
                  item.get("mayoria_clave") or None, item.get("articulo") or None,
-                 item.get("nota") or None, item.get("orden", 0), ahora, ahora),
+                 item.get("nota") or None, item.get("orden", 0),
+                 int(item.get("computa_ausentes", 1)), ahora, ahora),
             )
         try:
             conn.commit()
@@ -55340,6 +57437,8 @@ def fetch_workspace_fincas_tipos_acuerdo(conn, workspace_id, *, sembrar=True):
             "nota": row_value(f, "nota", "") or "",
             "activo": int(row_value(f, "activo", 1) or 0),
             "orden": int(row_value(f, "orden", 0) or 0),
+            # Si a este tipo de acuerdo se le aplica el cómputo de ausentes (art. 17.8).
+            "computa_ausentes": int(row_value(f, "computa_ausentes", 1) or 0),
         }
         for f in filas
     ]
@@ -55433,11 +57532,43 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
     asistencia = {
         row_value(a, "vecino_id", ""): a
         for a in conn.execute(
-            "SELECT vecino_id, asiste, representado_por FROM workspace_fincas_junta_asistentes "
+            "SELECT vecino_id, asiste, representado_por, derecho_voto "
+            "FROM workspace_fincas_junta_asistentes "
             "WHERE junta_id = ? AND workspace_id = ?",
             (junta_id, workspace_id),
         ).fetchall()
     }
+
+    # Quien no está al corriente de pago puede asistir y deliberar, pero no vota, y su
+    # cuota se deduce del total del inmueble a efectos de alcanzar las mayorías
+    # (LPH art. 15.2). La convocatoria que genera el CRM ya lo advertía; el recuento no
+    # lo aplicaba, así que el voto del deudor contaba y su coeficiente seguía en el
+    # divisor. Un acuerdo dado por aprobado así es impugnable (art. 18).
+    #
+    # Recupera el voto quien antes del inicio de la junta haya pagado, impugnado
+    # judicialmente la deuda o consignado su importe. Eso no está en la base: lo marca
+    # quien preside con la casilla `derecho_voto`.
+    deudores = {}
+    try:
+        # Devuelve {"rows": [...]}, no la lista: iterar el diccionario da sus claves.
+        for m in (fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id)
+                  or {}).get("rows") or []:
+            vid = str(m.get("vecino_id") or "")
+            if vid:
+                deudores[vid] = round(parse_money_value(m.get("deuda")), 2)
+    except Exception:
+        _rollback_best_effort(conn)
+        deudores = {}
+    sin_voto = []
+    for vecino_id, deuda in deudores.items():
+        if vecino_id not in coef:
+            continue
+        marca = row_value(asistencia.get(vecino_id), "derecho_voto", None) if asistencia.get(vecino_id) else None
+        if marca is not None and str(marca).strip() not in {"", "None"} and int(marca or 0):
+            continue          # ha pagado, impugnado o consignado: vota
+        sin_voto.append(vecino_id)
+    sin_voto_set = set(sin_voto)
+    con_voto = [v for v in coef if v not in sin_voto_set]
     presentes, representados = [], []
     for vecino_id in coef:
         fila = asistencia.get(vecino_id)
@@ -55452,18 +57583,88 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
     # use, y aquí depende de una casilla, no de la memoria de quien preside.
     segunda = bool(int(row_value(junta, "segunda_convocatoria", 0) or 0))
 
-    def porcentaje(ids, sobre_coef=True, sobre_asistentes=None):
+    # Las mayorías se miden entre quienes tienen derecho a voto: los deudores salen de
+    # los dos divisores, el de cabezas y el de cuotas (art. 15.2). La asistencia, en
+    # cambio, se sigue midiendo sobre toda la comunidad: el deudor asiste y delibera.
+    total_coef_voto = round(sum(coef[v] for v in con_voto), 4)
+    total_prop_voto = len(con_voto)
+    asistentes_con_voto = [a for a in asistentes if a not in sin_voto_set]
+
+    def porcentaje(ids, sobre_coef=True, sobre_asistentes=None, con_derecho=True):
         usar_segunda = segunda if sobre_asistentes is None else sobre_asistentes
+        base = asistentes_con_voto if con_derecho else asistentes
         if sobre_coef:
-            divisor = (round(sum(coef.get(i, 0.0) for i in asistentes), 4) if usar_segunda else total_coef)
+            divisor = (round(sum(coef.get(i, 0.0) for i in base), 4) if usar_segunda
+                       else (total_coef_voto if con_derecho else total_coef))
             return round(sum(coef.get(i, 0.0) for i in ids) / divisor * 100, 4) if divisor else 0.0
-        divisor = (len(asistentes) if usar_segunda else total_prop)
+        divisor = (len(base) if usar_segunda else (total_prop_voto if con_derecho else total_prop))
         return round(len(ids) / divisor * 100, 4) if divisor else 0.0
 
     mayorias = {m["clave"]: m for m in fetch_workspace_fincas_mayorias(conn, workspace_id)}
+    tipos = {tp["clave"]: tp for tp in fetch_workspace_fincas_tipos_acuerdo(conn, workspace_id)}
+
+    # Cómputo de ausentes (LPH art. 17.8): al propietario ausente debidamente citado que,
+    # informado del acuerdo, no manifieste su discrepancia en 30 días naturales, se le
+    # computa el voto A FAVOR. Es lo que hace que un acuerdo salga «no aprobado» el día de
+    # la junta y sea firme y aprobado un mes después, y no estaba.
+    #
+    # El plazo arranca el día en que se comunicó el acta, no el de la junta: si no consta
+    # la comunicación, el plazo no ha empezado y nada es firme.
+    notificada = str(row_value(junta, "acta_notificada", "") or "")[:10]
+    hoy = datetime.now(timezone.utc).date()
+    vence = None
+    dias_restantes = None
+    if notificada:
+        try:
+            vence = (datetime.strptime(notificada, "%Y-%m-%d").date()
+                     + timedelta(days=FINCAS_DIAS_COMPUTO_AUSENTES))
+            dias_restantes = (vence - hoy).days
+        except Exception:
+            vence = None
+    plazo_cerrado = bool(vence and dias_restantes is not None and dias_restantes < 0)
+
+    # Ausentes con derecho a voto: los que no asistieron ni fueron representados.
+    ausentes = [v for v in coef if v not in asistentes and v not in sin_voto_set]
+    discrepan_por_acuerdo = {}
+    for d in conn.execute(
+        "SELECT acuerdo_id, vecino_id FROM workspace_fincas_junta_discrepancias "
+        "WHERE junta_id = ? AND workspace_id = ?",
+        (junta_id, workspace_id),
+    ).fetchall():
+        discrepan_por_acuerdo.setdefault(row_value(d, "acuerdo_id", ""), set()).add(
+            row_value(d, "vecino_id", ""))
+    impugnaciones_por_acuerdo = {}
+    for imp in conn.execute(
+        "SELECT acuerdo_id, vecino_id, motivo, fecha, notas "
+        "FROM workspace_fincas_junta_impugnaciones WHERE junta_id = ? AND workspace_id = ? "
+        "ORDER BY fecha",
+        (junta_id, workspace_id),
+    ).fetchall():
+        impugnaciones_por_acuerdo.setdefault(row_value(imp, "acuerdo_id", ""), []).append(imp)
+
+    # El plazo de caducidad del art. 18.3 corre desde que se adoptó el acuerdo; para los
+    # ausentes, desde que se les comunicó. Son dos fechas distintas y dos plazos según
+    # el motivo, así que se dan los dos calculados en vez de dejarlo a la memoria.
+    fecha_junta = str(row_value(junta, "fecha", "") or "")[:10]
+
+    def vence_impugnacion(meses, desde):
+        if not desde:
+            return ""
+        try:
+            d = datetime.strptime(desde, "%Y-%m-%d").date()
+        except Exception:
+            return ""
+        mes = d.month - 1 + meses
+        ano = d.year + mes // 12
+        mes = mes % 12 + 1
+        dia = min(d.day, [31, 29 if ano % 4 == 0 and (ano % 100 != 0 or ano % 400 == 0) else 28,
+                          31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mes - 1])
+        return date(ano, mes, dia).isoformat()
+
     acuerdos = []
     for acuerdo in conn.execute(
-        "SELECT id, orden, titulo, descripcion, mayoria_clave FROM workspace_fincas_junta_acuerdos "
+        "SELECT id, orden, titulo, descripcion, mayoria_clave, tipo_acuerdo "
+        "FROM workspace_fincas_junta_acuerdos "
         "WHERE junta_id = ? AND workspace_id = ? ORDER BY orden",
         (junta_id, workspace_id),
     ).fetchall():
@@ -55474,8 +57675,11 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
             (acuerdo_id, workspace_id),
         ).fetchall():
             clave = str(row_value(voto, "voto", "") or "").strip().capitalize()
-            if clave in votos:
-                votos[clave].append(row_value(voto, "vecino_id", ""))
+            vid = row_value(voto, "vecino_id", "")
+            # Puede quedar un voto guardado de antes de que el vecino entrara en
+            # morosidad. No se borra —es histórico— pero no cuenta.
+            if clave in votos and vid not in sin_voto_set:
+                votos[clave].append(vid)
         mayoria = mayorias.get(str(row_value(acuerdo, "mayoria_clave", "") or ""))
         # El porcentaje se mide sobre el total de la comunidad, no sobre los que
         # votaron: si no, una junta de cuatro gatos aprobaría por unanimidad.
@@ -55499,7 +57703,78 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
             )
             for sentido, ids in votos.items()
         }
+        # El ausente que no discrepa cuenta a favor. Y en cuanto se cuentan ausentes, la
+        # medida deja de ser «sobre los asistentes»: se mide sobre toda la comunidad con
+        # derecho a voto, porque los ausentes ya están dentro del cómputo.
+        tipo_acuerdo = tipos.get(str(row_value(acuerdo, "tipo_acuerdo", "") or ""), {})
+        computa = bool(tipo_acuerdo.get("computa_ausentes", 1)) if tipo_acuerdo else True
+        discrepan = discrepan_por_acuerdo.get(acuerdo_id, set())
+        ya_votaron = set(votos["Favor"]) | set(votos["Contra"]) | set(votos["Abstencion"])
+        se_suman = [a for a in ausentes if a not in discrepan and a not in ya_votaron]
+        con_ausentes = list(votos["Favor"]) + (se_suman if computa else [])
+        pct_coef_ausentes = porcentaje(con_ausentes, True, sobre_asistentes=False)
+        pct_prop_ausentes = porcentaje(con_ausentes, False, sobre_asistentes=False)
+        aprobado_con_ausentes = (None if not mayoria else
+                                 bool(_alcanza(pct_coef_ausentes, mayoria)
+                                      and _alcanza(pct_prop_ausentes, mayoria)))
         acuerdos.append({
+            "computa_ausentes": computa,
+            # Cuántos ausentes se sumarían a favor y cuánta cuota traen.
+            "ausentes_pendientes": len(se_suman) if computa else 0,
+            "ausentes_pendientes_coeficiente": round(sum(coef.get(a, 0.0) for a in se_suman), 4)
+            if computa else 0.0,
+            "ausentes_discrepan": len([d for d in discrepan if d in ausentes]),
+            # TODOS los ausentes con derecho a voto, no sólo los que faltan por
+            # contestar: si sólo salieran los pendientes, marcar una discrepancia haría
+            # desaparecer la casilla y no habría forma de rectificarla.
+            "ausentes_nominales": sorted(
+                ({"vecino_id": a,
+                  "piso": ficha_propietario.get(a, {}).get("piso", ""),
+                  "nombre": ficha_propietario.get(a, {}).get("nombre", ""),
+                  "coeficiente": coef.get(a, 0.0),
+                  "discrepa": a in discrepan,
+                  "suma_a_favor": a in se_suman}
+                 for a in (ausentes if computa else [])),
+                key=lambda x: (x["piso"], x["nombre"])),
+            "favor_con_ausentes_coeficiente": pct_coef_ausentes,
+            "favor_con_ausentes_propietarios": pct_prop_ausentes,
+            "aprobado_con_ausentes": aprobado_con_ausentes,
+            # Firme cuando el resultado ya no puede cambiar: o a ese tipo no se le aplica
+            # el cómputo, o no queda ausente que sumar, o el plazo de 30 días se acabó.
+            "firme": (not computa) or (not se_suman) or plazo_cerrado,
+            "plazo_ausentes": {
+                "acta_notificada": notificada or "",
+                "vence": vence.isoformat() if vence else "",
+                "dias_restantes": dias_restantes,
+                "cerrado": plazo_cerrado,
+            },
+            # Impugnación (art. 18). Se dan los dos plazos porque dependen del motivo, y
+            # se dice lo que más se olvida: impugnar NO suspende la ejecución del acuerdo
+            # (art. 18.4), salvo que el juez lo acuerde. Quien deje de ejecutarlo porque
+            # «está impugnado» se mete en otro problema.
+            "impugnaciones": [
+                {
+                    "vecino_id": row_value(i, "vecino_id", ""),
+                    "nombre": ficha_propietario.get(row_value(i, "vecino_id", ""), {}).get("nombre", ""),
+                    "piso": ficha_propietario.get(row_value(i, "vecino_id", ""), {}).get("piso", ""),
+                    "motivo": row_value(i, "motivo", ""),
+                    "motivo_etiqueta": (FINCAS_MOTIVOS_IMPUGNACION.get(row_value(i, "motivo", ""))
+                                        or {}).get("etiqueta", ""),
+                    "articulo": (FINCAS_MOTIVOS_IMPUGNACION.get(row_value(i, "motivo", ""))
+                                 or {}).get("articulo", ""),
+                    "fecha": row_value(i, "fecha", "") or "",
+                    "notas": row_value(i, "notas", "") or "",
+                }
+                for i in impugnaciones_por_acuerdo.get(acuerdo_id, [])
+            ],
+            "plazo_impugnacion": {
+                "desde_la_junta": fecha_junta,
+                "desde_la_comunicacion": notificada or "",
+                "vence_tres_meses": vence_impugnacion(3, fecha_junta),
+                "vence_un_ano": vence_impugnacion(12, fecha_junta),
+                "vence_tres_meses_ausentes": vence_impugnacion(3, notificada),
+                "vence_un_ano_ausentes": vence_impugnacion(12, notificada),
+            },
             "votos_nominales": nominal,
             "id": acuerdo_id,
             "orden": int(row_value(acuerdo, "orden", 0) or 0),
@@ -55527,11 +57802,29 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
             "presentes": len(presentes),
             "representados": len(representados),
             "asistentes": len(asistentes),
-            "asistentes_pct_propietarios": porcentaje(asistentes, False, sobre_asistentes=False),
-            "asistentes_pct_coeficiente": porcentaje(asistentes, True, sobre_asistentes=False),
+            "asistentes_pct_propietarios": porcentaje(asistentes, False, sobre_asistentes=False,
+                                                      con_derecho=False),
+            "asistentes_pct_coeficiente": porcentaje(asistentes, True, sobre_asistentes=False,
+                                                     con_derecho=False),
             "segunda_convocatoria": segunda,
+            # Sobre cuánto se miden las mayorías después de descontar a los deudores.
+            "coeficiente_con_voto": total_coef_voto,
+            "propietarios_con_voto": total_prop_voto,
         },
         "acuerdos": acuerdos,
+        # Quién no vota y por cuánto: sin esta lista, un porcentaje sobre 85 % en vez de
+        # sobre 100 % es un número que nadie puede comprobar.
+        "sin_derecho_voto": [
+            {
+                "vecino_id": v,
+                "nombre": ficha_propietario.get(v, {}).get("nombre", ""),
+                "piso": ficha_propietario.get(v, {}).get("piso", ""),
+                "coeficiente": coef.get(v, 0.0),
+                "deuda": deudores.get(v, 0.0),
+            }
+            for v in sorted(sin_voto, key=lambda x: (ficha_propietario.get(x, {}).get("piso", ""),
+                                                     ficha_propietario.get(x, {}).get("nombre", "")))
+        ],
         "mayorias": list(mayorias.values()),
         "tipos_acuerdo": fetch_workspace_fincas_tipos_acuerdo(conn, workspace_id),
         "propietarios": [
@@ -55541,6 +57834,7 @@ def calcular_recuento_junta(conn, workspace_id, junta_id):
                 "piso": row_value(p, "piso", ""),
                 "coeficiente": float(row_value(p, "coeficiente", 0) or 0),
                 "asiste": row_value(p, "id", "") in asistentes,
+                "sin_derecho_voto": row_value(p, "id", "") in sin_voto_set,
                 "representado_por": str(row_value(asistencia.get(row_value(p, "id", "")), "representado_por", "") or "")
                 if asistencia.get(row_value(p, "id", "")) else "",
             }
@@ -56329,6 +58623,16 @@ def fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio
 #: renovarlo con la persona que de verdad vive ahí.
 FINCAS_PORTAL_DIAS_VALIDEZ = 180
 
+#: Cuántas incidencias puede comunicar un vecino en un día desde el portal. No es
+#: desconfianza: un enlace puede acabar en manos de cualquiera, y sin tope una tarde
+#: tonta llena la bandeja del administrador de ruido y tapa lo que importa.
+FINCAS_PORTAL_INCIDENCIAS_DIA = 5
+
+#: Lo que se acepta escribir. Recortar en el servidor y no solo en la pantalla: el
+#: formulario se puede saltar, la validación no.
+FINCAS_PORTAL_TITULO_MAX = 120
+FINCAS_PORTAL_DESCRIPCION_MAX = 2000
+
 
 def hash_portal_token(raw):
     return hashlib.sha256(str(raw or "").encode("utf-8")).hexdigest()
@@ -56369,7 +58673,7 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
     if not token:
         return None
     fila = conn.execute(
-        "SELECT a.*, v.nombre, v.piso, v.nif, v.iban, c.nombre AS comunidad_nombre, "
+        "SELECT a.*, v.nombre, v.piso, v.nif, v.iban, v.coeficiente, c.nombre AS comunidad_nombre, "
         "       c.direccion AS comunidad_direccion "
         "FROM workspace_fincas_portal_accesos a "
         "JOIN workspace_fincas_vecinos v ON v.id = a.vecino_id "
@@ -56428,6 +58732,99 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
             "ref": referencia_portal(token, row_value(d, "id", "")) if tiene_fichero else "",
         })
 
+    # Las incidencias que ha comunicado él. Solo las suyas: una gotera en el 3.º B es
+    # de su vecino, no de la comunidad entera, y el portal no enseña datos de otros.
+    incidencias = [
+        {
+            "titulo": row_value(i, "titulo", ""),
+            "estado": row_value(i, "estado", "") or "Abierta",
+            "fecha": str(row_value(i, "fecha_apertura", "") or "")[:10],
+        }
+        for i in conn.execute(
+            "SELECT titulo, estado, fecha_apertura FROM workspace_fincas_incidencias "
+            "WHERE workspace_id = ? AND comunidad_id = ? AND vecino_id = ? "
+            "ORDER BY COALESCE(fecha_apertura, '') DESC LIMIT 30",
+            (workspace_id, comunidad_id, vecino_id),
+        ).fetchall()
+    ]
+
+    # El estado financiero de la comunidad. Son cifras agregadas —presupuesto, gasto,
+    # cobrado, fondo de reserva—, las mismas que se leen en la junta, y el propietario
+    # tiene derecho a conocerlas (art. 20 LPH). Va el importe pendiente de cobro pero
+    # **no cuántos deudores hay**: en una comunidad de tres vecinos, un número así con
+    # saber que no eres tú señala a alguien.
+    ejercicio = datetime.now().strftime("%Y")
+    cuentas = fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio)["resumen"]
+    balance = {
+        "ejercicio": ejercicio,
+        "presupuestado": round(float(cuentas.get("presupuestado") or 0), 2),
+        "gastado": round(float(cuentas.get("gastado") or 0), 2),
+        "ingresado": round(float(cuentas.get("ingresado") or 0), 2),
+        "pendiente_cobro": round(float(cuentas.get("recibos_pendientes") or 0), 2),
+        "fondo_reserva": round(float(cuentas.get("fondo_reserva") or 0), 2),
+        "fondo_sin_configurar": bool(cuentas.get("fondo_reserva_sin_configurar")),
+    }
+
+    # Lo que le viene a él. Primero lo cierto —recibos ya emitidos de periodos que aún
+    # no han llegado—; y si no hay ninguno, una estimación con la cuota vigente y su
+    # coeficiente, dicha como estimación. Emitir una cifra como si fuera un recibo que
+    # no existe es la forma de que alguien la dé por buena.
+    hoy_periodo = datetime.now().strftime("%Y-%m")
+    proximos = [
+        {
+            "periodo": row_value(r, "periodo", ""),
+            "concepto": row_value(r, "concepto", ""),
+            "importe": round(parse_money_value(row_value(r, "importe", 0)), 2),
+        }
+        for r in conn.execute(
+            "SELECT periodo, concepto, importe FROM workspace_fincas_recibos "
+            "WHERE workspace_id = ? AND vecino_id = ? AND COALESCE(periodo, '') > ? "
+            "AND estado NOT IN ('Cobrado') ORDER BY periodo LIMIT 12",
+            (workspace_id, vecino_id, hoy_periodo),
+        ).fetchall()
+    ]
+    coef_vecino = float(row_value(fila, "coeficiente", 0) or 0)
+    # La estimación tiene que salir de donde sale el recibo, o el propietario descubre
+    # la diferencia en el banco. Se mensualiza el presupuesto que aprobó la junta; el
+    # honorario del administrador es una partida dentro de él, no la base del reparto.
+    ejercicio_avance = fetch_workspace_fincas_ejercicio(
+        conn, workspace_id, comunidad_id, hoy_periodo[:4])
+    cabecera_avance = ejercicio_avance.get("presupuesto") or {}
+    base_mensual = 0.0
+    if str(row_value(cabecera_avance, "estado", "") or "").strip().lower() == "aprobado":
+        anual = round(parse_money_value(ejercicio_avance["resumen"].get("presupuestado")), 2)
+        base_mensual = round(anual / 12.0, 2) if anual > 0 else 0.0
+    avance = {
+        "emitidos": proximos,
+        "estimacion": round(base_mensual * coef_vecino / 100.0, 2) if (base_mensual and coef_vecino) else 0.0,
+        # Sin presupuesto aprobado no se estima nada: una cifra inventada en el portal
+        # del propietario se da por buena, y luego no coincide con el recibo.
+        "estimacion_origen": (f"presupuesto {hoy_periodo[:4]} aprobado, mensualizado"
+                              if base_mensual else "sin presupuesto aprobado"),
+    }
+
+    # El certificado del art. 9.1.e: se cobra siempre, así que el vecino ve el precio
+    # antes de pedirlo y solo puede descargarlo cuando la administración confirma el
+    # pago. Sin confirmar, no hay enlace: el documento no se emite a crédito.
+    tarifa_cert = next(
+        (t for t in fetch_workspace_fincas_tarifas(conn, workspace_id, sembrar=False)
+         if t.get("clave") == "certificado_corriente" and int(t.get("activo", 1) or 0)),
+        None,
+    )
+    solicitud = conn.execute(
+        "SELECT id, estado, importe, fecha_solicitud, fecha_pago FROM workspace_fincas_certificados "
+        "WHERE workspace_id = ? AND vecino_id = ? ORDER BY COALESCE(created_at, '') DESC LIMIT 1",
+        (workspace_id, vecino_id),
+    ).fetchone()
+    certificado = {
+        "precio": round(float((tarifa_cert or {}).get("precio") or 0), 2),
+        "estado": row_value(solicitud, "estado", "") if solicitud else "",
+        "fecha": str(row_value(solicitud, "fecha_solicitud", "") or "")[:10] if solicitud else "",
+        # La referencia solo aparece cuando está pagado. Es lo que abre la descarga.
+        "ref": (referencia_portal(token, row_value(solicitud, "id", ""))
+                if solicitud and row_value(solicitud, "estado", "") == "Pagado" else ""),
+    }
+
     # Las juntas publicadas, con su convocatoria y su acta. Estos dos documentos sí
     # llevan datos de otros vecinos —el acta dice quién votó qué y la convocatoria
     # relaciona a quien no está al corriente—, pero no es una fuga: son documentos que
@@ -56468,11 +58865,20 @@ def fetch_fincas_portal_public(conn, token, *, registrar=True):
             "nombre": row_value(fila, "nombre", ""),
             "piso": row_value(fila, "piso", "") or "",
             "cuenta": f"····{iban[-4:]}" if iban else "",
+            # Su cuota de participación: es lo que determina lo que paga de cada gasto
+            # y lo que pesa su voto en la junta. Es suya y tiene derecho a conocerla
+            # (art. 20 LPH). Va 0 cuando la comunidad todavía no las tiene cargadas, y
+            # entonces la pantalla no la enseña en vez de decir «0,0000 %».
+            "coeficiente": round(float(row_value(fila, "coeficiente", 0) or 0), 4),
         },
         "recibos": recibos,
         "deuda": round(deuda, 2),
         "documentos": documentos,
         "juntas": juntas,
+        "incidencias": incidencias,
+        "balance": balance,
+        "avance": avance,
+        "certificado": certificado,
         "caduca": caduca,
     }
 
@@ -56932,13 +59338,20 @@ def fetch_memoria_fincas(conn, workspace_id, comunidad_id, ejercicio):
                for f in movimiento}
     ingresos = round(-sum(v for c, v in del_ano.items() if c[:1] == "7"), 2)
     gastos = round(sum(v for c, v in del_ano.items() if c[:1] == "6"), 2)
+    # El gasto caía a la contabilidad simple cuando no hay asientos, pero el ingreso no:
+    # una comunidad que lleve las cuentas sin partida doble veía su gasto y un ingreso de
+    # cero. Y el resultado se calculaba con los del libro, no con los dos números que la
+    # memoria acababa de dar, así que podía decir «gastado 1.655,50 · ingresado 0 ·
+    # resultado 0». Los tres salen ahora de la misma fuente.
+    gastado_memoria = gastos or cuentas.get("gastado", 0.0)
+    ingresado_memoria = ingresos or cuentas.get("ingresado", 0.0)
     return {
         "ejercicio": ejercicio,
         "presupuestado": cuentas.get("presupuestado", 0.0),
-        "gastado": gastos or cuentas.get("gastado", 0.0),
-        "ingresado": ingresos,
-        "resultado": round(ingresos - gastos, 2),
-        "desviacion": round(cuentas.get("presupuestado", 0.0) - (gastos or cuentas.get("gastado", 0.0)), 2),
+        "gastado": gastado_memoria,
+        "ingresado": ingresado_memoria,
+        "resultado": round(ingresado_memoria - gastado_memoria, 2),
+        "desviacion": round(cuentas.get("presupuestado", 0.0) - gastado_memoria, 2),
         "fondo_reserva": round(-saldos.get(CUENTA_FONDO_RESERVA, 0.0), 2),
         "fondo_reserva_pct": cuentas.get("fondo_reserva_pct", 0.0),
         "recibos_cobrados": cuentas.get("recibos_cobrados", 0.0),
@@ -57054,6 +59467,37 @@ def cerrar_ejercicio_fincas(conn, workspace_id, comunidad_id, ejercicio, *, now=
             "dotacion_fondo": dotacion, "ejercicio_siguiente": siguiente}
 
 
+# Por encima de esto, un apunte de comunidad pide confirmación antes de guardarse. No
+# es un tope: una derrama grande es legítima. Es la red para el dedazo y para el importe
+# pegado con formato raro, que es de donde salen las cifras imposibles.
+FINCAS_IMPORTE_QUE_PIDE_CONFIRMACION = 100000.0
+
+
+def _quiere_confirmar(payload):
+    valor = (payload or {}).get("confirmado", (payload or {}).get("confirmar"))
+    return str(valor).strip().lower() in {"1", "true", "si", "sí", "yes"}
+
+
+def condicion_de_recibo_impagado(alias=""):
+    """Qué es deuda de verdad y qué es un recibo recién emitido.
+
+    Contar como moroso todo lo que estuviera «Pendiente» pintaba de rojo a la comunidad
+    entera el mismo día de emitir los recibos: nadie había tenido ocasión de pagar. Y el
+    certificado de deuda —que se usa para vender un piso y para reclamar por el 21 de la
+    LPH— certificaba un importe que todavía no se debía.
+
+    El criterio: un recibo devuelto por el banco está impagado siempre; uno pendiente lo
+    está cuando su mes ya ha pasado. Si no tiene periodo, cuenta como deuda, que es como
+    se comportaba antes y es el lado prudente.
+
+    Devuelve la condición SQL y el parámetro del periodo actual.
+    """
+    p = f"{alias}." if alias else ""
+    condicion = (f"({p}estado = 'Devuelto' OR ({p}estado = 'Pendiente' "
+                 f"AND COALESCE(NULLIF({p}periodo, ''), '0000-00') < ?))")
+    return condicion, datetime.now(timezone.utc).strftime("%Y-%m")
+
+
 def fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id):
     """Quién debe, cuánto y desde cuándo.
 
@@ -57061,8 +59505,9 @@ def fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id):
     está impagado igual que uno que nunca se pasó al cobro, y tratarlo aparte era
     la forma de que la mitad de la morosidad no se viera.
     """
+    condicion, periodo_actual = condicion_de_recibo_impagado("r")
     filas = conn.execute(
-        """
+        f"""
         SELECT
           v.id AS vecino_id,
           COALESCE(v.nombre, '') AS nombre,
@@ -57074,13 +59519,13 @@ def fetch_workspace_fincas_morosidad(conn, workspace_id, comunidad_id):
           MAX(r.periodo) AS hasta
         FROM workspace_fincas_vecinos v
         JOIN workspace_fincas_recibos r
-          ON r.vecino_id = v.id AND r.estado IN ('Pendiente', 'Devuelto')
+          ON r.vecino_id = v.id AND {condicion}
         WHERE v.workspace_id = ? AND v.comunidad_id = ?
         GROUP BY v.id, v.nombre, v.piso, v.nif
         HAVING COALESCE(SUM(r.importe), 0) > 0
         ORDER BY COALESCE(SUM(r.importe), 0) DESC
         """,
-        (workspace_id, comunidad_id),
+        (periodo_actual, workspace_id, comunidad_id),
     ).fetchall()
     deudores = []
     for fila in filas:
@@ -57116,6 +59561,34 @@ FINCAS_DIAS_ANTELACION_ORDINARIA = 6
 #: Plazo para cerrar el acta con las firmas del presidente y el secretario: al terminar
 #: la reunión o dentro de los diez días naturales siguientes (art. 19.2 LPH).
 FINCAS_DIAS_CIERRE_ACTA = 10
+
+#: Motivos por los que un acuerdo se puede impugnar y el plazo de caducidad de cada uno
+#: (LPH art. 18). El plazo NO es el mismo: tres meses en general, pero un año si el
+#: acuerdo es contrario a la ley o a los estatutos. Confundirlos deja fuera de plazo una
+#: impugnación que estaba en plazo, o al revés.
+FINCAS_MOTIVOS_IMPUGNACION = {
+    "ley_estatutos": {
+        "etiqueta": "Contrario a la ley o a los estatutos",
+        "articulo": "LPH art. 18.1.a",
+        "meses": 12,
+    },
+    "lesivo_comunidad": {
+        "etiqueta": "Gravemente lesivo para la comunidad en beneficio de uno o varios propietarios",
+        "articulo": "LPH art. 18.1.b",
+        "meses": 3,
+    },
+    "perjudicial_abuso": {
+        "etiqueta": "Gravemente perjudicial para un propietario sin obligación de soportarlo, "
+                    "o adoptado con abuso de derecho",
+        "articulo": "LPH art. 18.1.c",
+        "meses": 3,
+    },
+}
+
+#: Días NATURALES que tiene un propietario ausente, desde que se le comunica el acuerdo,
+#: para manifestar su discrepancia. Si no lo hace, su voto se computa como favorable
+#: (LPH art. 17.8). No son hábiles: el artículo dice «naturales».
+FINCAS_DIAS_COMPUTO_AUSENTES = 30
 
 
 def build_convocatoria_junta_pdf(junta, comunidad, acuerdos, morosos, workspace=None, company=None):
@@ -57195,8 +59668,8 @@ def build_convocatoria_junta_pdf(junta, comunidad, acuerdos, morosos, workspace=
     if puntos:
         sections.append(("Orden del día", [
             linea for punto in puntos for linea in (
-                f"{punto.get('orden', 0)}. {limpio(punto.get('titulo'))}",
-                *( [f"      {limpio(punto.get('descripcion'))}"] if limpio(punto.get("descripcion")) else [] ),
+                f"{punto.get('orden', 0)}. {limpio(punto.get('titulo'))}"
+                + (f" — {limpio(punto.get('descripcion'))}" if limpio(punto.get("descripcion")) else ""),
             )
         ]))
     else:
@@ -57321,12 +59794,41 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
         ]),
         ("Asistencia", {"kind": "kpi_cards", "columns": 3, "items": [
             {"label": "Asistentes", "value": f"{asistencia.get('asistentes', 0)} de {asistencia.get('propietarios_total', 0)}", "accent": 1},
-            {"label": "Sobre propietarios", "value": f"{asistencia.get('asistentes_pct_propietarios', 0):.2f} %"},
-            {"label": "Sobre coeficiente", "value": f"{asistencia.get('asistentes_pct_coeficiente', 0):.2f} %"},
+            {"label": "Sobre propietarios", "value": format_pct(asistencia.get('asistentes_pct_propietarios', 0))},
+            {"label": "Sobre coeficiente", "value": format_pct(asistencia.get('asistentes_pct_coeficiente', 0))},
         ]}),
         ("", [f"De ellos, {asistencia.get('presentes', 0)} presentes y "
               f"{asistencia.get('representados', 0)} representados."]),
     ]
+
+    # Art. 15.2: el deudor asiste y delibera, pero no vota, y su cuota se deduce del
+    # total a efectos de alcanzar las mayorías. Si no consta en el acta quiénes son,
+    # los porcentajes de más abajo no hay forma de comprobarlos: están calculados sobre
+    # un denominador que el acta no enseña.
+    privados = recuento.get("sin_derecho_voto") or []
+    if privados:
+        sections.append(("Propietarios sin derecho de voto", {
+            "kind": "table",
+            "columns": [
+                {"label": "Inmueble", "width": 2},
+                {"label": "Propietario", "width": 5},
+                {"label": "Coeficiente", "width": 2, "align": "right"},
+                {"label": "Deuda", "width": 2, "align": "right"},
+            ],
+            "rows": [[limpio(x.get("piso")), limpio(x.get("nombre")),
+                      format_pct(x.get("coeficiente", 0)), format_eur(x.get("deuda", 0))]
+                     for x in privados],
+            "total": ["Total", "", format_pct(sum(float(x.get("coeficiente") or 0) for x in privados)),
+                      format_eur(sum(float(x.get("deuda") or 0) for x in privados))],
+        }))
+        sections.append(("", [
+            "Los propietarios relacionados no están al corriente en el pago de las deudas "
+            "vencidas con la comunidad. Han podido asistir y deliberar, pero no han tenido "
+            "derecho de voto (art. 15.2 LPH).",
+            f"Las mayorías de los acuerdos se calculan, por tanto, sobre "
+            f"{format_pct(asistencia.get('coeficiente_con_voto', 0))} de coeficiente y "
+            f"{asistencia.get('propietarios_con_voto', 0)} propietarios con derecho a voto.",
+        ]))
 
     # Art. 19.1.e: el orden del día de la reunión. Iba implícito en los títulos de cada
     # acuerdo; aquí va como lista, que es lo que pide la ley y lo que se lee de un vistazo.
@@ -57363,14 +59865,14 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
             ],
             "rows": [[p.get("piso", ""), p.get("nombre", ""), cargo_de(p.get("nombre")) or "—",
                       p.get("representado_por", "") or "—",
-                      f"{float(p.get('coeficiente') or 0):.4f} %"] for p in asistentes],
+                      format_pct(p.get('coeficiente'), 4)] for p in asistentes],
         }))
 
     def nominal(acuerdo, sentido):
         """«Fulano (3º B, 2,1300 %)», que es como lo pide el art. 19.1.f."""
         gente = (acuerdo.get("votos_nominales") or {}).get(sentido) or []
         return ", ".join(
-            f"{v.get('nombre', '')} ({v.get('piso') or 'sin piso'}, {float(v.get('coeficiente') or 0):.4f} %)"
+            f"{v.get('nombre', '')} ({v.get('piso') or 'sin piso'}, {format_pct(v.get('coeficiente'), 4)})"
             for v in gente
         )
 
@@ -57379,6 +59881,53 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
             veredicto = "Sin mayoría asignada: el resultado no se dictamina."
         else:
             veredicto = "APROBADO" if acuerdo["aprobado"] else "NO APROBADO"
+        # Cómputo de ausentes (art. 17.8): mientras corra el plazo, el resultado del día
+        # de la junta no es el definitivo. Decirlo aquí es lo que evita que alguien dé
+        # por cerrado un punto que todavía puede cambiar de signo.
+        computo = []
+        plazo = acuerdo.get("plazo_ausentes") or {}
+        if acuerdo.get("computa_ausentes") and int(acuerdo.get("ausentes_pendientes") or 0):
+            pendientes = ", ".join(
+                f"{v.get('nombre', '')} ({v.get('piso') or 'sin piso'}, {format_pct(v.get('coeficiente'), 4)})"
+                for v in (acuerdo.get("ausentes_nominales") or []))
+            con_ellos = ("APROBADO" if acuerdo.get("aprobado_con_ausentes")
+                         else "seguiría NO APROBADO")
+            if plazo.get("cerrado"):
+                veredicto = (f"{veredicto} el día de la junta. Cerrado el plazo del artículo 17.8 "
+                             f"el {plazo.get('vence', '')}, el resultado definitivo es: "
+                             f"{'APROBADO' if acuerdo.get('aprobado_con_ausentes') else 'NO APROBADO'}.")
+            computo = [
+                f"{acuerdo.get('ausentes_pendientes')} propietarios ausentes "
+                f"({format_pct(acuerdo.get('ausentes_pendientes_coeficiente', 0))} de coeficiente) "
+                f"no han manifestado discrepancia: {pendientes}.",
+                (f"Su voto se computa como favorable si no la manifiestan en los "
+                 f"{FINCAS_DIAS_COMPUTO_AUSENTES} días naturales siguientes a la comunicación "
+                 f"del acuerdo (art. 17.8 LPH)."),
+                (f"Acta comunicada el {plazo.get('acta_notificada')}; el plazo termina el "
+                 f"{plazo.get('vence')}."
+                 if plazo.get("acta_notificada")
+                 else "NO CONSTA la fecha de comunicación del acta: el plazo no ha empezado a "
+                      "correr y este punto no es firme."),
+                f"Contando a esos ausentes a favor, el resultado sería: "
+                f"{format_pct(acuerdo.get('favor_con_ausentes_propietarios', 0))} de los "
+                f"propietarios y {format_pct(acuerdo.get('favor_con_ausentes_coeficiente', 0))} "
+                f"de los coeficientes — {con_ellos}.",
+            ]
+            if acuerdo.get("ausentes_discrepan"):
+                computo.append(f"{acuerdo['ausentes_discrepan']} ausentes han manifestado su "
+                               f"discrepancia dentro de plazo y no se computan a favor.")
+        # Impugnación (art. 18). Va en el acta porque es un hecho del acuerdo, y con el
+        # aviso del 18.4 al lado: lo que peor sale es dejar de ejecutar un acuerdo
+        # porque «está impugnado».
+        for imp in acuerdo.get("impugnaciones") or []:
+            computo.append(
+                f"IMPUGNADO por {imp.get('nombre', '')} "
+                f"({imp.get('piso') or 'sin piso'}) el {imp.get('fecha', '')}: "
+                f"{imp.get('motivo_etiqueta', '')} ({imp.get('articulo', '')})."
+                + (f" {imp.get('notas')}" if imp.get("notas") else ""))
+        if acuerdo.get("impugnaciones"):
+            computo.append("La impugnación no suspende la ejecución del acuerdo, salvo que el "
+                           "juez la suspenda cautelarmente (art. 18.4).")
         # Art. 19.1.f: los nombres de quienes votaron a favor y en contra, con sus
         # cuotas, cuando sea relevante para la validez del acuerdo. Los votos estaban
         # en la base desde siempre y el acta solo imprimía el recuento.
@@ -57391,13 +59940,14 @@ def build_acta_junta_pdf(recuento, comunidad, workspace=None, company=None):
                 + (f" ({acuerdo['articulo']})." if acuerdo.get("articulo") else "."),
                 f"A favor: {acuerdo.get('favor', 0)} · En contra: {acuerdo.get('contra', 0)} · "
                 f"Abstenciones: {acuerdo.get('abstencion', 0)}.",
-                f"El voto a favor representa el {acuerdo.get('favor_propietarios', 0):.2f} % de los propietarios "
-                f"y el {acuerdo.get('favor_coeficiente', 0):.2f} % de los coeficientes, sobre "
+                f"El voto a favor representa el {format_pct(acuerdo.get('favor_propietarios', 0))} de los propietarios "
+                f"y el {format_pct(acuerdo.get('favor_coeficiente', 0))} de los coeficientes, sobre "
                 f"{acuerdo.get('sobre', 'toda la comunidad')}.",
                 f"Votaron a favor: {a_favor}." if a_favor else "",
                 f"Votaron en contra: {en_contra}." if en_contra else "",
                 f"Se abstuvieron: {abstenciones}." if abstenciones else "",
                 veredicto,
+                *computo,
             ) if linea
         ]))
 
@@ -57531,7 +60081,15 @@ def fetch_workspace_fincas_comunidad_dashboard(conn, workspace_id, comunidad_id,
             "nombre": row_value(comunidad, "nombre", ""),
             "direccion": row_value(comunidad, "direccion", "") or "",
             "estado": row_value(comunidad, "estado", "") or "",
-            "cuota_mensual": round(parse_money_value(row_value(comunidad, "cuota_mensual", 0)), 2),
+            # `honorario_mensual` es lo que la comunidad paga al administrador. Se
+            # sigue enviando `cuota_mensual` con el mismo valor mientras queden
+            # pantallas leyendo el nombre viejo.
+            "honorario_mensual": round(parse_money_value(
+                row_value(comunidad, "honorario_mensual", 0)
+                or row_value(comunidad, "cuota_mensual", 0)), 2),
+            "cuota_mensual": round(parse_money_value(
+                row_value(comunidad, "honorario_mensual", 0)
+                or row_value(comunidad, "cuota_mensual", 0)), 2),
         },
         "periodo": periodo,
         "ejercicio": ejercicio,
@@ -57580,7 +60138,15 @@ def build_certificado_deuda_pdf(comunidad, vecino, recibos, workspace=None, comp
         texto = str(valor or "").strip()
         return "" if texto in {"-", "—", "None"} else texto
 
+    al_corriente = not recibos and total <= 0
     sections = [
+        ("Lo que se certifica", [
+            "Que el propietario que se identifica abajo SÍ está al corriente en el pago de todas "
+            "las deudas vencidas con la comunidad a la fecha de emisión de este certificado."
+            if al_corriente else
+            "Que el propietario que se identifica abajo NO está al corriente en el pago de las "
+            "deudas vencidas con la comunidad, según el detalle que consta más abajo.",
+        ]),
         ("Estado de deuda", {"kind": "kpi_cards", "columns": 3, "items": [
             {"label": "Importe pendiente", "value": format_eur(total), "accent": 1},
             {"label": "Recibos impagados", "value": str(len(recibos))},
@@ -57599,22 +60165,49 @@ def build_certificado_deuda_pdf(comunidad, vecino, recibos, workspace=None, comp
         ) if linea]),
     ]
     if recibos:
+        # Un piso cambia de dueño y la deuda le sigue: el comprador responde de la del
+        # año en curso y los tres anteriores. Pero esos recibos se le emitieron a otra
+        # persona, y el certificado se usa en una notaría: tiene que decir a nombre de
+        # quién se emitió cada uno en vez de dar a entender que todo es del actual.
+        de_otro = [r for r in recibos
+                   if limpio(row_value(r, "vecino_nombre", "")) not in {"", nombre}]
+        columnas = [
+            {"label": "Periodo", "width": 2},
+            {"label": "Concepto", "width": 5},
+            {"label": "Estado", "width": 2},
+            {"label": "Importe", "width": 2, "align": "right"},
+        ]
+        filas = [[
+            row_value(r, "periodo", ""),
+            row_value(r, "concepto", ""),
+            row_value(r, "estado", ""),
+            format_eur(row_value(r, "importe", 0)),
+        ] for r in recibos]
+        pie = ["Total", "", "", format_eur(total)]
+        if de_otro:
+            columnas.insert(2, {"label": "Emitido a", "width": 4})
+            for fila, r in zip(filas, recibos):
+                fila.insert(2, limpio(row_value(r, "vecino_nombre", "")) or nombre)
+            pie.insert(2, "")
         sections.append(("Recibos impagados", {
-            "kind": "table",
-            "columns": [
-                {"label": "Periodo", "width": 2},
-                {"label": "Concepto", "width": 5},
-                {"label": "Estado", "width": 2},
-                {"label": "Importe", "width": 2, "align": "right"},
-            ],
-            "rows": [[
-                row_value(r, "periodo", ""),
-                row_value(r, "concepto", ""),
-                row_value(r, "estado", ""),
-                format_eur(row_value(r, "importe", 0)),
-            ] for r in recibos],
-            "total": ["Total", "", "", format_eur(total)],
+            "kind": "table", "columns": columnas, "rows": filas, "total": pie,
         }))
+        if de_otro:
+            anteriores = []
+            for r in de_otro:
+                quien = limpio(row_value(r, "vecino_nombre", ""))
+                if quien and quien not in anteriores:
+                    anteriores.append(quien)
+            suma_otros = round(sum(parse_money_value(row_value(r, "importe", 0))
+                                   for r in de_otro), 2)
+            sections.append(("Sobre los recibos emitidos a nombre de otro propietario", [
+                f"{len(de_otro)} de los {len(recibos)} recibos impagados, por "
+                f"{format_eur(suma_otros)}, se emitieron a nombre de "
+                f"{', '.join(anteriores)}, propietario anterior del inmueble según consta "
+                f"en la comunidad.",
+                "Se detallan porque siguen sin pagar y afectan al inmueble. Quién responde "
+                "de ellos no lo determina este documento.",
+            ]))
     sections.append(("Firma", [
         "Este certificado recoge los recibos impagados que constan en la contabilidad de la",
         "comunidad a la fecha de emisión. Debe ser firmado por el secretario administrador con",
@@ -57636,7 +60229,7 @@ def build_certificado_deuda_pdf(comunidad, vecino, recibos, workspace=None, comp
     except ImportError:
         from branded_pdf_vector import build_modernia_branded_document_pdf_vector
     return build_modernia_branded_document_pdf_vector(
-        "CERTIFICADO DE DEUDA",
+        "CERTIFICADO DE ESTAR AL CORRIENTE DE PAGO" if al_corriente else "CERTIFICADO DE DEUDA",
         f"{nombre}{f' · {piso}' if piso else ''}",
         sections,
         footer,
@@ -59404,6 +61997,17 @@ def _pdf_escape(value):
     return runtime_pdf_utils._pdf_escape(value)
 
 
+def format_pct(value, decimales=2):
+    """Un porcentaje con la coma decimal española.
+
+    Los importes ya salían bien —`format_eur` cambia el separador— pero los
+    porcentajes se escribían con f-string y salían con punto: «2.1300 %». En un acta,
+    donde el punto es el separador de millares, un coeficiente así se puede leer como
+    dos mil ciento treinta. Y la cuota de participación es lo que reparte el gasto.
+    """
+    return f"{float(value or 0.0):.{decimales}f}".replace(".", ",") + " %"
+
+
 def format_eur(value):
     amount = float(value or 0.0)
     raw = f"{amount:,.2f}"
@@ -59699,6 +62303,38 @@ def fetch_workspace_fincas_cartas(conn, workspace_id, *, sembrar=True):
         }
         for f in filas
     ]
+
+
+def generate_default_fincas_carta(conn, workspace_id, *, empresa_id="", plantilla_clave="",
+                                   comunidad="", direccion="", calc=None, cuota=0, colegiado=""):
+    """Redacta la carta de presentación con la primera plantilla disponible.
+
+    Mismo criterio que `/api/workspace_fincas_carta`: si no hay plantillas o la
+    plantilla elegida no resuelve ningún hueco, se devuelve cadena vacía y el PDF
+    simplemente no lleva carta (en vez de mandar un texto a medias).
+    """
+    plantillas = {c["clave"]: c for c in fetch_workspace_fincas_cartas(conn, workspace_id)}
+    plantilla = plantillas.get(str(plantilla_clave or "").strip()) or (list(plantillas.values())[0] if plantillas else None)
+    if not plantilla:
+        return ""
+    empresa = ""
+    empresa_id = str(empresa_id or "").strip()
+    if empresa_id:
+        fila = conn.execute("SELECT nombre, razon_social FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+        if fila:
+            empresa = str(row_value(fila, "nombre", "") or row_value(fila, "razon_social", "") or "").strip()
+    cuota = round(parse_money_value(cuota), 2)
+    datos = {
+        "comunidad": str(comunidad or "").strip() or "su comunidad",
+        "direccion": str(direccion or "").strip(),
+        "viviendas": str(parse_non_negative_int((calc or {}).get("num_vecinos")) or ""),
+        "unidades": describe_unidades_edificio(calc or {}),
+        "cuota": format_eur(cuota) if cuota else "",
+        # La carta la firma la marca, igual que el logo del PDF.
+        "empresa": FINCAS_NOMBRE_COMERCIAL or empresa or "nuestro despacho",
+        "colegiado": str(colegiado or "").strip(),
+    }
+    return render_carta_presentacion(plantilla["cuerpo"], datos)
 
 
 #: El equipo que firma la propuesta. Son personas reales, así que esta lista se
@@ -65097,7 +67733,10 @@ def build_inmueble_consumo_sale_price_note_pdf(company, inmueble, captacion):
             direccion_full = ", ".join([p for p in [direccion, locality, provincia] if p]).strip() or direccion
 
             price_value = parse_money_value((inmueble or {}).get("precio_objetivo") or (captacion or {}).get("precio_objetivo") or 0) or 0.0
-            price = format_eur(price_value)
+            # Sin precio en la ficha salía «0,00 €», que en una nota de precio que se
+            # entrega al comprador no es un cero: es un hueco sin rellenar disfrazado de
+            # cifra. Se deja el hueco a la vista, como en el resto de documentos.
+            price = format_eur(price_value) if price_value > 0 else "................."
 
             # Anejos (si se modela explícito, se rellena; si no, por defecto "NO" como en el manual)
             plaza = str((inmueble or {}).get("plaza_aparcamiento") or (captacion or {}).get("plaza_aparcamiento") or "").strip()
@@ -65240,7 +67879,10 @@ def build_inmueble_consumo_sale_price_note_pdf(company, inmueble, captacion):
         (
             "a) Precio de venta",
             [
-                ("Precio de venta de la vivienda", format_eur(precio_valor)),
+                # Igual que arriba: sin precio, hueco a la vista y no un «0,00 €» que
+                # el comprador leería como el precio de la vivienda.
+                ("Precio de venta de la vivienda",
+                 format_eur(precio_valor) if precio_valor > 0 else "................."),
                 ("Anejos y servicios accesorios", _texto_o(captacion.get("precio_anejos"),
                                                            "Incluidos en el precio anterior")),
                 "El precio indicado no incluye los tributos ni los gastos que se detallan a continuación.",
@@ -66552,6 +69194,16 @@ class Handler(BaseHTTPRequestHandler):
     ocr_db_path = OCR_DB_DEFAULT
     _db_ready = False
     _db_ready_lock = threading.Lock()
+    # Sin esto, `socketserver` no aplica ningún timeout al socket: si un cliente
+    # cierra la pestaña o pierde la red a media respuesta, el hilo se queda
+    # bloqueado para siempre en el write() y nunca llega a `finish()`, así que la
+    # conexión a Postgres que llevaba (con su transacción a medias) tampoco se
+    # cierra nunca. Visto en producción: tres conexiones "idle in transaction"
+    # desde hacía más de 3 horas, una de ellas bloqueando a las demás lecturas de
+    # `workspaces`. `StreamRequestHandler.setup()` ya llama a
+    # `self.connection.settimeout(self.timeout)` si este atributo no es None;
+    # solo faltaba fijarlo.
+    timeout = 120
 
     def _emit_security_headers(self):
         # Inyecta cabeceras de seguridad en TODA respuesta (se llama desde end_headers).
@@ -68560,6 +71212,15 @@ class Handler(BaseHTTPRequestHandler):
       (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
     const eur = (n) => (Number(n) || 0).toLocaleString("es-ES", { style: "currency", currency: "EUR",
       maximumFractionDigits: 0 });
+    // Las fechas viajan en ISO porque el servidor las ordena y compara con ellas
+    // («¿esta cita es futura?»). Aquí se pintan como se escriben en España: un
+    // comprador que lee «2026-08-28» en la ficha de su casa piensa que el portal
+    // está a medio hacer. Si no viene con la forma esperada, se deja tal cual.
+    const fecha = (v) => {
+      const t = String(v == null ? "" : v).trim();
+      const m = t.match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[ T](\\d{2}:\\d{2}))?/);
+      return m ? `${m[3]}/${m[2]}/${m[1]}` + (m[4] ? ` ${m[4]}` : "") : t;
+    };
     const clave = "portal_busqueda_sesion";
     const sesion = () => { try { return sessionStorage.getItem(clave) || localStorage.getItem(clave) || ""; }
       catch (e) { return ""; } };
@@ -68671,12 +71332,12 @@ class Handler(BaseHTTPRequestHandler):
       const pedida = x.cita && String(x.cita.estado || "").toLowerCase() === "solicitada";
       const cita = x.cita && x.cita.futura
         ? `<div class="etiqueta${pedida ? " aviso" : ""}">${pedida
-            ? "Visita pedida para el " + esc(x.cita.fecha) + " · pendiente de confirmar"
-            : "Visita el " + esc(x.cita.fecha) + (x.cita.hora ? " a las " + esc(x.cita.hora) : "")}</div>`
+            ? "Visita pedida para el " + esc(fecha(x.cita.fecha)) + " · pendiente de confirmar"
+            : "Visita el " + esc(fecha(x.cita.fecha)) + (x.cita.hora ? " a las " + esc(x.cita.hora) : "")}</div>`
         : "";
       const novedades = (x.novedades || []).length
         ? `<div class="novedades">` + x.novedades.map((n) =>
-            `<div><b>${esc(n.texto)}</b> · ${esc(n.fecha)}${n.nuevo ? '<span class="marca">nuevo</span>' : ""}</div>`
+            `<div><b>${esc(n.texto)}</b> · ${esc(fecha(n.fecha))}${n.nuevo ? '<span class="marca">nuevo</span>' : ""}</div>`
           ).join("") + `</div>`
         : "";
       const docs = (x.documentos || []).map((d) =>
@@ -68804,7 +71465,7 @@ class Handler(BaseHTTPRequestHandler):
       const agenda = document.getElementById("agenda");
       agenda.innerHTML = (d.agenda || []).length
         ? d.agenda.map((c) => `<div class="item"><span>${esc(c.donde || "Visita")}</span>
-            <span class="suave">${esc(c.fecha)}${c.hora ? " · " + esc(c.hora) : ""}</span></div>`).join("")
+            <span class="suave">${esc(fecha(c.fecha))}${c.hora ? " · " + esc(c.hora) : ""}</span></div>`).join("")
         : '<div class="suave">Todavía no tienes ninguna visita concertada.</div>';
       if (d.agenda_es_pasado && (d.agenda || []).length) {
         agenda.insertAdjacentHTML("afterbegin",
@@ -68815,14 +71476,14 @@ class Handler(BaseHTTPRequestHandler):
       hilo.innerHTML = (d.mensajes || []).length
         ? d.mensajes.map((m) => `<div class="sobre ${m.mio ? "mio" : ""}">
             <div>${esc(m.texto)}</div>
-            <div class="suave" style="font-size:12px">${esc(m.quien)} · ${esc(m.fecha)}</div></div>`).join("")
+            <div class="suave" style="font-size:12px">${esc(m.quien)} · ${esc(fecha(m.fecha))}</div></div>`).join("")
         : '<div class="suave">Escríbele lo que necesites.</div>';
 
       if ((d.pendiente_de_ti || []).length) {
         document.getElementById("cajaPendiente").style.display = "";
         document.getElementById("pendiente").innerHTML = d.pendiente_de_ti.map((p) =>
           `<div class="item"><span>${esc(p.tarea)}${p.donde ? " · " + esc(p.donde) : ""}</span>
-             <span class="suave">${esc(p.fecha_limite || "")}</span></div>`).join("");
+             <span class="suave">${esc(fecha(p.fecha_limite || ""))}</span></div>`).join("");
       }
 
       const firmas = (d.firmas || []).filter((f) => f.pendiente);
@@ -68934,16 +71595,16 @@ class Handler(BaseHTTPRequestHandler):
           if (o.nota) partes.push(`<div class="cual">${esc(o.nota)}</div>`);
           if (o.estado === "reserva_pendiente") {
             partes.push(`<div class="cual">Ingresa <strong>${eur(o.senal)}</strong>${
-              o.limite ? " antes del <strong>" + esc(o.limite) + "</strong>" : ""} en esta cuenta:</div>`);
+              o.limite ? " antes del <strong>" + esc(fecha(o.limite)) + "</strong>" : ""} en esta cuenta:</div>`);
             partes.push(`<div class="cuenta">${esc(o.iban)}</div>`);
             partes.push(`<div class="cual">Cuando lo tengas hecho, sube aquí el justificante.</div>`);
             partes.push(`<input type="file" class="justificante" accept=".pdf,.jpg,.jpeg,.png,.webp" />`);
           } else if (o.arras) {
             partes.push(`<div class="cual">Arras: <strong>${eur(o.arras.importe)}</strong>${
-              o.arras.fecha_firma ? " · firmadas el " + esc(o.arras.fecha_firma) : ""}</div>`);
+              o.arras.fecha_firma ? " · firmadas el " + esc(fecha(o.arras.fecha_firma)) : ""}</div>`);
             if (o.arras.fecha_escritura) {
               partes.push(`<div class="cual">Fecha límite para escriturar:
-                <strong>${esc(o.arras.fecha_escritura)}</strong></div>`);
+                <strong>${esc(fecha(o.arras.fecha_escritura))}</strong></div>`);
             }
             if (o.arras.notaria) partes.push(`<div class="cual">Notaría: ${esc(o.arras.notaria)}</div>`);
             if (o.siguiente) partes.push(`<div class="cual">${esc(o.siguiente)}</div>`);
@@ -68967,7 +71628,7 @@ class Handler(BaseHTTPRequestHandler):
               <div class="cual">Tu financiación: <strong>${esc(h.etiqueta)}</strong></div>
               ${barra}
               ${(h.hitos || []).map((x) =>
-                `<div class="hito"><b>${esc(x.etiqueta)}</b> · ${esc(x.fecha)}</div>`).join("")}
+                `<div class="hito"><b>${esc(x.etiqueta)}</b> · ${esc(fecha(x.fecha))}</div>`).join("")}
             </div>`);
           }
           partes.push(`</div>`);
@@ -69142,6 +71803,13 @@ class Handler(BaseHTTPRequestHandler):
     const eur = new Intl.NumberFormat("es-ES", { style: "currency", currency: "EUR" });
     const pct = new Intl.NumberFormat("es-ES", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
     const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    // Las fechas llegan en ISO porque el servidor ordena y compara con ellas. Al
+    // comunero se le enseñan como se escriben aquí: «12/09/2026», no «2026-09-12».
+    const fecha = (x) => {
+      const t = String(x ?? "").trim();
+      const m = t.match(/^(\\d{4})-(\\d{2})-(\\d{2})(?:[ T](\\d{2}:\\d{2}))?/);
+      return m ? `${m[3]}/${m[2]}/${m[1]}` + (m[4] ? ` ${m[4]}` : "") : t;
+    };
     const app = document.getElementById("app");
     const token = new URLSearchParams(location.search).get("token") || "";
     // Se saca de la barra en cuanto lo tenemos: el enlace lleva la llave dentro y
@@ -69161,12 +71829,35 @@ class Handler(BaseHTTPRequestHandler):
             <p class="muted">${esc(d.comunidad.direccion || "")}</p>
             <div class="card">
               <strong>${esc(d.propietario.nombre)}</strong>
-              <div class="muted">${esc(d.propietario.piso || "")}${d.propietario.cuenta ? " · cuenta " + esc(d.propietario.cuenta) : ""}</div>
+              <div class="muted">${esc(d.propietario.piso || "")}${d.propietario.cuenta ? " · cuenta " + esc(d.propietario.cuenta) : ""}${d.propietario.coeficiente ? " · coeficiente " + pct.format(d.propietario.coeficiente) + " %" : ""}</div>
             </div>
             <div class="kpis">
               <div class="kpi"><span>Pendiente de pago</span><strong>${eur.format(d.deuda || 0)}</strong></div>
               <div class="kpi"><span>Recibos sin cobrar</span><strong>${pendientes}</strong></div>
               <div class="kpi"><span>Recibos en total</span><strong>${(d.recibos || []).length}</strong></div>
+            </div>
+            <div class="card">
+              <h2 style="font-size:16px;margin:0 0 8px;">Cuentas de la comunidad · ${esc(d.balance.ejercicio)}</h2>
+              <div class="kpis">
+                <div class="kpi"><span>Presupuesto</span><strong>${eur.format(d.balance.presupuestado)}</strong></div>
+                <div class="kpi"><span>Gastado</span><strong>${eur.format(d.balance.gastado)}</strong></div>
+                <div class="kpi"><span>Ingresado</span><strong>${eur.format(d.balance.ingresado)}</strong></div>
+                <div class="kpi"><span>Pendiente de cobro</span><strong>${eur.format(d.balance.pendiente_cobro)}</strong></div>
+                <div class="kpi"><span>Fondo de reserva</span><strong>${d.balance.fondo_sin_configurar ? "sin fijar" : eur.format(d.balance.fondo_reserva)}</strong></div>
+              </div>
+              <p class="muted" style="margin-top:10px;">Son las cuentas de toda la comunidad, no las tuyas.</p>
+            </div>
+            <div class="card">
+              <h2 style="font-size:16px;margin:0 0 8px;">Lo que te viene</h2>
+              ${(d.avance.emitidos || []).length ? `<table>
+                <thead><tr><th>Periodo</th><th>Concepto</th><th class="num">Importe</th></tr></thead>
+                <tbody>${d.avance.emitidos.map((x) => `<tr><td>${esc(x.periodo)}</td><td>${esc(x.concepto)}</td>
+                  <td class="num">${eur.format(x.importe || 0)}</td></tr>`).join("")}</tbody></table>`
+                : d.avance.estimacion
+                ? `<p>Con la cuota vigente y tu coeficiente, tu recibo mensual sería de aproximadamente
+                   <strong>${eur.format(d.avance.estimacion)}</strong>.</p>
+                   <p class="muted">Es una estimación, no un recibo emitido: puede cambiar si la junta aprueba otra cuota o hay derramas.</p>`
+                : '<p class="muted">No hay recibos pendientes de periodos futuros.</p>'}
             </div>
             <div class="card">
               <h2 style="font-size:16px;margin:0 0 8px;">Mis recibos</h2>
@@ -69181,7 +71872,7 @@ class Handler(BaseHTTPRequestHandler):
             ${(d.juntas || []).length ? `<div class="card">
               <h2 style="font-size:16px;margin:0 0 8px;">Juntas</h2>
               <table><tbody>${d.juntas.map((x) => `<tr>
-                <td>${esc(x.fecha)}</td><td class="muted">${esc(x.tipo)}</td>
+                <td>${esc(fecha(x.fecha))}</td><td class="muted">${esc(x.tipo)}</td>
                 <td class="num"><a href="/api/workspace_fincas_portal_junta?tipo=convocatoria&ref=${encodeURIComponent(x.ref)}&token=${encodeURIComponent(token)}">Convocatoria</a>
                   · <a href="/api/workspace_fincas_portal_junta?tipo=acta&ref=${encodeURIComponent(x.ref)}&token=${encodeURIComponent(token)}">Acta</a></td>
               </tr>`).join("")}</tbody></table>
@@ -69191,9 +71882,73 @@ class Handler(BaseHTTPRequestHandler):
               <table><tbody>${d.documentos.map((x) => `<tr>
                 <td>${x.ref ? `<a href="/api/workspace_fincas_portal_doc?ref=${encodeURIComponent(x.ref)}&token=${encodeURIComponent(token)}">${esc(x.titulo)}</a>` : esc(x.titulo)}</td>
                 <td class="muted">${esc(x.tipo)}</td>
-                <td class="num muted">${x.ref ? esc(x.fecha) : esc(x.fecha) + " · sin fichero"}</td></tr>`).join("")}</tbody></table>
+                <td class="num muted">${x.ref ? esc(fecha(x.fecha)) : esc(fecha(x.fecha)) + " · sin fichero"}</td></tr>`).join("")}</tbody></table>
             </div>` : ""}
-            <p class="muted">Enlace válido hasta ${esc(d.caduca || "-")}. Si tienes dudas sobre algún recibo, habla con tu administrador.</p>`;
+            <div class="card">
+              <h2 style="font-size:16px;margin:0 0 8px;">Certificado de estar al corriente</h2>
+              <p class="muted">Es el que pide la notaría para vender o hipotecar (art. 9.1.e LPH).</p>
+              ${d.certificado.ref
+                ? `<p><a href="/api/workspace_fincas_portal_certificado_pdf?ref=${encodeURIComponent(d.certificado.ref)}&token=${encodeURIComponent(token)}">Descargar el certificado</a></p>`
+                : d.certificado.estado === "Solicitado"
+                ? `<div class="aviso">Solicitado el ${esc(fecha(d.certificado.fecha))}. Estará disponible en cuanto la administración confirme el pago${d.certificado.precio ? " de " + eur.format(d.certificado.precio) : ""}.</div>`
+                : `<p>${d.certificado.precio ? "Precio: <strong>" + eur.format(d.certificado.precio) + "</strong>." : "Consulta el precio con tu administrador."}</p>
+                   <button id="cert-pedir">Solicitar</button>
+                   <div id="cert-aviso" style="margin-top:10px;"></div>`}
+            </div>
+            <div class="card">
+              <h2 style="font-size:16px;margin:0 0 8px;">Comunicar una incidencia</h2>
+              ${(d.incidencias || []).length ? `<table><tbody>${d.incidencias.map((x) => `<tr>
+                <td>${esc(x.titulo)}</td><td class="muted">${esc(fecha(x.fecha))}</td>
+                <td class="num"><span class="estado" data-e="${esc(x.estado)}">${esc(x.estado)}</span></td>
+              </tr>`).join("")}</tbody></table><p class="muted" style="margin-top:10px;">Estas son las que has comunicado tú.</p>` : ""}
+              <label for="inc-titulo">Qué pasa</label>
+              <input id="inc-titulo" maxlength="120" placeholder="Gotera en el techo del garaje" />
+              <label for="inc-desc">Detalles (opcional)</label>
+              <textarea id="inc-desc" rows="3" maxlength="2000" placeholder="Desde cuándo, dónde exactamente, si va a más…"></textarea>
+              <button id="inc-enviar">Comunicar</button>
+              <div id="inc-aviso" style="margin-top:10px;"></div>
+            </div>
+            <p class="muted">Enlace válido hasta ${esc(fecha(d.caduca || "-"))}. Si tienes dudas sobre algún recibo, habla con tu administrador.</p>`;
+          const pedirCert = document.getElementById("cert-pedir");
+          if (pedirCert) pedirCert.addEventListener("click", async () => {
+            const av = document.getElementById("cert-aviso");
+            pedirCert.disabled = true;
+            av.innerHTML = '<p class="muted">Enviando…</p>';
+            try {
+              const r = await fetch("/api/workspace_fincas_portal_certificado", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ token }),
+              });
+              const res = await r.json();
+              if (!r.ok) throw new Error(res.error || "No se pudo solicitar");
+              av.innerHTML = '<div class="ok">Solicitado. Podrás descargarlo cuando la administración confirme el pago.</div>';
+            } catch (e) {
+              av.innerHTML = '<div class="aviso">' + esc(e.message || "No se pudo solicitar") + "</div>";
+              pedirCert.disabled = false;
+            }
+          });
+          const boton = document.getElementById("inc-enviar");
+          const aviso = document.getElementById("inc-aviso");
+          boton.addEventListener("click", async () => {
+            const titulo = document.getElementById("inc-titulo").value.trim();
+            if (titulo.length < 4) { aviso.innerHTML = '<div class="aviso">Cuenta en una línea qué pasa.</div>'; return; }
+            boton.disabled = true;
+            aviso.innerHTML = '<p class="muted">Enviando…</p>';
+            try {
+              const r = await fetch("/api/workspace_fincas_portal_incidencia", {
+                method: "POST", headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ token, titulo, descripcion: document.getElementById("inc-desc").value }),
+              });
+              const res = await r.json();
+              if (!r.ok) throw new Error(res.error || "No se pudo enviar");
+              aviso.innerHTML = '<div class="ok">Comunicada. La administración la verá con tu nombre y tu piso.</div>';
+              document.getElementById("inc-titulo").value = "";
+              document.getElementById("inc-desc").value = "";
+            } catch (e) {
+              aviso.innerHTML = '<div class="aviso">' + esc(e.message || "No se pudo enviar") + "</div>";
+              boton.disabled = false;
+            }
+          });
         })
         .catch((e) => { app.innerHTML = '<div class="aviso">' + esc(e.message || "No se pudo cargar") + "</div>"; });
     }
@@ -69928,6 +72683,16 @@ class Handler(BaseHTTPRequestHandler):
             # respondían "Endpoint no valido" pese a existir: entre ellas las dos
             # exportaciones de listados y la recuperación de acceso, que además está
             # marcada como pública pero se rechazaba antes de llegar a comprobarlo.
+            # Y el art. 17 para un comunero, que hasta ahora no tenía forma de ejercerse:
+            # un vecino no es un cliente y `cliente_suprimir` no llegaba a su ficha.
+            "/api/workspace_fincas_vecino_suprimir",
+            # Segunda tanda, encontrada comparando la lista con los manejadores que hay
+            # escritos más abajo: cerrar una compraventa, la preparación guiada del
+            # inmueble —que además se pierde en un catch vacío, así que fallaba sin
+            # decir nada— y reprocesar el OCR de una nómina.
+            "/api/compraventas_close",
+            "/api/inmueble_guided_prepare",
+            "/api/workspace_rrhh_nomina_ocr",
             "/api/ai_inmo_encargo_copilot",
             "/api/auth_request_access_recovery",
             "/api/gestoria_asiento_punteo_banco",
@@ -69991,6 +72756,9 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_junta_asistencia",
             "/api/workspace_fincas_junta_acuerdo",
             "/api/workspace_fincas_junta_voto",
+            "/api/workspace_fincas_junta_notificar_acta",
+            "/api/workspace_fincas_junta_discrepancia",
+            "/api/workspace_fincas_junta_impugnacion",
             "/api/workspace_fincas_mayorias",
             "/api/workspace_fincas_junta_convocatoria",
             "/api/workspace_fincas_presupuesto_anual",
@@ -70005,9 +72773,24 @@ class Handler(BaseHTTPRequestHandler):
             "/api/workspace_fincas_equipo",
             "/api/workspace_contrato_plantillas",
             "/api/workspace_fincas_portal_alta",
+            # La comunica el vecino desde su enlace, sin sesión. Marcarla pública no
+            # basta: si no está también aquí, la lista blanca la rechaza antes de
+            # llegar y el endpoint no existe para nadie.
+            "/api/workspace_fincas_portal_incidencia",
+            "/api/workspace_fincas_portal_certificado",
+            "/api/workspace_fincas_certificado_pagado",
             "/api/workspace_fincas_portal_revocar",
             "/api/workspace_fincas_vecino_delete",
             "/api/workspace_presupuesto_delete",
+            "/api/workspace_pericial",
+            "/api/workspace_pericial_delete",
+            "/api/workspace_pericial_entorno",
+            "/api/workspace_pericial_catastro_sync",
+            "/api/workspace_pericial_testigos_sugeridos",
+            "/api/workspace_pericial_testigo",
+            "/api/workspace_pericial_evidencia",
+            "/api/workspace_pericial_pdf",
+            "/api/workspace_pericial_firmar",
             "/api/workspace_rrhh_nominas_import",
             "/api/workspace_portal_presign",
         ):
@@ -74537,6 +77320,11 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True})
             return
         if parsed.path == "/api/movimientos":
+            # `concepto` es NOT NULL en la tabla: sin él saltaba la restricción y salía
+            # un 500. Falta un dato obligatorio, que es un 400 de toda la vida.
+            if not str(payload.get("concepto") or "").strip():
+                json_response(self, {"error": "concepto requerido"}, status=400)
+                return
             conn.execute(
                 """
                 INSERT INTO movimientos (
@@ -76232,6 +79020,45 @@ class Handler(BaseHTTPRequestHandler):
                     json_response(self, {"error": "No autorizado"}, status=403)
                     return
 
+            # Desactivar borra la pertenencia y revoca todas las sesiones del usuario, así
+            # que hacerlo sobre uno mismo es cerrarse la puerta desde fuera: el que pulsa
+            # se queda en la calle en la misma respuesta. Y si además era el único que
+            # podía gestionar el workspace, ya no queda nadie que pueda volver a invitarle.
+            actor_id = str((session or {}).get("user_id") or "").strip()
+            if actor_id and actor_id == user_id:
+                json_response(self, {"error": "No puedes desactivar tu propia cuenta. "
+                                              "Pídeselo a otro administrador."}, status=409)
+                return
+            if workspace_id:
+                try:
+                    ensure_workspace_core_tables(conn)
+                except Exception:
+                    _rollback_best_effort(conn)
+                try:
+                    filas = conn.execute(
+                        """
+                        SELECT m.usuario_id AS usuario_id, m.rol AS rol, u.activo AS activo
+                        FROM workspace_miembros m
+                        LEFT JOIN usuarios u ON u.id = m.usuario_id
+                        WHERE m.workspace_id = ?
+                        """,
+                        (workspace_id,),
+                    ).fetchall() or []
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("_do_POST/usuarios_delete/gestores", _fallo_tragado)
+                    filas = []
+                gestores = [
+                    str(row_value(f, "usuario_id") or "").strip()
+                    for f in filas
+                    if _normalize_workspace_member_role(row_value(f, "rol") or "") in {"Owner", "Admin"}
+                    and str(row_value(f, "activo", 1)) not in {"0", "False", "None"}
+                ]
+                if user_id in gestores and len([g for g in gestores if g != user_id]) == 0:
+                    json_response(self, {"error": "Es el único administrador del espacio. "
+                                                  "Nombra antes a otro o el espacio se queda "
+                                                  "sin quien lo gestione."}, status=409)
+                    return
+
             # No hacemos borrado físico: desactivamos el usuario para evitar cascadas y pérdidas accidentales.
             if confirm and confirm not in {"DESACTIVAR", "ELIMINAR", "BORRAR"}:
                 json_response(self, {"error": "confirm inválido (usa DESACTIVAR)"}, status=400)
@@ -76366,6 +79193,10 @@ class Handler(BaseHTTPRequestHandler):
                 razon_social = str(payload.get("razon_social") or "").strip() or None
                 updates.append("razon_social = ?")
                 values.append(razon_social)
+            if "nombre_comercial" in payload:
+                nombre_comercial = str(payload.get("nombre_comercial") or "").strip() or None
+                updates.append("nombre_comercial = ?")
+                values.append(nombre_comercial)
             if "nif" in payload:
                 nif = str(payload.get("nif") or "").strip() or None
                 updates.append("nif = ?")
@@ -77088,6 +79919,9 @@ class Handler(BaseHTTPRequestHandler):
                     fields[key] = payload.get(key)
             if not fields:
                 json_response(self, {"ok": True, "updated": False})
+                return
+            if "nombre" in fields and not str(fields.get("nombre") or "").strip():
+                json_response(self, {"error": "nombre no puede quedar vacío"}, status=400)
                 return
             # Normaliza tipos
             if "activo" in fields:
@@ -78001,18 +80835,18 @@ class Handler(BaseHTTPRequestHandler):
 
             seed_rows = [
                 # (usuario, email, nombre, apellido, servicio_csv, rol_usuario, workspace_id, rol_miembro)
-                ("SLallana", "", "Sebastian", "Lallana", "Inmobiliaria", "Lectura", ws_modernia, "Lectura"),
-                ("DGarcia", "", "David", "Garcia", "Inmobiliaria", "Lectura", ws_modernia, "Lectura"),
+                ("SLallana", "", "Sebastian", "Lallana", "Inmobiliaria", "Inmobiliaria", ws_modernia, "Miembro"),
+                ("DGarcia", "", "David", "Garcia", "Inmobiliaria", "Inmobiliaria", ws_modernia, "Miembro"),
                 ("Icanamero", "", "I", "Canamero", "Administración", "Administrador", ws_modernia, "Owner"),
-                ("DGallardo", "", "D", "Gallardo", "Fincas, Gestoría", "Lectura", ws_modernia, "Lectura"),
-                ("Rmiera", "", "R", "Miera", "Seguros, Gestoría", "Lectura", ws_modernia, "Lectura"),
-                ("Tramos", "", "T", "Ramos", "Gestoría", "Lectura", ws_modernia, "Lectura"),
-                ("AMostazo", "", "A", "Mostazo", "Gestoría", "Lectura", ws_modernia, "Lectura"),
-                ("Gbartha", "", "G", "Bartha", "Registro horario", "Lectura", ws_modernia, "Lectura"),
-                ("LDianez", "", "L", "Dianez", "Inmobiliaria", "Lectura", ws_modernia, "Lectura"),
-                ("Bsalazar", "", "B", "Salazar", "Seguros, Inmobiliaria", "Lectura", ws_modernia, "Lectura"),
-                ("AMelgar", "", "A", "Melgar", "Gestoría", "Lectura", ws_modernia, "Lectura"),
-                ("JBernal", "", "J", "Bernal", "Financiaciones", "Lectura", ws_modernia, "Lectura"),
+                ("DGallardo", "", "D", "Gallardo", "Fincas, Gestoría", "Gestoría", ws_modernia, "Miembro"),
+                ("Rmiera", "", "R", "Miera", "Seguros, Gestoría", "Gestoría", ws_modernia, "Miembro"),
+                ("Tramos", "", "T", "Ramos", "Gestoría", "Gestoría", ws_modernia, "Miembro"),
+                ("AMostazo", "", "A", "Mostazo", "Gestoría", "Gestoría", ws_modernia, "Miembro"),
+                ("Gbartha", "", "G", "Bartha", "Registro horario", "Gestoría", ws_modernia, "Miembro"),
+                ("LDianez", "", "L", "Dianez", "Inmobiliaria", "Inmobiliaria", ws_modernia, "Miembro"),
+                ("Bsalazar", "", "B", "Salazar", "Seguros, Inmobiliaria", "Seguros", ws_modernia, "Miembro"),
+                ("AMelgar", "", "A", "Melgar", "Gestoría", "Gestoría", ws_modernia, "Miembro"),
+                ("JBernal", "", "J", "Bernal", "Financiaciones", "Financiaciones", ws_modernia, "Miembro"),
                 ("S.sanchez", "sergirex@gmail.com", "S", "Sanchez", "Administración", "Administrador", ws_centro, "Owner"),
                 ("C.anca", "modernia.centro@grupomodernia.es", "C", "Anca", "Administración", "Administrador", ws_centro, "Owner"),
             ]
@@ -78070,7 +80904,15 @@ class Handler(BaseHTTPRequestHandler):
                                 nombre = COALESCE(NULLIF(?, ''), nombre),
                                 apellido = COALESCE(NULLIF(?, ''), apellido),
                                 servicio = COALESCE(NULLIF(?, ''), servicio),
-                                rol = COALESCE(NULLIF(?, ''), rol),
+                                -- El rol del que ya existe NO se toca: manda el que
+                                -- tenga puesto, y esta lista sólo decide con qué nace
+                                -- uno nuevo. Antes era al revés, y volver a sembrar
+                                -- devolvía a «Lectura» —el único rol que impide
+                                -- escribir— a siete trabajadores a los que se les
+                                -- había corregido a mano. Un sembrado que deshace
+                                -- decisiones posteriores no es idempotente: es una
+                                -- regresión con horario.
+                                rol = COALESCE(NULLIF(rol, ''), ?),
                                 registro_horario_activo = CASE WHEN ? = 1 THEN 1 ELSE COALESCE(registro_horario_activo, 0) END,
                                 updated_at = datetime(?)
                             WHERE id = ?
@@ -78377,22 +81219,74 @@ class Handler(BaseHTTPRequestHandler):
             numero = (payload.get("numero") or "").strip() or None
             prefijo = ""
             if serie and not numero:
-                series_row = conn.execute(
-                    """
-                    SELECT id, COALESCE(prefijo, ''), COALESCE(siguiente_numero, 1)
-                    FROM workspace_facturacion_series
-                    WHERE workspace_id = ? AND empresa_id = ? AND serie = ? AND COALESCE(activa, 1) = 1
-                    LIMIT 1
-                    """,
-                    (workspace_id, empresa_id, serie),
-                ).fetchone()
+                # Coger número y avanzar el contador, en UNA sentencia.
+                #
+                # Antes eran tres —leer el contador, componer el número, guardar el
+                # siguiente— y eso tiene dos fallos, cada uno por su lado:
+                #
+                # 1. Sobre Postgres ni siquiera llegaba a correr. El SELECT pedía dos
+                #    columnas sin nombre, `COALESCE(prefijo,'')` y
+                #    `COALESCE(siguiente_numero,1)`, y la fila vuelve como diccionario:
+                #    las dos se llaman «coalesce», una pisa a la otra, y `series_row[1]`
+                #    revienta con KeyError. O sea que dejar el número en blanco —que es
+                #    lo que dice el formulario, «Autogenerado»— devolvía un 500.
+                #    En SQLite las filas se indexan por posición y no se notaba.
+                #
+                # 2. Dos facturas a la vez leían el mismo contador y salían con el mismo
+                #    número. La numeración de facturas tiene que ser correlativa y sin
+                #    repetir; no es una preferencia.
+                #
+                # Con `UPDATE … RETURNING` el contador se reserva y se lee de una vez, y
+                # la fila queda bloqueada mientras tanto: la segunda petición espera y se
+                # lleva el siguiente. Va en las dos bases (SQLite lo admite desde 3.35).
+                try:
+                    series_row = conn.execute(
+                        """
+                        UPDATE workspace_facturacion_series
+                        SET siguiente_numero = COALESCE(siguiente_numero, 1) + 1,
+                            updated_at = ?
+                        WHERE workspace_id = ? AND empresa_id = ? AND serie = ?
+                          AND COALESCE(activa, 1) = 1
+                        RETURNING id AS serie_id,
+                                  COALESCE(prefijo, '') AS prefijo,
+                                  COALESCE(siguiente_numero, 1) - 1 AS asignado
+                        """,
+                        (now, workspace_id, empresa_id, serie),
+                    ).fetchone()
+                except Exception:
+                    # El UPDATE bloquea la fila de la serie, y hay un `lock_timeout`
+                    # puesto. Si aun así se agota, es que alguien la tiene cogida: se
+                    # dice, en vez de devolver un 500 sin explicación.
+                    _rollback_best_effort(conn)
+                    json_response(self, {
+                        "error": "La serie está ocupada ahora mismo por otra factura. "
+                                 "Vuelve a darle en un momento.",
+                        "reintentar": True,
+                    }, status=409)
+                    return
                 if series_row:
-                    prefijo = series_row[1]
-                    numero = f"{prefijo}{int(series_row[2] or 1):04d}"
-                    conn.execute(
-                        "UPDATE workspace_facturacion_series SET siguiente_numero = ?, updated_at = datetime(?) WHERE id = ?",
-                        (int(series_row[2] or 1) + 1, now, series_row[0]),
-                    )
+                    prefijo = str(row_value(series_row, "prefijo", "") or "")
+                    numero = f"{prefijo}{int(row_value(series_row, 'asignado', 1) or 1):04d}"
+                    # PENDIENTE, a propósito: la reserva NO se confirma aquí.
+                    #
+                    # El `UPDATE` deja la fila de la serie bloqueada hasta que la petición
+                    # confirme, y eso no pasa hasta el final, después de guardar la
+                    # factura y de correr las automatizaciones. O sea que la serie queda
+                    # tomada durante toda la petición: con seis personas facturando a la
+                    # vez, medido, ocho de cuarenta y ocho facturas no salen —unas con
+                    # 500 por `lock_timeout`, otras rechazadas por número duplicado—.
+                    #
+                    # Lo suyo sería confirmar la reserva aquí mismo y soltar el candado,
+                    # aceptando que un fallo posterior deje un hueco en la numeración
+                    # (un hueco se audita; dos facturas con el mismo número, no). Se
+                    # probó: sube a 47 de 48 y desaparecen los 500 y los duplicados.
+                    #
+                    # Pero una de esas 48 devolvía 200 **sin guardar la factura**, y no
+                    # se ha encontrado por qué. Cambiar un fallo que se ve por uno que no
+                    # se ve, en facturación, es peor negocio. Se deja como está hasta
+                    # entender la pérdida.
+                    #
+                    # Lo que sí está resuelto es lo grave: el número nunca se repite.
             if serie and numero:
                 duplicate = conn.execute(
                     """
@@ -81483,6 +84377,59 @@ class Handler(BaseHTTPRequestHandler):
             if not fecha_inicio or not fecha_fin:
                 json_response(self, {"error": "fecha_inicio y fecha_fin requeridos"}, status=400)
                 return
+            # Una ausencia que acaba antes de empezar no es una ausencia. Y no era sólo
+            # feo: el contador de vacaciones cuenta los días de inicio a fin, así que
+            # una del 20 al 10 gastaba CERO días. El trabajador se iba quince días y el
+            # resumen decía que no había usado ninguno.
+            def _dia(valor):
+                try:
+                    return datetime.strptime(str(valor or "")[:10], "%Y-%m-%d").date()
+                except Exception:
+                    return None
+            dia_inicio, dia_fin = _dia(fecha_inicio), _dia(fecha_fin)
+            if not dia_inicio or not dia_fin:
+                json_response(self, {"error": "Las fechas van en formato AAAA-MM-DD."}, status=400)
+                return
+            if dia_fin < dia_inicio:
+                json_response(
+                    self,
+                    {"error": f"La ausencia acaba antes de empezar: del {fecha_inicio} al "
+                              f"{fecha_fin}. Revisa las fechas."},
+                    status=400,
+                )
+                return
+            # Dos ausencias del mismo trabajador encima del mismo día. No se bloquea,
+            # porque el caso más común es legítimo —una baja médica que cae dentro de
+            # unas vacaciones aprobadas— y ahí la ley dice que esos días de vacaciones
+            # se recuperan (ET art. 38.3). Lo que no vale es que entre sin que nadie se
+            # entere y el cómputo cuente los días dos veces.
+            solapadas = conn.execute(
+                "SELECT id, tipo, fecha_inicio, fecha_fin, estado "
+                "FROM workspace_rrhh_ausencias "
+                "WHERE workspace_id = ? AND persona_id = ? AND id <> ? "
+                "  AND LOWER(COALESCE(estado, '')) NOT IN ('cancelada', 'cancelado', 'rechazada') "
+                "  AND COALESCE(fecha_inicio, '') <= ? AND COALESCE(fecha_fin, '') >= ? "
+                "ORDER BY fecha_inicio",
+                (workspace_id, persona_id, record_id or "", fecha_fin, fecha_inicio),
+            ).fetchall()
+            if solapadas and not _quiere_confirmar(payload):
+                detalle = "; ".join(
+                    f"{row_value(s, 'tipo', '') or 'Ausencia'} del "
+                    f"{row_value(s, 'fecha_inicio', '')} al {row_value(s, 'fecha_fin', '')} "
+                    f"({row_value(s, 'estado', '')})"
+                    for s in solapadas)
+                json_response(
+                    self,
+                    {"error": f"{persona_nombre} ya tiene otra ausencia en esos días: {detalle}. "
+                              f"Si es una baja que cae dentro de unas vacaciones, confírmalo: "
+                              f"esos días de vacaciones se recuperan (ET art. 38.3). Si te has "
+                              f"equivocado de fechas, corrígelas.",
+                     "code": "ausencias_solapadas",
+                     "requiere_confirmacion": True,
+                     "solapa_con": [dict(s) for s in solapadas]},
+                    status=409,
+                )
+                return
             prev = None
             if record_id:
                 row = conn.execute(
@@ -82066,8 +85013,18 @@ class Handler(BaseHTTPRequestHandler):
             workspace_id = str(payload.get("workspace_id") or "").strip()
             doc_key = str(payload.get("doc_key") or payload.get("s3_key") or "").strip()
             filename = str(payload.get("filename") or payload.get("nombre") or "nominas.pdf").strip() or "nominas.pdf"
-            year = int(payload.get("year") or 0)
-            month = int(payload.get("month") or 0)
+            # Convertir antes de validar: un «2026-08» en `month` —que es justo como
+            # se escribe un periodo en el resto del CRM— reventaba con ValueError y
+            # devolvía un 500, en vez del «month inválido» que hay diez líneas más
+            # abajo. Se convierte con red, y el valor malo cae en su propia
+            # comprobación de rango.
+            def _entero(valor):
+                try:
+                    return int(str(valor).strip())
+                except (TypeError, ValueError):
+                    return 0
+            year = _entero(payload.get("year") or 0)
+            month = _entero(payload.get("month") or 0)
             overwrite = 1 if str(payload.get("overwrite") or "").strip().lower() in {"1", "true", "si", "sí", "on"} else 0
             dry_run = 1 if str(payload.get("dry_run") or "").strip().lower() in {"1", "true", "si", "sí", "on"} else 0
             if not workspace_id:
@@ -82579,6 +85536,20 @@ class Handler(BaseHTTPRequestHandler):
                     calculo["num_aparcamientos"],
                     tarifas=tarifas,
                 )
+                # Un presupuesto sin carta de presentación se manda pelado: cuando no
+                # se ha escrito una a mano, se genera sola con la primera plantilla
+                # disponible. Así todo presupuesto de fincas sale con carta y con la
+                # foto del equipo (que solo se pega en el PDF si hay carta).
+                if not calculo["carta_presentacion"]:
+                    calculo["carta_presentacion"] = generate_default_fincas_carta(
+                        conn, workspace_id,
+                        empresa_id=empresa_id,
+                        comunidad=calculo["comunidad_denominacion"],
+                        direccion=calculo["comunidad_direccion"],
+                        calc=calculo,
+                        cuota=calculo["cuota_sugerida"],
+                        colegiado=calculo["colegiado_numero"],
+                    )
                 # Trabajos puntuales elegidos en el formulario (constitución de la
                 # comunidad y demás): van como línea propia, no en la cuota mensual.
                 elegidas = payload.get("tarifas_fijas")
@@ -82852,6 +85823,536 @@ class Handler(BaseHTTPRequestHandler):
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
             return
+        elif parsed.path == "/api/workspace_pericial":
+            ensure_workspace_product_tables(conn)
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            if not workspace_id or not empresa_id:
+                json_response(self, {"error": "workspace_id y empresa_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            linked = conn.execute(
+                "SELECT 1 FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ? LIMIT 1",
+                (workspace_id, empresa_id),
+            ).fetchone()
+            if not linked:
+                json_response(self, {"error": "Esa empresa no pertenece a este workspace"}, status=403)
+                return
+            current = None
+            if record_id:
+                current = conn.execute(
+                    "SELECT * FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (record_id, workspace_id),
+                ).fetchone()
+                if not current:
+                    json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                    return
+                # Un expediente firmado no se toca: es el mismo criterio que ya usa
+                # la firma de inmueble («no se puede anular una firma ya firmada»),
+                # aquí aplicado también a la edición. Solo el propio flujo de firma
+                # (que no pasa por este endpoint) puede llevar un expediente a
+                # "Firmado" — este POST nunca lo acepta como valor de entrada.
+                if str(current["estado"] or "") == "Firmado":
+                    json_response(self, {"error": "El expediente ya está firmado y no se puede editar."}, status=409)
+                    return
+            estado_payload = str(payload.get("estado") or "").strip()
+            if estado_payload == "Firmado":
+                estado_payload = ""  # se ignora: ese estado solo se alcanza firmando.
+            estado = estado_payload or (str(current["estado"]) if current else "") or "Encargado"
+            metodo = str(payload.get("metodo") or (current["metodo"] if current else "") or "comparacion").strip()
+            calculo = {}
+            try:
+                calculo = json.loads((current["calculo_json"] if current else None) or "{}") or {}
+            except Exception:
+                calculo = {}
+            calculo.setdefault("schema_version", 1)
+            calculo["metodo_activo"] = metodo
+            calculo.setdefault("comparacion", None)
+            calculo.setdefault("coste", None)
+            calculo.setdefault("capitalizacion", None)
+            calculo.setdefault("residual", None)
+            calculo.setdefault("conclusion", {})
+            justificacion = payload.get("justificacion_metodo")
+            if justificacion is not None:
+                calculo["conclusion"]["justificacion_metodo"] = str(justificacion or "").strip()
+            # Edición parcial: si el campo no viene en el payload, se conserva lo que
+            # ya había — mandar solo `direccion_manual` no puede vaciar el resto del
+            # expediente. Mismo criterio que ya usa `workspace_presupuestos`.
+            def _campo(nombre, transform=str):
+                if nombre in payload:
+                    crudo = payload.get(nombre)
+                    valor = transform(crudo).strip() if transform is str else transform(crudo)
+                    return valor or None
+                return (current[nombre] if current else None)
+
+            values = (
+                workspace_id, empresa_id,
+                _campo("inmueble_id"),
+                _campo("denominacion_manual"),
+                _campo("direccion_manual"),
+                _campo("referencia_catastral_manual"),
+                _campo("cliente_id"),
+                _campo("perito_usuario_id"),
+                _campo("colegiado_numero"),
+                _campo("finalidad"),
+                _campo("procedimiento_referencia"),
+                metodo, estado,
+                _campo("motivo_estado"),
+                _campo("fecha_encargo"),
+                _campo("fecha_visita"),
+                _campo("fecha_valoracion"),
+                _campo("fecha_emision"),
+                _campo("superficie_catastral", parse_money_value),
+                _campo("superficie_registral", parse_money_value),
+                _campo("superficie_medida", parse_money_value),
+                _campo("superficie_calculo_usada", parse_money_value),
+                _campo("motivo_superficie_usada"),
+                _campo("valor_final", parse_money_value),
+                json.dumps(calculo, ensure_ascii=False),
+                _campo("descripcion_entorno"),
+            )
+            if record_id:
+                conn.execute(
+                    "UPDATE workspace_periciales SET workspace_id=?, empresa_id=?, inmueble_id=?, "
+                    "denominacion_manual=?, direccion_manual=?, referencia_catastral_manual=?, cliente_id=?, "
+                    "perito_usuario_id=?, colegiado_numero=?, finalidad=?, procedimiento_referencia=?, metodo=?, "
+                    "estado=?, motivo_estado=?, fecha_encargo=?, fecha_visita=?, fecha_valoracion=?, fecha_emision=?, "
+                    "superficie_catastral=?, superficie_registral=?, superficie_medida=?, superficie_calculo_usada=?, "
+                    "motivo_superficie_usada=?, valor_final=?, calculo_json=?, descripcion_entorno=?, updated_at=datetime(?) "
+                    "WHERE id = ? AND workspace_id = ?",
+                    (*values, now, record_id, workspace_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    "INSERT INTO workspace_periciales (id, workspace_id, empresa_id, inmueble_id, "
+                    "denominacion_manual, direccion_manual, referencia_catastral_manual, cliente_id, "
+                    "perito_usuario_id, colegiado_numero, finalidad, procedimiento_referencia, metodo, estado, "
+                    "motivo_estado, fecha_encargo, fecha_visita, fecha_valoracion, fecha_emision, "
+                    "superficie_catastral, superficie_registral, superficie_medida, superficie_calculo_usada, "
+                    "motivo_superficie_usada, valor_final, calculo_json, descripcion_entorno, created_at, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime(?),datetime(?))",
+                    (record_id, *values, now, now),
+                )
+            # El nº de colegiado se aprende del perito la primera vez que se
+            # teclea: no hace falta una pantalla de "ficha del perito" aparte.
+            # Si ya tenía uno guardado no se pisa aquí (para eso está la
+            # edición del propio usuario).
+            perito_id_final = values[7]
+            colegiado_final = values[8]
+            if perito_id_final and colegiado_final:
+                try:
+                    conn.execute(
+                        "UPDATE usuarios SET colegiado_numero = ? "
+                        "WHERE id = ? AND COALESCE(colegiado_numero, '') = ''",
+                        (colegiado_final, perito_id_final),
+                    )
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("workspace_pericial/aprender_colegiado", _fallo_tragado)
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_pericial_entorno":
+            # Solo busca y devuelve el texto — no guarda nada. El formulario lo
+            # precarga en el campo editable; hace falta un "Guardar expediente"
+            # aparte para que quede, igual que el resto de campos manuales.
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            direccion = str(payload.get("direccion") or "").strip()
+            if not workspace_id or not direccion:
+                json_response(self, {"error": "workspace_id y direccion requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            # Si el expediente cuelga de un inmueble gestionado, sus datos ya
+            # sabidos (municipio/provincia/código postal) afinan la
+            # geocodificación sin coste añadido — no hace falta pedírselos
+            # de nuevo al perito.
+            municipio_ctx = provincia_ctx = cp_ctx = ""
+            pericial_id_ctx = str(payload.get("pericial_id") or "").strip()
+            if pericial_id_ctx:
+                fila_ctx = conn.execute(
+                    "SELECT i.poblacion, i.provincia, i.codigo_postal FROM workspace_periciales p "
+                    "JOIN inmuebles i ON i.id = p.inmueble_id "
+                    "WHERE p.id = ? AND p.workspace_id = ? LIMIT 1",
+                    (pericial_id_ctx, workspace_id),
+                ).fetchone()
+                if fila_ctx:
+                    municipio_ctx = str(fila_ctx["poblacion"] or "").strip()
+                    provincia_ctx = str(fila_ctx["provincia"] or "").strip()
+                    cp_ctx = str(fila_ctx["codigo_postal"] or "").strip()
+            try:
+                resultado = fetch_descripcion_entorno(
+                    direccion, municipio=municipio_ctx, provincia=provincia_ctx, codigo_postal=cp_ctx,
+                )
+            except Exception as fallo:
+                json_response(self, {"error": f"No se pudo consultar el entorno: {fallo}"}, status=502)
+                return
+            if not resultado.get("ok"):
+                json_response(self, {"error": resultado.get("error") or "No se pudo localizar el entorno."}, status=400)
+                return
+            json_response(self, resultado)
+            return
+        elif parsed.path == "/api/workspace_pericial_catastro_sync":
+            # Busca la referencia catastral (si falta) y adjunta la ficha
+            # catastral al expediente, en un solo botón. Reutiliza tal cual
+            # la infraestructura ya construida para inmuebles
+            # (`sync_catastro_for_inmueble`): la referencia y los datos
+            # objetivos quedan en la propia ficha del inmueble (fuente única
+            # de verdad), y el PDF generado se registra como documento del
+            # expediente pericial vía `persist_pericial_generated_doc` — esa
+            # función va a disco local, no a S3, así que no pasa por
+            # `workspace_pericial_evidencias` (esa tabla asume S3 para poder
+            # verificar su cadena de hash).
+            try:
+                workspace_id = str(payload.get("workspace_id") or "").strip()
+                pericial_id = str(payload.get("pericial_id") or "").strip()
+                if not workspace_id or not pericial_id:
+                    json_response(self, {"error": "workspace_id y pericial_id requeridos"}, status=400)
+                    return
+                session = getattr(self, "auth_session", None) or self._current_session()
+                ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
+                pericial_row = conn.execute(
+                    "SELECT * FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (pericial_id, workspace_id),
+                ).fetchone()
+                if not pericial_row:
+                    json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                    return
+                inmueble_id = str(pericial_row["inmueble_id"] or "").strip()
+                if not inmueble_id:
+                    json_response(
+                        self,
+                        {"error": "Este expediente no está enlazado a un inmueble gestionado en el CRM."},
+                        status=400,
+                    )
+                    return
+                ok_acc, err_acc, _fila_acc = enforce_inmueble_access(conn, session, inmueble_id, write=True)
+                if not ok_acc:
+                    json_response(self, {"error": err_acc}, status=404 if err_acc == "Inmueble no encontrado" else 403)
+                    return
+                result = sync_catastro_for_inmueble(conn, inmueble_id, now, usuario=session.get("usuario") if session else None)
+                doc = persist_pericial_generated_doc(
+                    conn, pericial_id, "ficha_catastro", "Ficha catastral (Sede Electrónica del Catastro)",
+                    result["pdf_bytes"], f"ficha_catastral_{pericial_id}", now,
+                    workspace_id=workspace_id, empresa_id=pericial_row["empresa_id"],
+                    plantilla_clave="catastro_ficha",
+                )
+                conn.commit()
+                json_response(self, {
+                    "ok": True,
+                    "referencia_catastral": result["summary"].get("referencia_catastral") or "",
+                    "doc": doc,
+                })
+                return
+            except ValueError as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            except Exception as exc:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                json_response(self, {"error": f"catastro_sync_error: {type(exc).__name__}: {exc}"}, status=502)
+                return
+        elif parsed.path == "/api/workspace_pericial_testigos_sugeridos":
+            # Igual que el de entorno: solo busca, no guarda. Cada candidato se
+            # añade como testigo real vía /api/workspace_pericial_testigo,
+            # el mismo endpoint que usa el alta manual — no hay un camino
+            # aparte que se pueda desincronizar de la cadena de evidencia.
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            direccion = str(payload.get("direccion") or "").strip()
+            if not workspace_id or not direccion:
+                json_response(self, {"error": "workspace_id y direccion requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            try:
+                resultado = buscar_testigos_propios(conn, workspace_id, direccion)
+            except Exception as fallo:
+                json_response(self, {"error": f"No se pudo buscar en el inventario: {fallo}"}, status=502)
+                return
+            json_response(self, resultado)
+            return
+        elif parsed.path == "/api/workspace_pericial_delete":
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            if not workspace_id or not record_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            row = conn.execute(
+                "SELECT id, estado FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (record_id, workspace_id),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                return
+            if str(row["estado"] or "") == "Firmado":
+                json_response(self, {"error": "El expediente ya está firmado y no se puede borrar."}, status=409)
+                return
+            conn.execute("DELETE FROM workspace_periciales WHERE id = ? AND workspace_id = ?", (record_id, workspace_id))
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id})
+            return
+        elif parsed.path == "/api/workspace_pericial_testigo":
+            ensure_workspace_product_tables(conn)
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            pericial_id = str(payload.get("pericial_id") or "").strip()
+            record_id = str(payload.get("id") or "").strip()
+            if not workspace_id or not pericial_id:
+                json_response(self, {"error": "workspace_id y pericial_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            pericial = conn.execute(
+                "SELECT id, estado FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (pericial_id, workspace_id),
+            ).fetchone()
+            if not pericial:
+                json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                return
+            if str(pericial["estado"] or "") == "Firmado":
+                json_response(self, {"error": "El expediente ya está firmado y no se puede editar."}, status=409)
+                return
+            # Nunca se borra un testigo de verdad: uno descartado sigue siendo
+            # prueba de la diligencia del trabajo. Solo cambia de estado.
+            estado_testigo = str(payload.get("estado") or "activo").strip() or "activo"
+            coeficientes = payload.get("coeficientes") or {}
+            if isinstance(coeficientes, str):
+                try:
+                    coeficientes = json.loads(coeficientes)
+                except Exception:
+                    coeficientes = {}
+            homogeneizacion = compute_homogenizacion_testigo(
+                {"precio": payload.get("precio"), "superficie": payload.get("superficie")}, coeficientes
+            )
+            caracteristicas = payload.get("caracteristicas") or {}
+            if isinstance(caracteristicas, str):
+                try:
+                    caracteristicas = json.loads(caracteristicas)
+                except Exception:
+                    caracteristicas = {}
+            values = (
+                pericial_id,
+                str(payload.get("orden") or 1),
+                estado_testigo,
+                str(payload.get("motivo_descarte") or "").strip() or None,
+                str(payload.get("sustituido_por_testigo_id") or "").strip() or None,
+                str(payload.get("fuente") or "").strip() or None,
+                str(payload.get("url_original") or "").strip() or None,
+                str(payload.get("fecha_captura") or "").strip() or None,
+                parse_money_value(payload.get("precio")) or None,
+                parse_money_value(payload.get("superficie")) or None,
+                json.dumps(caracteristicas, ensure_ascii=False),
+                json.dumps(coeficientes, ensure_ascii=False),
+                homogeneizacion["valor_homogeneizado_unitario"] or None,
+            )
+            if record_id:
+                conn.execute(
+                    "UPDATE workspace_pericial_testigos SET pericial_id=?, orden=?, estado=?, motivo_descarte=?, "
+                    "sustituido_por_testigo_id=?, fuente=?, url_original=?, fecha_captura=?, precio=?, superficie=?, "
+                    "caracteristicas_json=?, coeficientes_json=?, valor_homogeneizado=?, updated_at=datetime(?) "
+                    "WHERE id = ? AND pericial_id = ?",
+                    (*values, now, record_id, pericial_id),
+                )
+            else:
+                record_id = os.urandom(16).hex()
+                conn.execute(
+                    "INSERT INTO workspace_pericial_testigos (id, pericial_id, orden, estado, motivo_descarte, "
+                    "sustituido_por_testigo_id, fuente, url_original, fecha_captura, precio, superficie, "
+                    "caracteristicas_json, coeficientes_json, valor_homogeneizado, created_at, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime(?),datetime(?))",
+                    (record_id, *values, now, now),
+                )
+            # Recalcula el valor del expediente con los testigos activos que
+            # queden, para que la conclusión no se quede atrasada respecto a los
+            # comparables que de verdad están en juego.
+            activos = conn.execute(
+                "SELECT superficie, valor_homogeneizado FROM workspace_pericial_testigos "
+                "WHERE pericial_id = ? AND estado = 'activo'", (pericial_id,),
+            ).fetchall()
+            pericial_row = conn.execute(
+                "SELECT calculo_json, superficie_calculo_usada FROM workspace_periciales WHERE id = ?", (pericial_id,),
+            ).fetchone()
+            try:
+                calculo = json.loads((pericial_row["calculo_json"] if pericial_row else None) or "{}") or {}
+            except Exception:
+                calculo = {}
+            superficie_sujeto = (pericial_row["superficie_calculo_usada"] if pericial_row else None) or 0
+            stats = compute_comparacion_valoracion(
+                [{"valor_homogeneizado_unitario": r["valor_homogeneizado"]} for r in activos], superficie_sujeto
+            )
+            calculo.setdefault("comparacion", {})
+            calculo["comparacion"] = {**(calculo.get("comparacion") or {}), "estadisticos": stats,
+                                       "valor_unitario_homogeneizado": stats["valor_unitario_homogeneizado"],
+                                       "valor_total": stats["valor_total"]}
+            conn.execute(
+                "UPDATE workspace_periciales SET calculo_json = ?, valor_final = COALESCE(NULLIF(valor_final, 0), ?), "
+                "updated_at = datetime(?) WHERE id = ?",
+                (json.dumps(calculo, ensure_ascii=False), stats["valor_total"] or None, now, pericial_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id, "homogeneizacion": homogeneizacion, "estadisticos": stats})
+            return
+        elif parsed.path == "/api/workspace_pericial_evidencia":
+            ensure_workspace_product_tables(conn)
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            pericial_id = str(payload.get("pericial_id") or "").strip()
+            doc_key = str(payload.get("doc_key") or "").strip()
+            tipo = str(payload.get("tipo") or "").strip() or "foto_visita"
+            if not workspace_id or not pericial_id or not doc_key:
+                json_response(self, {"error": "workspace_id, pericial_id y doc_key requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            pericial = conn.execute(
+                "SELECT id, estado FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (pericial_id, workspace_id),
+            ).fetchone()
+            if not pericial:
+                json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                return
+            if str(pericial["estado"] or "") == "Firmado":
+                json_response(self, {"error": "El expediente ya está firmado y no admite nueva evidencia."}, status=409)
+                return
+            # El hash se calcula del propio archivo ya subido a S3, no del que
+            # dice el cliente: confiar en un hash mandado por el navegador
+            # invalidaría el propósito de la cadena de integridad.
+            raw_bytes, s3_err = s3_get_object_bytes(doc_key)
+            if not raw_bytes:
+                json_response(self, {"error": f"No se pudo leer el archivo subido: {s3_err or 'desconocido'}"}, status=400)
+                return
+            hash_archivo = hashlib.sha256(raw_bytes).hexdigest()
+            quien = ""
+            try:
+                quien = str(session.get("nombre") or session.get("usuario") or "").strip()
+            except Exception:
+                quien = ""
+            testigo_id = str(payload.get("testigo_id") or "").strip() or None
+            nombre = str(payload.get("nombre") or "").strip() or None
+            evidencia_id = apunta_evidencia_de_peritaje(
+                conn, pericial_id, testigo_id, tipo, doc_key, hash_archivo, quien, now=now, nombre=nombre
+            )
+            if testigo_id:
+                conn.execute(
+                    "UPDATE workspace_pericial_testigos SET evidencia_id_vigente = ?, updated_at = datetime(?) "
+                    "WHERE id = ? AND pericial_id = ?",
+                    (evidencia_id, now, testigo_id, pericial_id),
+                )
+            conn.commit()
+            json_response(self, {"ok": True, "id": evidencia_id, "hash_archivo": hash_archivo})
+            return
+        elif parsed.path == "/api/workspace_pericial_pdf":
+            ensure_workspace_product_tables(conn)
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            pericial_id = str(payload.get("id") or payload.get("pericial_id") or "").strip()
+            if not workspace_id or not pericial_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            paquete = fetch_workspace_pericial_pdf_payload(conn, pericial_id, workspace_id=workspace_id)
+            if not paquete:
+                json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                return
+            pdf_bytes = build_pericial_valoracion_pdf(*paquete)
+            doc = persist_pericial_generated_doc(
+                conn, pericial_id, "informe_pericial", "Informe pericial de valoración", pdf_bytes,
+                f"informe_pericial_{pericial_id}", now, workspace_id=workspace_id,
+                empresa_id=paquete[0].get("empresa_id"), plantilla_clave="pericial_valoracion",
+            )
+            conn.execute(
+                "UPDATE workspace_periciales SET informe_doc_id = ?, updated_at = datetime(?) WHERE id = ?",
+                ((doc or {}).get("id"), now, pericial_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "doc": doc})
+            return
+        elif parsed.path == "/api/workspace_pericial_firmar":
+            ensure_workspace_product_tables(conn)
+            ensure_pericial_signature_schema(conn)
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            pericial_id = str(payload.get("pericial_id") or "").strip()
+            if not workspace_id or not pericial_id:
+                json_response(self, {"error": "workspace_id y pericial_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            pericial = conn.execute(
+                "SELECT * FROM workspace_periciales WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (pericial_id, workspace_id),
+            ).fetchone()
+            if not pericial:
+                json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                return
+            if str(pericial["estado"] or "") == "Firmado":
+                json_response(self, {"error": "El expediente ya está firmado."}, status=409)
+                return
+            testigos = conn.execute(
+                "SELECT * FROM workspace_pericial_testigos WHERE pericial_id = ?", (pericial_id,),
+            ).fetchall()
+            verificacion = verifica_evidencias_del_peritaje(conn, pericial_id)
+            faltan = checklist_une197001_pericial(dict(pericial), [dict(t) for t in testigos], verificacion)
+            if faltan:
+                json_response(self, {"error": "El expediente no cumple los requisitos para firmarse.",
+                                      "faltan": faltan, "verificacion": verificacion}, status=422)
+                return
+            doc_actual = conn.execute(
+                "SELECT id, doc_key, nombre FROM workspace_pericial_docs WHERE pericial_id = ? AND tipo = 'informe_pericial' "
+                "ORDER BY version DESC LIMIT 1", (pericial_id,),
+            ).fetchone()
+            if not doc_actual:
+                json_response(self, {"error": "Genera primero el PDF del informe antes de firmarlo."}, status=422)
+                return
+            try:
+                solicitud = create_pericial_signature_request(
+                    conn, empresa_id=str(pericial["empresa_id"] or ""), pericial_id=pericial_id,
+                    doc_id=doc_actual["id"],
+                    signer_nombre=str(payload.get("signer_nombre") or "").strip(),
+                    signer_nif=str(payload.get("signer_nif") or "").strip(),
+                    signer_email=str(payload.get("signer_email") or "").strip(),
+                    purpose="Informe pericial", otp_required=bool(payload.get("otp_required")), now=now,
+                )
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            conn.commit()
+            json_response(self, {"ok": True, "solicitud": solicitud})
+            return
         elif parsed.path == "/api/workspace_fincas_comunidades":
             workspace_id = str(payload.get("workspace_id") or "").strip()
             empresa_id = str(payload.get("empresa_id") or "").strip()
@@ -82876,6 +86377,18 @@ class Handler(BaseHTTPRequestHandler):
                 num_vecinos, num_locales, num_trasteros, num_aparcamientos,
                 tarifas=fetch_workspace_fincas_tarifas(conn, workspace_id),
             )
+            # Una comunidad no cobra una cuota negativa: eso no es una cuota, es un
+            # reparto al revés, y se aceptaba sin decir nada.
+            for campo in ("cuota_mensual", "honorario_mensual"):
+                if str(payload.get(campo) or "").strip():
+                    valor = parse_money_value(payload.get(campo))
+                    if valor is not None and valor < 0:
+                        json_response(
+                            self,
+                            {"error": f"La cuota no puede ser negativa ({format_export_money(valor)})."},
+                            status=400,
+                        )
+                        return
             values = (
                 workspace_id,
                 empresa_id,
@@ -82892,7 +86405,10 @@ class Handler(BaseHTTPRequestHandler):
                 num_trasteros,
                 num_aparcamientos,
                 cuota_sugerida,
-                round(parse_money_value(payload.get("cuota_mensual")), 2) or cuota_sugerida,
+                round(parse_money_value(payload.get("honorario_mensual")
+                                        or payload.get("cuota_mensual")), 2) or cuota_sugerida,
+                round(parse_money_value(payload.get("honorario_mensual")
+                                        or payload.get("cuota_mensual")), 2) or cuota_sugerida,
                 normalizar_iban(payload.get("iban")) or None,
                 (payload.get("acreedor_sepa") or "").strip().upper() or None,
             )
@@ -82903,6 +86419,7 @@ class Handler(BaseHTTPRequestHandler):
                     SET workspace_id = ?, empresa_id = ?, nombre = ?, referencia_catastral = ?, cif = ?, direccion = ?, foto_edificio_key = ?, presidente = ?,
                         secretario = ?, estado = ?, num_vecinos = ?, num_locales = ?, num_trasteros = ?,
                         num_aparcamientos = ?, cuota_sugerida = ?, cuota_mensual = ?,
+                        honorario_mensual = ?,
                         iban = ?, acreedor_sepa = ?, updated_at = datetime(?)
                     WHERE id = ? AND workspace_id = ?
                     """,
@@ -82915,8 +86432,9 @@ class Handler(BaseHTTPRequestHandler):
                     INSERT INTO workspace_fincas_comunidades (
                       id, workspace_id, empresa_id, nombre, referencia_catastral, cif, direccion, foto_edificio_key, presidente, secretario,
                       estado, num_vecinos, num_locales, num_trasteros, num_aparcamientos, cuota_sugerida, cuota_mensual,
+                      honorario_mensual,
                       iban, acreedor_sepa, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (record_id, *values, now, now),
                 )
@@ -83523,6 +87041,31 @@ class Handler(BaseHTTPRequestHandler):
             if importe is None:
                 json_response(self, {"error": "importe requerido"}, status=400)
                 return
+            # El signo lo pone el tipo —Gasto o Ingreso—, no el importe. Un gasto de
+            # -500 € entraba y restaba como si fuera un ingreso, descuadrando el
+            # ejercicio sin que nada avisara. Un abono se anota como ingreso.
+            if importe < 0:
+                json_response(
+                    self,
+                    {"error": "El importe va en positivo: lo que decide si suma o resta es "
+                              "el tipo (Gasto o Ingreso). Si es un abono, anótalo como ingreso."},
+                    status=400,
+                )
+                return
+            # Un dedazo o un pegado con formato raro mete cifras imposibles. No se
+            # bloquea —una derrama grande es legítima—: se pide confirmarla.
+            if importe > FINCAS_IMPORTE_QUE_PIDE_CONFIRMACION and not _quiere_confirmar(payload):
+                json_response(
+                    self,
+                    {
+                        "error": f"{format_export_money(importe)} es mucho para un apunte de "
+                                 "comunidad. Si es correcto, confírmalo.",
+                        "requiere_confirmacion": True,
+                        "importe": importe,
+                    },
+                    status=409,
+                )
+                return
             values = (
                 workspace_id,
                 (payload.get("comunidad_id") or "").strip() or None,
@@ -83720,6 +87263,18 @@ class Handler(BaseHTTPRequestHandler):
                     coeficiente = float(coef_raw.replace(",", "."))
                 except Exception:
                     coeficiente = None
+            # El coeficiente es la parte que le toca a ese piso del total de la finca
+            # (art. 5 LPH): ni negativo ni por encima de cien tiene sentido, y multiplica
+            # directamente lo que se le cobra. Se aceptaba un 250 %, que es cobrarle dos
+            # veces y media el presupuesto entero de la comunidad.
+            if coeficiente is not None and not (0.0 <= coeficiente <= 100.0):
+                json_response(
+                    self,
+                    {"error": f"El coeficiente es el porcentaje que le toca a ese piso: "
+                              f"tiene que estar entre 0 y 100, y has puesto {coef_raw}."},
+                    status=400,
+                )
+                return
             values = (
                 workspace_id,
                 comunidad_id,
@@ -83855,66 +87410,171 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "comunidad no encontrada"}, status=404)
                 return
             propietarios = conn.execute(
-                "SELECT id, nombre, piso, coeficiente, iban FROM workspace_fincas_vecinos "
+                "SELECT id, nombre, nif, piso, coeficiente, iban FROM workspace_fincas_vecinos "
                 "WHERE workspace_id = ? AND comunidad_id = ? ORDER BY piso, nombre",
                 (workspace_id, comunidad_id),
             ).fetchall()
             if not propietarios:
                 json_response(self, {"error": "La comunidad no tiene censo: cárgalo antes de emitir recibos"}, status=400)
                 return
-            total = round(parse_money_value(payload.get("importe")), 2)
-            if total <= 0:
-                total = round(parse_money_value(row_value(comunidad, "cuota_mensual", 0)), 2)
-            if total <= 0:
-                json_response(self, {"error": "No hay importe que repartir"}, status=400)
+
+            # El reparto se hace por coeficiente (LPH art. 9.1.e), así que si los
+            # coeficientes no suman 100 el recibo no se sostiene: o se cobra de más
+            # entre todos, o se deja parte del presupuesto sin repartir. Antes sólo se
+            # exigía que hubiera censo, y con los coeficientes a cero salían recibos de
+            # cero euros sin que nada lo dijera.
+            suma_coef = round(sum(parse_money_value(row_value(v, "coeficiente", 0)) for v in propietarios), 2)
+            if abs(suma_coef - 100.0) > FINCAS_COEFICIENTE_TOLERANCIA:
+                json_response(self, {
+                    "error": (f"Los coeficientes suman {format_pct(suma_coef)} y deben sumar 100 % "
+                              f"para repartir por cuota de participación (LPH art. 5). "
+                              f"Revisa el censo antes de emitir."),
+                    "code": "coeficientes_no_suman_cien",
+                    "suma_coeficientes": suma_coef,
+                }, status=400)
                 return
-            ya_emitidos = conn.execute(
-                "SELECT COUNT(*) AS n FROM workspace_fincas_recibos WHERE comunidad_id = ? AND periodo = ?",
-                (comunidad_id, periodo),
-            ).fetchone()
-            if int(row_value(ya_emitidos, "n", 0) or 0):
-                # Volver a emitir el mismo mes es la forma más rápida de cobrar dos
-                # veces: se exige decirlo a propósito y se borra lo pendiente.
-                if str(payload.get("reemitir") or "").strip().lower() not in {"1", "true", "si", "sí"}:
+
+            total = round(parse_money_value(payload.get("importe")), 2)
+            origen_importe = "indicado"
+            if total <= 0:
+                # Lo que se reparte entre los propietarios es el presupuesto que aprobó
+                # la junta, mensualizado; no el honorario del administrador, que es sólo
+                # una partida más dentro de ese presupuesto. Antes caía a
+                # `cuota_mensual`, que guarda la minuta: repartirla habría cobrado a la
+                # comunidad su propia administración y nada de sus gastos.
+                ejercicio_recibo = fetch_workspace_fincas_ejercicio(
+                    conn, workspace_id, comunidad_id, periodo[:4])
+                cabecera_pre = ejercicio_recibo.get("presupuesto") or {}
+                if str(row_value(cabecera_pre, "estado", "") or "").strip().lower() == "aprobado":
+                    anual = round(parse_money_value(
+                        ejercicio_recibo["resumen"].get("presupuestado")), 2)
+                    if anual > 0:
+                        total = round(anual / 12.0, 2)
+                        origen_importe = f"presupuesto {periodo[:4]} aprobado, mensualizado"
+            if total <= 0:
+                json_response(self, {
+                    "error": (f"No hay importe que repartir: indica uno, o aprueba el presupuesto "
+                              f"anual de {periodo[:4]} para que la cuota salga de él."),
+                    "code": "sin_importe",
+                }, status=400)
+                return
+            concepto = str(payload.get("concepto") or "").strip() or f"Cuota de comunidad {periodo}"
+            # Lo que identifica un cargo dentro de un mes es su concepto, no el mes.
+            # Antes bastaba el mes, y eso dejaba sin salida la derrama: emitirla en
+            # agosto chocaba con la cuota de agosto, y la única puerta que ofrecía el
+            # aviso —«reemitir»— borraba los recibos pendientes del mes. Quien seguía
+            # esa instrucción cobraba los 12.000 € de la derrama y se dejaba sin cobrar
+            # los 1.200 € de la cuota ordinaria, con un 200 OK y sin más aviso.
+            mismos = int(row_value(conn.execute(
+                "SELECT COUNT(*) AS n FROM workspace_fincas_recibos "
+                "WHERE comunidad_id = ? AND periodo = ? AND concepto = ?",
+                (comunidad_id, periodo, concepto),
+            ).fetchone(), "n", 0) or 0)
+            otros = conn.execute(
+                "SELECT concepto, COUNT(*) AS n, COALESCE(SUM(importe), 0) AS total "
+                "FROM workspace_fincas_recibos "
+                "WHERE comunidad_id = ? AND periodo = ? AND concepto <> ? "
+                "GROUP BY concepto ORDER BY concepto",
+                (comunidad_id, periodo, concepto),
+            ).fetchall()
+            quiere_reemitir = str(payload.get("reemitir") or "").strip().lower() in {"1", "true", "si", "sí"}
+            if mismos:
+                # Repetir el mismo cargo del mismo mes es la forma más rápida de cobrar
+                # dos veces: se exige decirlo a propósito, y se rehace sólo ese cargo.
+                if not quiere_reemitir:
                     json_response(
                         self,
-                        {"error": f"Ya hay recibos emitidos de {periodo}. Marca «reemitir» si quieres rehacerlos.",
+                        {"error": f"Ya hay {mismos} recibos de {periodo} con el concepto "
+                                  f"«{concepto}». Marca «reemitir» para rehacer los que sigan "
+                                  f"pendientes de ese concepto; el resto del mes no se toca.",
                          "code": "ya_emitido"},
                         status=409,
                     )
                     return
                 conn.execute(
-                    "DELETE FROM workspace_fincas_recibos WHERE comunidad_id = ? AND periodo = ? AND estado = 'Pendiente'",
-                    (comunidad_id, periodo),
+                    "DELETE FROM workspace_fincas_recibos "
+                    "WHERE comunidad_id = ? AND periodo = ? AND concepto = ? AND estado = 'Pendiente'",
+                    (comunidad_id, periodo, concepto),
                 )
-            concepto = str(payload.get("concepto") or "").strip() or f"Cuota de comunidad {periodo}"
+            elif otros and not _quiere_confirmar(payload):
+                # Hay recibos de ese mes, pero de otra cosa. Puede ser una derrama que se
+                # suma —lo normal— o que quien emite haya cambiado la redacción del
+                # concepto y crea que está rehaciendo la cuota. No se adivina: se dice
+                # qué hay y se pregunta.
+                detalle = "; ".join(
+                    f"{int(row_value(o, 'n', 0) or 0)} de «{row_value(o, 'concepto', '')}» "
+                    f"por {format_export_money(parse_money_value(row_value(o, 'total', 0)))}"
+                    for o in otros)
+                json_response(
+                    self,
+                    {"error": f"En {periodo} ya hay recibos de otro concepto ({detalle}). "
+                              f"Si «{concepto}» es un cargo aparte —una derrama—, confírmalo y "
+                              f"se suma a lo que ya hay. Si querías rehacer aquéllos, emítelos "
+                              f"con su mismo concepto.",
+                     "code": "otro_cargo_en_el_mes",
+                     "requiere_confirmacion": True},
+                    status=409,
+                )
+                return
             reparto, por_partes = reparte_por_coeficiente(total, propietarios)
             creados = 0
+            ya_estaban = 0
             sin_iban = []
             for vecino, importe in reparto:
                 vecino_id = row_value(vecino, "id", "")
                 existe = conn.execute(
-                    "SELECT id FROM workspace_fincas_recibos WHERE comunidad_id = ? AND vecino_id = ? AND periodo = ? LIMIT 1",
-                    (comunidad_id, vecino_id, periodo),
+                    "SELECT id FROM workspace_fincas_recibos "
+                    "WHERE comunidad_id = ? AND vecino_id = ? AND periodo = ? AND concepto = ? LIMIT 1",
+                    (comunidad_id, vecino_id, periodo, concepto),
                 ).fetchone()
                 if existe:
                     continue
                 if not iban_valido(row_value(vecino, "iban", "")):
                     sin_iban.append(row_value(vecino, "piso", "") or row_value(vecino, "nombre", ""))
-                conn.execute(
-                    "INSERT INTO workspace_fincas_recibos "
-                    "(id, workspace_id, comunidad_id, vecino_id, periodo, concepto, importe, coeficiente, estado, "
-                    " fecha_emision, created_at, updated_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', ?, datetime(?), datetime(?))",
-                    (os.urandom(16).hex(), workspace_id, comunidad_id, vecino_id, periodo, concepto, importe,
-                     row_value(vecino, "coeficiente", None), datetime.now().date().isoformat(), now, now),
-                )
-                creados += 1
+                try:
+                    conn.execute(
+                        "INSERT INTO workspace_fincas_recibos "
+                        "(id, workspace_id, comunidad_id, vecino_id, periodo, concepto, importe, coeficiente, estado, "
+                        " fecha_emision, vecino_nombre, vecino_nif, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Pendiente', ?, ?, ?, datetime(?), datetime(?))",
+                        (os.urandom(16).hex(), workspace_id, comunidad_id, vecino_id, periodo, concepto, importe,
+                         row_value(vecino, "coeficiente", None), datetime.now().date().isoformat(),
+                         # A nombre de quién se emite, congelado aquí: la ficha del vecino
+                         # cambia cuando el piso cambia de dueño, y el recibo no debe cambiar.
+                         str(row_value(vecino, "nombre", "") or "").strip() or None,
+                         str(row_value(vecino, "nif", "") or "").strip() or None,
+                         now, now),
+                    )
+                    creados += 1
+                except Exception:
+                    # Otra persona ha emitido este mismo cargo entre la comprobación de
+                    # arriba y este INSERT. La comprobación mira lo confirmado, así que
+                    # con dos administradoras dándole a la vez las dos la pasan y una
+                    # choca con el índice único.
+                    #
+                    # Que choque es lo que hay que querer: el índice es lo que impide
+                    # cobrar dos veces al vecindario. Lo que no vale es que salga como
+                    # un 500. Se cuenta y se sigue; al final se dice quién lo emitió.
+                    _rollback_best_effort(conn)
+                    ya_estaban += 1
             conn.commit()
+            if not creados and ya_estaban:
+                json_response(
+                    self,
+                    {"error": f"Los recibos de {periodo} para «{concepto}» acaban de "
+                              f"emitirse desde otro sitio. Recarga para verlos.",
+                     "code": "ya_emitido",
+                     "emitidos_por_otro": ya_estaban},
+                    status=409,
+                )
+                return
             json_response(self, {
                 "ok": True,
                 "creados": creados,
                 "total": total,
+                # De dónde salió el importe: quien emite tiene que poder ver si repartió
+                # lo que tecleó o lo que aprobó la junta, sin abrir la ficha.
+                "origen_importe": origen_importe,
                 "reparto_por_partes": por_partes,
                 "sin_iban": sin_iban[:50],
             })
@@ -84041,6 +87701,9 @@ class Handler(BaseHTTPRequestHandler):
         elif parsed.path in ("/api/workspace_fincas_junta_asistencia",
                              "/api/workspace_fincas_junta_acuerdo",
                              "/api/workspace_fincas_junta_voto",
+                             "/api/workspace_fincas_junta_notificar_acta",
+                             "/api/workspace_fincas_junta_discrepancia",
+                             "/api/workspace_fincas_junta_impugnacion",
                              "/api/workspace_fincas_mayorias"):
             session = getattr(self, "auth_session", None) or self._current_session()
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -84063,6 +87726,10 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 asiste = 1 if str(payload.get("asiste") or "").strip().lower() in {"1", "true", "si", "sí"} else 0
                 representado = str(payload.get("representado_por") or "").strip() or None
+                # Vacío = manda la deuda. 1 = ha pagado, impugnado o consignado y vota.
+                crudo_voto = payload.get("derecho_voto")
+                derecho_voto = (None if str(crudo_voto or "").strip() in {"", "None"}
+                                else (1 if str(crudo_voto).strip().lower() in {"1", "true", "si", "sí"} else 0))
                 existente = conn.execute(
                     "SELECT id FROM workspace_fincas_junta_asistentes WHERE junta_id = ? AND vecino_id = ? LIMIT 1",
                     (junta_id, vecino_id),
@@ -84070,15 +87737,17 @@ class Handler(BaseHTTPRequestHandler):
                 if existente:
                     conn.execute(
                         "UPDATE workspace_fincas_junta_asistentes SET asiste = ?, representado_por = ?, "
-                        "updated_at = datetime(?) WHERE id = ?",
-                        (asiste, representado, now, row_value(existente, "id", "")),
+                        "derecho_voto = ?, updated_at = datetime(?) WHERE id = ?",
+                        (asiste, representado, derecho_voto, now, row_value(existente, "id", "")),
                     )
                 else:
                     conn.execute(
                         "INSERT INTO workspace_fincas_junta_asistentes "
-                        "(id, workspace_id, junta_id, vecino_id, asiste, representado_por, created_at, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
-                        (os.urandom(16).hex(), workspace_id, junta_id, vecino_id, asiste, representado, now, now),
+                        "(id, workspace_id, junta_id, vecino_id, asiste, representado_por, derecho_voto, "
+                        " created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
+                        (os.urandom(16).hex(), workspace_id, junta_id, vecino_id, asiste, representado,
+                         derecho_voto, now, now),
                     )
                 conn.commit()
                 json_response(self, {"ok": True, "recuento": calcular_recuento_junta(conn, workspace_id, junta_id)})
@@ -84124,17 +87793,233 @@ class Handler(BaseHTTPRequestHandler):
                         "orden = ?, updated_at = datetime(?) WHERE id = ? AND workspace_id = ?",
                         (*valores, now, record_id, workspace_id),
                     )
+                    # Sólo si viene: cambiar la mayoría a mano no debe borrar el tipo.
+                    if tipo_clave:
+                        conn.execute(
+                            "UPDATE workspace_fincas_junta_acuerdos SET tipo_acuerdo = ? "
+                            "WHERE id = ? AND workspace_id = ?", (tipo_clave, record_id, workspace_id))
                 else:
                     record_id = os.urandom(16).hex()
                     conn.execute(
                         "INSERT INTO workspace_fincas_junta_acuerdos "
-                        "(id, workspace_id, junta_id, titulo, descripcion, mayoria_clave, orden, created_at, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
-                        (record_id, workspace_id, junta_id, *valores, now, now),
+                        "(id, workspace_id, junta_id, titulo, descripcion, mayoria_clave, orden, "
+                        " tipo_acuerdo, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
+                        (record_id, workspace_id, junta_id, *valores, tipo_clave or None, now, now),
                     )
                 conn.commit()
                 json_response(self, {"ok": True, "id": record_id,
                                      "recuento": calcular_recuento_junta(conn, workspace_id, junta_id)})
+                return
+
+            if parsed.path == "/api/workspace_fincas_junta_notificar_acta":
+                # El día que se comunicó el acta a los propietarios (art. 9.1.h y 19.3).
+                # De aquí arrancan los 30 días naturales del cómputo de ausentes.
+                junta_id = str(payload.get("junta_id") or "").strip()
+                fecha = str(payload.get("fecha") or "").strip()[:10]
+                if not junta_id:
+                    json_response(self, {"error": "junta_id requerido"}, status=400)
+                    return
+                if fecha:
+                    try:
+                        datetime.strptime(fecha, "%Y-%m-%d")
+                    except Exception:
+                        json_response(self, {"error": f"«{fecha}» no es una fecha (AAAA-MM-DD). "
+                                                      f"De ella dependen los 30 días del art. 17.8."},
+                                      status=400)
+                        return
+                conn.execute(
+                    "UPDATE workspace_fincas_juntas SET acta_notificada = ?, updated_at = datetime(?) "
+                    "WHERE id = ? AND workspace_id = ?",
+                    (fecha or None, now, junta_id, workspace_id),
+                )
+                conn.commit()
+                json_response(self, {"ok": True,
+                                     "recuento": calcular_recuento_junta(conn, workspace_id, junta_id)})
+                return
+
+            if parsed.path == "/api/workspace_fincas_junta_discrepancia":
+                # El ausente que sí manifiesta su discrepancia dentro de los 30 días. Sin
+                # esto, callarse y oponerse dan el mismo resultado.
+                acuerdo_id = str(payload.get("acuerdo_id") or "").strip()
+                vecino_id = str(payload.get("vecino_id") or "").strip()
+                if not acuerdo_id or not vecino_id:
+                    json_response(self, {"error": "acuerdo_id y vecino_id requeridos"}, status=400)
+                    return
+                fila = conn.execute(
+                    "SELECT junta_id FROM workspace_fincas_junta_acuerdos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (acuerdo_id, workspace_id),
+                ).fetchone()
+                if not fila:
+                    json_response(self, {"error": "acuerdo no encontrado"}, status=404)
+                    return
+                junta_id = row_value(fila, "junta_id", "")
+                # El artículo 17.8 habla de los propietarios AUSENTES. Quien asistió
+                # —en persona o representado— ya se manifestó votando, y anotarle una
+                # discrepancia después sería colarle un voto fuera de la junta.
+                asistio = conn.execute(
+                    "SELECT 1 FROM workspace_fincas_junta_asistentes "
+                    "WHERE junta_id = ? AND vecino_id = ? AND COALESCE(asiste, 0) = 1 LIMIT 1",
+                    (junta_id, vecino_id),
+                ).fetchone()
+                if asistio:
+                    json_response(
+                        self,
+                        {"error": "Ese propietario asistió a la junta, en persona o "
+                                  "representado. La discrepancia del artículo 17.8 es sólo "
+                                  "para los ausentes: si quieres cambiar su postura, "
+                                  "cámbiale el voto.",
+                         "code": "no_estaba_ausente"},
+                        status=409,
+                    )
+                    return
+                conn.execute(
+                    "DELETE FROM workspace_fincas_junta_discrepancias WHERE acuerdo_id = ? AND vecino_id = ?",
+                    (acuerdo_id, vecino_id),
+                )
+                if str(payload.get("discrepa") or "").strip().lower() in {"1", "true", "si", "sí"}:
+                    conn.execute(
+                        "INSERT INTO workspace_fincas_junta_discrepancias "
+                        "(id, workspace_id, junta_id, acuerdo_id, vecino_id, fecha, medio, created_at, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
+                        (os.urandom(16).hex(), workspace_id, junta_id, acuerdo_id, vecino_id,
+                         str(payload.get("fecha") or "").strip()[:10] or datetime.now().date().isoformat(),
+                         str(payload.get("medio") or "").strip() or None, now, now),
+                    )
+                conn.commit()
+                json_response(self, {"ok": True,
+                                     "recuento": calcular_recuento_junta(conn, workspace_id, junta_id)})
+                return
+
+            if parsed.path == "/api/workspace_fincas_junta_impugnacion":
+                # Impugnar un acuerdo (art. 18). Tres reglas que se olvidan y que aquí
+                # se comprueban antes de anotar nada: quién está legitimado, si está al
+                # corriente, y si el plazo de caducidad sigue abierto.
+                acuerdo_id = str(payload.get("acuerdo_id") or "").strip()
+                vecino_id = str(payload.get("vecino_id") or "").strip()
+                motivo = str(payload.get("motivo") or "").strip()
+                if not acuerdo_id or not vecino_id:
+                    json_response(self, {"error": "acuerdo_id y vecino_id requeridos"}, status=400)
+                    return
+                fila = conn.execute(
+                    "SELECT junta_id FROM workspace_fincas_junta_acuerdos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (acuerdo_id, workspace_id),
+                ).fetchone()
+                if not fila:
+                    json_response(self, {"error": "acuerdo no encontrado"}, status=404)
+                    return
+                junta_id = row_value(fila, "junta_id", "")
+                if str(payload.get("retirar") or "").strip().lower() in {"1", "true", "si", "sí"}:
+                    conn.execute(
+                        "DELETE FROM workspace_fincas_junta_impugnaciones "
+                        "WHERE acuerdo_id = ? AND vecino_id = ? AND workspace_id = ?",
+                        (acuerdo_id, vecino_id, workspace_id),
+                    )
+                    conn.commit()
+                    json_response(self, {"ok": True,
+                                         "recuento": calcular_recuento_junta(conn, workspace_id, junta_id)})
+                    return
+                if motivo not in FINCAS_MOTIVOS_IMPUGNACION:
+                    json_response(
+                        self,
+                        {"error": "Falta el motivo, y de él depende el plazo: tres meses en "
+                                  "general, un año si el acuerdo es contrario a la ley o a los "
+                                  "estatutos (art. 18.3).",
+                         "motivos": [{"clave": k, **v} for k, v in FINCAS_MOTIVOS_IMPUGNACION.items()]},
+                        status=400,
+                    )
+                    return
+                recuento = calcular_recuento_junta(conn, workspace_id, junta_id) or {}
+                punto = next((a for a in (recuento.get("acuerdos") or [])
+                              if str(a.get("id")) == acuerdo_id), {})
+                quien = next((p for p in (recuento.get("propietarios") or [])
+                              if str(p.get("id")) == vecino_id), None)
+                if quien is None:
+                    json_response(self, {"error": "propietario no encontrado en esa comunidad"},
+                                  status=404)
+                    return
+                nombre_quien = str(quien.get("nombre") or "ese propietario")
+
+                # (1) Legitimación (art. 18.2): sólo quien salvó su voto, estuvo ausente
+                # o fue privado indebidamente de votar. Quien votó a favor, no.
+                nominales = punto.get("votos_nominales") or {}
+                voto_a_favor = any(str(v.get("nombre")) == nombre_quien
+                                   for v in (nominales.get("favor") or []))
+                if voto_a_favor:
+                    json_response(
+                        self,
+                        {"error": f"{nombre_quien} votó a favor de ese acuerdo. Están legitimados "
+                                  f"para impugnar los que salvaron su voto, los ausentes y los que "
+                                  f"fueron privados indebidamente de votar (art. 18.2).",
+                         "code": "no_legitimado"},
+                        status=409,
+                    )
+                    return
+
+                # (2) Estar al corriente (art. 18.2, párrafo segundo). Se exceptúan los
+                # acuerdos sobre el establecimiento o alteración de las cuotas de
+                # participación, que el deudor sí puede impugnar.
+                privados = {str(x.get("vecino_id")) for x in (recuento.get("sin_derecho_voto") or [])}
+                afecta_cuotas = str(payload.get("afecta_cuotas") or "").strip().lower() in {"1", "true", "si", "sí"}
+                if vecino_id in privados and not afecta_cuotas:
+                    json_response(
+                        self,
+                        {"error": f"{nombre_quien} no está al corriente de pago. Para impugnar hay "
+                                  f"que estarlo, o consignar judicialmente lo debido (art. 18.2). "
+                                  f"Se exceptúan los acuerdos sobre el establecimiento o la "
+                                  f"alteración de las cuotas de participación: si es el caso, "
+                                  f"márcalo.",
+                         "code": "no_esta_al_corriente"},
+                        status=409,
+                    )
+                    return
+
+                # (3) Caducidad (art. 18.3). No se bloquea —el hecho ocurrió y hay que
+                # poder anotarlo— pero no se registra en silencio como si estuviera en
+                # plazo: se dice hasta cuándo era y se pide confirmar.
+                plazo = punto.get("plazo_impugnacion") or {}
+                es_ausente = not bool(quien.get("asiste"))
+                meses = FINCAS_MOTIVOS_IMPUGNACION[motivo]["meses"]
+                clave_vence = ("vence_un_ano" if meses == 12 else "vence_tres_meses")
+                if es_ausente and plazo.get(clave_vence + "_ausentes"):
+                    clave_vence += "_ausentes"
+                limite = plazo.get(clave_vence) or ""
+                fecha = str(payload.get("fecha") or "").strip()[:10] or datetime.now().date().isoformat()
+                if limite and fecha > limite and not _quiere_confirmar(payload):
+                    json_response(
+                        self,
+                        {"error": f"El plazo para impugnar por ese motivo terminó el {limite} "
+                                  f"({meses} meses, art. 18.3){' contados desde que se le comunicó el acuerdo' if es_ausente else ''}. "
+                                  f"Si aun así quieres dejarlo anotado, confírmalo.",
+                         "code": "fuera_de_plazo",
+                         "requiere_confirmacion": True,
+                         "vence": limite},
+                        status=409,
+                    )
+                    return
+                conn.execute(
+                    "DELETE FROM workspace_fincas_junta_impugnaciones "
+                    "WHERE acuerdo_id = ? AND vecino_id = ? AND workspace_id = ?",
+                    (acuerdo_id, vecino_id, workspace_id),
+                )
+                conn.execute(
+                    "INSERT INTO workspace_fincas_junta_impugnaciones "
+                    "(id, workspace_id, junta_id, acuerdo_id, vecino_id, motivo, fecha, notas, "
+                    " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))",
+                    (os.urandom(16).hex(), workspace_id, junta_id, acuerdo_id, vecino_id, motivo,
+                     fecha, str(payload.get("notas") or "").strip() or None, now, now),
+                )
+                conn.commit()
+                json_response(self, {
+                    "ok": True,
+                    # Lo que más se olvida, y lo que peor sale: el acuerdo se sigue
+                    # ejecutando mientras no lo suspenda un juez.
+                    "aviso": "Anotada. La impugnación NO suspende la ejecución del acuerdo "
+                             "(art. 18.4): sigue ejecutándose salvo que el juez lo suspenda "
+                             "cautelarmente.",
+                    "vence": limite,
+                    "recuento": calcular_recuento_junta(conn, workspace_id, junta_id),
+                })
                 return
 
             if parsed.path == "/api/workspace_fincas_junta_voto":
@@ -84150,6 +88035,25 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
                 if not fila:
                     json_response(self, {"error": "acuerdo no encontrado"}, status=404)
+                    return
+                # Un deudor no vota (art. 15.2). Registrarlo y no contarlo sería peor:
+                # quien preside vería el voto en pantalla y creería que cuenta.
+                junta_id_voto = row_value(fila, "junta_id", "")
+                recuento_previo = calcular_recuento_junta(conn, workspace_id, junta_id_voto) or {}
+                privados = {str(x.get("vecino_id")): x
+                            for x in (recuento_previo.get("sin_derecho_voto") or [])}
+                if voto and vecino_id in privados:
+                    quien = privados[vecino_id]
+                    json_response(
+                        self,
+                        {"error": f"{quien.get('nombre') or 'Ese propietario'} no está al corriente "
+                                  f"({format_export_money(quien.get('deuda'))}) y no tiene derecho de "
+                                  f"voto (LPH art. 15.2). Puede asistir y deliberar. Si antes de "
+                                  f"empezar la junta ha pagado, ha impugnado judicialmente la deuda o "
+                                  f"la ha consignado, márcale «tiene voto» en la lista de asistencia.",
+                         "code": "sin_derecho_de_voto"},
+                        status=409,
+                    )
                     return
                 conn.execute("DELETE FROM workspace_fincas_junta_votos WHERE acuerdo_id = ? AND vecino_id = ?",
                              (acuerdo_id, vecino_id))
@@ -84285,6 +88189,132 @@ class Handler(BaseHTTPRequestHandler):
                 "ejercicio": fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio),
             })
             return
+        elif parsed.path == "/api/workspace_fincas_portal_certificado":
+            # El vecino pide el certificado. No se emite aquí: queda solicitado y la
+            # administración confirma el cobro. Emitirlo antes sería regalar un
+            # servicio que se factura siempre.
+            token = str(payload.get("token") or "").strip()
+            acceso = conn.execute(
+                "SELECT workspace_id, comunidad_id, vecino_id, revocado, expires_at "
+                "FROM workspace_fincas_portal_accesos WHERE token_hash = ? LIMIT 1",
+                (hash_portal_token(token),),
+            ).fetchone() if token else None
+            if not acceso or int(row_value(acceso, "revocado", 0) or 0):
+                json_response(self, {"error": "enlace no válido"}, status=404)
+                return
+            caduca_acc = str(row_value(acceso, "expires_at", "") or "")[:10]
+            if caduca_acc and caduca_acc < datetime.now().date().isoformat():
+                json_response(self, {"error": "enlace caducado"}, status=403)
+                return
+            workspace_id = row_value(acceso, "workspace_id", "")
+            vecino_id = row_value(acceso, "vecino_id", "")
+            abierta = conn.execute(
+                "SELECT id FROM workspace_fincas_certificados WHERE workspace_id = ? AND vecino_id = ? "
+                "AND estado IN ('Solicitado', 'Pagado') LIMIT 1",
+                (workspace_id, vecino_id),
+            ).fetchone()
+            if abierta:
+                json_response(self, {"error": "Ya tienes una solicitud en curso."}, status=409)
+                return
+            tarifa = next(
+                (t for t in fetch_workspace_fincas_tarifas(conn, workspace_id, sembrar=False)
+                 if t.get("clave") == "certificado_corriente"), None)
+            conn.execute(
+                "INSERT INTO workspace_fincas_certificados (id, workspace_id, comunidad_id, vecino_id, "
+                "estado, importe, fecha_solicitud, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, 'Solicitado', ?, ?, datetime(?), datetime(?))",
+                (os.urandom(16).hex(), workspace_id, row_value(acceso, "comunidad_id", ""), vecino_id,
+                 round(float((tarifa or {}).get("precio") or 0), 2),
+                 datetime.now().date().isoformat(), now, now),
+            )
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
+
+        elif parsed.path == "/api/workspace_fincas_certificado_pagado":
+            # Lo confirma la administración desde el CRM, con sesión. El vecino no
+            # puede marcarse el pago a sí mismo.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            solicitud_id = str(payload.get("id") or "").strip()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            if not workspace_id or not solicitud_id:
+                json_response(self, {"error": "workspace_id e id requeridos"}, status=400)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            conn.execute(
+                "UPDATE workspace_fincas_certificados SET estado = 'Pagado', fecha_pago = ?, "
+                "updated_at = datetime(?) WHERE id = ? AND workspace_id = ?",
+                (datetime.now().date().isoformat(), now, solicitud_id, workspace_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True})
+            return
+
+        elif parsed.path == "/api/workspace_fincas_portal_incidencia":
+            # El comunero comunica una avería desde su enlace. Es el único sitio del
+            # portal donde se escribe, así que aquí va todo el cuidado: la llave es el
+            # token, hay tope de envíos y la validación se hace en el servidor —el
+            # formulario se puede saltar, esto no—.
+            token = str(payload.get("token") or "").strip()
+            if not token:
+                json_response(self, {"error": "token requerido"}, status=400)
+                return
+            acceso = conn.execute(
+                "SELECT id, workspace_id, comunidad_id, vecino_id, revocado, expires_at "
+                "FROM workspace_fincas_portal_accesos WHERE token_hash = ? LIMIT 1",
+                (hash_portal_token(token),),
+            ).fetchone()
+            if not acceso or int(row_value(acceso, "revocado", 0) or 0):
+                json_response(self, {"error": "enlace no válido"}, status=404)
+                return
+            caduca = str(row_value(acceso, "expires_at", "") or "")[:10]
+            if caduca and caduca < datetime.now().date().isoformat():
+                json_response(self, {"error": "enlace caducado"}, status=403)
+                return
+            workspace_id = row_value(acceso, "workspace_id", "")
+            comunidad_id = row_value(acceso, "comunidad_id", "")
+            vecino_id = row_value(acceso, "vecino_id", "")
+
+            titulo = re.sub(r"\s+", " ", str(payload.get("titulo") or "")).strip()[:FINCAS_PORTAL_TITULO_MAX]
+            descripcion = str(payload.get("descripcion") or "").strip()[:FINCAS_PORTAL_DESCRIPCION_MAX]
+            if len(titulo) < 4:
+                json_response(self, {"error": "Cuenta en una línea qué pasa."}, status=400)
+                return
+
+            # El tope es por vecino y por día natural.
+            desde = (datetime.now() - timedelta(days=1)).isoformat(timespec="seconds")
+            recientes = conn.execute(
+                "SELECT COUNT(*) AS n FROM workspace_fincas_incidencias "
+                "WHERE workspace_id = ? AND vecino_id = ? AND COALESCE(created_at, '') >= ?",
+                (workspace_id, vecino_id, desde),
+            ).fetchone()
+            if int(row_value(recientes, "n", 0) or 0) >= FINCAS_PORTAL_INCIDENCIAS_DIA:
+                json_response(self, {
+                    "error": "Has comunicado varias incidencias hoy. Si es urgente, llama a la administración.",
+                }, status=429)
+                return
+
+            # La prioridad no la pone el vecino: describir es suyo, triar es del
+            # administrador. Entra Abierta y sin prioridad, para que se vea que nadie
+            # la ha mirado todavía.
+            conn.execute(
+                "INSERT INTO workspace_fincas_incidencias "
+                "(id, workspace_id, comunidad_id, titulo, descripcion, estado, fecha_apertura, "
+                " vecino_id, origen, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 'Abierta', ?, ?, 'portal', datetime(?), datetime(?))",
+                (os.urandom(16).hex(), workspace_id, comunidad_id, titulo, descripcion or None,
+                 datetime.now().date().isoformat(), vecino_id, now, now),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "recuento": fetch_fincas_portal_public(conn, token, registrar=False)})
+            return
+
         elif parsed.path == "/api/workspace_fincas_portal_alta":
             session = getattr(self, "auth_session", None) or self._current_session()
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -84522,38 +88552,29 @@ class Handler(BaseHTTPRequestHandler):
             # porque se pide antes de crear el presupuesto.
             clave = str(payload.get("plantilla") or "").strip()
             plantillas = {c["clave"]: c for c in fetch_workspace_fincas_cartas(conn, workspace_id)}
-            plantilla = plantillas.get(clave) or (list(plantillas.values())[0] if plantillas else None)
-            if not plantilla:
+            if clave not in plantillas and not plantillas:
                 json_response(self, {"error": "No hay plantillas de carta"}, status=404)
                 return
-            empresa_id = str(payload.get("empresa_id") or "").strip()
-            empresa = ""
-            if empresa_id:
-                fila = conn.execute("SELECT nombre, razon_social FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
-                if fila:
-                    empresa = str(row_value(fila, "nombre", "") or row_value(fila, "razon_social", "") or "").strip()
             calc = {
                 "num_vecinos": payload.get("num_vecinos"),
                 "num_locales": payload.get("num_locales"),
                 "num_trasteros": payload.get("num_trasteros"),
                 "num_aparcamientos": payload.get("num_aparcamientos"),
             }
-            cuota = round(parse_money_value(payload.get("cuota")), 2)
-            datos = {
-                "comunidad": str(payload.get("comunidad") or "").strip() or "su comunidad",
-                "direccion": str(payload.get("direccion") or "").strip(),
-                "viviendas": str(parse_non_negative_int(payload.get("num_vecinos")) or ""),
-                "unidades": describe_unidades_edificio(calc),
-                "cuota": format_eur(cuota) if cuota else "",
-                # La carta la firma la marca, igual que el logo del PDF. La sociedad
-                # que emite va identificada en el propio presupuesto, no en el texto.
-                "empresa": FINCAS_NOMBRE_COMERCIAL or empresa or "nuestro despacho",
-                "colegiado": str(payload.get("colegiado") or "").strip(),
-            }
+            plantilla_usada = plantillas.get(clave) or (list(plantillas.values())[0] if plantillas else None)
             json_response(self, {
                 "ok": True,
-                "plantilla": plantilla["clave"],
-                "carta": render_carta_presentacion(plantilla["cuerpo"], datos),
+                "plantilla": plantilla_usada["clave"] if plantilla_usada else "",
+                "carta": generate_default_fincas_carta(
+                    conn, workspace_id,
+                    empresa_id=payload.get("empresa_id"),
+                    plantilla_clave=clave,
+                    comunidad=payload.get("comunidad"),
+                    direccion=payload.get("direccion"),
+                    calc=calc,
+                    cuota=payload.get("cuota"),
+                    colegiado=payload.get("colegiado"),
+                ),
             })
             return
         elif parsed.path == "/api/workspace_fincas_extracto_importar":
@@ -84860,6 +88881,41 @@ class Handler(BaseHTTPRequestHandler):
             if not ok:
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
+            # Borrar la ficha dejaba los recibos apuntando al vacío: contestaba «ok» y la
+            # comunidad se quedaba con cobros —incluidos los pendientes— de los que ya no
+            # se sabía de quién eran. Eso no es dar de baja a un propietario, es perder la
+            # contabilidad. Con historia detrás no se borra: se suprime, que conserva los
+            # apuntes y quita la identidad.
+            historia = {}
+            for tabla, etiqueta in RGPD_FINCAS_CONSERVAR_DEL_VECINO:
+                cols = table_columns(conn, tabla) or set()
+                if "vecino_id" not in cols:
+                    continue
+                try:
+                    cuenta = conn.execute(
+                        f"SELECT COUNT(*) AS total FROM {tabla} WHERE vecino_id = ?", (record_id,)
+                    ).fetchone()
+                    cuantas = int(row_value(cuenta, "total", 0) or 0)
+                except Exception as _fallo_tragado:
+                    _rollback_best_effort(conn)
+                    apunta_escritura_tragada("_do_POST/vecino_delete/historia", _fallo_tragado)
+                    continue
+                if cuantas:
+                    historia[etiqueta] = cuantas
+            if historia:
+                detalle = ", ".join(f"{etiqueta} ({n})" for etiqueta, n in historia.items())
+                json_response(
+                    self,
+                    {
+                        "error": f"Este propietario tiene {detalle}. Borrarlo dejaría esos "
+                                 "registros sin dueño. Usa «Suprimir datos (RGPD)»: conserva la "
+                                 "contabilidad y le quita la identidad.",
+                        "historia": historia,
+                    },
+                    status=409,
+                )
+                return
+
             conn.execute(
                 "DELETE FROM workspace_fincas_vecinos WHERE id = ? AND workspace_id = ?",
                 (record_id, workspace_id),
@@ -85131,6 +89187,15 @@ class Handler(BaseHTTPRequestHandler):
                     cliente_ids = [hipoteca_link["cliente_id"]]
                     cliente_id = hipoteca_link["cliente_id"]
             cliente_ids_json = json.dumps(cliente_ids, ensure_ascii=False) if cliente_ids else None
+            importe_apunte, error_importe, pide_confirmar = importe_de_apunte_de_gestoria(payload)
+            if error_importe:
+                json_response(
+                    self,
+                    {"error": error_importe,
+                     **({"requiere_confirmacion": True} if pide_confirmar else {})},
+                    status=409 if pide_confirmar else 400,
+                )
+                return
             conn.execute(
                 """
                 INSERT INTO gestoria_contabilidad (
@@ -85152,7 +89217,7 @@ class Handler(BaseHTTPRequestHandler):
                     payload.get("concepto"),
                     payload.get("gestion"),
                     payload.get("tipo"),
-                    payload.get("importe"),
+                    importe_apunte,
                     payload.get("notas"),
                     now,
                     now,
@@ -85185,9 +89250,24 @@ class Handler(BaseHTTPRequestHandler):
             updates = []
             values = []
             cliente_ids = None
+            # El mismo control en la edición: cambiar el importe de un apunte ya guardado
+            # entra por aquí, y sin esto se podía meter el texto por la puerta de atrás.
+            if "importe" in payload:
+                importe_apunte, error_importe, pide_confirmar = importe_de_apunte_de_gestoria(payload)
+                if error_importe:
+                    json_response(
+                        self,
+                        {"error": error_importe,
+                         **({"requiere_confirmacion": True} if pide_confirmar else {})},
+                        status=409 if pide_confirmar else 400,
+                    )
+                    return
             for field in allowed:
                 if field in payload:
-                    if field in {"seguro_id", "hipoteca_id"}:
+                    if field == "importe":
+                        updates.append("importe = ?")
+                        values.append(importe_apunte)
+                    elif field in {"seguro_id", "hipoteca_id"}:
                         updates.append(f"{field} = ?")
                         values.append((payload.get(field) or "").strip() or None)
                     elif field == "cliente_id":
@@ -85254,7 +89334,12 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, result)
             return
         elif parsed.path == "/api/gestoria_facturas_reparse":
-            empresa_id = str(payload.get("empresa_id") or empresa.get("id") or "").strip()
+            # `empresa` ya viene resuelto (y comprobado) por el pipeline genérico de
+            # más arriba. Leer primero `payload.get("empresa_id")` dejaba que el valor
+            # del cliente ganara por cortocircuito de `or` en cuanto viniera relleno,
+            # así que un `empresa_id` de otro tenant reconstruía asientos contables
+            # ajenos sin pasar por ningún control de pertenencia.
+            empresa_id = str(empresa["id"] if empresa else "").strip()
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
@@ -85405,6 +89490,13 @@ class Handler(BaseHTTPRequestHandler):
             record_id = payload.get("id")
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            ok_amb, err_amb = enforce_gestoria_row_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                "gestoria_conta_tasks", record_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb},
+                              status=404 if err_amb == "No encontrado" else 403)
                 return
             fields = ["tarea", "estado", "fecha_limite", "responsable"]
             updates = {f: payload.get(f) for f in fields if f in payload}
@@ -85754,6 +89846,7 @@ class Handler(BaseHTTPRequestHandler):
                     "ocr_quality": fin_quality,
                 },
             )
+            return
         elif parsed.path == "/api/fin_asesoramiento_ocr_auto":
             data_uri = payload.get("file_base64") or payload.get("data")
             if not data_uri:
@@ -86551,7 +90644,17 @@ class Handler(BaseHTTPRequestHandler):
                     (record_id,),
                 ).fetchone()
             hipoteca_id = convert_fin_asesoramiento_to_hipoteca(conn, empresa["id"], row, now)
+            # La conversión inserta la hipoteca y marca el asesoramiento como convertido,
+            # pero nadie confirmaba: se devolvía el id de una hipoteca que no existía y el
+            # asesor no la encontraba en su listado. Con suerte la salvaba la siguiente
+            # escritura de la misma conexión, y sin suerte se perdía.
+            conn.commit()
             json_response(self, {"hipoteca_id": hipoteca_id})
+            # Sin este `return` la ejecución seguía hasta el 404 del final e intentaba
+            # contestar por segunda vez: cada conversión dejaba un BrokenPipeError en el
+            # registro. Funcionaba de suerte —el cliente ya tenía su respuesta— y el ruido
+            # tapaba errores de verdad.
+            return
         elif parsed.path == "/api/hipotecas_update":
             record_id = payload.get("id")
             if not record_id:
@@ -86795,6 +90898,9 @@ class Handler(BaseHTTPRequestHandler):
                 updates["precio"] = financing_split["precio"]
                 updates["importe_hipoteca"] = financing_split["importe_hipoteca"]
                 updates["porcentaje"] = financing_split["porcentaje"]
+                entrada_actual = updates.get("entrada") if "entrada" in updates else current_row["entrada"]
+                if entrada_actual in (None, "", 0, 0.0):
+                    updates["entrada"] = financing_split["entrada"]
             if "anio" not in updates:
                 fecha_ref = str(updates.get("fecha_firma") or updates.get("fecha_encargo") or "").strip()
                 if fecha_ref:
@@ -86872,6 +90978,13 @@ class Handler(BaseHTTPRequestHandler):
             record_id = payload.get("id")
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            ok_amb, err_amb = enforce_gestoria_row_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                "gestoria", record_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb},
+                              status=404 if err_amb == "No encontrado" else 403)
                 return
             updates = {}
             for key in ("estado", "fecha_baja"):
@@ -87061,11 +91174,17 @@ class Handler(BaseHTTPRequestHandler):
             row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
             if row and row["cliente_id"]:
                 ensure_cliente_servicio_link(conn, row["cliente_id"], row["empresa_id"], "seguros", now)
+            recibos_anulados = 0
             if row:
                 ensure_seguro_doc_link(conn, row, now)
                 log_seguro_event(conn, row, "actualizacion", now, payload={"campos": sorted(list(updates.keys()))})
                 upsert_seguro_comision_contabilidad(conn, row, now, movimiento="emision")
                 seguros_sync_activation_action(conn, row, now)
+                # La interfaz anula por aquí, no por `seguros_poliza_accion`: si el
+                # control estuviera sólo allí, el camino que usa la gente se lo saltaría.
+                if str(updates.get("estado") or "").strip().lower() in {"anulada", "baja"}:
+                    recibos_anulados = anula_recibos_pendientes_de_poliza(
+                        conn, row, now, str(updates.get("motivo_baja") or "").strip())
             if row:
                 missing = []
                 for key in ("tomador", "poliza_numero", "compania", "fecha_efecto"):
@@ -87175,7 +91294,33 @@ class Handler(BaseHTTPRequestHandler):
                 nueva_poliza = (payload.get("nueva_poliza_ref") or row["nueva_poliza_ref"] or row["poliza_numero"] or "").strip()
             nueva_fecha_efecto = payload.get("nueva_fecha_efecto") or payload.get("fecha_efecto") or row["fecha_efecto"]
             nueva_fecha_venc = payload.get("nueva_fecha_vencimiento") or payload.get("fecha_vencimiento") or row["fecha_vencimiento"]
+            # La prima y la comisión NO se heredan. Nadie cambia de compañía para pagar
+            # lo mismo: la prima nueva es justo el motivo del cambio. Copiarlas dejaba al
+            # cliente facturado con el importe de la compañía anterior y a la correduría
+            # liquidándose una comisión que no le corresponde, con un 200 OK.
+            def _importe_nuevo(*claves):
+                for clave in claves:
+                    crudo = payload.get(clave)
+                    if str(crudo or "").strip() != "":
+                        return parse_money_value(crudo)
+                return None
+            nueva_prima_neta = _importe_nuevo("nueva_prima_neta", "prima_neta")
+            nueva_prima_total = _importe_nuevo("nueva_prima_total", "prima_total")
+            nueva_comision = _importe_nuevo("nueva_comision", "comision")
+            faltan_importes = [
+                etiqueta for etiqueta, valor in (("prima", nueva_prima_total),
+                                                 ("comisión", nueva_comision))
+                if valor is None
+            ]
+            # El PDF de la póliza nueva: el camino normal no deja ponerla en vigor sin
+            # él, y por aquí entraba «En vigor» con el hueco vacío. No se rechaza el
+            # cambio —ha ocurrido y hay que registrarlo—: se queda Pendiente y se dice.
+            nueva_poliza_key = str(payload.get("poliza_key") or "").strip()
+            nueva_poliza_url = str(payload.get("poliza_url") or "").strip()
             nuevo_estado = payload.get("nuevo_estado") or "En vigor"
+            sin_pdf = not (nueva_poliza_key or nueva_poliza_url)
+            if sin_pdf and str(nuevo_estado).strip().lower() in {"en vigor", "contratada"}:
+                nuevo_estado = "Pendiente"
             nuevo_cliente_id = payload.get("cliente_id") or row["cliente_id"]
             if nuevo_cliente_id:
                 cliente_access = resolve_cliente_scope_access(conn, nuevo_cliente_id, empresa_id=row["empresa_id"])
@@ -87261,9 +91406,9 @@ class Handler(BaseHTTPRequestHandler):
                     nueva_compania,
                     row["ramo"],
                     nueva_poliza or row["poliza_numero"],
-                    row["prima_neta"],
-                    row["prima_total"],
-                    row["comision"],
+                    nueva_prima_neta,
+                    nueva_prima_total,
+                    nueva_comision,
                     row["produccion"],
                     row["colaborador"],
                     nuevo_estado,
@@ -87337,6 +91482,18 @@ class Handler(BaseHTTPRequestHandler):
                 upsert_seguro_comision_contabilidad(conn, new_row, now, movimiento="emision")
                 seguros_sync_activation_action(conn, new_row, now)
             conn.commit()
+            # Los recibos pendientes de la póliza que sale NO se tocan: una póliza
+            # sustituida a mitad de año puede deber legítimamente la prima del periodo
+            # ya transcurrido, y anularlos aquí sería borrar deuda real. Eso sólo se
+            # hace al anular de verdad.
+            pendiente = []
+            if faltan_importes:
+                pendiente.append("Falta " + " y ".join(faltan_importes)
+                                 + " de la póliza nueva: no se hereda la de la anterior, "
+                                   "porque cambiar de compañía es cambiar de precio.")
+            if sin_pdf:
+                pendiente.append("Queda en Pendiente hasta que adjuntes el PDF de la póliza "
+                                 "nueva, igual que en el alta normal.")
             json_response(
                 self,
                 {
@@ -87344,6 +91501,8 @@ class Handler(BaseHTTPRequestHandler):
                     "old_id": record_id,
                     "new_id": new_id,
                     "version_grupo": version_grupo,
+                    "estado_nueva": nuevo_estado,
+                    "aviso": " ".join(pendiente),
                 },
             )
             return
@@ -87646,6 +91805,7 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 row = conn.execute("SELECT * FROM seguros WHERE id = ?", (record_id,)).fetchone()
                 seguros_sync_activation_action(conn, row, now)
+                recibos_anulados = anula_recibos_pendientes_de_poliza(conn, row, now, motivo_baja)
                 log_seguro_event(conn, row, "anulacion", now, motivo=motivo_baja, payload={"fecha_baja": fecha_baja})
                 try:
                     create_seguro_movimiento(
@@ -87660,7 +91820,8 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 conn.commit()
-                json_response(self, {"ok": True, "id": record_id, "accion": "anular"})
+                json_response(self, {"ok": True, "id": record_id, "accion": "anular",
+                                     "recibos_anulados": recibos_anulados})
                 return
             json_response(self, {"error": "Accion no soportada"}, status=400)
             return
@@ -88505,6 +92666,9 @@ class Handler(BaseHTTPRequestHandler):
                         (now, f"%{record_id}%"),
                     )
         elif parsed.path == "/api/seguros_ofertas":
+            if not cliente_existe(conn, payload.get("cliente_id")):
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
             conn.execute(
                 """
                 INSERT INTO seguros_ofertas (
@@ -88891,6 +93055,9 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/seguros_referidos":
+            if not cliente_existe(conn, payload.get("cliente_id")):
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
             conn.execute(
                 """
                 INSERT INTO seguros_referidos (
@@ -89202,7 +93369,13 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT estado FROM asesoramientos_financiacion WHERE id = ? LIMIT 1",
                 (asesoramiento_id,),
             ).fetchone()
-            stage = normalize_fin_stage(ases_row["estado"] if ases_row else "")
+            # Si el asesoramiento no existe se seguía adelante igualmente, insertando
+            # tareas colgadas de un id que no está: saltaba la clave ajena y salía un
+            # 500. Es un id que no existe, no un fallo del servidor.
+            if not ases_row:
+                json_response(self, {"error": "Asesoramiento no encontrado"}, status=404)
+                return
+            stage = normalize_fin_stage(ases_row["estado"])
             conn.execute(
                 "DELETE FROM fin_checklist WHERE asesoramiento_id = ?",
                 (asesoramiento_id,),
@@ -89246,7 +93419,11 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
-            json_response(self, {"ok": True})
+            # Sin esto el botón contestaba «ok» y no guardaba nada: el expediente se
+            # quedaba con la lista vacía y quien lo pulsó creía haberla generado. Es el
+            # mismo descuido que tenía `fin_checklist_update`, arreglado en su día.
+            conn.commit()
+            json_response(self, {"ok": True, "tareas": len(tasks)})
             return
         elif parsed.path == "/api/fin_checklist_update":
             record_id = payload.get("id")
@@ -89262,10 +93439,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             set_clause = ", ".join([f"{key} = ?" for key in updates])
             values = list(updates.values()) + [now, record_id]
-            conn.execute(
+            cur = conn.execute(
                 f"UPDATE fin_checklist SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
+            # Faltaban las dos líneas siguientes: sin `commit` el cambio se perdía al
+            # devolver la conexión al pool, y sin `json_response` el servidor cerraba la
+            # conexión sin contestar nada —el navegador se queda colgado, que es peor
+            # que un error.
+            conn.commit()
+            json_response(self, {"ok": True, "id": record_id,
+                                 "actualizado": int(getattr(cur, "rowcount", 0) or 0)})
             return
         elif parsed.path == "/api/ai_seguros_copilot":
             if not openai_available():
@@ -89430,6 +93614,11 @@ class Handler(BaseHTTPRequestHandler):
                     operacion = dict(operacion)
                 except Exception:
                     pass
+            # `inmueble` y `captacion` salen de la base tal cual. En Postgres llegan como
+            # diccionario y `.get` funciona; en SQLite son `sqlite3.Row` y revienta con
+            # AttributeError en la primera línea que las lee. Se normalizan las tres igual.
+            inmueble = dict(inmueble) if inmueble is not None else {}
+            captacion = dict(captacion) if captacion is not None else {}
 
             def suggested_defaults():
                 today = datetime.now(timezone.utc).date().isoformat()
@@ -92006,6 +96195,50 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Captación no encontrada"}, status=404)
                 return
             inmueble_id = str(captacion["inmueble_id"] or "").strip()
+            # Borrar la captación se lleva el inmueble por delante, y hay cosas colgadas de
+            # él que no se pueden perder: un cierre firmado, una operación, un estudio de
+            # financiación, una firma pedida. Hasta ahora ni se miraba: la clave ajena
+            # saltaba en mitad del borrado y salía un 500 «API error» —en Postgres, además,
+            # con la transacción envenenada para el resto de la petición—. Se mira antes y
+            # se dice qué hay detrás.
+            RETIENEN_EL_INMUEBLE = (
+                ("inmueble_cierres", "cierres firmados"),
+                ("operaciones_inmobiliarias", "operaciones"),
+                ("asesoramientos_financiacion", "estudios de financiación"),
+                ("inmueble_signature_requests", "firmas solicitadas"),
+            )
+            if inmueble_id:
+                retenido = {}
+                for tabla, etiqueta in RETIENEN_EL_INMUEBLE:
+                    cols = table_columns(conn, tabla) or set()
+                    if "inmueble_id" not in cols:
+                        continue
+                    try:
+                        cuenta = conn.execute(
+                            f"SELECT COUNT(*) AS total FROM {tabla} WHERE inmueble_id = ?",
+                            (inmueble_id,),
+                        ).fetchone()
+                        cuantas = int(row_value(cuenta, "total", 0) or 0)
+                    except Exception as _fallo_tragado:
+                        _rollback_best_effort(conn)
+                        apunta_escritura_tragada("_do_POST/captacion_delete/retenido", _fallo_tragado)
+                        continue
+                    if cuantas:
+                        retenido[etiqueta] = cuantas
+                if retenido:
+                    detalle = ", ".join(f"{etiqueta} ({n})" for etiqueta, n in retenido.items())
+                    json_response(
+                        self,
+                        {
+                            "error": f"Este inmueble tiene {detalle}. Borrar la captación lo "
+                                     "borraría también y esos registros se quedarían sin "
+                                     "inmueble. Archiva la captación en vez de borrarla.",
+                            "retenido": retenido,
+                        },
+                        status=409,
+                    )
+                    return
+
             actor = _session_user_label(getattr(self, "auth_session", None) or self._current_session()) or None
             try:
                 trash_backup_row(conn, "captaciones", record_id, deleted_by=actor, reason="api/captacion_delete", now=now)
@@ -92028,6 +96261,23 @@ class Handler(BaseHTTPRequestHandler):
                 conn.execute("DELETE FROM inmueble_propietarios WHERE inmueble_id = ?", (inmueble_id,))
                 conn.execute("DELETE FROM visitas WHERE inmueble_id = ?", (inmueble_id,))
                 conn.execute("DELETE FROM acciones WHERE inmueble_id = ?", (inmueble_id,))
+                # Estos cuelgan del inmueble y no tienen valor propio: si se quedan,
+                # apuntan a una vivienda que ya no existe.
+                for tabla in ("inmueble_compradores", "inmueble_servicios", "crm_stage_events"):
+                    if "inmueble_id" in (table_columns(conn, tabla) or set()):
+                        try:
+                            conn.execute(f"DELETE FROM {tabla} WHERE inmueble_id = ?", (inmueble_id,))
+                        except Exception as _fallo_tragado:
+                            _rollback_best_effort(conn)
+                            apunta_escritura_tragada("_do_POST/captacion_delete/hijos", _fallo_tragado)
+            # El embudo también se guarda por captación, no sólo por inmueble: si la
+            # captación nunca llegó a tener piso, el evento se quedaba suelto.
+            if "captacion_id" in (table_columns(conn, "crm_stage_events") or set()):
+                try:
+                    conn.execute("DELETE FROM crm_stage_events WHERE captacion_id = ?", (record_id,))
+                except Exception as _fallo_tragado:
+                    _rollback_best_effort(conn)
+                    apunta_escritura_tragada("_do_POST/captacion_delete/embudo", _fallo_tragado)
             conn.execute("DELETE FROM captaciones WHERE id = ?", (record_id,))
             if inmueble_id:
                 conn.execute("DELETE FROM inmuebles WHERE id = ?", (inmueble_id,))
@@ -93477,9 +97727,19 @@ class Handler(BaseHTTPRequestHandler):
                 motivo_cierre=motivo_cierre,
                 nuevo_propietario=nuevo_propietario,
                 workspace_id=ws_alta,
+                confirmado=_quiere_confirmar(payload),
             )
             if not result.get("ok"):
-                json_response(self, {"error": result.get("error") or "No se pudo cerrar"}, status=400)
+                # Lo que se puede confirmar va con 409 y su bandera, para que el front
+                # pueda preguntar en vez de dar el cierre por imposible.
+                json_response(
+                    self,
+                    {"error": result.get("error") or "No se pudo cerrar",
+                     **({"requiere_confirmacion": True} if result.get("requiere_confirmacion") else {}),
+                     **({"code": result["code"]} if result.get("code") else {}),
+                     **({"cierre_anterior": result["cierre_anterior"]} if result.get("cierre_anterior") else {})},
+                    status=409 if result.get("requiere_confirmacion") else 400,
+                )
                 return
             conn.commit()
             json_response(self, result)
@@ -93769,6 +98029,14 @@ class Handler(BaseHTTPRequestHandler):
                 if cliente_access == "forbidden":
                     json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
                     return
+            if not cliente_id and not str(payload.get("cliente_nombre") or "").strip():
+                # Una demanda sin cliente no sirve para nada: no se puede llamar a
+                # nadie, no cruza con ningún inmueble y ensucia el listado. Se
+                # rechaza aquí y no sólo en el formulario, que es lo que evita que
+                # entre por otra puerta.
+                json_response(self, {"error": "Hace falta el cliente: elige uno o escribe su nombre"},
+                              status=400)
+                return
             if not cliente_id:
                 cliente_id = ensure_cliente_for_inmobiliaria(
                     conn,
@@ -93899,6 +98167,48 @@ class Handler(BaseHTTPRequestHandler):
             nombre_previo = str(row_value(fila, "nombre", "") or "")
 
             columnas = table_columns(conn, "clientes") or set()
+
+            # Se leen antes de vaciarlos: después ya no hay con qué buscar las copias.
+            identidad_previa = {}
+            try:
+                cols_id = [c for c in ("nombre", "nif", "telefono", "movil", "email") if c in columnas]
+                if cols_id:
+                    prev = conn.execute(
+                        f"SELECT {', '.join(cols_id)} FROM clientes WHERE id = ?", (cliente_id,)
+                    ).fetchone()
+                    for c in cols_id:
+                        valor = str(row_value(prev, c, "") or "").strip()
+                        if valor:
+                            identidad_previa[c] = valor
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_do_POST/cliente_suprimir/identidad", _fallo_tragado)
+
+            # Antes de borrar nada, soltar las referencias de tablas que se conservan.
+            # Sin esto la clave ajena aborta la supresión —y en Postgres deja la
+            # transacción envenenada, así que todo lo que venga después en la misma
+            # petición también revienta.
+            soltados = {}
+            for tabla, col_fk, tabla_padre, col_cliente in RGPD_VINCULOS_A_SOLTAR:
+                cols_hijo = table_columns(conn, tabla) or set()
+                cols_padre = table_columns(conn, tabla_padre) or set()
+                if col_fk not in cols_hijo or col_cliente not in cols_padre:
+                    continue
+                # Se cuenta antes de actualizar: `rowcount` no es fiable con todos los
+                # envoltorios de conexión y devolvía -1, así que el acuse salía vacío
+                # aunque el vínculo sí se hubiera soltado.
+                n = int(row_value(conn.execute(
+                    f"SELECT COUNT(*) AS total FROM {tabla} WHERE {col_fk} IN "
+                    f"(SELECT id FROM {tabla_padre} WHERE {col_cliente} = ?)",
+                    (cliente_id,),
+                ).fetchone(), "total", 0) or 0)
+                if n > 0:
+                    conn.execute(
+                        f"UPDATE {tabla} SET {col_fk} = NULL WHERE {col_fk} IN "
+                        f"(SELECT id FROM {tabla_padre} WHERE {col_cliente} = ?)",
+                        (cliente_id,),
+                    )
+                    soltados[tabla] = n
+
             borrados = {}
             for tabla, columna in RGPD_TABLAS_A_BORRAR:
                 cols = table_columns(conn, tabla) or set()
@@ -93945,10 +98255,38 @@ class Handler(BaseHTTPRequestHandler):
                 (*valores, cliente_id),
             )
 
+            # ¿Queda la misma persona escrita en otra tabla? No se toca nada: se cuenta
+            # y se dice, porque el aviso de abajo afirmaba que ya no identificaba a nadie.
+            copias = {}
+            try:
+                for tabla, etiqueta in RGPD_TABLAS_CON_COPIA_DE_IDENTIDAD:
+                    cols = table_columns(conn, tabla) or set()
+                    condiciones, valores = [], []
+                    for campo in ("nif", "email", "telefono", "movil", "nombre"):
+                        if campo in cols and identidad_previa.get(campo):
+                            condiciones.append(f"{campo} = ?")
+                            valores.append(identidad_previa[campo])
+                    if not condiciones:
+                        continue
+                    cuenta = conn.execute(
+                        f"SELECT COUNT(*) AS total FROM {tabla} WHERE " + " OR ".join(condiciones),
+                        tuple(valores),
+                    ).fetchone()
+                    cuantas = int(row_value(cuenta, "total", 0) or 0)
+                    if cuantas:
+                        copias[tabla] = {"filas": cuantas, "donde": etiqueta}
+            except Exception as _fallo_tragado:
+                _rollback_best_effort(conn)
+                apunta_escritura_tragada("_do_POST/cliente_suprimir/copias", _fallo_tragado)
+
             resumen = {
                 "cliente_id": cliente_id,
                 "motivo": motivo,
+                "copias_que_quedan": copias,
                 "borrado": borrados,
+                # Qué referencias se soltaron: la fila se queda, sólo deja de apuntar a
+                # algo que se ha suprimido.
+                "desvinculado": soltados,
                 "conservado": conservados,
                 "columnas_vaciadas": [c for c in RGPD_COLUMNAS_IDENTIFICATIVAS if c in columnas],
             }
@@ -93971,10 +98309,182 @@ class Handler(BaseHTTPRequestHandler):
                     "ok": True,
                     "nombre_previo": nombre_previo,
                     "borrado": borrados,
+                    # Quien pide el acuse de la supresión también tiene derecho a saber
+                    # qué se conservó y dejó de apuntar a lo suprimido.
+                    "desvinculado": soltados,
                     "conservado": conservados,
+                    "copias_que_quedan": copias,
                     "aviso": (
                         "La ficha ya no identifica a nadie. Se conservan los registros con "
                         "obligación legal de conservación, ahora anónimos."
+                        if not copias else
+                        "La ficha de cliente ya no identifica a nadie, pero la misma persona "
+                        "sigue escrita con sus datos en: "
+                        + ", ".join(f"{d['donde']} ({d['filas']})" for d in copias.values())
+                        + ". Revisa si queda base legal para conservarlas."
+                    ),
+                },
+            )
+            return
+        elif parsed.path == "/api/workspace_fincas_vecino_suprimir":
+            # Art. 17 para un comunero. No es un `cliente`, así que `cliente_suprimir` no
+            # llegaba hasta aquí: su nombre, NIF, teléfono, correo e IBAN se quedaban
+            # enteros aunque la ficha de cliente de la misma persona quedara anónima.
+            #
+            # Mismo criterio que allí: la fila no se borra —los recibos, los apuntes y las
+            # actas cuelgan de ella— y lo que desaparece es la identidad.
+            ws_id = str(payload.get("workspace_id") or "").strip()
+            vecino_id = str(payload.get("vecino_id") or payload.get("id") or "").strip()
+            motivo = str(payload.get("motivo") or "").strip()
+            confirm = str(payload.get("confirm") or "").strip().upper()
+            if not vecino_id:
+                json_response(self, {"error": "vecino_id requerido"}, status=400)
+                return
+            if not ws_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, session, ws_id, write=True)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            if not workspace_actor_is_privileged(conn, session):
+                json_response(
+                    self,
+                    {"error": "Solo un responsable del workspace puede suprimir una ficha."},
+                    status=403,
+                )
+                return
+            if confirm and confirm != "SUPRIMIR":
+                json_response(self, {"error": "confirm inválido (usa SUPRIMIR)"}, status=400)
+                return
+
+            fila = conn.execute(
+                "SELECT id, nombre, comunidad_id FROM workspace_fincas_vecinos "
+                "WHERE id = ? AND workspace_id = ? LIMIT 1",
+                (vecino_id, ws_id),
+            ).fetchone()
+            if not fila:
+                json_response(self, {"error": "Vecino no encontrado en este workspace"}, status=404)
+                return
+            nombre_previo = str(row_value(fila, "nombre", "") or "")
+            comunidad_id = str(row_value(fila, "comunidad_id", "") or "")
+
+            # Con recibos sin cobrar la relación sigue viva y hay base legal para
+            # conservar los datos: quien debe dinero a la comunidad no desaparece del
+            # censo. Se dice cuántos son, para poder resolverlo y volver.
+            pendientes = 0
+            try:
+                cuenta = conn.execute(
+                    "SELECT COUNT(*) AS total FROM workspace_fincas_recibos "
+                    "WHERE vecino_id = ? AND LOWER(COALESCE(estado,'')) IN ('pendiente','devuelto')",
+                    (vecino_id,),
+                ).fetchone()
+                pendientes = int(row_value(cuenta, "total", 0) or 0)
+            except Exception as _fallo_tragado:
+                _rollback_best_effort(conn)
+                apunta_escritura_tragada("_do_POST/vecino_suprimir/pendientes", _fallo_tragado)
+            if pendientes:
+                json_response(
+                    self,
+                    {
+                        "error": f"Tiene {pendientes} recibo(s) sin cobrar. Mientras haya deuda con "
+                                 "la comunidad hay base legal para conservar sus datos: liquida o "
+                                 "anula esos recibos antes de suprimir.",
+                        "recibos_pendientes": pendientes,
+                    },
+                    status=409,
+                )
+                return
+
+            now = datetime.now(timezone.utc).isoformat()
+            columnas = table_columns(conn, "workspace_fincas_vecinos") or set()
+
+            borrados = {}
+            for tabla, columna in RGPD_FINCAS_BORRAR_DEL_VECINO:
+                cols = table_columns(conn, tabla) or set()
+                if columna not in cols:
+                    continue
+                try:
+                    cuenta = conn.execute(
+                        f"SELECT COUNT(*) AS total FROM {tabla} WHERE {columna} = ?", (vecino_id,)
+                    ).fetchone()
+                    cuantas = int(row_value(cuenta, "total", 0) or 0)
+                    if cuantas:
+                        conn.execute(f"DELETE FROM {tabla} WHERE {columna} = ?", (vecino_id,))
+                        borrados[tabla] = cuantas
+                except Exception as _fallo_tragado:
+                    _rollback_best_effort(conn)
+                    apunta_escritura_tragada("_do_POST/vecino_suprimir/borrar", _fallo_tragado)
+
+            conservados = {}
+            for tabla, etiqueta in RGPD_FINCAS_CONSERVAR_DEL_VECINO:
+                cols = table_columns(conn, tabla) or set()
+                if "vecino_id" not in cols:
+                    continue
+                try:
+                    cuenta = conn.execute(
+                        f"SELECT COUNT(*) AS total FROM {tabla} WHERE vecino_id = ?", (vecino_id,)
+                    ).fetchone()
+                    cuantas = int(row_value(cuenta, "total", 0) or 0)
+                except Exception as _fallo_tragado:
+                    _rollback_best_effort(conn)
+                    apunta_escritura_tragada("_do_POST/vecino_suprimir/conservar", _fallo_tragado)
+                    continue
+                if cuantas:
+                    conservados[tabla] = {"filas": cuantas, "motivo": etiqueta}
+
+            sets, valores = [], []
+            for columna in RGPD_FINCAS_IDENTIDAD_DEL_VECINO:
+                if columna in columnas:
+                    sets.append(f"{columna} = NULL")
+            if "nombre" in columnas:
+                sets.append("nombre = ?")
+                valores.append(f"Vecino suprimido · {vecino_id[:8]}")
+            if "updated_at" in columnas:
+                sets.append("updated_at = ?")
+                valores.append(now)
+            conn.execute(
+                "UPDATE workspace_fincas_vecinos SET " + ", ".join(sets) + " WHERE id = ?",
+                (*valores, vecino_id),
+            )
+            conn.commit()
+
+            try:
+                audit_event(
+                    conn,
+                    str(payload.get("empresa_id") or "").strip(),
+                    "workspace_fincas_vecino",
+                    vecino_id,
+                    "supresion_rgpd",
+                    usuario=(session or {}).get("usuario") or "",
+                    detalles={
+                        "vecino_id": vecino_id,
+                        "comunidad_id": comunidad_id,
+                        "workspace_id": ws_id,
+                        "motivo": motivo,
+                        "borrado": borrados,
+                        "conservado": conservados,
+                    },
+                    now=now,
+                )
+                conn.commit()
+            except Exception as _fallo_tragado:
+                apunta_escritura_tragada("_do_POST/vecino_suprimir/audit", _fallo_tragado)
+
+            json_response(
+                self,
+                {
+                    "ok": True,
+                    "vecino_id": vecino_id,
+                    "nombre_previo": nombre_previo,
+                    "borrado": borrados,
+                    "conservado": conservados,
+                    "columnas_vaciadas": [c for c in RGPD_FINCAS_IDENTIDAD_DEL_VECINO if c in columnas],
+                    "aviso": (
+                        "El vecino ya no identifica a nadie. Los recibos, apuntes y actas se "
+                        "conservan por obligación legal, ahora anónimos. El coeficiente sigue "
+                        "en el piso, que es de quien lo compre."
                     ),
                 },
             )
@@ -94273,10 +98783,31 @@ class Handler(BaseHTTPRequestHandler):
                 insert_cols.insert(1, "empresa_id")
                 values.insert(1, empresa["id"])
             placeholders = ", ".join(["?"] * len(insert_cols))
-            conn.execute(
-                f"INSERT INTO clientes ({', '.join(insert_cols)}) VALUES ({placeholders})",
-                tuple(values),
-            )
+            try:
+                conn.execute(
+                    f"INSERT INTO clientes ({', '.join(insert_cols)}) VALUES ({placeholders})",
+                    tuple(values),
+                )
+            except Exception:
+                # Otra persona ha dado de alta este mismo NIF entre la comprobación de
+                # duplicados de arriba y este INSERT. La comprobación mira lo confirmado,
+                # así que con dos altas a la vez las dos la pasan y una choca con
+                # `idx_clientes_nif_unico_por_workspace`.
+                #
+                # Que choque es lo que se busca: una ficha duplicada no se arregla sola,
+                # hay que fusionarla a mano. Se devuelve la misma respuesta que cuando el
+                # duplicado se detecta a tiempo, con el id de la ficha que ganó, para que
+                # quien lo pidió acabe en la ficha buena en vez de en un error.
+                _rollback_best_effort(conn)
+                gemelo = resolve_cliente_duplicate_id(
+                    conn, nombre_norm, nif, workspace_id=workspace_id,
+                    empresa_id=empresa_scope_id,
+                )
+                if gemelo:
+                    json_response(self, {"error": "Cliente duplicado", "id": gemelo},
+                                  status=409)
+                    return
+                raise
             conn.commit()
             json_response(self, {"ok": True, "id": cliente_id})
             return
@@ -95903,6 +100434,22 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     json_response(self, {"error": "servicio requerido"}, status=400)
                     return
+            # Lo que se guarda son claves ajenas: si el cliente o el inmueble no
+            # existen, salta la restricción y sale un 500 —y en Postgres, además, deja
+            # la transacción abortada—. Un id que no está es un 404.
+            for campo, tabla in (("cliente_id", "clientes"), ("inmueble_id", "inmuebles")):
+                valor = str(payload.get(campo) or "").strip()
+                if not valor:
+                    continue
+                try:
+                    existe = bool(conn.execute(
+                        f"SELECT 1 FROM {tabla} WHERE id = ? LIMIT 1", (valor,)).fetchone())
+                except Exception:
+                    _rollback_best_effort(conn)
+                    existe = False
+                if not existe:
+                    json_response(self, {"error": f"{campo} no encontrado"}, status=404)
+                    return
             tipo = str(payload.get("tipo") or "").strip()
             estado = normalizar_estado_de_accion(payload.get("estado"))
             resultado_cierre = str(payload.get("resultado_cierre") or "").strip()
@@ -97107,7 +101654,11 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
-            ok, err = enforce_workspace_membership(conn, session, payload.get("workspace_id") or "", write=False)
+            # El `workspace_id` del payload solo valida ESE campo; el `empresa_id` que
+            # de verdad se usa más abajo para leer nunca se cruzaba contra él, así que
+            # bastaba con un workspace propio válido y un empresa_id ajeno para
+            # previsualizar el extracto bancario de otra empresa.
+            ok, err = enforce_empresa_membership(conn, session, empresa_id, write=False)
             if not ok:
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
@@ -97157,7 +101708,10 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
-            ok, err = enforce_workspace_membership(conn, session, payload.get("workspace_id") or "", write=True)
+            # Mismo fallo que en la previsualización de arriba: el `workspace_id` del
+            # payload se validaba, pero el `empresa_id` que de verdad importa el
+            # movimiento nunca se cruzaba contra él.
+            ok, err = enforce_empresa_membership(conn, session, empresa_id, write=True)
             if not ok:
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
@@ -97320,6 +101874,11 @@ class Handler(BaseHTTPRequestHandler):
             force_new = bool(payload.get("force_new") or payload.get("forceCreateNew") or payload.get("no_reuse"))
             cliente = str(payload.get("cliente") or "").strip()
             cliente_id = str(payload.get("cliente_id") or "").strip() or None
+            # Aquí el cliente es opcional —se puede abrir un estudio sin ficha— pero si
+            # viene uno, tiene que existir.
+            if cliente_id and not cliente_existe(conn, cliente_id):
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
             fecha_encargo = str(payload.get("fecha_encargo") or "").strip() or None
             precio = parse_optional_float(payload.get("precio"))
             importe_hipoteca = parse_optional_float(payload.get("importe_hipoteca"))
@@ -97770,6 +102329,7 @@ class Handler(BaseHTTPRequestHandler):
                   nombre,
                   COALESCE(logo_url, '') AS logo_url,
                   COALESCE(razon_social, '') AS razon_social,
+                  COALESCE(nombre_comercial, '') AS nombre_comercial,
                   COALESCE(nif, '') AS nif,
                   COALESCE(direccion, '') AS direccion,
                   COALESCE(direccion_fiscal, '') AS direccion_fiscal,
@@ -99523,6 +104083,74 @@ class Handler(BaseHTTPRequestHandler):
             binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
             return
 
+        if path == "/api/workspace_periciales":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            limit = params.get("limit", ["100"])[0]
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            json_response(self, fetch_workspace_periciales(conn, workspace_id, limit=limit))
+            return
+
+        if path == "/api/workspace_pericial":
+            pericial_id = (params.get("id", [""])[0] or "").strip()
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            if not pericial_id or not workspace_id:
+                json_response(self, {"error": "id y workspace_id requeridos"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            ok, err = enforce_workspace_membership(conn, session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            detalle = fetch_workspace_pericial_detalle(conn, pericial_id, workspace_id=workspace_id)
+            if not detalle:
+                json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                return
+            json_response(self, detalle)
+            return
+
+        if path == "/api/workspace_pericial_pdf":
+            pericial_id = (params.get("id", [""])[0] or "").strip()
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            if not pericial_id or not workspace_id:
+                json_response(self, {"error": "id y workspace_id requeridos"}, status=400)
+                return
+            paquete = fetch_workspace_pericial_pdf_payload(conn, pericial_id, workspace_id=workspace_id)
+            if not paquete:
+                json_response(self, {"error": "expediente pericial no encontrado"}, status=404)
+                return
+            pericial_dict = paquete[0]
+            pdf_bytes = None
+            # Si ya está firmado, se sirve el fichero congelado que se firmó —
+            # nunca se regenera: sería otro documento, con otro hash, y dejaría
+            # de coincidir con lo que el firmante aceptó.
+            if str(pericial_dict.get("estado") or "") == "Firmado":
+                doc_firmado = conn.execute(
+                    "SELECT doc_key FROM workspace_pericial_docs WHERE pericial_id = ? AND tipo = 'informe_pericial' "
+                    "ORDER BY version DESC LIMIT 1", (pericial_id,),
+                ).fetchone()
+                if doc_firmado:
+                    local_path = _signature_url_to_local_path(doc_firmado["doc_key"])
+                    if local_path and local_path.exists():
+                        pdf_bytes = local_path.read_bytes()
+            if pdf_bytes is None:
+                pdf_bytes = build_pericial_valoracion_pdf(*paquete)
+            filename = f"pericial_{pericial_id}.pdf"
+            binary_response(self, pdf_bytes, content_type="application/pdf", filename=filename)
+            return
+
         if path == "/api/workspace_presupuesto_encargo_pdf":
             budget_id = params.get("id", [""])[0]
             workspace_id = params.get("workspace_id", [""])[0]
@@ -99955,7 +104583,8 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, fetch_workspace_fincas_ejercicio(conn, workspace_id, comunidad_id, ejercicio))
             return
 
-        if path in ("/api/workspace_fincas_portal_doc", "/api/workspace_fincas_portal_junta"):
+        if path in ("/api/workspace_fincas_portal_doc", "/api/workspace_fincas_portal_junta",
+                    "/api/workspace_fincas_portal_certificado_pdf"):
             # Descargas del portal del comunero. Sin sesión: la llave es el token del
             # enlace, igual que la pantalla. Y la referencia que llega **no es un id**:
             # se recalculan las de lo que ese vecino puede ver y se busca la que encaja,
@@ -100011,6 +104640,57 @@ class Handler(BaseHTTPRequestHandler):
                     self.end_headers()
                     return
                 json_response(self, {"error": "documento sin fichero"}, status=404)
+                return
+
+            if path == "/api/workspace_fincas_portal_certificado_pdf":
+                # Solo si está pagado. La referencia únicamente existe en ese estado
+                # —se calcula en el portal cuando lo está—, pero se vuelve a comprobar
+                # aquí: quien guardó el enlace de una vez anterior no puede reutilizarlo
+                # para una solicitud nueva sin pagar.
+                fila = next(
+                    (c for c in conn.execute(
+                        "SELECT id, vecino_id FROM workspace_fincas_certificados "
+                        "WHERE workspace_id = ? AND comunidad_id = ? AND estado = 'Pagado'",
+                        (workspace_id, comunidad_id),
+                    ).fetchall()
+                     if secrets.compare_digest(referencia_portal(token, row_value(c, "id", "")), ref)),
+                    None,
+                )
+                if not fila:
+                    json_response(self, {"error": "certificado no disponible"}, status=404)
+                    return
+                vecino = conn.execute(
+                    "SELECT * FROM workspace_fincas_vecinos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (row_value(fila, "vecino_id", ""), workspace_id),
+                ).fetchone()
+                comunidad = conn.execute(
+                    "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (comunidad_id, workspace_id),
+                ).fetchone()
+                _cond, _periodo_hoy = condicion_de_recibo_impagado()
+                impagados = conn.execute(
+                    "SELECT periodo, concepto, estado, importe FROM workspace_fincas_recibos "
+                    f"WHERE workspace_id = ? AND vecino_id = ? AND {_cond} "
+                    "ORDER BY periodo",
+                    (workspace_id, row_value(fila, "vecino_id", ""), _periodo_hoy),
+                ).fetchall()
+                detalle = fetch_workspace_detail(conn, workspace_id)
+                pdf = build_certificado_deuda_pdf(
+                    comunidad or {}, vecino or {}, impagados,
+                    workspace=detalle.get("workspace") or {},
+                    company=(detalle.get("companies") or [{}])[0] if detalle.get("companies") else {})
+                try:
+                    conn.execute(
+                        "UPDATE workspace_fincas_certificados SET fecha_descarga = ?, updated_at = datetime(?) "
+                        "WHERE id = ?",
+                        (datetime.now().date().isoformat(), datetime.now().isoformat(timespec="seconds"),
+                         row_value(fila, "id", "")),
+                    )
+                    conn.commit()
+                except Exception as _fallo_tragado:
+                    apunta_escritura_tragada("portal_certificado_pdf/fecha_descarga", _fallo_tragado)
+                binary_response(self, pdf, content_type="application/pdf",
+                                filename="certificado.pdf")
                 return
 
             # La junta: convocatoria o acta, y solo si está publicada.
@@ -100742,11 +105422,13 @@ class Handler(BaseHTTPRequestHandler):
                 "SELECT * FROM workspace_fincas_comunidades WHERE id = ? AND workspace_id = ? LIMIT 1",
                 (row_value(vecino, "comunidad_id", ""), workspace_id),
             ).fetchone()
+            _cond, _periodo_hoy = condicion_de_recibo_impagado()
             recibos = conn.execute(
-                "SELECT periodo, concepto, importe, estado FROM workspace_fincas_recibos "
-                "WHERE vecino_id = ? AND workspace_id = ? AND estado IN ('Pendiente', 'Devuelto') "
+                "SELECT periodo, concepto, importe, estado, vecino_nombre "
+                "FROM workspace_fincas_recibos "
+                f"WHERE vecino_id = ? AND workspace_id = ? AND {_cond} "
                 "ORDER BY periodo",
-                (vecino_id, workspace_id),
+                (vecino_id, workspace_id, _periodo_hoy),
             ).fetchall()
             detalle = fetch_workspace_detail(conn, workspace_id)
             pdf = build_certificado_deuda_pdf(
@@ -100953,7 +105635,19 @@ class Handler(BaseHTTPRequestHandler):
                 return
             record_signature_event(conn, data["id"], "document_viewed", handler=self, now=datetime.now(timezone.utc).isoformat())
             conn.commit()
-            send_file(self, path_obj, filename=str(data.get("doc_nombre") or "documento.pdf"))
+            # Mismo criterio que en `/uploads/`: este enlace es público —se le manda al
+            # cliente para que firme— y el fichero lo ha subido alguien de la agencia sin
+            # que nadie mire la extensión. Servir un .html o un .svg con su tipo real lo
+            # ejecutaría en el origen de la aplicación, en el navegador de quien firma.
+            _suf = path_obj.suffix.lower()
+            if _suf in {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+                send_file(self, path_obj, filename=str(data.get("doc_nombre") or "documento.pdf"))
+            elif _suf in {".svg", ".svgz"}:
+                send_file(self, path_obj, filename=str(data.get("doc_nombre") or "documento.svg"),
+                          force_attachment=True)
+            else:
+                send_file(self, path_obj, filename=str(data.get("doc_nombre") or "documento"),
+                          force_download=True)
             return
 
         if path == "/api/workspace_portal_facturas_excel":
@@ -102408,6 +107102,14 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if workspace_id:
+                ok_amb, err_amb = enforce_workspace_membership(conn, session, workspace_id)
+            else:
+                ok_amb, err_amb = enforce_empresa_membership(conn, session, empresa_id or empresa_ids[0])
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             q = params.get("q", [""])[0]
             estado = params.get("estado", [""])[0]
             ejercicio = params.get("ejercicio", [""])[0]
@@ -102455,6 +107157,14 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if workspace_id:
+                ok_amb, err_amb = enforce_workspace_membership(conn, session, workspace_id)
+            else:
+                ok_amb, err_amb = enforce_empresa_membership(conn, session, empresa_id or empresa_ids[0])
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             ejercicio = params.get("ejercicio", [""])[0]
             try:
                 ids_key = ",".join(sorted([str(eid or "").strip() for eid in empresa_ids if str(eid or "").strip()]))
@@ -102501,6 +107211,16 @@ class Handler(BaseHTTPRequestHandler):
             empresa_ids = [empresa_id] if empresa_id else (fetch_workspace_company_ids(conn, workspace_id) if workspace_id else [])
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                return
+            # Exporta CSV con NIF, teléfono, email y dirección: sin esto, un
+            # workspace_id/empresa_id ajeno lo descargaba entero.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if workspace_id:
+                ok_amb, err_amb = enforce_workspace_membership(conn, session, workspace_id)
+            else:
+                ok_amb, err_amb = enforce_empresa_membership(conn, session, empresa_id or empresa_ids[0])
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             ejercicio = params.get("ejercicio", [""])[0]
             kind = str(params.get("kind", ["all"])[0] or "all").strip().lower()
@@ -104406,6 +109126,15 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
+            # `resolve_empresa_ids_for_request` es un resolutor puro: no mira la sesión.
+            # Sin esto, un `workspace_id` o `empresa_id` ajeno devolvía sociedades enteras
+            # (CIF, capital social, domicilio) de cualquier otro tenant.
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             placeholders = ",".join(["?"] * len(empresa_ids))
             where = [f"empresa_id IN ({placeholders})"]
             values = list(empresa_ids)
@@ -104444,6 +109173,12 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             placeholders = ",".join(["?"] * len(empresa_ids))
             where = [f"s.empresa_id IN ({placeholders})"]
             values = list(empresa_ids)
@@ -104480,6 +109215,12 @@ class Handler(BaseHTTPRequestHandler):
             empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                return
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             placeholders = ",".join(["?"] * len(empresa_ids))
             where = [f"sc.empresa_id IN ({placeholders})"]
@@ -104526,6 +109267,12 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             placeholders = ",".join(["?"] * len(empresa_ids))
             where = [f"a.empresa_id IN ({placeholders})"]
             values = list(empresa_ids)
@@ -104564,6 +109311,12 @@ class Handler(BaseHTTPRequestHandler):
             empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                return
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             placeholders = ",".join(["?"] * len(empresa_ids))
             where = [f"f.empresa_id IN ({placeholders})"]
@@ -104636,11 +109389,19 @@ class Handler(BaseHTTPRequestHandler):
             next_30 = today + timedelta(days=30)
             where = []
             values = []
+            # EXISTS, no JOIN: un cliente puede tener varias filas en
+            # clientes_empresas para la misma empresa (2.497 filas para solo 548
+            # clientes en Fincas Velazquez). El JOIN que había antes multiplicaba
+            # cada modelo por cada fila duplicada — 376 modelos reales devolvían
+            # 25.010 aquí, y el dashboard mostraba "Modelos pendientes: 26.161".
             if len(empresa_ids) == 1:
-                where.append("ce.empresa_id = ?")
+                where.append("EXISTS (SELECT 1 FROM clientes_empresas ce WHERE ce.cliente_id = c.id AND ce.empresa_id = ?)")
                 values.append(empresa_ids[0])
             else:
-                where.append(f"ce.empresa_id IN ({','.join(['?'] * len(empresa_ids))})")
+                placeholders_emp_modelos = ",".join(["?"] * len(empresa_ids))
+                where.append(
+                    f"EXISTS (SELECT 1 FROM clientes_empresas ce WHERE ce.cliente_id = c.id AND ce.empresa_id IN ({placeholders_emp_modelos}))"
+                )
                 values.extend(empresa_ids)
             if scope == "proximos":
                 where.append("m.proxima_fecha IS NOT NULL")
@@ -104658,7 +109419,6 @@ class Handler(BaseHTTPRequestHandler):
                        COALESCE(c.nombre, '') AS cliente
                 FROM gestoria_modelos m
                 JOIN clientes c ON c.id = m.cliente_id
-                JOIN clientes_empresas ce ON ce.cliente_id = c.id
                 WHERE {where_clause}
                 ORDER BY m.proxima_fecha ASC
                 """,
@@ -104683,6 +109443,17 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id and not empresa_ids:
                 json_response(self, {"error": "cliente_id, empresa_id o workspace_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if cliente_id:
+                ok_amb, err_amb = enforce_gestoria_cliente_access(conn, session, cliente_id)
+                if not ok_amb:
+                    json_response(self, {"error": err_amb}, status=403)
+                    return
+            elif empresa_ids:
+                ok_amb, err_amb = enforce_workspace_or_empresa_scope(conn, session, workspace_id, empresa_id)
+                if not ok_amb:
+                    json_response(self, {"error": err_amb}, status=403)
+                    return
 
             limit = 500
             if limit_raw:
@@ -104731,6 +109502,10 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(conn, session, workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             rol_norm = normalize_lookup_text((session or {}).get("rol") or "")
             is_admin_actor = rol_norm in {"ADMINISTRADOR", "ADMIN", "DIRECCION", "ADMINISTRACION", "CONTROL"} or bool(
                 is_superadmin_actor(None, session)
@@ -105135,6 +109910,13 @@ class Handler(BaseHTTPRequestHandler):
                         "rows": out_rows,
                         "total_rows": total_rows,
                         "summary": {
+                            # También dentro de `summary`: el frontend lee
+                            # `summary.total_rows` en tres sitios (dashboard de
+                            # Gestoría y la ficha de contabilidad por empresa) y
+                            # antes solo existía en la raíz de la respuesta, así
+                            # que siempre veían "Asientos: 0" aunque hubiera
+                            # cientos de filas reales.
+                            "total_rows": total_rows,
                             "ingresos": ingresos,
                             "gastos": gastos,
                             "resultado": resultado,
@@ -105156,6 +109938,16 @@ class Handler(BaseHTTPRequestHandler):
             conciliar = _bool_param(params, "conciliar", default=False)
             if not cliente_id and not empresa_id:
                 json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
+                return
+            # `conciliar=true` no solo lee: llama a reconcile_gestoria_factura_asiento
+            # y hace commit, así que aquí un GET también puede escribir.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if cliente_id:
+                ok_amb, err_amb = enforce_gestoria_cliente_access(conn, session, cliente_id, write=conciliar)
+            else:
+                ok_amb, err_amb = enforce_empresa_membership(conn, session, empresa_id, write=conciliar)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             where = []
             values = []
@@ -105247,6 +110039,12 @@ class Handler(BaseHTTPRequestHandler):
             empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
             if not empresa_ids:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                return
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             placeholders = ",".join(["?"] * len(empresa_ids))
             rows = conn.execute(
@@ -105363,6 +110161,20 @@ class Handler(BaseHTTPRequestHandler):
             if not lote_id:
                 json_response(self, {"error": "lote_id requerido"}, status=400)
                 return
+            # Su vecino /api/gestoria_import_excel sí comprueba esto sobre el mismo
+            # lote_id; aquí faltaba del todo, y era el único de los dos que no exige
+            # ni empresa_id ni workspace_id en la petición.
+            lote_row = conn.execute(
+                "SELECT empresa_id FROM gestoria_import_lotes WHERE id = ? LIMIT 1", (lote_id,)).fetchone()
+            if not lote_row:
+                json_response(self, {"error": "lote no encontrado"}, status=404)
+                return
+            session_tmp = getattr(self, "auth_session", None) or self._current_session()
+            if session_tmp and not workspace_actor_is_privileged(conn, session_tmp):
+                ok, err = enforce_empresa_membership(conn, session_tmp, str(lote_row["empresa_id"] or ""), write=False)
+                if not ok:
+                    json_response(self, {"error": err or "No autorizado"}, status=403)
+                    return
             values = [lote_id]
             where_estado = ""
             if estado:
@@ -105582,6 +110394,14 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id and not empresa_id:
                 json_response(self, {"error": "cliente_id o empresa_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if cliente_id:
+                ok_amb, err_amb = enforce_gestoria_cliente_access(conn, session, cliente_id)
+            else:
+                ok_amb, err_amb = enforce_empresa_membership(conn, session, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             where = []
             values = []
             if cliente_id:
@@ -105661,9 +110481,18 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/gestoria_cuentas_bancarias":
             empresa_id = params.get("empresa_id", [""])[0]
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=params.get("workspace_id", [""])[0])
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
             if not empresa_ids:
                 json_response(self, {"rows": []})
+                return
+            # IBAN y titular de la cuenta: sin esto, un empresa_id/workspace_id ajeno
+            # los devolvía enteros.
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             placeholders = ",".join(["?"] * len(empresa_ids))
             rows = conn.execute(
@@ -105691,9 +110520,16 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/gestoria_movimientos_bancarios":
             empresa_id = params.get("empresa_id", [""])[0]
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=params.get("workspace_id", [""])[0])
+            workspace_id = params.get("workspace_id", [""])[0]
+            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
             if not empresa_ids:
                 json_response(self, {"rows": []})
+                return
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             placeholders = ",".join(["?"] * len(empresa_ids))
             rows = conn.execute(
@@ -105902,6 +110738,15 @@ class Handler(BaseHTTPRequestHandler):
                         "facturas_resumen": {"total": 0, "conciliadas": 0, "pendientes": 0},
                     },
                 )
+                return
+            # Este GET siempre escribe: sync_gestoria_modelos_from_contabilidad, dos
+            # líneas más abajo, genera modelos si hace falta —y con `conciliar=true`
+            # además valida conciliaciones—, así que se pide con write=True.
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             try:
                 sync_gestoria_modelos_from_contabilidad(conn, empresa_ids=empresa_ids, cliente_ids=[cliente_id] if cliente_id else None, now=datetime.utcnow().isoformat())
@@ -106333,6 +111178,11 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
+            ok_amb, err_amb = enforce_gestoria_cliente_access(
+                conn, getattr(self, "auth_session", None) or self._current_session(), cliente_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             row = conn.execute(
                 """
                 SELECT id, cliente_id, periodo, fecha_inicio, responsable
@@ -106358,6 +111208,17 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id and not empresa_ids:
                 json_response(self, {"error": "cliente_id, empresa_id o workspace_id requerido"}, status=400)
                 return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if cliente_id:
+                ok_amb, err_amb = enforce_gestoria_cliente_access(conn, session, cliente_id)
+                if not ok_amb:
+                    json_response(self, {"error": err_amb}, status=403)
+                    return
+            elif empresa_ids:
+                ok_amb, err_amb = enforce_workspace_or_empresa_scope(conn, session, workspace_id, empresa_id)
+                if not ok_amb:
+                    json_response(self, {"error": err_amb}, status=403)
+                    return
             where = []
             values = []
             if cliente_id:
@@ -106522,6 +111383,13 @@ class Handler(BaseHTTPRequestHandler):
             ejercicio = (params.get("ejercicio", [""])[0] if params else "").strip()
             if not empresa_id or not cliente_id:
                 json_response(self, {"error": "empresa_id y cliente_id requeridos"}, status=400)
+                return
+            # Devuelve la ficha completa del cliente y toda su renta (declaraciones,
+            # documentos): con el empresa_id/cliente_id bastaba, sin mirar la sesión.
+            ok_amb, err_amb = enforce_empresa_membership(
+                conn, getattr(self, "auth_session", None) or self._current_session(), empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
                 return
             ejercicio_val = ejercicio if re.match(r"^20[0-9]{2}$", ejercicio or "") else ""
             service_filter = gestoria_service_sql_condition("clientes_empresas")
@@ -106823,11 +111691,11 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
 
-                tipos_map = {}
+                perfil_map = {}
                 try:
-                    tipos = conn.execute(
+                    perfiles = conn.execute(
                         f"""
-                        SELECT cg.tipo_cliente AS tipo, COUNT(*) AS total
+                        SELECT c.perfil AS perfil, COUNT(*) AS total
                         FROM cliente_gestoria cg
                         JOIN clientes c ON c.id = cg.cliente_id
                         LEFT JOIN clientes_empresas ce_join
@@ -106836,30 +111704,59 @@ class Handler(BaseHTTPRequestHandler):
                          AND {service_filter_join}
                         WHERE COALESCE(c.empresa_id, '') IN ({placeholders_emp})
                            OR ce_join.id IS NOT NULL
-                        GROUP BY cg.tipo_cliente
+                        GROUP BY c.perfil
                         """,
                         tuple([*empresa_ids, *empresa_ids]),
                     ).fetchall()
-                    for row in tipos:
-                        tipo = str(row_value(row, "tipo", "") or "").strip()
-                        if not tipo:
+                    for row in perfiles:
+                        perfil = str(row_value(row, "perfil", "") or "").strip()
+                        if not perfil:
                             continue
                         try:
-                            tipos_map[tipo] = int(row_value(row, "total", 0) or 0)
+                            perfil_map[perfil] = int(row_value(row, "total", 0) or 0)
                         except Exception:
-                            tipos_map[tipo] = 0
+                            perfil_map[perfil] = 0
                 except Exception as exc:
                     try:
-                        Handler._record_api_error("/api/gestoria_dashboard:tipos", exc)
+                        Handler._record_api_error("/api/gestoria_dashboard:perfiles", exc)
                     except Exception:
                         pass
 
-                def tipo_count(*labels):
-                    return sum(int(tipos_map.get(label, 0) or 0) for label in labels)
+                def perfil_count(*labels):
+                    return sum(int(perfil_map.get(label, 0) or 0) for label in labels)
 
-                payload["counts"]["autonomos"] = tipo_count("Autónomo", "Autonomo")
-                payload["counts"]["empresas"] = tipo_count("Empresa", "Empresas")
-                payload["counts"]["puntuales"] = tipo_count("Puntual", "Puntuales")
+                # cliente_gestoria.tipo_cliente se fija una vez al crear la ficha y no se
+                # resincroniza; clientes.perfil es el dato vivo, así que manda aquí.
+                payload["counts"]["autonomos"] = perfil_count("Autónomo", "Autonomo")
+                payload["counts"]["empresas"] = perfil_count("Empresa", "Empresas")
+
+                # Puntual: tiene ficha de gestoría pero ningún módulo recurrente
+                # (fiscal, laboral, contable o renta) activo — acude por trámites sueltos.
+                try:
+                    puntuales_row = conn.execute(
+                        f"""
+                        SELECT COUNT(*) AS total
+                        FROM cliente_gestoria cg
+                        JOIN clientes c ON c.id = cg.cliente_id
+                        LEFT JOIN clientes_empresas ce_join
+                          ON ce_join.cliente_id = c.id
+                         AND ce_join.empresa_id IN ({placeholders_emp})
+                         AND {service_filter_join}
+                        WHERE (COALESCE(c.empresa_id, '') IN ({placeholders_emp})
+                           OR ce_join.id IS NOT NULL)
+                          AND COALESCE(cg.mod_fiscal, 0) = 0
+                          AND COALESCE(cg.mod_laboral, 0) = 0
+                          AND COALESCE(cg.mod_contable, 0) = 0
+                          AND COALESCE(cg.mod_renta, 0) = 0
+                        """,
+                        tuple([*empresa_ids, *empresa_ids]),
+                    ).fetchone()
+                    payload["counts"]["puntuales"] = int(row_value(puntuales_row, "total", 0) or 0)
+                except Exception as exc:
+                    try:
+                        Handler._record_api_error("/api/gestoria_dashboard:puntuales", exc)
+                    except Exception:
+                        pass
 
             try:
                 docs_sin_archivo = conn.execute(
@@ -107264,7 +112161,12 @@ class Handler(BaseHTTPRequestHandler):
                     pass
 
             try:
-                # Histórico de clientes activos (ALTA/ACTIVO/ACTIVA) por tipo_cliente.
+                # Histórico de clientes activos (ALTA/ACTIVO/ACTIVA) por perfil.
+                # cliente_gestoria.tipo_cliente se fija una vez al crear la ficha y no se
+                # resincroniza (ver el mismo comentario más arriba, en counts.autonomos):
+                # aquí no tenía ni un solo valor "AUTONOMO" en toda la tabla, así que esta
+                # serie mostraba siempre 0 autónomos por más que hubiera 54 activos.
+                # clientes.perfil es el dato vivo, así que manda aquí también.
                 link_rows = conn.execute(
                     f"""
                     WITH ce_latest AS (
@@ -107286,9 +112188,9 @@ class Handler(BaseHTTPRequestHandler):
                       ce_latest.estado,
                       ce_latest.fecha_inicio,
                       ce_latest.fecha_fin,
-                      cg.tipo_cliente AS tipo_cliente
+                      c.perfil AS perfil
                     FROM ce_latest
-                    LEFT JOIN cliente_gestoria cg ON cg.cliente_id = ce_latest.cliente_id
+                    LEFT JOIN clientes c ON c.id = ce_latest.cliente_id
                     WHERE ce_latest.rn = 1
                     """,
                     tuple(empresa_ids),
@@ -107319,7 +112221,7 @@ class Handler(BaseHTTPRequestHandler):
                         for row in clients:
                             if not _active_at(row, day):
                                 continue
-                            tipo = normalize_lookup_text(row.get("tipo_cliente") or "")
+                            tipo = normalize_lookup_text(row.get("perfil") or "")
                             if tipo in {"AUTONOMO", "AUTONOMOS"}:
                                 a_count += 1
                             elif tipo in {"EMPRESA", "EMPRESAS"}:
@@ -107770,14 +112672,20 @@ class Handler(BaseHTTPRequestHandler):
                 """,
                 (empresa_id,),
             ).fetchone()
-            logo_url = str(row_value(row, "logo_url") or "").strip() if row else ""
-            if not logo_url:
+            # Aquí ya sabemos que la empresa tiene escaparate abierto: la consulta de
+            # arriba es la puerta, y para quien no la pasa esto es un 404 y punto.
+            if row is None:
                 self.send_error(404, "Not found")
                 return
+            logo_url = str(row_value(row, "logo_url") or "").strip()
             raw_bytes = None
             content_type = "image/png"
             if logo_url.startswith("s3://"):
-                safe_key = _normalize_s3_key(logo_url)
+                # `_normalize_s3_key` espera la clave, no la URI: pasarle el «s3://»
+                # entero dejaba la comprobación del prefijo en falso siempre, así que
+                # ningún logotipo de S3 se llegaba a servir. Es como lo hace el
+                # generador de informes, que sí funciona.
+                safe_key = _normalize_s3_key(logo_url[5:])
                 if safe_key and safe_key.startswith("company_logos/"):
                     raw_bytes, _err = s3_get_object_bytes(safe_key)
             elif logo_url.startswith("/uploads/s3_local/"):
@@ -107790,8 +112698,17 @@ class Handler(BaseHTTPRequestHandler):
                 if safe_path and safe_path.exists():
                     raw_bytes = safe_path.read_bytes()
             if not raw_bytes:
-                self.send_error(404, "Not found")
-                return
+                # La empresa está publicando, así que aquí hay alguien mirando un
+                # anuncio: un 404 le deja un hueco roto en el escaparate. Si su
+                # logotipo no se puede servir —no lo tiene, o la clave de S3 ya no
+                # resuelve— se enseña la marca de la casa, que es la misma caída que
+                # anuncia el listado. El 404 queda para quien no tiene escaparate.
+                respaldo = safe_resolve_under(ASSETS, "grupo_modernia_logo.png")
+                if not (respaldo and respaldo.exists()):
+                    self.send_error(404, "Not found")
+                    return
+                raw_bytes = respaldo.read_bytes()
+                logo_url = "/assets/grupo_modernia_logo.png"
             lower = logo_url.lower()
             download_name = None
             if lower.endswith(".jpg") or lower.endswith(".jpeg"):
@@ -108389,6 +113306,10 @@ class Handler(BaseHTTPRequestHandler):
                 (inmueble_id,),
             ).fetchone()
             servicios = get_inmueble_servicios(conn, inmueble_id)
+            # Puente empresa -> workspace: la ficha de Inmueble necesita saber a qué
+            # workspace tenant pertenece para poder lanzar acciones que viven allí
+            # (p. ej. crear una valoración pericial) sin una llamada aparte.
+            workspace_id_de_empresa = resolve_workspace_id_for_empresa(conn, inmueble["empresa_id"])
             json_response(
                 self,
                 {
@@ -108397,6 +113318,7 @@ class Handler(BaseHTTPRequestHandler):
                     "docs": [dict(r) for r in docs],
                     "captacion": dict(captacion) if captacion else {},
                     "servicios": servicios,
+                    "workspace_id": workspace_id_de_empresa,
                 },
             )
             return
@@ -109699,9 +114621,18 @@ class Handler(BaseHTTPRequestHandler):
                 where.append("v.inmueble_id = ?")
                 values.append(inmueble_id)
             where_clause = " AND ".join(where)
+            # Las columnas del resultado de la visita se añadieron después: se piden
+            # sólo si existen, para no romper una base que aún no las tenga.
+            ensure_visita_resultado_schema(conn)
+            campos_resultado = "".join(
+                f"v.{campo}, "
+                for campo in ("resultado", "comentario_propietario")
+                if campo in (table_columns(conn, "visitas") or set())
+            )
             rows = conn.execute(
                 f"""
                 SELECT v.id, v.fecha, v.hora, v.estado, v.asesor, v.notas,
+                       {campos_resultado}
                        v.demanda_id,
                        v.inmueble_id,
                        i.direccion AS inmueble,
@@ -110912,8 +115843,12 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/hipotecas_firmadas_pdf":
-            empresa_id = str(payload.get("empresa_id") or "").strip()
-            selected_year = str(payload.get("year") or "").strip()
+            # `payload` no existe en una petición GET: leerlo aquí hacía que este PDF
+            # reventara con UnboundLocalError **siempre**, sin excepción. Nadie ha
+            # podido descargar nunca el listado de hipotecas firmadas. Sus vecinos de
+            # unas líneas más arriba leen de `params`, que es de donde viene un GET.
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            selected_year = (params.get("year", [""])[0] or "").strip()
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
@@ -114351,7 +119286,49 @@ def main():
     parser.add_argument("--host", default="0.0.0.0", help="Host.")
     env_port = os.environ.get("PORT")
     parser.add_argument("--port", default=(env_port or "8000"), help="Port.")
+    parser.add_argument(
+        "--permitir-produccion", action="store_true",
+        help="Arrancar aunque la base sea la de producción. Sólo hace falta fuera de la nube.")
     args = parser.parse_args()
+
+    # `web/db_backend.py` lee el .env de la raíz al importarse, y ahí está el
+    # DATABASE_URL de producción. Levantar el CRM en un portátil abría, sin decir nada,
+    # un CRM local escribiendo en la base real: misma pantalla, mismos botones, datos de
+    # verdad. En la nube eso es lo correcto y por eso sólo se pregunta fuera de ella.
+    # Un Postgres en el propio equipo no es producción, es lo que hace falta para probar
+    # de verdad: la suite corre sobre SQLite y producción es Postgres, así que el único
+    # sitio donde se ven las diferencias es un Postgres local. Si el candado lo bloqueara
+    # también, la salida sería --permitir-produccion, y esa costumbre sí abre la de
+    # verdad. Se distingue por el host: el bucle local pasa, lo demás pregunta.
+    destino = ""
+    es_local = False
+    try:
+        crudo = (os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or "").strip()
+        partes = urllib.parse.urlparse(crudo)
+        # Sin usuario ni contraseña: esto se imprime en una terminal.
+        destino = (f" ({partes.hostname}/{(partes.path or '').lstrip('/')})"
+                   if partes.hostname else "")
+        es_local = (partes.hostname or "").lower() in ("127.0.0.1", "::1", "localhost")
+    except Exception:
+        destino = ""
+        es_local = False
+
+    if (db_is_postgres_enabled() and not os.environ.get("RENDER")
+            and not args.permitir_produccion and not es_local):
+        print(
+            f"\n  ALTO: esto va a conectarse a la base de PRODUCCIÓN{destino}.\n"
+            f"\n  Estás fuera de la nube, así que probablemente no es lo que quieres:"
+            f"\n  cualquier cosa que toques aquí la tocas en los datos de verdad.\n"
+            f"\n  · Para trabajar contra una base de prueba, vacía DATABASE_URL y"
+            f"\n    POSTGRES_URL ANTES de arrancar (el .env se lee al importar)."
+            f"\n  · Si de verdad quieres entrar en producción, añade"
+            f"\n    --permitir-produccion.\n",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    if db_is_postgres_enabled() and es_local and not os.environ.get("RENDER"):
+        # Pasa, pero se dice: si alguien creía estar sobre SQLite, que lo vea.
+        print(f"  Base: Postgres local{destino}.", file=sys.stderr)
     try:
         raw_port = str(args.port or "").strip()
         if raw_port in {"$PORT", "${PORT}", "PORT"}:

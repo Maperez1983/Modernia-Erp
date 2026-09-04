@@ -1682,6 +1682,93 @@ class LosGraficosTests(BasePortal):
         self.assertIn('class="meses"', html)
 
 
+class ElControlEnLaFichaTests(BasePortal):
+    """Sin un sitio donde anotarlo, el resultado de la visita no lo rellena nadie y
+    los dos gráficos nuevos se quedan vacíos para siempre."""
+
+    @staticmethod
+    def _app():
+        return (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+
+    def test_la_tabla_de_visitas_tiene_las_dos_columnas(self):
+        app = self._app()
+        self.assertIn('"resultado", "qué contarle al propietario"', app)
+
+    def test_las_opciones_son_las_mismas_que_acepta_el_servidor(self):
+        app = self._app()
+        i = app.index("const VISITA_RESULTADOS")
+        bloque = app[i:i + 700]
+        for clave in S.RESULTADOS_DE_VISITA:
+            with self.subTest(clave):
+                self.assertIn(f'"{clave}"', bloque)
+
+    def test_el_campo_avisa_de_que_lo_lee_el_propietario(self):
+        """Es OTRO campo distinto de las notas internas, y esa diferencia hay que
+        verla al escribir, no leerla en un manual."""
+        self.assertIn("Lo verá el propietario en su seguimiento", self._app())
+
+    def test_guarda_contra_el_endpoint_correcto(self):
+        self.assertIn('apiPost("/api/visita_resultado"', self._app())
+
+    def test_el_listado_de_visitas_devuelve_lo_anotado(self):
+        S.ensure_visita_resultado_schema(self.conn)
+        self.conn.execute("UPDATE visitas SET resultado='precio', comentario_propietario='Lo ven caro' WHERE id='v1'")
+        self.conn.commit()
+        estado, cuerpo = self._get(
+            f"/api/visitas?workspace_id={self.ws}&inmueble_id=inm1", con_sesion=True)
+        self.assertEqual(estado, 200, cuerpo)
+        fila = next(r for r in json.loads(cuerpo)["rows"] if r["id"] == "v1")
+        self.assertEqual(fila["resultado"], "precio")
+        self.assertEqual(fila["comentario_propietario"], "Lo ven caro")
+
+
+class LaListaDeAccesosEnLaFichaTests(BasePortal):
+    """El dato existía y no se veía: a quién se le abrió, si ha entrado y cuándo
+    caduca. Con tres o cuatro fichas ya no se sabe a quién se le dio el enlace."""
+
+    @staticmethod
+    def _app():
+        return (Path(__file__).resolve().parents[1] / "web" / "app.js").read_text(encoding="utf-8")
+
+    def test_la_ficha_pide_la_lista(self):
+        self.assertIn("/api/inmueble_portal_accesos?inmueble_id=", self._app())
+
+    def test_hay_boton_de_anular(self):
+        app = self._app()
+        self.assertIn("/api/inmueble_portal_acceso_revoke", app)
+        self.assertIn("Anular", app)
+
+    def test_solo_se_listan_los_vivos(self):
+        """Un acceso anulado no tiene por qué seguir ocupando sitio."""
+        self.assertIn("filter((f) => f.activo)", self._app())
+
+    def test_la_lista_se_refresca_al_abrir_uno_nuevo(self):
+        app = self._app()
+        i = app.index('apiPost("/api/inmueble_portal_acceso"')
+        self.assertIn("pintaAccesos()", app[i:i + 1800])
+
+    def test_el_endpoint_da_lo_que_pinta_la_ficha(self):
+        self._abre_portal()
+        estado, cuerpo = self._get("/api/inmueble_portal_accesos?inmueble_id=inm1", con_sesion=True)
+        self.assertEqual(estado, 200, cuerpo)
+        fila = json.loads(cuerpo)["rows"][0]
+        for clave in ("propietario", "activo", "caduca", "visitas", "ultima_visita"):
+            with self.subTest(clave):
+                self.assertIn(clave, fila)
+
+    def test_tras_anular_deja_de_estar_activo(self):
+        self._abre_portal()
+        self._post("/api/inmueble_portal_acceso_revoke", {"inmueble_id": "inm1"})
+        filas = json.loads(self._get("/api/inmueble_portal_accesos?inmueble_id=inm1", con_sesion=True)[1])["rows"]
+        self.assertTrue(filas)
+        self.assertFalse(any(f["activo"] for f in filas))
+
+    def test_el_token_no_aparece_en_esa_lista(self):
+        self._abre_portal()
+        _, cuerpo = self._get("/api/inmueble_portal_accesos?inmueble_id=inm1", con_sesion=True)
+        self.assertNotIn("token", cuerpo)
+
+
 class NadieEntraSinFirmarTests(BasePortal):
     """El consentimiento se pide ANTES de devolver un solo dato del expediente, no
     después de enseñarlo con un aviso encima."""

@@ -29,7 +29,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=338" />
+	    <link rel="stylesheet" href="styles.css?v=340" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -3030,100 +3030,38 @@
           </div>
         </div>
         <div class="form-card crm-workspace-view" data-workspace-view="periciales">
-          <div class="section-head">
-            <div>
-              <h3>Peritajes de valoración</h3>
-              <p class="muted">Informes periciales de valoración de inmuebles: testigos, evidencia y firma.</p>
+          <div data-periciales-tab="listado">
+            <div class="section-head">
+              <div>
+                <h3>Peritajes de valoración</h3>
+                <p class="muted">Informes periciales de valoración de inmuebles: testigos, evidencia y firma. Los expedientes se crean desde la ficha del inmueble en el CRM inmobiliario, con el botón "Valoración pericial".</p>
+              </div>
             </div>
+            <p id="workspacePericialesInfo" class="muted"></p>
+            <div id="workspacePericialesTable"></div>
           </div>
-          <form id="workspacePericialForm" class="form-grid">
-            <input type="hidden" name="id" />
-            <input type="hidden" name="workspace_id" />
-            <label class="span-2">
-              Empresa emisora
-              <select name="empresa_id" required></select>
-            </label>
-            <label class="span-2">
-              Denominación del inmueble (si no está gestionado en el CRM)
-              <input name="denominacion_manual" placeholder="Ej. Vivienda C/ Mayor 12" />
-            </label>
-            <label class="span-2">
-              Dirección
-              <input name="direccion_manual" placeholder="Calle, número, localidad" />
-            </label>
-            <label>
-              Referencia catastral
-              <input name="referencia_catastral_manual" />
-            </label>
-            <label>
-              Finalidad
-              <select name="finalidad">
-                <option value="Judicial - Divorcio">Judicial - Divorcio</option>
-                <option value="Judicial - Herencia">Judicial - Herencia</option>
-                <option value="Judicial - Expropiación">Judicial - Expropiación</option>
-                <option value="Judicial - Litigio de compraventa">Judicial - Litigio de compraventa</option>
-                <option value="Privada">Privada</option>
-              </select>
-            </label>
-            <label>
-              Referencia del procedimiento
-              <input name="procedimiento_referencia" placeholder="Ej. Autos 123/2026, Juzgado nº 3" />
-            </label>
-            <label>
-              Perito
-              <select name="perito_usuario_id"></select>
-            </label>
-            <label>
-              Nº de colegiado
-              <input name="colegiado_numero" />
-            </label>
-            <label>
-              Fecha de encargo
-              <input name="fecha_encargo" type="date" />
-            </label>
-            <label>
-              Fecha de la visita
-              <input name="fecha_visita" type="date" />
-            </label>
-            <label>
-              Fecha de valoración
-              <input name="fecha_valoracion" type="date" required />
-            </label>
-            <div class="form-grid-section">Superficies</div>
-            <label>
-              Catastral (m²)
-              <input name="superficie_catastral" inputmode="decimal" />
-            </label>
-            <label>
-              Registral (m²)
-              <input name="superficie_registral" inputmode="decimal" />
-            </label>
-            <label>
-              Medida en visita (m²)
-              <input name="superficie_medida" inputmode="decimal" />
-            </label>
-            <label>
-              Usada en el cálculo (m²)
-              <input name="superficie_calculo_usada" inputmode="decimal" required />
-            </label>
-            <label class="span-2">
-              Motivo de la superficie usada
-              <input name="motivo_superficie_usada" placeholder="Por qué se usa esta superficie y no otra" />
-            </label>
-            <div class="form-actions span-2">
-              <button type="submit">Guardar expediente</button>
-              <button type="button" id="workspacePericialResetBtn" class="secondary ghost">Nuevo</button>
-              <span id="workspacePericialStatus" class="muted"></span>
+
+          <div data-periciales-tab="ficha" class="hidden">
+            <div class="section-head" style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;">
+              <div style="flex:1;">
+                <h3 id="workspacePericialFichaTitle">Expediente pericial</h3>
+                <p class="muted" id="workspacePericialFichaSubtitle"></p>
+              </div>
+              <button type="button" class="secondary ghost" id="workspacePericialFichaBackBtn">Volver</button>
             </div>
-          </form>
-          <div class="section-head" style="margin-top:24px;">
-            <div>
-              <h3>Expedientes</h3>
-              <p class="muted">Testigos, evidencia, generación del informe y firma.</p>
+            <div class="crm-workspace-tabs" style="margin-top: 8px; flex-wrap: wrap;" id="workspacePericialFichaTabs">
+              <button class="tab active" type="button" data-pericial-ficha-tab="datos">Datos</button>
+              <button class="tab" type="button" data-pericial-ficha-tab="testigos">Testigos</button>
+              <button class="tab" type="button" data-pericial-ficha-tab="evidencia">Evidencia y documentos</button>
             </div>
+            <div class="form-actions" id="workspacePericialFichaAcciones" style="margin:14px 0;">
+              <button type="button" id="workspacePericialFichaGenerarPdfBtn" class="secondary ghost">Generar PDF</button>
+              <a id="workspacePericialFichaDescargarPdf" class="secondary ghost button-inline" href="#" target="_blank" rel="noreferrer">Descargar PDF</a>
+              <button type="button" id="workspacePericialFichaFirmarBtn" class="primary">Solicitar firma</button>
+              <span id="workspacePericialFichaAccionesStatus" class="muted"></span>
+            </div>
+            <div id="workspacePericialFichaPanel"></div>
           </div>
-          <p id="workspacePericialesInfo" class="muted"></p>
-          <div id="workspacePericialesTable"></div>
         </div>
         </div>
       </section>
@@ -4859,6 +4797,7 @@
 	                </div>
 	              </div>
 	              <button type="button" class="secondary ghost" id="inmuebleTecnoValoracionBtn">Informe valoración</button>
+			              <button type="button" class="secondary ghost" id="inmuebleValoracionPericialBtn">Valoración pericial</button>
 	            </div>
 					            <div class="tabs crm-lightning-subbar" id="inmuebleTabs">
 				              <button class="tab active" type="button" data-tab="datos">Información</button>
@@ -8658,6 +8597,50 @@
             </div>
           </div>
           <div id="estudioAltaDemanda" class="hidden">
+            <!-- Apuntar qué busca alguien tenía 14 campos, y el resultado se veía en
+                 los datos: de 2.261 clientes había 3 demandas, y las 3 habían
+                 entrado solas desde la web. Ninguna la había escrito nadie. Esto son
+                 los tres datos que se saben nada más colgar el teléfono; el resto se
+                 completa luego en el formulario de abajo, si hace falta. -->
+            <div class="form-card">
+              <h3>Apuntar qué busca</h3>
+              <p class="muted">Lo mínimo, en diez segundos. Luego se completa si hace falta.</p>
+              <form id="demandaRapidaForm">
+                <div class="form-grid">
+                  <label>
+                    Quién
+                    <input name="cliente_nombre" placeholder="Nombre y apellidos" required />
+                  </label>
+                  <label>
+                    Teléfono
+                    <input name="cliente_telefono" placeholder="Para poder llamarle" />
+                  </label>
+                  <label>
+                    Qué busca
+                    <select name="tipo">
+                      <option value="Piso">Piso</option>
+                      <option value="Casa">Casa</option>
+                      <option value="Ático">Ático</option>
+                      <option value="Local">Local</option>
+                      <option value="Terreno">Terreno</option>
+                      <option value="Otro">Otro</option>
+                    </select>
+                  </label>
+                  <label>
+                    Zona
+                    <input name="zona" placeholder="Centro, El Palo…" />
+                  </label>
+                  <label>
+                    Hasta cuánto
+                    <input name="precio_max" type="number" inputmode="numeric" placeholder="200000" />
+                  </label>
+                </div>
+                <div class="form-actions">
+                  <button type="submit">Apuntar</button>
+                  <span class="muted" id="demandaRapidaStatus"></span>
+                </div>
+              </form>
+            </div>
             <div class="form-card">
               <h3>Alta Demanda · Estudio Velazquez 2012 SL</h3>
               <p class="muted">Registro de compradores e inquilinos.</p>
@@ -12121,7 +12104,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=909",
+              "app.js?v=937",
               // Panel de la operación en la ficha del inmueble. Va aparte de
               // `app.js` a propósito: cuelga de una sola pantalla y se monta solo.
               "inmo_operacion.js?v=1",

@@ -964,6 +964,71 @@ Dos cosas fallaron durante la propia limpieza, y las dos están arregladas en el
   apuntes de contabilidad nombrando a una ficha retirada. Corregidos, y el guion ahora
   sustituye dentro del texto comprobando que siga siendo JSON válido.
 
+## El lector de pólizas inventaba nombres, y con ellos clientes
+
+Las fichas de cliente llamadas «Y CONDUCTOR», «del Seguro Por SANITAS», «Edificación y
+anexos» o «de la póliza TERESA RAMOS RUEDA» que había en producción no las tecleó nadie:
+**las escribió el OCR**. Cuando un PDF no encaja con el patrón de su compañía, el lector
+recorta la zona donde suele ir el tomador y se trae lo que hubiera al lado — la letra
+pequeña, la etiqueta del impreso, o media palabra cortada por el margen.
+
+«Y CONDUCTOR» salió de `POLIZA AUTO Nº 2002400455146 - ADRIAN GUTIERREZ.pdf`.
+
+### Medido, no supuesto
+
+Los PDF de la correduría se nombran `COMPAÑÍA RAMO NOMBRE Póliza NÚMERO.pdf`, así que el
+nombre del fichero sirve de referencia y se puede medir el acierto sobre **133 pólizas
+reales** sin teclear nada. Eso es `scripts/mide_el_ocr_de_polizas.py`.
+
+| | antes | después |
+|---|---|---|
+| **tomadores inventados** | **40** de 122 | **7** |
+| aciertos | 59 | 59 |
+| lo deja vacío | 23 | 56 |
+| número de póliza | 83 % | 83 % |
+
+De 40 nombres falsos a 7, sin perder un acierto. Lo que hace el arreglo es convertir
+«inventado» en «vacío», y **no son el mismo fallo**: vacío se lo pregunta a una persona,
+inventado lo escribe en la base. Occident pasó de 10 a 0; Mapfre, de 7 a 0.
+
+Los 7 que quedan no son fallos: son pólizas de impago donde el fichero lleva la dirección
+del piso alquilado (`ARAG IMPAGO - FLORES GARCIA 3, BAJO 5.2`) y el lector saca al
+arrendador, que es lo correcto.
+
+### Cómo funciona
+
+Dos piezas, ambas en `web/server.py`:
+
+- `limpia_tomador` quita lo que viene pegado a los extremos: la etiqueta del impreso
+  («de la póliza …»), los restos del margen («up … oD», «ica … pl») y el documento de
+  detrás («… NIF: 24835591F»). Sólo toca los bordes: «MALAGAMBA **DE OÑA** FERNANDO»
+  conserva su partícula.
+- `tomador_parece_un_nombre` descarta lo que es texto de contrato. La lista de palabras
+  sale del corpus real, no de la imaginación.
+
+### Dos errores por el camino, que valen más que el arreglo
+
+**Medí antes de comprobar la vara.** La primera medición decía «Occident 0 de 12» y estuve
+a punto de reescribir un lector que funcionaba: era mi extractor de referencia, que tiraba
+la letra de control del número (`8 11.239.386 E`). Corregida, el número estaba al 83 %, no
+al 67 %.
+
+**Y la primera prueba no probaba nada.** Quité el arreglo del código y las trece pruebas
+siguieron en verde: comprobaban las funciones sueltas, no que el lector las llamara. Sólo
+lo detectó la medición sobre el corpus. Hay tres pruebas más que ejercitan
+`parse_poliza_text` entero, y ésas sí se ponen rojas.
+
+Prueba: `tests/test_el_tomador_que_no_era_un_nombre.py`.
+
+### Lo que la carpeta de OneDrive no arregla
+
+Se revisaron los 133 PDF contra la base (`scripts/prueba_lector_de_polizas.py`, en local y
+sin que ningún documento salga del equipo). **113 pólizas ya existen en el CRM** casadas
+por número, y **110 de ellas ya tienen su PDF dentro**. Sólo faltan 5 documentos y 14
+pólizas nuevas.
+
+Es decir: subir la carpeta **no resuelve las 66 pólizas sin número**. Ésas no están aquí.
+
 ## Qué NO cubre esto todavía
 
 Conviene tenerlo claro para no dar por auditado lo que no lo está:

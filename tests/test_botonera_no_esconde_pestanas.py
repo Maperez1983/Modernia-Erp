@@ -22,6 +22,7 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parents[1]
 HTML = (RAIZ / "web" / "index.html").read_text(encoding="utf-8")
 CSS = (RAIZ / "web" / "styles.css").read_text(encoding="utf-8")
+APP = (RAIZ / "web" / "app.js").read_text(encoding="utf-8")
 
 #: Ancho de pestaña y hueco de cada variante, leídos de `styles.css`.
 MEDIDAS = {"--compact": (104, 8), "--micro": (86, 8), "": (92, 10)}
@@ -105,6 +106,55 @@ class LasEtiquetasNoSeAbrevianAMediasTests(unittest.TestCase):
         etiquetas = self._etiquetas()
         self.assertEqual(etiquetas.get("contabilidad"), "Contabilidad")
         self.assertEqual(etiquetas.get("presupuestos"), "Presupuestos")
+
+    def test_la_pestaña_de_comunidades_va_en_plural(self):
+        """Lista todas las comunidades; el singular decía otra cosa."""
+        self.assertEqual(self._etiquetas().get("comunidades"), "Comunidades")
+
+
+class SeVeDondeEstaElFocoYCualEstaAbiertaTests(unittest.TestCase):
+    """Dos avisos que se pisaban, y uno que no existía.
+
+    El anillo de foco de teclado es `button:focus` —peso 0-1-1— y el de la pestaña
+    abierta es `.tc-modulebar .tab.tc-module.active` —peso 0-4-0—. Gana el segundo,
+    así que al tabular hasta la pestaña ya seleccionada **no cambiaba nada en
+    pantalla**: no había forma de saber dónde estaba el foco. Encima el anillo general
+    va al 22 % de opacidad, y sobre el fondo dorado de la pestaña apenas se ve.
+
+    Y cuál estaba abierta se decía solo con ese borde: sin `aria-current`, quien
+    navega con lector de pantalla oía ocho botones iguales.
+    """
+
+    def test_hay_un_foco_propio_para_las_pestañas(self):
+        self.assertRegex(
+            CSS,
+            r"\.tc-modulebar \.tab\.tc-module:focus-visible",
+            "Sin regla propia, el foco lo tapa el estado activo.",
+        )
+
+    def test_ese_foco_gana_al_estado_activo(self):
+        """Si no cubre también `.active`, la pestaña abierta se queda sin foco visible."""
+        self.assertRegex(CSS, r"\.tc-modulebar \.tab\.tc-module\.active:focus-visible")
+
+    def test_va_en_focus_visible_y_no_en_focus(self):
+        """Con `:focus` a secas el anillo se queda pegado tras un clic de ratón."""
+        bloque = re.search(
+            r"\.tc-modulebar \.tab\.tc-module:focus-visible.*?\{([^}]*)\}", CSS, re.S
+        )
+        self.assertIsNotNone(bloque)
+        self.assertIn("outline", bloque.group(1))
+
+    def test_la_pestaña_abierta_se_anuncia(self):
+        """Con `role="tab"` el atributo correcto es `aria-selected`, no `aria-current`.
+
+        Lo pone `activarPatronDePestanas` para las nueve barras a la vez, escuchando la
+        clase `.active` que cada módulo ya mantiene. Quien lo comprueba de verdad, contra
+        un DOM y pulsando teclas, es `test_patron_de_pestanas.py`."""
+        i = APP.index("const activarPatronDePestanas")
+        cuerpo = APP[i: APP.index("\ndocument.addEventListener(", i)]
+        self.assertIn('setAttribute("role", "tab")', cuerpo)
+        self.assertIn('setAttribute("aria-selected"', cuerpo)
+        self.assertNotIn("aria-current", APP)
 
 
 if __name__ == "__main__":

@@ -2079,6 +2079,18 @@ const RoutingModule = window.CRMAppRouting || null;
   });
 })();
 
+// Las mismas seis opciones que acepta el servidor (`RESULTADOS_DE_VISITA`). Lista
+// cerrada a propósito: en texto libre no se puede contar, y contar es lo que
+// convierte cinco visitas en un argumento para ajustar el precio.
+const VISITA_RESULTADOS = [
+  ["interesa", "Le interesa"],
+  ["precio", "Le gusta, pero el precio le frena"],
+  ["distribucion", "Descarta por la distribución"],
+  ["zona", "Descarta por la zona"],
+  ["estado", "Descarta por el estado del inmueble"],
+  ["no_apareció", "No se presentó"],
+];
+
 const state = {
   appInitialized: false,
   authUser: null,
@@ -2654,11 +2666,17 @@ const workspaceFincasBudgetBrandCompany = document.getElementById("workspaceFinc
 const workspaceFincasBudgetBuildingPhoto = document.getElementById("workspaceFincasBudgetBuildingPhoto");
 const workspaceFincasBudgetBuildingPhotoPreview = document.getElementById("workspaceFincasBudgetBuildingPhotoPreview");
 const workspaceFincasBudgetBuildingPhotoStatus = document.getElementById("workspaceFincasBudgetBuildingPhotoStatus");
-const workspacePericialForm = document.getElementById("workspacePericialForm");
-const workspacePericialStatus = document.getElementById("workspacePericialStatus");
-const workspacePericialResetBtn = document.getElementById("workspacePericialResetBtn");
 const workspacePericialesTable = document.getElementById("workspacePericialesTable");
 const workspacePericialesInfo = document.getElementById("workspacePericialesInfo");
+const workspacePericialFichaTitle = document.getElementById("workspacePericialFichaTitle");
+const workspacePericialFichaSubtitle = document.getElementById("workspacePericialFichaSubtitle");
+const workspacePericialFichaBackBtn = document.getElementById("workspacePericialFichaBackBtn");
+const workspacePericialFichaTabs = document.getElementById("workspacePericialFichaTabs");
+const workspacePericialFichaPanel = document.getElementById("workspacePericialFichaPanel");
+const workspacePericialFichaGenerarPdfBtn = document.getElementById("workspacePericialFichaGenerarPdfBtn");
+const workspacePericialFichaDescargarPdf = document.getElementById("workspacePericialFichaDescargarPdf");
+const workspacePericialFichaFirmarBtn = document.getElementById("workspacePericialFichaFirmarBtn");
+const workspacePericialFichaAccionesStatus = document.getElementById("workspacePericialFichaAccionesStatus");
 const workspaceFincasBudgetQuickForm = document.getElementById("workspaceFincasBudgetQuickForm");
 const workspaceFincasBudgetOpenEngine = document.getElementById("workspaceFincasBudgetOpenEngine");
 const workspaceFincasBudgetResetBtn = document.getElementById("workspaceFincasBudgetResetBtn");
@@ -4154,6 +4172,7 @@ const inmuebleTecnoPrintMenu = document.getElementById("inmuebleTecnoPrintMenu")
 const inmuebleTecnoActions = document.getElementById("inmuebleTecnoActions");
 const inmuebleTecnoCampaignBtn = document.getElementById("inmuebleTecnoCampaignBtn");
 const inmuebleTecnoValoracionBtn = document.getElementById("inmuebleTecnoValoracionBtn");
+const inmuebleValoracionPericialBtn = document.getElementById("inmuebleValoracionPericialBtn");
   const inmuebleTecnoSideDemandasOpen = document.getElementById("inmuebleTecnoSideDemandasOpen");
   const inmuebleTecnoSideDemandasList = document.getElementById("inmuebleTecnoSideDemandasList");
   const inmuebleTecnoSideDemandasCount = document.getElementById("inmuebleTecnoSideDemandasCount");
@@ -7536,7 +7555,7 @@ const workspaceHasEnabledModule = (moduleKey = "") =>
 // igualmente «Seguros del workspace», vacía, y lo mismo con gestoría, financiación,
 // inmobiliaria, contabilidad y facturas recibidas.
 //
-// La salvaguarda importa más que la regla: mientras no se sepa qué módulos tiene el
+// La salvaguarda pesa más que la regla: mientras no se sepa qué módulos tiene el
 // workspace —al arrancar, o si la petición falla— no se esconde nada. Vale más una
 // tarjeta de sobra que un Hub en blanco porque una lista llegó tarde.
 const sincronizaTarjetasPorModulo = (raiz = document) => {
@@ -9650,9 +9669,16 @@ const setWorkspaceView = (view = "overview", options = {}) => {
     setWorkspaceFincasTab(state.workspaceFincasTab || "dashboard");
   }
   if (normalized === "periciales") {
-    hydrateWorkspaceCompanySelects();
-    void refreshWorkspacePericialPeritos();
-    void refreshWorkspacePericiales();
+    void refreshWorkspacePericiales().then(() => {
+      // Deep-link: si la URL ya trae un expediente concreto (compartido o
+      // recargado), se abre su ficha directamente en vez del listado.
+      const pericialParam = String(new URLSearchParams(window.location.search || "").get("pericial") || "").trim();
+      if (pericialParam) {
+        openWorkspacePericialFicha(pericialParam);
+      } else {
+        setWorkspacePericialesTab(state.workspacePericialesTab || "listado");
+      }
+    });
   }
   syncHoldingUrlParams();
   if (workspaceCompanySwitcher) {
@@ -10689,10 +10715,10 @@ const WORKSPACE_LAUNCHERS = {
     actionLabel: "Ver módulo",
     action: () => {
       if (isTenantWorkspaceMode()) {
-        focusWorkspaceView("periciales", workspacePericialForm, { scroll: true, forceTenantView: true });
+        focusWorkspaceView("periciales", workspacePericialesTable, { scroll: true, forceTenantView: true });
         return;
       }
-      focusWorkspaceView("periciales", workspacePericialForm);
+      focusWorkspaceView("periciales", workspacePericialesTable);
     },
   },
   facturacion: {
@@ -22222,11 +22248,19 @@ const hydrateWorkspaceCompanySelects = () => {
 
 // --- Peritajes de valoración -------------------------------------------
 
+const PERICIAL_CAMPOS_OBLIGATORIOS_LABEL = {
+  empresa_id: "Empresa emisora",
+  fecha_valoracion: "Fecha de valoración",
+  superficie_calculo_usada: "Usada en el cálculo (m²)",
+};
+
 // El desplegable de perito estaba vacío: nunca se rellenaba con los usuarios
 // de verdad del workspace. Reutiliza `/api/usuarios` (mismo endpoint que ya
-// usan los selectores de responsable), acotado por workspace.
-const refreshWorkspacePericialPeritos = async () => {
-  const select = workspacePericialForm?.querySelector('[name="perito_usuario_id"]');
+// usan los selectores de responsable), acotado por workspace. Recibe el
+// <select> a rellenar porque ahora vive dentro de la ficha, que se
+// reconstruye entera en cada render — ya no hay un formulario fijo del que
+// colgarlo.
+const hydrateWorkspacePericialPeritoSelect = async (select, valorPrevio = "") => {
   if (!select || !state.currentWorkspaceId) return;
   let usuarios = [];
   try {
@@ -22235,61 +22269,14 @@ const refreshWorkspacePericialPeritos = async () => {
   } catch (e) {
     return;
   }
-  const previo = select.value;
   select.innerHTML = `<option value="">Selecciona perito</option>${usuarios
     .map((u) => {
       const nombre = `${u.nombre || ""} ${u.apellido || ""}`.trim() || u.usuario || u.id;
       return `<option value="${escapeHtml(u.id)}" data-colegiado="${escapeHtml(u.colegiado_numero || "")}">${escapeHtml(nombre)}</option>`;
     })
     .join("")}`;
-  if (previo && Array.from(select.options).some((opt) => opt.value === previo)) {
-    select.value = previo;
-  }
-};
-
-// Al elegir perito, si el nº de colegiado del formulario está vacío se
-// autorrellena con el que ya tuviera guardado ese usuario — sin pisar lo que
-// se hubiera escrito a mano (puede firmar un sustituto con otro nº).
-workspacePericialForm?.querySelector('[name="perito_usuario_id"]')?.addEventListener("change", (ev) => {
-  const opt = ev.target.selectedOptions?.[0];
-  const colegiadoField = workspacePericialForm.querySelector('[name="colegiado_numero"]');
-  const colegiado = opt?.dataset?.colegiado || "";
-  if (colegiadoField && colegiado && !colegiadoField.value.trim()) {
-    colegiadoField.value = colegiado;
-  }
-});
-
-const fillWorkspacePericialForm = (row = null) => {
-  if (!workspacePericialForm) return;
-  workspacePericialForm.reset();
-  const set = (name, value) => {
-    const el = workspacePericialForm.querySelector(`[name="${name}"]`);
-    if (el) el.value = value == null ? "" : String(value);
-  };
-  set("id", row?.id || "");
-  set("workspace_id", state.currentWorkspaceId || "");
-  set("denominacion_manual", row?.denominacion_manual || "");
-  set("direccion_manual", row?.direccion_manual || "");
-  set("referencia_catastral_manual", row?.referencia_catastral_manual || "");
-  set("finalidad", row?.finalidad || "");
-  set("procedimiento_referencia", row?.procedimiento_referencia || "");
-  set("perito_usuario_id", row?.perito_usuario_id || "");
-  set("colegiado_numero", row?.colegiado_numero || "");
-  set("fecha_encargo", row?.fecha_encargo || "");
-  set("fecha_visita", row?.fecha_visita || "");
-  set("fecha_valoracion", row?.fecha_valoracion || "");
-  set("superficie_catastral", row?.superficie_catastral || "");
-  set("superficie_registral", row?.superficie_registral || "");
-  set("superficie_medida", row?.superficie_medida || "");
-  set("superficie_calculo_usada", row?.superficie_calculo_usada || "");
-  set("motivo_superficie_usada", row?.motivo_superficie_usada || "");
-  hydrateWorkspaceCompanySelects();
-  if (row?.empresa_id) {
-    const sel = workspacePericialForm.querySelector('[name="empresa_id"]');
-    if (sel) sel.value = row.empresa_id;
-  }
-  if (workspacePericialStatus) {
-    workspacePericialStatus.textContent = row ? `Editando: ${row.finalidad || row.id}` : "";
+  if (valorPrevio && Array.from(select.options).some((opt) => opt.value === valorPrevio)) {
+    select.value = valorPrevio;
   }
 };
 
@@ -22317,15 +22304,14 @@ const renderWorkspacePericialesList = () => {
   const rows = state.workspacePericialesRows || [];
   if (workspacePericialesInfo) workspacePericialesInfo.textContent = `${rows.length} expediente${rows.length === 1 ? "" : "s"}`;
   if (!rows.length) {
-    workspacePericialesTable.innerHTML = "<p class='muted'>Sin expedientes todavía.</p>";
+    workspacePericialesTable.innerHTML = "<p class='muted'>Sin expedientes todavía. Se crean desde la ficha del inmueble en el CRM inmobiliario, con el botón \"Valoración pericial\".</p>";
     return;
   }
   workspacePericialesTable.innerHTML = `
     <div class="workspace-billing-list">
       ${rows.map((row) => {
-        const denom = row.inmueble_denominacion || "Inmueble sin denominación";
+        const denom = row.denominacion_manual || row.direccion_manual || row.inmueble_denominacion || "Inmueble sin denominación";
         const valor = row.valor_final ? euroFormatter.format(Number(row.valor_final)) : "—";
-        const firmado = String(row.estado || "") === "Firmado";
         return `
           <div class="workspace-billing-row">
             <div>
@@ -22334,27 +22320,16 @@ const renderWorkspacePericialesList = () => {
             </div>
             <div class="workspace-billing-meta">
               <span>${escapeHtml(valor)}</span>
-              <a class="secondary ghost button-inline" href="/api/workspace_pericial_pdf?id=${encodeURIComponent(row.id)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}" target="_blank" rel="noreferrer">PDF</a>
-              ${!firmado ? `<button type="button" class="secondary ghost button-inline" data-pericial-edit="${escapeHtml(row.id)}">Editar</button>` : ""}
-              <button type="button" class="secondary ghost button-inline" data-pericial-gestionar="${escapeHtml(row.id)}">Testigos / Firma</button>
-              ${!firmado ? `<button type="button" class="secondary ghost button-inline" data-pericial-delete="${escapeHtml(row.id)}">Borrar</button>` : ""}
+              <button type="button" class="secondary ghost button-inline" data-pericial-abrir="${escapeHtml(row.id)}">Abrir expediente</button>
+              <button type="button" class="secondary ghost button-inline" data-pericial-delete="${escapeHtml(row.id)}">Borrar</button>
             </div>
           </div>
         `;
       }).join("")}
     </div>
   `;
-  workspacePericialesTable.querySelectorAll("[data-pericial-edit]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const row = rows.find((r) => r.id === btn.dataset.pericialEdit);
-      if (row) fillWorkspacePericialForm(row);
-    });
-  });
-  workspacePericialesTable.querySelectorAll("[data-pericial-gestionar]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const row = rows.find((r) => r.id === btn.dataset.pericialGestionar);
-      if (row) void openPericialModal(row);
-    });
+  workspacePericialesTable.querySelectorAll("[data-pericial-abrir]").forEach((btn) => {
+    btn.addEventListener("click", () => openWorkspacePericialFicha(btn.dataset.pericialAbrir));
   });
   workspacePericialesTable.querySelectorAll("[data-pericial-delete]").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -22369,159 +22344,623 @@ const renderWorkspacePericialesList = () => {
   });
 };
 
-workspacePericialForm?.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const fd = new FormData(workspacePericialForm);
-  const payload = Object.fromEntries(fd.entries());
-  payload.workspace_id = state.currentWorkspaceId || "";
-  try {
-    if (workspacePericialStatus) workspacePericialStatus.textContent = "Guardando...";
-    await apiPost("/api/workspace_pericial", payload);
-    if (workspacePericialStatus) workspacePericialStatus.textContent = "Guardado.";
-    fillWorkspacePericialForm(null);
-    await refreshWorkspacePericiales();
-  } catch (error) {
-    if (workspacePericialStatus) workspacePericialStatus.textContent = error?.message || "No se pudo guardar.";
-  }
-});
 
-workspacePericialResetBtn?.addEventListener("click", () => fillWorkspacePericialForm(null));
-
-const openPericialModal = async (row) => {
-  let modal = document.getElementById("pericialModal");
-  if (!modal) {
-    modal = document.createElement("div");
-    modal.id = "pericialModal";
-    modal.className = "modal hidden";
-    modal.innerHTML = `
-      <div class="modal-content" style="max-width: 720px;">
-        <div class="modal-header">
-          <h3>Testigos, evidencia y firma</h3>
-          <button type="button" class="secondary ghost" data-pericial-modal-close>Cerrar</button>
-        </div>
-        <div class="modal-body">
-          <div id="pericialModalChecklist" class="muted"></div>
-          <h4>Testigos</h4>
-          <div id="pericialModalTestigos"></div>
-          <form id="pericialModalTestigoForm" class="form-grid">
-            <label>Fuente<input name="fuente" placeholder="Idealista, notaría..." required /></label>
-            <label>Fecha de captura<input name="fecha_captura" type="date" /></label>
-            <label>Precio (€)<input name="precio" inputmode="decimal" required /></label>
-            <label>Superficie (m²)<input name="superficie" inputmode="decimal" required /></label>
-            <div class="form-actions span-2">
-              <button type="submit">Añadir testigo</button>
-              <span id="pericialModalTestigoStatus" class="muted"></span>
-            </div>
-          </form>
-          <div class="form-actions" style="margin-top:16px;">
-            <button type="button" id="pericialModalGenerarPdf" class="secondary ghost">Generar PDF</button>
-            <button type="button" id="pericialModalFirmar" class="primary">Solicitar firma</button>
-          </div>
-          <div id="pericialModalStatus" class="muted"></div>
-        </div>
-      </div>
-    `;
-    document.body.appendChild(modal);
-    modal.querySelector("[data-pericial-modal-close]").addEventListener("click", () => {
-      modal.classList.add("hidden");
-      modal.classList.remove("open");
-    });
-    modal.addEventListener("click", (ev) => {
-      if (ev.target === modal) {
-        modal.classList.add("hidden");
-        modal.classList.remove("open");
-      }
-    });
-  }
-  modal.dataset.pericialId = row.id;
-  modal.classList.remove("hidden");
-  modal.classList.add("open");
-  await refreshPericialModalContent(row.id);
-
-  const testigoForm = modal.querySelector("#pericialModalTestigoForm");
-  testigoForm.onsubmit = async (event) => {
-    event.preventDefault();
-    const fd = new FormData(testigoForm);
-    const payload = Object.fromEntries(fd.entries());
-    payload.workspace_id = state.currentWorkspaceId || "";
-    payload.pericial_id = row.id;
-    const statusEl = modal.querySelector("#pericialModalTestigoStatus");
-    try {
-      if (statusEl) statusEl.textContent = "Guardando...";
-      await apiPost("/api/workspace_pericial_testigo", payload);
-      testigoForm.reset();
-      if (statusEl) statusEl.textContent = "Añadido.";
-      await refreshPericialModalContent(row.id);
-      await refreshWorkspacePericiales({ silent: true });
-    } catch (error) {
-      if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
-    }
-  };
-
-  modal.querySelector("#pericialModalGenerarPdf").onclick = async () => {
-    const statusEl = modal.querySelector("#pericialModalStatus");
-    try {
-      if (statusEl) statusEl.textContent = "Generando...";
-      await apiPost("/api/workspace_pericial_pdf", { workspace_id: state.currentWorkspaceId, id: row.id });
-      if (statusEl) statusEl.textContent = "PDF generado. Puedes descargarlo desde el listado.";
-    } catch (error) {
-      if (statusEl) statusEl.textContent = error?.message || "No se pudo generar.";
-    }
-  };
-
-  modal.querySelector("#pericialModalFirmar").onclick = async () => {
-    const statusEl = modal.querySelector("#pericialModalStatus");
-    const signerNombre = window.prompt("Nombre de quien firma:", "") || "";
-    if (!signerNombre.trim()) return;
-    const signerNif = window.prompt("NIF de quien firma:", "") || "";
-    try {
-      if (statusEl) statusEl.textContent = "Solicitando firma...";
-      const res = await apiPost("/api/workspace_pericial_firmar", {
-        workspace_id: state.currentWorkspaceId, pericial_id: row.id,
-        signer_nombre: signerNombre, signer_nif: signerNif,
-      });
-      const url = res?.solicitud?.public_url ? `${window.location.origin}${res.solicitud.public_url}` : "";
-      if (statusEl) {
-        statusEl.textContent = url
-          ? `Solicitud creada. Enlace de firma (compártelo con el perito): ${url}`
-          : "Solicitud creada.";
-      }
-      await refreshWorkspacePericiales({ silent: true });
-    } catch (error) {
-      const detalle = error?.data?.faltan ? ` — ${error.data.faltan.join(" ")}` : "";
-      if (statusEl) statusEl.textContent = (error?.message || "No se pudo solicitar la firma.") + detalle;
-    }
-  };
+// Dos paneles dentro de la misma vista "Peritajes": el listado (con el alta
+// mínima) y la ficha de un expediente concreto. Nada de esto cambia de
+// página — solo se alternan estos dos contenedores, igual que hace Fincas
+// con la ficha de comunidad (`setWorkspaceFincasTab`).
+const setWorkspacePericialesTab = (tab = "listado") => {
+  const normalized = tab === "ficha" ? "ficha" : "listado";
+  state.workspacePericialesTab = normalized;
+  document.querySelectorAll("[data-periciales-tab]").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.pericialesTab !== normalized);
+  });
 };
 
-const refreshPericialModalContent = async (pericialId) => {
-  const modal = document.getElementById("pericialModal");
-  if (!modal) return;
+const openWorkspacePericialFicha = (id) => {
+  const pericialId = String(id || "").trim();
+  if (!pericialId) return;
+  state.workspacePericialSelectedId = pericialId;
+  state.workspacePericialFichaTab = "datos";
+  setWorkspacePericialesTab("ficha");
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    params.set("pericial", pericialId);
+    setUrlParams(params, { replace: true });
+  } catch (e) {}
+  void renderWorkspacePericialFicha();
+};
+
+const closeWorkspacePericialFicha = () => {
+  state.workspacePericialSelectedId = "";
+  setWorkspacePericialesTab("listado");
+  try {
+    const params = new URLSearchParams(window.location.search || "");
+    params.delete("pericial");
+    setUrlParams(params, { replace: true });
+  } catch (e) {}
+  void refreshWorkspacePericiales({ silent: true });
+};
+
+if (!window.__pericialFichaBound) {
+  window.__pericialFichaBound = true;
+  workspacePericialFichaBackBtn?.addEventListener("click", closeWorkspacePericialFicha);
+  workspacePericialFichaTabs?.querySelectorAll("[data-pericial-ficha-tab]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.workspacePericialFichaTab = String(btn.dataset.pericialFichaTab || "datos");
+      void renderWorkspacePericialFicha();
+    });
+  });
+}
+
+const renderWorkspacePericialFicha = async () => {
+  if (!workspacePericialFichaPanel) return;
+  const pericialId = String(state.workspacePericialSelectedId || "").trim();
+  if (!pericialId) return;
   let detalle;
   try {
     detalle = await api(`/api/workspace_pericial?id=${encodeURIComponent(pericialId)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}`);
   } catch (error) {
+    workspacePericialFichaPanel.innerHTML = `<p class="muted">${escapeHtml(error?.message || "No se pudo cargar el expediente.")}</p>`;
     return;
   }
-  const checklistEl = modal.querySelector("#pericialModalChecklist");
-  const faltan = detalle?.checklist_pendiente || [];
-  if (checklistEl) {
-    checklistEl.innerHTML = faltan.length
-      ? `<strong>Pendiente para poder firmar:</strong><ul>${faltan.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>`
-      : "<strong>Listo para firmar.</strong>";
+  const pericial = detalle?.pericial || {};
+  const calculo = detalle?.calculo || {};
+  const firmado = String(pericial.estado || "") === "Firmado";
+  const denom = pericial.denominacion_manual || pericial.direccion_manual || pericial.inmueble_denominacion || "Expediente pericial";
+
+  if (workspacePericialFichaTitle) workspacePericialFichaTitle.textContent = denom;
+  if (workspacePericialFichaSubtitle) {
+    const valor = pericial.valor_final ? euroFormatter.format(Number(pericial.valor_final)) : "sin valorar todavía";
+    workspacePericialFichaSubtitle.textContent = `${workspacePericialEstadoBadge(pericial.estado)} · ${pericial.finalidad || "-"} · ${valor}`;
   }
-  const testigosEl = modal.querySelector("#pericialModalTestigos");
-  const testigos = (detalle?.testigos || []).filter((t) => (t.estado || "activo") === "activo");
-  if (testigosEl) {
-    testigosEl.innerHTML = testigos.length
-      ? `<div class="workspace-billing-list">${testigos.map((t) => `
-          <div class="workspace-billing-row">
-            <div><strong>${escapeHtml(t.fuente || "-")}</strong>
-              <div class="muted">${escapeHtml(t.fecha_captura || "-")} · ${euroFormatter.format(Number(t.precio || 0))} · ${Number(t.superficie || 0)} m²</div>
-            </div>
-            <div class="workspace-billing-meta"><span>${t.valor_homogeneizado ? euroFormatter.format(Number(t.valor_homogeneizado)) + "/m²" : "—"}</span></div>
-          </div>`).join("")}</div>`
-      : "<p class='muted'>Sin testigos todavía.</p>";
+  const tab = String(state.workspacePericialFichaTab || "datos").trim() || "datos";
+  workspacePericialFichaTabs?.querySelectorAll("[data-pericial-ficha-tab]").forEach((btn) => {
+    btn.classList.toggle("active", String(btn.dataset.pericialFichaTab || "") === tab);
+  });
+
+  const faltan = detalle?.checklist_pendiente || [];
+  const checklistHtml = faltan.length
+    ? `<div class="muted" style="margin-bottom:12px;"><strong>Pendiente para poder firmar:</strong><ul style="margin:4px 0 0 18px;">${faltan.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul></div>`
+    : `<div class="muted" style="margin-bottom:12px;"><strong>Listo para firmar.</strong></div>`;
+
+  // Acciones fijas de la cabecera: se reasignan con onclick= en cada render
+  // (no addEventListener) para no ir acumulando listeners duplicados cada
+  // vez que se abre o se refresca la ficha.
+  if (workspacePericialFichaDescargarPdf) {
+    workspacePericialFichaDescargarPdf.href = `/api/workspace_pericial_pdf?id=${encodeURIComponent(pericialId)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}`;
+  }
+  if (workspacePericialFichaGenerarPdfBtn) {
+    workspacePericialFichaGenerarPdfBtn.onclick = async () => {
+      try {
+        if (workspacePericialFichaAccionesStatus) workspacePericialFichaAccionesStatus.textContent = "Generando...";
+        await apiPost("/api/workspace_pericial_pdf", { workspace_id: state.currentWorkspaceId, id: pericialId });
+        if (workspacePericialFichaAccionesStatus) workspacePericialFichaAccionesStatus.textContent = "PDF generado.";
+      } catch (error) {
+        if (workspacePericialFichaAccionesStatus) workspacePericialFichaAccionesStatus.textContent = error?.message || "No se pudo generar.";
+      }
+    };
+  }
+  if (workspacePericialFichaFirmarBtn) {
+    workspacePericialFichaFirmarBtn.classList.toggle("hidden", firmado);
+    workspacePericialFichaFirmarBtn.onclick = async () => {
+      const signerNombre = window.prompt("Nombre de quien firma:", "") || "";
+      if (!signerNombre.trim()) return;
+      const signerNif = window.prompt("NIF de quien firma:", "") || "";
+      try {
+        if (workspacePericialFichaAccionesStatus) workspacePericialFichaAccionesStatus.textContent = "Solicitando firma...";
+        const res = await apiPost("/api/workspace_pericial_firmar", {
+          workspace_id: state.currentWorkspaceId, pericial_id: pericialId,
+          signer_nombre: signerNombre, signer_nif: signerNif,
+        });
+        const url = res?.solicitud?.public_url ? `${window.location.origin}${res.solicitud.public_url}` : "";
+        if (workspacePericialFichaAccionesStatus) {
+          workspacePericialFichaAccionesStatus.textContent = url
+            ? `Solicitud creada. Enlace de firma (compártelo con el perito): ${url}`
+            : "Solicitud creada.";
+        }
+        await refreshWorkspacePericiales({ silent: true });
+      } catch (error) {
+        const detalleError = error?.data?.faltan ? ` — ${error.data.faltan.join(" ")}` : "";
+        if (workspacePericialFichaAccionesStatus) workspacePericialFichaAccionesStatus.textContent = (error?.message || "No se pudo solicitar la firma.") + detalleError;
+      }
+    };
+  }
+
+  if (tab === "datos") {
+    workspacePericialFichaPanel.innerHTML = `
+      ${checklistHtml}
+      <form class="form-grid" data-pericial-ficha-datos-form>
+        <label class="span-2">
+          Empresa emisora
+          <select name="empresa_id" required></select>
+        </label>
+        <label class="span-2">
+          Denominación del inmueble (si no está gestionado en el CRM)
+          <input name="denominacion_manual" placeholder="Ej. Vivienda C/ Mayor 12" value="${escapeHtml(String(pericial.denominacion_manual || ""))}" />
+        </label>
+        <label class="span-2">
+          Dirección
+          <input name="direccion_manual" placeholder="Calle, número, localidad" value="${escapeHtml(String(pericial.direccion_manual || ""))}" />
+        </label>
+        <div class="form-actions span-2" style="margin-top:-8px;">
+          <button type="button" data-pericial-ficha-buscar-entorno class="secondary ghost">Buscar entorno</button>
+          <span data-pericial-ficha-entorno-status class="muted"></span>
+        </div>
+        <label class="span-2">
+          Descripción del entorno
+          <textarea name="descripcion_entorno" rows="3" placeholder="Barrio, distrito y equipamientos cercanos. Se puede precargar con «Buscar entorno» y editar a mano.">${escapeHtml(String(pericial.descripcion_entorno || ""))}</textarea>
+        </label>
+        ${pericial.inmueble_id ? `
+        <label class="span-2">
+          Referencia catastral
+          <input value="${escapeHtml(String(pericial.inmueble_referencia_catastral || "Sin sincronizar todavía"))}" disabled />
+        </label>
+        <div class="form-actions span-2" style="margin-top:-8px;">
+          <button type="button" data-pericial-ficha-catastro-sync class="secondary ghost">Buscar y adjuntar ficha catastral</button>
+          <span data-pericial-ficha-catastro-status class="muted"></span>
+        </div>
+        ` : `
+        <label>
+          Referencia catastral
+          <input name="referencia_catastral_manual" value="${escapeHtml(String(pericial.referencia_catastral_manual || ""))}" />
+        </label>
+        `}
+        <label>
+          Finalidad
+          <select name="finalidad">
+            ${["Judicial - Divorcio", "Judicial - Herencia", "Judicial - Expropiación", "Judicial - Litigio de compraventa", "Privada"]
+              .map((v) => `<option value="${v}" ${String(pericial.finalidad || "") === v ? "selected" : ""}>${v}</option>`).join("")}
+          </select>
+        </label>
+        <label>
+          Referencia del procedimiento
+          <input name="procedimiento_referencia" placeholder="Ej. Autos 123/2026, Juzgado nº 3" value="${escapeHtml(String(pericial.procedimiento_referencia || ""))}" />
+        </label>
+        <label>
+          Perito
+          <select name="perito_usuario_id"></select>
+        </label>
+        <label>
+          Nº de colegiado
+          <input name="colegiado_numero" value="${escapeHtml(String(pericial.colegiado_numero || ""))}" />
+        </label>
+        <label>
+          Fecha de encargo
+          <input name="fecha_encargo" type="date" value="${escapeHtml(String(pericial.fecha_encargo || ""))}" />
+        </label>
+        <label>
+          Fecha de la visita
+          <input name="fecha_visita" type="date" value="${escapeHtml(String(pericial.fecha_visita || ""))}" />
+        </label>
+        <label>
+          Fecha de valoración *
+          <input name="fecha_valoracion" type="date" required value="${escapeHtml(String(pericial.fecha_valoracion || ""))}" />
+        </label>
+        <div class="form-grid-section">Superficies</div>
+        <label>
+          Catastral (m²)
+          <input name="superficie_catastral" inputmode="decimal" value="${escapeHtml(String(pericial.superficie_catastral ?? ""))}" />
+        </label>
+        <label>
+          Registral (m²)
+          <input name="superficie_registral" inputmode="decimal" value="${escapeHtml(String(pericial.superficie_registral ?? ""))}" />
+        </label>
+        <label>
+          Medida en visita (m²)
+          <input name="superficie_medida" inputmode="decimal" value="${escapeHtml(String(pericial.superficie_medida ?? ""))}" />
+        </label>
+        <label>
+          Usada en el cálculo (m²) *
+          <input name="superficie_calculo_usada" inputmode="decimal" required value="${escapeHtml(String(pericial.superficie_calculo_usada ?? ""))}" />
+        </label>
+        <label class="span-2">
+          Motivo de la superficie usada
+          <input name="motivo_superficie_usada" placeholder="Por qué se usa esta superficie y no otra" value="${escapeHtml(String(pericial.motivo_superficie_usada || ""))}" />
+        </label>
+        <label class="span-2">
+          Justificación del método (sale en la Conclusión del informe)
+          <textarea name="justificacion_metodo" rows="4" placeholder="Por qué se ha llegado a este valor: cuántos testigos, si alguno se ha descartado, qué ajustes se han aplicado...">${escapeHtml(String(calculo?.conclusion?.justificacion_metodo || ""))}</textarea>
+        </label>
+        <div class="form-actions span-2" style="flex-direction: column; align-items: flex-start; gap: 8px;">
+          <span class="muted">* Fecha de valoración y superficie usada en el cálculo son obligatorias.</span>
+          <div class="form-actions">
+            ${firmado ? `<span class="muted">Expediente firmado: no se puede editar.</span>` : `<button type="submit">Guardar</button><span data-pericial-ficha-datos-status class="muted"></span>`}
+          </div>
+        </div>
+      </form>
+    `;
+    const form = workspacePericialFichaPanel.querySelector("[data-pericial-ficha-datos-form]");
+    const empresaSelect = form.querySelector('[name="empresa_id"]');
+    const companies = state.currentWorkspaceDetail?.companies || [];
+    empresaSelect.innerHTML = companies.map((c) => `<option value="${escapeHtml(companyLegacyId(c))}">${escapeHtml(c.nombre || "-")}</option>`).join("");
+    empresaSelect.value = pericial.empresa_id || companyLegacyId(companies[0]) || "";
+    const peritoSelect = form.querySelector('[name="perito_usuario_id"]');
+    void hydrateWorkspacePericialPeritoSelect(peritoSelect, pericial.perito_usuario_id || "");
+    // Al elegir perito, si el nº de colegiado está vacío se autorrellena con
+    // el que ya tuviera guardado ese usuario — sin pisar lo que se hubiera
+    // escrito a mano (puede firmar un sustituto con otro nº).
+    peritoSelect.addEventListener("change", (ev) => {
+      const opt = ev.target.selectedOptions?.[0];
+      const colegiadoField = form.querySelector('[name="colegiado_numero"]');
+      const colegiado = opt?.dataset?.colegiado || "";
+      if (colegiadoField && colegiado && !colegiadoField.value.trim()) {
+        colegiadoField.value = colegiado;
+      }
+    });
+    // Si el expediente cuelga de un inmueble gestionado (sin dirección
+    // manual propia), "Buscar entorno" necesita algo por donde tirar: la
+    // dirección resuelta viaja en `inmueble_denominacion`.
+    if (!pericial.direccion_manual && pericial.inmueble_denominacion) {
+      form.dataset.direccionInmuebleResuelta = pericial.inmueble_denominacion;
+    }
+    const buscarEntornoBtn = form.querySelector("[data-pericial-ficha-buscar-entorno]");
+    const entornoStatus = form.querySelector("[data-pericial-ficha-entorno-status]");
+    buscarEntornoBtn?.addEventListener("click", async () => {
+      const direccionManual = String(form.querySelector('[name="direccion_manual"]')?.value || "").trim();
+      const direccion = direccionManual || String(form.dataset.direccionInmuebleResuelta || "").trim();
+      if (!direccion) {
+        if (entornoStatus) entornoStatus.textContent = "Escribe antes la dirección.";
+        return;
+      }
+      try {
+        if (entornoStatus) entornoStatus.textContent = "Buscando...";
+        const res = await apiPost("/api/workspace_pericial_entorno", { workspace_id: state.currentWorkspaceId || "", direccion, pericial_id: pericialId });
+        const campo = form.querySelector('[name="descripcion_entorno"]');
+        if (campo) campo.value = res?.texto || "";
+        if (entornoStatus) entornoStatus.textContent = "Encontrado. Revisa el texto antes de guardar.";
+      } catch (error) {
+        if (entornoStatus) entornoStatus.textContent = error?.message || "No se pudo buscar el entorno.";
+      }
+    });
+    const catastroSyncBtn = form.querySelector("[data-pericial-ficha-catastro-sync]");
+    const catastroStatus = form.querySelector("[data-pericial-ficha-catastro-status]");
+    catastroSyncBtn?.addEventListener("click", async () => {
+      try {
+        if (catastroStatus) catastroStatus.textContent = "Buscando en el Catastro...";
+        catastroSyncBtn.disabled = true;
+        await apiPost("/api/workspace_pericial_catastro_sync", { workspace_id: state.currentWorkspaceId || "", pericial_id: pericialId });
+        if (catastroStatus) catastroStatus.textContent = "Referencia encontrada y ficha catastral adjuntada.";
+        await renderWorkspacePericialFicha();
+      } catch (error) {
+        catastroSyncBtn.disabled = false;
+        if (catastroStatus) catastroStatus.textContent = error?.message || "No se pudo consultar el Catastro.";
+      }
+    });
+    if (!firmado) {
+      form.querySelector('button[type="submit"]')?.addEventListener("click", (event) => {
+        if (form.checkValidity()) return;
+        event.preventDefault();
+        const faltanCampos = Array.from(form.querySelectorAll(":invalid")).map((el) => PERICIAL_CAMPOS_OBLIGATORIOS_LABEL[el.name] || el.name);
+        const statusEl = form.querySelector("[data-pericial-ficha-datos-status]");
+        if (statusEl) statusEl.textContent = faltanCampos.length ? `Falta rellenar: ${faltanCampos.join(", ")}.` : "Revisa los campos marcados.";
+        form.reportValidity();
+      });
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        const fd = new FormData(form);
+        const payload = Object.fromEntries(fd.entries());
+        payload.id = pericialId;
+        payload.workspace_id = state.currentWorkspaceId || "";
+        const statusEl = form.querySelector("[data-pericial-ficha-datos-status]");
+        try {
+          if (statusEl) statusEl.textContent = "Guardando...";
+          await apiPost("/api/workspace_pericial", payload);
+          if (statusEl) statusEl.textContent = "Guardado.";
+          await refreshWorkspacePericiales({ silent: true });
+          await renderWorkspacePericialFicha();
+        } catch (error) {
+          if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
+        }
+      };
+    }
+    return;
+  }
+
+  if (tab === "testigos") {
+    // Cinco categorías fijas, las mismas que ya cita la sección "Metodología
+    // aplicada" del PDF (ubicación, superficie, estado, orientación, planta
+    // y antigüedad — la superficie no es un coeficiente, es la unidad base
+    // precio/m² de la que se parte).
+    const COEF_CATEGORIAS = [
+      { clave: "ubicacion", etiqueta: "Ubicación" },
+      { clave: "estado_conservacion", etiqueta: "Estado de conservación" },
+      { clave: "orientacion", etiqueta: "Orientación" },
+      { clave: "planta", etiqueta: "Planta" },
+      { clave: "antiguedad", etiqueta: "Antigüedad" },
+    ];
+    // Se muestran todos los estados, no solo los activos: un testigo
+    // descartado sigue siendo prueba de la diligencia del trabajo, no algo
+    // que desaparece de la vista.
+    const testigos = detalle?.testigos || [];
+    workspacePericialFichaPanel.innerHTML = `
+      ${checklistHtml}
+      <div data-pericial-ficha-testigos-list>
+        ${testigos.length
+          ? `<div class="workspace-billing-list">${testigos.map((t) => {
+              const descartado = (t.estado || "activo") === "descartado";
+              return `
+              <div class="workspace-billing-row" style="${descartado ? "opacity:0.55;" : ""}">
+                <div><strong>${escapeHtml(t.fuente || "-")}</strong>
+                  <div class="muted">${escapeHtml(t.fecha_captura || "-")} · ${euroFormatter.format(Number(t.precio || 0))} · ${Number(t.superficie || 0)} m²${descartado ? ` · Descartado: ${escapeHtml(t.motivo_descarte || "sin motivo registrado")}` : ""}</div>
+                </div>
+                <div class="workspace-billing-meta">
+                  <span>${t.valor_homogeneizado ? euroFormatter.format(Number(t.valor_homogeneizado)) + "/m²" : "—"}</span>
+                  ${firmado ? "" : `
+                  <button type="button" class="secondary ghost button-inline" data-testigo-editar="${escapeHtml(t.id)}">Editar</button>
+                  ${!descartado ? `<button type="button" class="secondary ghost button-inline" data-testigo-descartar="${escapeHtml(t.id)}">Descartar</button>` : ""}`}
+                </div>
+              </div>`;
+            }).join("")}</div>`
+          : "<p class='muted'>Sin testigos todavía.</p>"}
+      </div>
+      ${firmado ? "" : `
+      <div class="form-actions" style="margin-top:14px;">
+        <button type="button" data-pericial-ficha-buscar-inventario class="secondary ghost">Buscar en nuestro inventario</button>
+        <span data-pericial-ficha-inventario-status class="muted"></span>
+      </div>
+      <div data-pericial-ficha-inventario-resultados></div>
+      <form class="form-grid" data-pericial-ficha-testigo-form style="margin-top:10px;">
+        <input type="hidden" name="id" />
+        <label>Fuente<input name="fuente" placeholder="Idealista, notaría..." required /></label>
+        <label>Fecha de captura<input name="fecha_captura" type="date" /></label>
+        <label>Precio (€)<input name="precio" inputmode="decimal" required /></label>
+        <label>Superficie (m²)<input name="superficie" inputmode="decimal" required /></label>
+        <label class="span-2 hidden" data-testigo-descartado-wrap>
+          <input type="checkbox" name="descartado" style="width:auto;display:inline-block;margin-right:6px;" />
+          Marcar como descartado
+          <input name="motivo_descarte" placeholder="Motivo del descarte" style="margin-top:6px;" />
+        </label>
+        <div class="form-grid-section span-2">Coeficientes de homogeneización (opcional)</div>
+        ${COEF_CATEGORIAS.map((c) => `
+        <label>${c.etiqueta} — factor<input name="coef_${c.clave}_factor" inputmode="decimal" placeholder="1.00" /></label>
+        <label>${c.etiqueta} — motivo<input name="coef_${c.clave}_motivo" placeholder="Por qué se ajusta" /></label>`).join("")}
+        <div class="form-actions span-2">
+          <button type="submit" data-testigo-submit-label>Añadir testigo</button>
+          <button type="button" class="secondary ghost hidden" data-testigo-cancelar-edicion>Cancelar edición</button>
+          <span data-pericial-ficha-testigo-status class="muted"></span>
+        </div>
+      </form>`}
+    `;
+    if (firmado) return;
+    const testigoForm = workspacePericialFichaPanel.querySelector("[data-pericial-ficha-testigo-form]");
+    const testigoSubmitBtn = testigoForm.querySelector("[data-testigo-submit-label]");
+    const testigoCancelarBtn = testigoForm.querySelector("[data-testigo-cancelar-edicion]");
+    const testigoDescartadoWrap = testigoForm.querySelector("[data-testigo-descartado-wrap]");
+    const resetFormularioTestigo = () => {
+      testigoForm.reset();
+      testigoForm.querySelector('[name="id"]').value = "";
+      testigoSubmitBtn.textContent = "Añadir testigo";
+      testigoCancelarBtn.classList.add("hidden");
+      testigoDescartadoWrap.classList.add("hidden");
+    };
+    testigoCancelarBtn.onclick = resetFormularioTestigo;
+    testigoForm.onsubmit = async (event) => {
+      event.preventDefault();
+      const fd = new FormData(testigoForm);
+      const marcadoDescartado = testigoForm.querySelector('[name="descartado"]').checked;
+      const payload = {
+        id: fd.get("id") || "", estado: marcadoDescartado ? "descartado" : "activo",
+        motivo_descarte: marcadoDescartado ? String(fd.get("motivo_descarte") || "").trim() : "",
+        fuente: fd.get("fuente") || "", fecha_captura: fd.get("fecha_captura") || "",
+        precio: fd.get("precio") || "", superficie: fd.get("superficie") || "",
+        workspace_id: state.currentWorkspaceId || "", pericial_id: pericialId,
+      };
+      // Solo se manda la clave si de verdad hay un ajuste (factor distinto
+      // de 1 o un motivo escrito) — cinco claves neutras en cada testigo
+      // solo añadirían ruido al calculo_json.
+      const coeficientes = {};
+      COEF_CATEGORIAS.forEach((c) => {
+        const factorTexto = String(fd.get(`coef_${c.clave}_factor`) || "").trim();
+        const motivo = String(fd.get(`coef_${c.clave}_motivo`) || "").trim();
+        const factor = factorTexto ? Number(factorTexto) : 1;
+        if ((factorTexto && Math.abs(factor - 1) > 0.001) || motivo) {
+          coeficientes[c.clave] = { factor: factor || 1, motivo };
+        }
+      });
+      payload.coeficientes = JSON.stringify(coeficientes);
+      const statusEl = testigoForm.querySelector("[data-pericial-ficha-testigo-status]");
+      try {
+        if (statusEl) statusEl.textContent = "Guardando...";
+        await apiPost("/api/workspace_pericial_testigo", payload);
+        if (statusEl) statusEl.textContent = "Guardado.";
+        await refreshWorkspacePericiales({ silent: true });
+        await renderWorkspacePericialFicha();
+      } catch (error) {
+        if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
+      }
+    };
+    workspacePericialFichaPanel.querySelectorAll("[data-testigo-editar]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const t = testigos.find((x) => x.id === btn.dataset.testigoEditar);
+        if (!t) return;
+        testigoForm.querySelector('[name="id"]').value = t.id;
+        testigoForm.querySelector('[name="fuente"]').value = t.fuente || "";
+        testigoForm.querySelector('[name="fecha_captura"]').value = t.fecha_captura || "";
+        testigoForm.querySelector('[name="precio"]').value = t.precio || "";
+        testigoForm.querySelector('[name="superficie"]').value = t.superficie || "";
+        testigoDescartadoWrap.classList.remove("hidden");
+        testigoForm.querySelector('[name="descartado"]').checked = (t.estado || "activo") === "descartado";
+        testigoForm.querySelector('[name="motivo_descarte"]').value = t.motivo_descarte || "";
+        let coefsGuardados = {};
+        try { coefsGuardados = JSON.parse(t.coeficientes_json || "{}") || {}; } catch (e) {}
+        COEF_CATEGORIAS.forEach((c) => {
+          const ajuste = coefsGuardados[c.clave];
+          testigoForm.querySelector(`[name="coef_${c.clave}_factor"]`).value = ajuste?.factor ?? "";
+          testigoForm.querySelector(`[name="coef_${c.clave}_motivo"]`).value = ajuste?.motivo || "";
+        });
+        testigoSubmitBtn.textContent = "Guardar cambios";
+        testigoCancelarBtn.classList.remove("hidden");
+        testigoForm.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
+    workspacePericialFichaPanel.querySelectorAll("[data-testigo-descartar]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const t = testigos.find((x) => x.id === btn.dataset.testigoDescartar);
+        if (!t) return;
+        const motivo = window.prompt("Motivo del descarte:", "");
+        if (motivo == null) return;
+        try {
+          btn.disabled = true;
+          await apiPost("/api/workspace_pericial_testigo", {
+            id: t.id, workspace_id: state.currentWorkspaceId || "", pericial_id: pericialId,
+            estado: "descartado", motivo_descarte: motivo,
+            fuente: t.fuente || "", fecha_captura: t.fecha_captura || "",
+            precio: t.precio || "", superficie: t.superficie || "",
+            coeficientes: t.coeficientes_json || "{}",
+          });
+          await refreshWorkspacePericiales({ silent: true });
+          await renderWorkspacePericialFicha();
+        } catch (error) {
+          btn.disabled = false;
+          alert(error?.message || "No se pudo descartar.");
+        }
+      });
+    });
+    const buscarInventarioBtn = workspacePericialFichaPanel.querySelector("[data-pericial-ficha-buscar-inventario]");
+    buscarInventarioBtn.onclick = async () => {
+      const statusEl = workspacePericialFichaPanel.querySelector("[data-pericial-ficha-inventario-status]");
+      const resultadosEl = workspacePericialFichaPanel.querySelector("[data-pericial-ficha-inventario-resultados]");
+      const direccion = String(pericial.direccion_manual || pericial.inmueble_denominacion || "").trim();
+      if (!direccion) {
+        if (statusEl) statusEl.textContent = "El expediente no tiene dirección guardada todavía.";
+        return;
+      }
+      try {
+        if (statusEl) statusEl.textContent = "Buscando en el inventario...";
+        const res = await apiPost("/api/workspace_pericial_testigos_sugeridos", { workspace_id: state.currentWorkspaceId || "", direccion });
+        const candidatos = res?.testigos || [];
+        if (statusEl) statusEl.textContent = candidatos.length ? `${candidatos.length} candidato(s) encontrado(s).` : "Sin ventas propias cerca de esta dirección.";
+        if (resultadosEl) {
+          resultadosEl.innerHTML = candidatos.length
+            ? `<div class="workspace-billing-list">${candidatos.map((c, idx) => `
+                <div class="workspace-billing-row">
+                  <div><strong>${escapeHtml(c.direccion || "-")}</strong>
+                    <div class="muted">${escapeHtml(c.fecha || "-")} · ${euroFormatter.format(Number(c.precio || 0))} · ${c.superficie ? `${Number(c.superficie)} m²` : "sin superficie"}${c.distancia_km != null ? ` · ${c.distancia_km} km` : (c.mismo_codigo_postal ? " · mismo código postal" : "")}</div>
+                  </div>
+                  <div class="workspace-billing-meta"><button type="button" class="secondary ghost" data-inventario-anadir="${idx}">Añadir</button></div>
+                </div>`).join("")}</div>`
+            : "";
+          resultadosEl.querySelectorAll("[data-inventario-anadir]").forEach((btn) => {
+            btn.addEventListener("click", async () => {
+              const c = candidatos[Number(btn.dataset.inventarioAnadir)];
+              if (!c) return;
+              try {
+                btn.disabled = true;
+                await apiPost("/api/workspace_pericial_testigo", {
+                  workspace_id: state.currentWorkspaceId || "", pericial_id: pericialId,
+                  fuente: `CRM propio — ${c.direccion || "venta escriturada"}`,
+                  fecha_captura: c.fecha || "", precio: c.precio, superficie: c.superficie,
+                });
+                await refreshWorkspacePericiales({ silent: true });
+                await renderWorkspacePericialFicha();
+              } catch (error) {
+                btn.disabled = false;
+                btn.textContent = error?.message || "Error";
+              }
+            });
+          });
+        }
+      } catch (error) {
+        if (statusEl) statusEl.textContent = error?.message || "No se pudo buscar en el inventario.";
+      }
+    };
+    return;
+  }
+
+  if (tab === "evidencia") {
+    const evidencias = detalle?.evidencias || [];
+    const fotos = evidencias.filter((e) => e.tipo === "foto_visita");
+    // Dos orígenes: lo que sube el perito a mano (evidencias, en S3, con
+    // `doc_url`) y lo que genera el propio sistema (workspace_pericial_docs,
+    // en disco local, con `doc_key` ya como URL servible — p. ej. la ficha
+    // catastral sincronizada desde el inmueble enlazado).
+    const docsSubidos = evidencias.filter((e) => e.tipo === "documento_aportado")
+      .map((d) => ({ nombre: d.nombre, created_at: d.created_at, href: d.doc_url }));
+    const docsGenerados = (detalle?.docs || [])
+      .map((d) => ({ nombre: d.nombre, created_at: d.created_at, href: d.doc_key }));
+    const docs = [...docsGenerados, ...docsSubidos];
+    workspacePericialFichaPanel.innerHTML = `
+      <h4>Fotos de la visita</h4>
+      <p class="muted">Aparecerán en el anexo fotográfico del informe.</p>
+      <div>${fotos.length
+        ? `<div class="workspace-billing-list">${fotos.map((f) => `
+            <div class="workspace-billing-row">
+              <div><strong>${escapeHtml(f.nombre || "Foto de visita")}</strong>
+                <div class="muted">${escapeHtml(String(f.created_at || "").slice(0, 10))}</div>
+              </div>
+              <div class="workspace-billing-meta">${f.doc_url ? `<a class="secondary ghost button-inline" href="${escapeHtml(safeHrefUrl(f.doc_url))}" target="_blank" rel="noreferrer">Ver</a>` : ""}</div>
+            </div>`).join("")}</div>`
+        : "<p class='muted'>Sin fotos todavía.</p>"}</div>
+      ${firmado ? "" : `
+      <form data-pericial-ficha-foto-form class="form-grid">
+        <label class="span-2">Foto<input name="file" type="file" accept="image/*" required /></label>
+        <div class="form-actions span-2">
+          <button type="submit">Subir foto</button>
+          <span data-pericial-ficha-foto-status class="muted"></span>
+        </div>
+      </form>`}
+      <h4 style="margin-top:20px;">Documentación aportada</h4>
+      <p class="muted">Ficha catastral, nota simple, otros documentos tenidos a la vista. Se listan en el informe, no se embeben como imagen.</p>
+      <div>${docs.length
+        ? `<div class="workspace-billing-list">${docs.map((d) => `
+            <div class="workspace-billing-row">
+              <div><strong>${escapeHtml(d.nombre || "Documento aportado")}</strong>
+                <div class="muted">${escapeHtml(String(d.created_at || "").slice(0, 10))}</div>
+              </div>
+              <div class="workspace-billing-meta">${d.href ? `<a class="secondary ghost button-inline" href="${escapeHtml(safeHrefUrl(d.href))}" target="_blank" rel="noreferrer">Abrir</a>` : ""}</div>
+            </div>`).join("")}</div>`
+        : "<p class='muted'>Sin documentación aportada todavía.</p>"}</div>
+      ${firmado ? "" : `
+      <form data-pericial-ficha-doc-form class="form-grid">
+        <label>Nombre<input name="nombre" placeholder="Ficha catastral, Nota simple..." required /></label>
+        <label>Archivo<input name="file" type="file" required /></label>
+        <div class="form-actions span-2">
+          <button type="submit">Subir documento</button>
+          <span data-pericial-ficha-doc-status class="muted"></span>
+        </div>
+      </form>`}
+    `;
+    if (firmado) return;
+    const fotoForm = workspacePericialFichaPanel.querySelector("[data-pericial-ficha-foto-form]");
+    fotoForm.onsubmit = async (event) => {
+      event.preventDefault();
+      const statusEl = fotoForm.querySelector("[data-pericial-ficha-foto-status]");
+      const file = fotoForm.querySelector('[name="file"]')?.files?.[0] || null;
+      if (!file) return;
+      try {
+        if (statusEl) statusEl.textContent = "Subiendo...";
+        const upload = await uploadFileToS3(file, "periciales", statusEl);
+        const doc_key = upload?.key || "";
+        if (!doc_key) throw new Error("No se pudo subir el archivo.");
+        await apiPost("/api/workspace_pericial_evidencia", { workspace_id: state.currentWorkspaceId || "", pericial_id: pericialId, doc_key, tipo: "foto_visita" });
+        if (statusEl) statusEl.textContent = "Foto añadida.";
+        await renderWorkspacePericialFicha();
+      } catch (error) {
+        if (statusEl) statusEl.textContent = error?.message || "No se pudo subir la foto.";
+      }
+    };
+    const docForm = workspacePericialFichaPanel.querySelector("[data-pericial-ficha-doc-form]");
+    docForm.onsubmit = async (event) => {
+      event.preventDefault();
+      const statusEl = docForm.querySelector("[data-pericial-ficha-doc-status]");
+      const fd = new FormData(docForm);
+      const nombre = String(fd.get("nombre") || "").trim();
+      const file = docForm.querySelector('[name="file"]')?.files?.[0] || null;
+      if (!nombre || !file) return;
+      try {
+        if (statusEl) statusEl.textContent = "Subiendo...";
+        const upload = await uploadFileToS3(file, "periciales", statusEl);
+        const doc_key = upload?.key || "";
+        if (!doc_key) throw new Error("No se pudo subir el archivo.");
+        await apiPost("/api/workspace_pericial_evidencia", { workspace_id: state.currentWorkspaceId || "", pericial_id: pericialId, doc_key, tipo: "documento_aportado", nombre });
+        if (statusEl) statusEl.textContent = "Documento añadido.";
+        await renderWorkspacePericialFicha();
+      } catch (error) {
+        if (statusEl) statusEl.textContent = error?.message || "No se pudo subir el documento.";
+      }
+    };
+    return;
   }
 };
 
@@ -24934,7 +25373,6 @@ const renderWorkspaceFincasCommunityFicha = async () => {
                     </label>`).join("") || "<span class='muted'>ninguna</span>"}
                 </div>
               </div>` : ""}
-
             ${(ac.impugnaciones || []).length ? `
               <div class="muted" style="border-left:3px solid #c0392b;padding-left:.6rem;">
                 <strong>Impugnado.</strong>
@@ -25892,7 +26330,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
 	          payload.comunidad_id = comunidadId;
 	          if (!payload.estado) payload.estado = "Manual";
 	          const res = await guardarApunteDeComunidad(payload);
-	          if (res === null) return;
+	          if (res === null) { if (statusEl) statusEl.textContent = ""; return; }
 	          await refreshWorkspaceFincasLedger({ force: true, silent: true });
 	          reset();
 	          if (statusEl) statusEl.textContent = "Guardado.";
@@ -26618,7 +27056,7 @@ const openFincasCommunityFichaModal = (record) => {
 	            payload.comunidad_id = comunidadId;
 	            if (!payload.estado) payload.estado = "Manual";
 	            const res = await guardarApunteDeComunidad(payload);
-	            if (res === null) return;
+	            if (res === null) { if (statusEl) statusEl.textContent = ""; return; }
 	            await refreshWorkspaceFincasLedger({ force: true, silent: true });
 	            resetLedgerForm();
 	            setSubtab("manual");
@@ -30972,9 +31410,8 @@ const openCrmInmobiliario = () => {
   setTab("crm");
   updateTableVisibility();
   syncCrmLegalAvailability();
-  // La URL, antes de elegir la vista: `setCrmWorkspaceView` pregunta a
-  // `resolveCrmTecnocloudVertical()` en qué vertical está, y ésta mira el `?crm=`
-  // antes que nada. Si se pone después, la vertical se deduce de la vista anterior.
+  // La URL, antes de elegir la vista: `setCrmWorkspaceView` deduce la vertical del
+  // `?crm=` y, si no lo encuentra, la deduce de la vista anterior.
   // Mantener `crm=inmo` sirve además para que los deep-links funcionen aunque
   // `openCompany` haya puesto `?empresa=...`.
   const currentParams = new URLSearchParams(window.location.search);
@@ -30988,8 +31425,8 @@ const openCrmInmobiliario = () => {
   // Abrir el CRM inmobiliario volvía a la última vista usada, fuera de la vertical
   // que fuera: quien había estado en Financiaciones pulsaba «Inmobiliaria» y
   // aterrizaba en `crmViewFin`, un panel de dos píxeles y vacío. Reproducible las
-  // tres veces que se probó. Una vista de otra vertical no es «donde lo dejé» en
-  // ésta: se entra por la portada del módulo.
+  // tres veces que se probó, con el perfil limpio. Una vista de otra vertical no es
+  // «donde lo dejé» en ésta: se entra por la portada del módulo.
   const VISTAS_DE_OTRA_VERTICAL = new Set(["fin", "seguros", "gestoria"]);
   const vistaRecordada = String(state.crmWorkspaceView || "").trim();
   setCrmWorkspaceView(
@@ -58758,6 +59195,7 @@ const refreshCurrentInmuebleProfile = () => {
           <span class="muted inmueble-summary-portal-status" id="inmueblePortalToggleStatus">
             ${isVerified ? "" : "Aparece en portal cuando esté verificado."}
           </span>
+          <div id="inmueblePortalAccesos" style="flex-basis:100%;margin-top:6px"></div>
         </div>
       </div>
     `;
@@ -58793,6 +59231,47 @@ const refreshCurrentInmuebleProfile = () => {
         }
       };
     }
+    // A quién se le ha abierto el seguimiento, cuándo entró por última vez y si
+    // sigue vivo. Sin esta lista, con tres o cuatro fichas ya no se sabe a quién se
+    // le dio el enlace ni si lo ha llegado a abrir, y el dato existía sin verse.
+    const cajaAccesos = inmuebleSummaryCard.querySelector("#inmueblePortalAccesos");
+    const pintaAccesos = () => {
+      if (!cajaAccesos || !inmueble?.id) return;
+      api(`/api/inmueble_portal_accesos?inmueble_id=${encodeURIComponent(inmueble.id)}`)
+        .then((data) => {
+          const filas = (data?.rows || []).filter((f) => f.activo);
+          if (!filas.length) { cajaAccesos.innerHTML = ""; return; }
+          cajaAccesos.innerHTML = filas.map((f) => {
+            const visto = f.ultima_visita
+              ? `entró ${f.visitas === 1 ? "una vez" : f.visitas + " veces"}, la última el ${String(f.ultima_visita).slice(0, 10)}`
+              : "todavía no ha entrado";
+            return `<div class="muted" style="display:flex;gap:8px;align-items:center;font-size:12px;padding:3px 0">
+                <strong>${escapeHtml(f.propietario || "Propietario")}</strong>
+                <span>· ${escapeHtml(visto)}</span>
+                ${f.caduca ? `<span>· caduca el ${escapeHtml(String(f.caduca).slice(0, 10))}</span>` : ""}
+                <button type="button" class="secondary ghost button-inline" data-anular="1"
+                        style="padding:1px 8px;font-size:11px">Anular</button>
+              </div>`;
+          }).join("");
+          cajaAccesos.querySelectorAll("[data-anular]").forEach((b) => {
+            b.onclick = async () => {
+              b.disabled = true;
+              try {
+                const res = await apiPost("/api/inmueble_portal_acceso_revoke", { inmueble_id: inmueble.id });
+                if (res?.error) throw new Error(res.error);
+                if (portalStatus) portalStatus.textContent = "Acceso anulado. El enlace deja de funcionar.";
+                pintaAccesos();
+              } catch (err) {
+                b.disabled = false;
+                if (portalStatus) portalStatus.textContent = err?.message || "No se pudo anular.";
+              }
+            };
+          });
+        })
+        .catch(() => { cajaAccesos.innerHTML = ""; });
+    };
+    pintaAccesos();
+
     const ownerPreviewBtn = inmuebleSummaryCard.querySelector("#inmuebleOwnerPreviewBtn");
     if (ownerPreviewBtn) {
       ownerPreviewBtn.onclick = (event) => {
@@ -58847,6 +59326,7 @@ const refreshCurrentInmuebleProfile = () => {
           if (enlace) {
             try { await navigator.clipboard?.writeText(enlace); } catch (e) {}
           }
+          pintaAccesos();
         } catch (err) {
           if (portalStatus) portalStatus.textContent = err?.message || "No se pudo abrir el seguimiento.";
         } finally {
@@ -64162,7 +64642,10 @@ const loadInmuebleVisitas = (inmuebleId, empresaId = "") => {
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
-    ["fecha", "hora", "estado", "cliente", "asesor"].forEach((col) => {
+    // «Resultado» y «Qué contarle al propietario» son columnas nuevas: hasta ahora
+    // una visita era sólo una fecha, y lo que pregunta un vendedor después no es
+    // cuándo fue, es qué dijeron.
+    ["fecha", "hora", "estado", "cliente", "asesor", "resultado", "qué contarle al propietario"].forEach((col) => {
       const th = document.createElement("th");
       th.textContent = formatHeader(col);
       trHead.appendChild(th);
@@ -64186,6 +64669,42 @@ const loadInmuebleVisitas = (inmuebleId, empresaId = "") => {
         td.textContent = formatted === null ? "" : formatted;
         tr.appendChild(td);
       });
+
+      const guarda = (extra) => {
+        const carga = { visita_id: row.id, resultado: selResultado.value,
+                        comentario_propietario: campoComentario.value, ...extra };
+        aviso.textContent = "Guardando…";
+        apiPost("/api/visita_resultado", carga)
+          .then((res) => { aviso.textContent = res?.error ? res.error : "Guardado"; })
+          .catch((err) => { aviso.textContent = err?.message || "No se pudo guardar"; });
+      };
+
+      const tdResultado = document.createElement("td");
+      const selResultado = document.createElement("select");
+      selResultado.innerHTML = '<option value="">— sin anotar —</option>' +
+        VISITA_RESULTADOS.map((r) => `<option value="${r[0]}">${r[1]}</option>`).join("");
+      selResultado.value = row.resultado || "";
+      tdResultado.appendChild(selResultado);
+      tr.appendChild(tdResultado);
+
+      const tdComentario = document.createElement("td");
+      const campoComentario = document.createElement("input");
+      campoComentario.type = "text";
+      campoComentario.maxLength = 500;
+      // El aviso deja claro a quién le llega: es OTRO campo distinto de las notas
+      // internas, y esa diferencia hay que verla al escribir, no leerla en un manual.
+      campoComentario.placeholder = "Lo verá el propietario en su seguimiento";
+      campoComentario.value = row.comentario_propietario || "";
+      const aviso = document.createElement("span");
+      aviso.className = "muted";
+      aviso.style.cssText = "display:block;font-size:11px;margin-top:2px";
+      tdComentario.appendChild(campoComentario);
+      tdComentario.appendChild(aviso);
+      tr.appendChild(tdComentario);
+
+      selResultado.onchange = () => guarda({});
+      campoComentario.onblur = () => { if (campoComentario.value !== (row.comentario_propietario || "")) guarda({}); };
+
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
@@ -76322,7 +76841,7 @@ const renderSimpleTable = (container, columns, rows) => {
   container.appendChild(table);
 };
 
-// Diario/Mayor/Balance/PyG/Facturas vacíos a la vez, en modo "empresa" (no
+// Con Fincas Velazquez como empresa activa (y no un cliente concreto de la
 // "cliente"), no siempre es "no hay nada": la contabilidad de cada empresa del
 // workspace es independiente, y el usuario puede llevar activa una que nunca
 // tuvo asientos aunque otra del mismo workspace sí. "Sin datos." no lo dice.
@@ -89278,7 +89797,10 @@ if (workspaceFincasLedgerForm) {
     payload.workspace_id = state.currentWorkspaceId;
     try {
       const data = await guardarApunteDeComunidad(payload);
-      if (data === null) return;
+      if (data === null) {
+        if (workspaceFincasLedgerStatus) workspaceFincasLedgerStatus.textContent = "";
+        return;
+      }
       if (workspaceFincasLedgerStatus) workspaceFincasLedgerStatus.textContent = "Movimiento guardado.";
       await refreshWorkspaceFincasLedger({ force: true, silent: true });
       fillWorkspaceFincasLedgerForm();
@@ -90911,6 +91433,44 @@ if (inmuebleTecnoValoracionBtn) {
       return;
     }
     alert("Informe de valoración: pendiente de configurar en este entorno.");
+  });
+}
+
+if (inmuebleValoracionPericialBtn) {
+  inmuebleValoracionPericialBtn.addEventListener("click", async () => {
+    const inmuebleId = String(state.currentInmuebleId || "").trim();
+    if (!inmuebleId) return;
+    const textoOriginal = inmuebleValoracionPericialBtn.textContent;
+    inmuebleValoracionPericialBtn.disabled = true;
+    inmuebleValoracionPericialBtn.textContent = "Creando...";
+    try {
+      // Se relee /api/inmueble en el momento del clic (no se confía en el
+      // estado ya cargado): así se tiene siempre el workspace_id resuelto
+      // fresco y los datos actuales del inmueble (m2, empresa_id).
+      const data = await api(`/api/inmueble?id=${encodeURIComponent(inmuebleId)}`);
+      const inmueble = data?.inmueble || {};
+      const workspaceId = String(data?.workspace_id || "").trim();
+      if (!workspaceId) {
+        alert("Esta empresa no está vinculada a un único workspace; no se puede crear el expediente automáticamente.");
+        return;
+      }
+      const hoy = new Date().toISOString().slice(0, 10);
+      const res = await apiPost("/api/workspace_pericial", {
+        workspace_id: workspaceId,
+        empresa_id: inmueble.empresa_id || "",
+        inmueble_id: inmuebleId,
+        fecha_valoracion: hoy,
+        superficie_calculo_usada: inmueble.m2 || "",
+      });
+      if (!res?.id) throw new Error("No se pudo crear el expediente.");
+      openHolding({ mode: "tenant", workspace: workspaceId, view: "periciales" });
+      openWorkspacePericialFicha(res.id);
+    } catch (error) {
+      alert(error?.message || "No se pudo crear la valoración pericial.");
+    } finally {
+      inmuebleValoracionPericialBtn.disabled = false;
+      inmuebleValoracionPericialBtn.textContent = textoOriginal;
+    }
   });
 }
 
@@ -94256,6 +94816,44 @@ if (compraventaCerrarBtn) {
       }
     } catch (error) {
       if (compraventaFormStatus) compraventaFormStatus.textContent = error?.message || "No se pudo cerrar.";
+    }
+  });
+}
+
+// Apuntar qué busca alguien tenía 14 campos y el resultado estaba en los datos: de
+// 2.261 clientes había 3 demandas, y las 3 habían entrado solas desde la web.
+// Ninguna la escribió nadie. Esto pide lo que se sabe al colgar el teléfono.
+const demandaRapidaForm = document.getElementById("demandaRapidaForm");
+const demandaRapidaStatus = document.getElementById("demandaRapidaStatus");
+if (demandaRapidaForm) {
+  demandaRapidaForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const datos = Object.fromEntries(new FormData(demandaRapidaForm).entries());
+    if (!String(datos.cliente_nombre || "").trim()) {
+      if (demandaRapidaStatus) demandaRapidaStatus.textContent = "Falta el nombre.";
+      return;
+    }
+    const boton = demandaRapidaForm.querySelector('button[type="submit"]');
+    if (boton) boton.disabled = true;
+    if (demandaRapidaStatus) demandaRapidaStatus.textContent = "Guardando…";
+    // El servidor crea el cliente si no existe, así que no hace falta darlo de alta
+    // antes: ése era otro paso que sobraba.
+    datos.empresa_nombre = resolveCrmInmoEmpresaNombre() || state.currentWorkspaceCompanyName || DASHBOARD_COMPANY;
+    datos.estado = "Activa";
+    try {
+      const res = await apiPost("/api/demandas", datos);
+      if (res?.error) throw new Error(res.error);
+      if (demandaRapidaStatus) {
+        demandaRapidaStatus.textContent = `Apuntado. ${String(datos.cliente_nombre).trim()} busca ${datos.tipo || "algo"}${datos.zona ? " en " + datos.zona : ""}.`;
+      }
+      demandaRapidaForm.reset();
+      loadCrmDemandas();
+      const scope = resolveInmoScopeParams() || {};
+      loadDemandasList(scope?.empresa_id || resolveLegacyEmpresaId(resolveCrmInmoEmpresa()));
+    } catch (err) {
+      if (demandaRapidaStatus) demandaRapidaStatus.textContent = err?.message || "No se pudo guardar.";
+    } finally {
+      if (boton) boton.disabled = false;
     }
   });
 }
