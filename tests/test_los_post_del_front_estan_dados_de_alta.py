@@ -26,12 +26,17 @@ import unittest
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[1]
-FRONT_FICHEROS = ["app.js", "index.html", "app-routing.js", "app-auth.js", "ui-foundation.js", "app_shared.js"]
+FRONT_FICHEROS = ["app.js", "index.html", "app-routing.js", "app-auth.js", "ui-foundation.js",
+                  "app_shared.js", "inmo_operacion.js"]
 FRONT = "\n".join((RAIZ / "web" / n).read_text(encoding="utf-8") for n in FRONT_FICHEROS)
 SERVER = (RAIZ / "web" / "server.py").read_text(encoding="utf-8")
 
-# Ayudantes del front que siempre mandan POST.
-AYUDANTES_POST = ("postJsonWithDbRetry", "postJson", "loadPdfFromApi", "postForm")
+# Ayudantes del front que siempre mandan POST. Faltaba `apiPost`, que es el más usado
+# después de `fetch` —39 rutas—, y por ese hueco se colaron tres el 2026-08-21: cerrar
+# una compraventa, la preparación guiada del inmueble y reprocesar el OCR de una nómina.
+# La prueba pasaba en verde sin haber mirado ninguna de las tres.
+AYUDANTES_POST = ("apiPost", "postJsonWithDbRetry", "postJsonWithRetryBasic", "postJson",
+                  "postPayload", "loadPdfFromApi", "downloadPdfFromApi", "postForm")
 
 
 def rutas_permitidas():
@@ -70,7 +75,7 @@ class TodoLoQueElFrontMandaPorPostExisteTests(unittest.TestCase):
 
     def test_el_barrido_encuentra_algo(self):
         """Si el regex dejara de reconocer las llamadas, el test de arriba pasaría vacío."""
-        self.assertGreater(len(rutas_que_el_front_manda_por_post()), 100)
+        self.assertGreater(len(rutas_que_el_front_manda_por_post()), 240)
 
 
 class LasRutasPublicasLleganAComprobarseTests(unittest.TestCase):

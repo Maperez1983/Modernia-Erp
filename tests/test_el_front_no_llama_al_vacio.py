@@ -19,7 +19,8 @@ import unittest
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parents[1]
-FRONT = ["app.js", "index.html", "app-routing.js", "app-auth.js", "ui-foundation.js", "app_shared.js"]
+FRONT = ["app.js", "index.html", "app-routing.js", "app-auth.js", "ui-foundation.js",
+         "app_shared.js", "inmo_operacion.js"]
 
 
 def texto_del_front():
@@ -31,12 +32,21 @@ class NingunEndpointLlamadoSeQuedaSinRutaTests(unittest.TestCase):
         front = texto_del_front()
         servidor = (RAIZ / "web" / "server.py").read_text(encoding="utf-8")
 
-        # Solo rutas literales y completas: las que se construyen con plantilla
-        # (`/api/x_${y}`) o se comparan con startsWith no se pueden resolver aquí.
+        # La ruta puede acabar en la comilla de cierre —"/api/clientes"— o seguir con
+        # parámetros dentro de una plantilla: `/api/ocr_job?id=${jobId}`. Mirar solo el
+        # primer caso dejaba 162 rutas sin vigilar, más de un tercio de las que el front
+        # pide de verdad, y justo las de los listados y descargas, que son las que más
+        # llevan parámetros.
+        # Lo que decide si es una llamada o un trozo es el carácter que sigue: cerrar la
+        # comilla o abrir parámetros ("?") es una ruta completa; seguir con `${` es una
+        # ruta que se construye al vuelo, como "/api/inmo_" + vertical. Descartar por
+        # "es prefijo de otra ruta del servidor" sería más simple y taparía justo el
+        # caso peor: llamar a /api/demandas cuando solo existe /api/demandas_update.
         pedidos = set()
-        for cita, ruta in re.findall(r'(["\'`])(/api/[a-z0-9_]+)\1', front):
-            pedidos.add(ruta)
-        # Descartar los que el propio front usa como prefijo.
+        for ruta, siguiente in re.findall(r'["\'`](/api/[a-z0-9_]+)(.?)', front):
+            if siguiente in ('"', "'", "`", "?"):
+                pedidos.add(ruta)
+
         prefijos = set(re.findall(r'startsWith\(\s*["\'`](/api/[a-z0-9_]+)', front))
         pedidos -= prefijos
 

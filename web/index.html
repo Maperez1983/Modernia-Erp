@@ -29,7 +29,7 @@
 	    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 	    <meta name="apple-mobile-web-app-title" content="Verifika²" />
 	    <title>Verifika² · CRM & Portal</title>
-	    <link rel="stylesheet" href="styles.css?v=337" />
+	    <link rel="stylesheet" href="styles.css?v=338" />
 	    <link rel="manifest" href="manifest.webmanifest?v=18" />
 	    <link rel="icon" href="/icons/ios/v28/icon-192.png" />
 	    <link rel="apple-touch-icon" sizes="180x180" href="/icons/ios/v28/apple-touch-icon-180.png" />
@@ -124,6 +124,10 @@
             <button type="button" class="app-side-item" data-workspace-view-tab="fincas" title="Fincas">
               <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-building-home"></use></svg></span>
               <span class="app-side-label">Fincas</span>
+            </button>
+            <button type="button" class="app-side-item" data-workspace-view-tab="periciales" title="Peritajes">
+              <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-file-check"></use></svg></span>
+              <span class="app-side-label">Peritajes</span>
             </button>
             <button type="button" class="app-side-item" data-workspace-view-tab="rrhh" title="RRHH">
               <span class="app-side-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><use href="#ico-users"></use></svg></span>
@@ -384,6 +388,10 @@
                 <label>
                   Razón social
                   <input name="razon_social" placeholder="Ej. Empresa Servicios S.L." />
+                </label>
+                <label class="span-2">
+                  Nombre comercial (escaparate público)
+                  <input name="nombre_comercial" placeholder="Con el que se anuncian sus inmuebles. En blanco: Grupo Modernia" />
                 </label>
                 <label>
                   CIF/NIF
@@ -1351,9 +1359,9 @@
 				              </div>
 				            </div>
 				            <div class="tabs crm-lightning-subbar" id="irpfScenarioTabs">
-				              <button class="tab active" type="button" data-irpf-slot="A">Ejemplo 1</button>
-				              <button class="tab" type="button" data-irpf-slot="B">Ejemplo 2</button>
-				              <button class="tab" type="button" data-irpf-slot="C">Ejemplo 3</button>
+				              <button class="tab active" type="button" data-irpf-slot="A">Venta (precio real)</button>
+				              <button class="tab" type="button" data-irpf-slot="B">Escritura</button>
+				              <button class="tab" type="button" data-irpf-slot="C">Alternativo</button>
 				            </div>
 				            <div class="form-card" id="irpfScenarioPanel">
 				              <div class="form-grid fiscal-grid">
@@ -2302,7 +2310,7 @@
 	              <span class="tc-mod-ico" aria-hidden="true">
 	                <svg viewBox="0 0 24 24" fill="none"><path d="M3 21h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M5 21V7l7-4 7 4v14" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M9 21v-8h6v8" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>
 	              </span>
-	              <span class="tc-mod-label">Comunidad</span>
+	              <span class="tc-mod-label">Comunidades</span>
 	            </button>
 	            <button class="tab tc-module" type="button" data-fincas-tab-btn="incidencias" title="Incidencias">
 	              <span class="tc-mod-ico" aria-hidden="true">
@@ -2792,8 +2800,8 @@
 	                <input name="cuota_sugerida" type="text" inputmode="decimal" readonly />
 	              </label>
 	              <label>
-	                Cuota mensual
-	                <input name="cuota_mensual" type="text" inputmode="decimal" />
+	                Honorario mensual (nuestra minuta)
+	                <input name="honorario_mensual" type="text" inputmode="decimal" />
 	              </label>
 		              <label class="span-all">
 		                Foto del edificio (opcional)
@@ -3020,6 +3028,102 @@
             </form>
             <div id="workspaceFincasMeetingList"></div>
           </div>
+        </div>
+        <div class="form-card crm-workspace-view" data-workspace-view="periciales">
+          <div class="section-head">
+            <div>
+              <h3>Peritajes de valoración</h3>
+              <p class="muted">Informes periciales de valoración de inmuebles: testigos, evidencia y firma.</p>
+            </div>
+          </div>
+          <form id="workspacePericialForm" class="form-grid">
+            <input type="hidden" name="id" />
+            <input type="hidden" name="workspace_id" />
+            <label class="span-2">
+              Empresa emisora
+              <select name="empresa_id" required></select>
+            </label>
+            <label class="span-2">
+              Denominación del inmueble (si no está gestionado en el CRM)
+              <input name="denominacion_manual" placeholder="Ej. Vivienda C/ Mayor 12" />
+            </label>
+            <label class="span-2">
+              Dirección
+              <input name="direccion_manual" placeholder="Calle, número, localidad" />
+            </label>
+            <label>
+              Referencia catastral
+              <input name="referencia_catastral_manual" />
+            </label>
+            <label>
+              Finalidad
+              <select name="finalidad">
+                <option value="Judicial - Divorcio">Judicial - Divorcio</option>
+                <option value="Judicial - Herencia">Judicial - Herencia</option>
+                <option value="Judicial - Expropiación">Judicial - Expropiación</option>
+                <option value="Judicial - Litigio de compraventa">Judicial - Litigio de compraventa</option>
+                <option value="Privada">Privada</option>
+              </select>
+            </label>
+            <label>
+              Referencia del procedimiento
+              <input name="procedimiento_referencia" placeholder="Ej. Autos 123/2026, Juzgado nº 3" />
+            </label>
+            <label>
+              Perito
+              <select name="perito_usuario_id"></select>
+            </label>
+            <label>
+              Nº de colegiado
+              <input name="colegiado_numero" />
+            </label>
+            <label>
+              Fecha de encargo
+              <input name="fecha_encargo" type="date" />
+            </label>
+            <label>
+              Fecha de la visita
+              <input name="fecha_visita" type="date" />
+            </label>
+            <label>
+              Fecha de valoración
+              <input name="fecha_valoracion" type="date" required />
+            </label>
+            <div class="form-grid-section">Superficies</div>
+            <label>
+              Catastral (m²)
+              <input name="superficie_catastral" inputmode="decimal" />
+            </label>
+            <label>
+              Registral (m²)
+              <input name="superficie_registral" inputmode="decimal" />
+            </label>
+            <label>
+              Medida en visita (m²)
+              <input name="superficie_medida" inputmode="decimal" />
+            </label>
+            <label>
+              Usada en el cálculo (m²)
+              <input name="superficie_calculo_usada" inputmode="decimal" required />
+            </label>
+            <label class="span-2">
+              Motivo de la superficie usada
+              <input name="motivo_superficie_usada" placeholder="Por qué se usa esta superficie y no otra" />
+            </label>
+            <div class="form-actions span-2">
+              <button type="submit">Guardar expediente</button>
+              <button type="button" id="workspacePericialResetBtn" class="secondary ghost">Nuevo</button>
+              <span id="workspacePericialStatus" class="muted"></span>
+            </div>
+          </form>
+          <div class="section-head" style="margin-top:24px;">
+            <div>
+              <h3>Expedientes</h3>
+              <p class="muted">Testigos, evidencia, generación del informe y firma.</p>
+            </div>
+          </div>
+          <p id="workspacePericialesInfo" class="muted"></p>
+          <div id="workspacePericialesTable"></div>
         </div>
         </div>
       </section>
@@ -4070,24 +4174,7 @@
                   </div>
                 </div>
               </div>
-              <div id="crmViewAnalisis" class="crm-workspace-view hidden">
-                <div class="tc-listview">
-                  <div class="tc-listhead">
-                    <div class="tc-listleft">
-                      <strong class="tc-title">Búsq./Informes</strong>
-                    </div>
-                  </div>
-                  <div class="tc-quickgrid">
-                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_proxima_accion">Sin próxima acción</button>
-                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_noticia_sin_verificar">Noticias sin verificar</button>
-                    <button type="button" class="tc-quickbtn" data-crm-view="captaciones" data-crm-quick="captaciones:quick_sin_contacto_120">Sin contacto &gt;120 días</button>
-                    <button type="button" class="tc-quickbtn" data-crm-view="agenda" data-crm-quick="agenda:Pendiente">Act./Citas pendientes</button>
-                    <button type="button" class="tc-quickbtn" data-crm-view="inmuebles">Listado inmuebles</button>
-                    <button type="button" class="tc-quickbtn" data-crm-view="clientes">Listado clientes</button>
-                  </div>
-	                  <div class="footer muted">Vista depurada para mantener la sencillez visual (sin KPIs ni bloques de “calidad/control operativo”).</div>
-                </div>
-              </div>
+
 		              <div id="crmViewCaptaciones" class="crm-workspace-view hidden">
 		                <div class="tc-listview">
 		                    <div class="tc-listhead">
@@ -4294,32 +4381,7 @@
 			                  <div id="crmDemandasPriority" class="crm-focus-list hidden"></div>
 			                </div>
 			              </div>
-					              <div id="crmViewRelaciones" class="crm-workspace-view hidden">
-					                <div class="tc-listview">
-					                  <div class="tc-listhead">
-					                    <div class="tc-listleft">
-					                      <select id="crmRelacionesPreset" title="Relaciones Cruce">
-					                        <option value="recientes">Relaciones Cruce (recientes)</option>
-					                        <option value="gestionar">-gestionar/ Visto y gusta / Enc.Rebajado / Int.ver...</option>
-					                        <option value="no_gusta">No gusta por precio / No gusta el inmueble</option>
-					                        <option value="propuesta">El comprador quiere hacer una propuesta</option>
-					                        <option value="negociacion">Negociación avanzada</option>
-					                        <option value="cerradas">Cerradas</option>
-					                      </select>
-					                    </div>
-					                    <div class="tc-listright">
-					                      <button type="button" class="secondary ghost" id="crmRelacionesPrintBtn">Impresiones</button>
-					                      <button type="button" class="secondary ghost" id="crmRelacionesRefresh">Actualizar</button>
-					                      <input id="crmRelacionesSearch" placeholder="Buscar..." title="Búsqueda avanzada: (ej: cliente:María provincia:Málaga refcat:123456 fase:gestionar)." />
-					                    </div>
-					                  </div>
-					                  <div class="tc-azbar" id="crmRelacionesAz" aria-label="Filtrar por letra"></div>
-					                  <div id="crmRelacionesTable"></div>
-					                  <div class="tc-listfoot">
-					                    <div class="footer" id="crmRelacionesInfo"></div>
-					                  </div>
-					                </div>
-					              </div>
+
 		              <div id="crmViewVisitas" class="crm-workspace-view hidden">
 		                <div class="crm-split crm-ops-split">
 		                  <div class="tc-listview">
@@ -4518,44 +4580,8 @@
                   </div>
                 </div>
               </div>
-	              <div id="crmViewInformadores" class="crm-workspace-view hidden">
-	                <div class="tc-listview">
-	                  <div class="tc-listhead">
-	                    <div class="tc-listleft">
-	                      <strong class="tc-title">Informadores</strong>
-	                    </div>
-	                    <div class="tc-listright">
-	                      <button type="button" class="secondary" id="crmInformadoresCrear">Crear informador</button>
-	                      <input id="crmInformadoresSearch" placeholder="Buscar en la lista..." title="Búsqueda avanzada: (ej: nombre:Juan tel:600 email:gmail)." />
-	                    </div>
-	                  </div>
-	                  <div id="crmInformadoresTable"></div>
-	                  <div class="tc-listfoot">
-	                    <div class="footer" id="crmInformadoresInfo"></div>
-	                  </div>
-	                </div>
-	              </div>
-	              <div id="crmViewEdificios" class="crm-workspace-view hidden">
-	                <div class="tc-listview">
-	                  <div class="tc-listhead">
-	                    <div class="tc-listleft">
-	                      <strong class="tc-title">Edificios y complejos</strong>
-	                      <select id="crmEdificiosTipoFilter" title="Tipo">
-	                        <option value="">Todos</option>
-	                        <option value="edificios">Edificios</option>
-	                        <option value="complejos">Complejos</option>
-	                      </select>
-	                    </div>
-	                    <div class="tc-listright">
-	                      <input id="crmEdificiosSearch" placeholder="Buscar en la lista..." title="Búsqueda avanzada: (ej: provincia:Málaga &quot;Edificio&quot;)." />
-	                    </div>
-	                  </div>
-	                  <div id="crmEdificiosTable"></div>
-	                  <div class="tc-listfoot">
-	                    <div class="footer" id="crmEdificiosInfo"></div>
-	                  </div>
-	                </div>
-	              </div>
+
+
               <div id="crmViewSeguros" class="crm-workspace-view hidden">
                 <div id="crmSegurosMount"></div>
               </div>
@@ -12091,11 +12117,11 @@
             const LEAFLET_CSS_HREF = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
             const DEEP_LINK_KEYS = ["activar_token", "portal_token", "firma_inmo", "portal_inmo", "holding", "workspace", "crm", "cliente", "poliza", "agenda", "admin", "token"];
             const APP_SHELL_SCRIPTS = [
-              "ui-foundation.js?v=10",
+              "ui-foundation.js?v=11",
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=892",
+              "app.js?v=909",
               // Panel de la operación en la ficha del inmueble. Va aparte de
               // `app.js` a propósito: cuelga de una sola pantalla y se monta solo.
               "inmo_operacion.js?v=1",

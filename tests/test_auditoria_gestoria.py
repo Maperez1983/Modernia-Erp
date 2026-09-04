@@ -79,6 +79,7 @@ class BaseGestoria(unittest.TestCase):
 
         self._prev = getattr(S.Handler, "db_path", None)
         S.Handler.db_path = str(self.db)
+        S.Handler._gestoria_dashboard_cache.clear()
         self.httpd = S.ThreadingHTTPServer(("127.0.0.1", 0), S.Handler)
         self.base = f"http://127.0.0.1:{self.httpd.server_address[1]}"
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
@@ -321,6 +322,322 @@ class ElCuadroDeMandoTests(BaseGestoria):
     def test_ni_el_de_renta(self):
         r = self._get("/api/gestoria_renta_dashboard?empresa_id=emp-b", self.cookie_a)
         self.assertNotIn("Cliente B", json.dumps(r["json"]))
+
+    def test_autonomos_lee_el_perfil_vivo_no_el_tipo_cliente_congelado(self):
+        """clientes.perfil es el dato que se edita; cliente_gestoria.tipo_cliente
+        se fija una vez al crear la ficha y nunca se resincroniza."""
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("clientes", dict(id="cli-a-auto", nombre="Autónoma A", nif="9990001",
+                                   empresa_id="emp-a", perfil="Autónomo", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-auto", cliente_id="cli-a-auto",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        self._ins("cliente_gestoria", dict(id="cg-a-auto", cliente_id="cli-a-auto",
+                                           tipo_cliente="Gestiones Administrativas",
+                                           mod_contable=1, **base))
+        r = self._get("/api/gestoria_dashboard?empresa_id=emp-a", self.cookie_a)
+        self.assertEqual(r["json"]["counts"]["autonomos"], 1)
+
+    def test_puntuales_es_sin_modulo_recurrente_y_no_se_fuga_de_empresa(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("clientes", dict(id="cli-a-suelto", nombre="Suelta A", nif="9990002",
+                                   empresa_id="emp-a", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-suelto", cliente_id="cli-a-suelto",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        self._ins("cliente_gestoria", dict(id="cg-a-suelto", cliente_id="cli-a-suelto",
+                                           tipo_cliente="Gestiones Administrativas",
+                                           mod_fiscal=0, mod_laboral=0, mod_contable=0,
+                                           mod_renta=0, **base))
+        self._ins("cliente_gestoria", dict(id="cg-b-suelto", cliente_id="cli-b",
+                                           tipo_cliente="Gestiones Administrativas",
+                                           mod_fiscal=0, mod_laboral=0, mod_contable=0,
+                                           mod_renta=0, **base))
+        r = self._get("/api/gestoria_dashboard?empresa_id=emp-a", self.cookie_a)
+        self.assertEqual(r["json"]["counts"]["puntuales"], 1)
+
+    def test_el_historico_de_autonomos_tambien_lee_el_perfil_vivo(self):
+        """Mismo fallo que arriba pero en `clientes_hist`, la serie mensual que
+        alimenta el gráfico "Clientes · Autónomo / Empresa": seguía leyendo
+        `cliente_gestoria.tipo_cliente`, que en producción no tenía ni un solo
+        valor "AUTONOMO" en toda la tabla (1.564 "PARTICULAR", 55 "CLIENTE
+        RENTA", 2 "EMPRESA"), así que el gráfico daba siempre 0 autónomos
+        aunque el KPI de arriba, ya corregido, mostrara 54."""
+        import datetime as _dt
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("clientes", dict(id="cli-a-auto-hist", nombre="Autónoma Hist", nif="9990004",
+                                   empresa_id="emp-a", perfil="Autónomo", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-auto-hist", cliente_id="cli-a-auto-hist",
+                                            empresa_id="emp-a", servicio="gestoria",
+                                            estado="Alta", fecha_inicio="2020-01-01", **base))
+        self._ins("cliente_gestoria", dict(id="cg-a-auto-hist", cliente_id="cli-a-auto-hist",
+                                           tipo_cliente="Gestiones Administrativas",
+                                           mod_contable=1, **base))
+        r = self._get("/api/gestoria_dashboard?empresa_id=emp-a", self.cookie_a)
+        year = str(_dt.datetime.now().year)
+        self.assertGreaterEqual(r["json"]["clientes_hist"]["totals"][year]["autonomos"], 1)
+
+    def test_puntuales_no_cuenta_a_quien_tiene_renta(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("clientes", dict(id="cli-a-renta", nombre="Rentista A", nif="9990003",
+                                   empresa_id="emp-a", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-renta", cliente_id="cli-a-renta",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        self._ins("cliente_gestoria", dict(id="cg-a-renta", cliente_id="cli-a-renta",
+                                           tipo_cliente="Cliente Renta", mod_renta=1, **base))
+        r = self._get("/api/gestoria_dashboard?empresa_id=emp-a", self.cookie_a)
+        self.assertEqual(r["json"]["counts"]["puntuales"], 0)
+
+
+class LosDosFallosDeLaFichaDeContabilidadTests(BaseGestoria):
+    """Encontrados recorriendo la pestaña Contabilidad en vivo: la tarjeta decía
+    «Asientos: 0» con 300 filas reales al lado, y «Modelos pendientes: 26.161»
+    cuando en toda la base de datos solo hay 376 modelos."""
+
+    def test_modelos_no_se_multiplica_por_duplicados_en_clientes_empresas(self):
+        """clientes_empresas puede tener varias filas para el mismo cliente y
+        empresa (2.497 filas para 548 clientes en producción). El JOIN que había
+        antes multiplicaba cada modelo por cada fila duplicada."""
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        # cli-a ya tiene una fila en clientes_empresas (del setUp); añado dos más
+        # para el mismo cliente y la misma empresa.
+        self._ins("clientes_empresas", dict(id="ce-a-dup1", cliente_id="cli-a",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-dup2", cliente_id="cli-a",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        r = self._get("/api/gestoria_modelos?empresa_id=emp-a", self.cookie_a)
+        filas_de_cli_a = [row for row in r["json"]["rows"] if row.get("id") == "mod-a"]
+        self.assertEqual(len(filas_de_cli_a), 1, "el modelo de cli-a salió duplicado")
+
+    def test_el_total_de_asientos_no_se_queda_en_cero(self):
+        """El backend ponía `total_rows` en la raíz de la respuesta, pero el
+        frontend lo lee de `summary.total_rows`: siempre undefined, siempre 0."""
+        r = self._get("/api/gestoria_contabilidad?empresa_id=emp-a", self.cookie_a)
+        self.assertEqual(r["json"]["total_rows"], 1)
+        self.assertEqual(r["json"]["summary"]["total_rows"], 1)
+
+
+class LaGeneracionAutomaticaDeModelosTests(BaseGestoria):
+    """Generaba IVA trimestral + retenciones para cualquier cliente con un solo
+    asiento contable, fuera o no autónomo/empresa. En Fincas Velazquez generó
+    20.460 filas de golpe para ~2.000 clientes, casi todos particulares."""
+
+    def test_solo_se_generan_para_autonomo_o_empresa(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("clientes", dict(id="cli-a-auto-gen", nombre="Autónoma Gen", nif="9990010",
+                                   empresa_id="emp-a", perfil="Autónomo", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-auto-gen", cliente_id="cli-a-auto-gen",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        self._ins("clientes", dict(id="cli-a-particular-gen", nombre="Particular Gen", nif="9990011",
+                                   empresa_id="emp-a", perfil="Particular", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-particular-gen", cliente_id="cli-a-particular-gen",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        r = self._get("/api/gestoria_modelos?empresa_id=emp-a", self.cookie_a)
+        generados = [row for row in r["json"]["rows"] if "Generado automáticamente" in str(row.get("notas") or "")]
+        clientes_con_generados = {row.get("cliente") for row in generados}
+        self.assertIn("Autónoma Gen", clientes_con_generados)
+        self.assertNotIn("Particular Gen", clientes_con_generados)
+
+
+class ElClienteIdNoSeAmpliaATodaLaEmpresaTests(BaseGestoria):
+    """Encontrado abriendo en el navegador la ficha de un cliente de Gestoría:
+    la pestaña se quedaba congelada más de un minuto, sin ningún bloqueo de
+    Postgres de por medio (pool libre, sin locks). `/api/gestoria_libros?
+    cliente_id=X&empresa_id=Y` pasa `cliente_ids=[X]` a
+    `sync_gestoria_modelos_from_contabilidad`, pero la función, en cuanto
+    recibía también `empresa_ids`, ignoraba ese cliente_id explícito y
+    ampliaba la barrida a TODOS los clientes con asientos de esa empresa —en
+    Fincas Velazquez, 33 tras el filtro de perfil, cada uno con su propio
+    SELECT+INSERT por año×modelo sin agrupar. Una ficha de un único cliente
+    pagaba el coste de toda la cartera."""
+
+    def test_no_genera_modelos_para_otro_cliente_de_la_empresa(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("clientes", dict(id="cli-a-target", nombre="Target Autonomo", nif="9990020",
+                                   empresa_id="emp-a", perfil="Autónomo", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-target", cliente_id="cli-a-target",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        self._ins("gestoria_asientos", dict(id="asi-a-target", empresa_id="emp-a", cliente_id="cli-a-target",
+                                            fecha="2026-03-01", concepto="Venta", **base))
+        self._ins("clientes", dict(id="cli-a-other", nombre="Otro Autonomo", nif="9990021",
+                                   empresa_id="emp-a", perfil="Autónomo", **base))
+        self._ins("clientes_empresas", dict(id="ce-a-other", cliente_id="cli-a-other",
+                                            empresa_id="emp-a", servicio="gestoria", **base))
+        self._ins("gestoria_asientos", dict(id="asi-a-other", empresa_id="emp-a", cliente_id="cli-a-other",
+                                            fecha="2026-03-01", concepto="Venta", **base))
+        self._get("/api/gestoria_libros?empresa_id=emp-a&cliente_id=cli-a-target&conciliar=1", self.cookie_a)
+        generados = self.conn.execute(
+            "SELECT cliente_id FROM gestoria_modelos WHERE notas LIKE '%Generado autom%'"
+        ).fetchall()
+        clientes_con_generados = {row["cliente_id"] for row in generados}
+        self.assertIn("cli-a-target", clientes_con_generados)
+        self.assertNotIn("cli-a-other", clientes_con_generados)
+
+
+class LosCuatroDeEscrituraSinNingunControlTests(BaseGestoria):
+    """Cuatro rutas de escritura que aceptaban un `id`/`empresa_id` de cualquier
+    empresa sin comprobar la sesión ni una vez: bastaba con saberlo para
+    reescribir la ficha, la tarea contable, la factura o el movimiento bancario
+    de un cliente ajeno."""
+
+    def test_no_se_reescribe_la_tarea_contable_de_otro(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("gestoria_conta_tasks", dict(id="ctt-b", cliente_id="cli-b",
+                                               tarea="IVA", estado="Pendiente", **base))
+        self._post("/api/gestoria_conta_task_update",
+                   {"id": "ctt-b", "estado": "Hecho"}, self.cookie_a)
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM gestoria_conta_tasks WHERE id = 'ctt-b'").fetchone()["estado"],
+            "Pendiente")
+
+    def test_lo_propio_si_se_reescribe(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("gestoria_conta_tasks", dict(id="ctt-a", cliente_id="cli-a",
+                                               tarea="IVA", estado="Pendiente", **base))
+        self._post("/api/gestoria_conta_task_update",
+                   {"id": "ctt-a", "estado": "Hecho"}, self.cookie_a)
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM gestoria_conta_tasks WHERE id = 'ctt-a'").fetchone()["estado"],
+            "Hecho")
+
+    def test_no_se_da_de_baja_la_ficha_de_otro(self):
+        """`gestoria` (la tabla legacy de alta/baja) no comprobaba nada: con el
+        `id` bastaba para dar de baja la cuota de un cliente ajeno."""
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("gestoria", dict(id="ges-b", empresa_id="emp-b", cliente_id="cli-b",
+                                   estado="Alta", **base))
+        self._post("/api/gestoria_update",
+                   {"id": "ges-b", "estado": "Baja"}, self.cookie_a)
+        self.assertEqual(self.conn.execute(
+            "SELECT estado FROM gestoria WHERE id = 'ges-b'").fetchone()["estado"],
+            "Alta")
+
+    def test_el_reparse_de_facturas_no_sigue_el_empresa_id_del_cuerpo(self):
+        """`empresa_id = payload.get("empresa_id") or empresa.get("id")`: por el
+        cortocircuito de `or`, el valor que mandara el cliente ganaba siempre que
+        viniera relleno, así que un `empresa_id` ajeno reconstruía facturas (y su
+        asiento contable) de otra empresa. Con `empresa_nombre` resuelto a la
+        propia (Empresa A) por la sesión, un intento de colar `empresa_id=emp-b`
+        no debe tocar ni ver la factura de la empresa B."""
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("gestoria_facturas", dict(id="fac-b", empresa_id="emp-b", cliente_id="cli-b",
+                                            raw_text="Factura de la empresa B", **base))
+        r = self._post("/api/gestoria_facturas_reparse",
+                       {"empresa_nombre": "Empresa A", "empresa_id": "emp-b",
+                        "cliente_id": "cli-b"}, self.cookie_a)
+        self.assertEqual(r["json"].get("total"), 0,
+                         "el reparse ha alcanzado la factura de la empresa B")
+
+    def test_el_import_de_movimientos_no_sigue_el_empresa_id_del_cuerpo(self):
+        """El `workspace_id` del payload se validaba contra la sesión, pero el
+        `empresa_id` que de verdad se usaba para leer/escribir nunca se cruzaba
+        contra él: un workspace propio válido y un empresa_id ajeno bastaban."""
+        r = self._post("/api/gestoria_movimientos_bancarios_import_preview",
+                       {"workspace_id": self.ws_a, "empresa_id": "emp-b",
+                        "filename": "extracto.txt"}, self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+        r2 = self._post("/api/gestoria_movimientos_bancarios_import",
+                        {"workspace_id": self.ws_a, "empresa_id": "emp-b",
+                         "filename": "extracto.txt"}, self.cookie_a)
+        self.assertEqual(r2["estado"], 403)
+
+
+class LosVeintiunoDeLecturaSinNingunControlTests(BaseGestoria):
+    """`resolve_empresa_ids_for_request` y `fetch_workspace_company_ids` son
+    resolutores puros: no miran la sesión. 21 endpoints GET de Gestoría
+    ejecutaban la consulta con lo que resultara, sin cruzarlo contra el
+    workspace/empresa del actor. Basta con `?empresa_id=emp-b` o
+    `?workspace_id=ws-otra` desde el gestor A."""
+
+    def _no_alcanza_por(self, ruta):
+        r = self._get(f"{ruta}?empresa_id=emp-b", self.cookie_a)
+        self.assertEqual(r["estado"], 403, f"{ruta}?empresa_id=emp-b debería dar 403")
+        r2 = self._get(f"{ruta}?workspace_id=ws-otra", self.cookie_a)
+        self.assertEqual(r2["estado"], 403, f"{ruta}?workspace_id=ws-otra debería dar 403")
+
+    def test_sociedades(self):
+        self._no_alcanza_por("/api/gestoria_sociedades")
+
+    def test_socios(self):
+        self._no_alcanza_por("/api/gestoria_socios")
+
+    def test_socios_cambios(self):
+        self._no_alcanza_por("/api/gestoria_socios_cambios")
+
+    def test_actas(self):
+        self._no_alcanza_por("/api/gestoria_actas")
+
+    def test_acta_firmas(self):
+        self._no_alcanza_por("/api/gestoria_acta_firmas")
+
+    def test_trabajos(self):
+        self._no_alcanza_por("/api/gestoria_trabajos")
+
+    def test_trabajo_tipos(self):
+        self._no_alcanza_por("/api/gestoria_trabajo_tipos")
+
+    def test_facturas(self):
+        r = self._get("/api/gestoria_facturas?empresa_id=emp-b", self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+
+    def test_import_lotes(self):
+        self._no_alcanza_por("/api/gestoria_import_lotes")
+
+    def test_import_documentos(self):
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("gestoria_import_lotes", dict(id="lote-b", empresa_id="emp-b",
+                                                estado="Pendiente", **base))
+        r = self._get("/api/gestoria_import_documentos?lote_id=lote-b", self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+
+    def test_asientos(self):
+        r = self._get("/api/gestoria_asientos?empresa_id=emp-b", self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+
+    def test_cuentas_bancarias(self):
+        self._no_alcanza_por("/api/gestoria_cuentas_bancarias")
+
+    def test_movimientos_bancarios(self):
+        self._no_alcanza_por("/api/gestoria_movimientos_bancarios")
+
+    def test_libros(self):
+        self._no_alcanza_por("/api/gestoria_libros")
+
+    def test_excel_plantilla(self):
+        r = self._get("/api/gestoria_excel_plantilla?empresa_id=emp-b&cliente_id=cli-b", self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+
+    def test_conta_config(self):
+        r = self._get("/api/gestoria_conta_config?cliente_id=cli-b", self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+
+    def test_conta_tasks(self):
+        self._no_alcanza_por("/api/gestoria_conta_tasks")
+
+    def test_renta_cards(self):
+        self._no_alcanza_por("/api/gestoria_renta_cards")
+
+    def test_renta_dashboard(self):
+        self._no_alcanza_por("/api/gestoria_renta_dashboard")
+
+    def test_renta_export(self):
+        self._no_alcanza_por("/api/gestoria_renta_export")
+
+    def test_renta_debug(self):
+        r = self._get("/api/gestoria_renta_debug?empresa_id=emp-b&cliente_id=cli-b", self.cookie_a)
+        self.assertEqual(r["estado"], 403)
+
+    def test_lo_propio_si_se_lee(self):
+        """Ninguna guarda nueva le cierra la puerta al propio: sociedades,
+        cuentas bancarias y renta siguen respondiendo 200 para lo suyo."""
+        for ruta in ("/api/gestoria_sociedades", "/api/gestoria_cuentas_bancarias",
+                     "/api/gestoria_movimientos_bancarios", "/api/gestoria_renta_cards",
+                     "/api/gestoria_renta_dashboard"):
+            with self.subTest(ruta=ruta):
+                r = self._get(f"{ruta}?empresa_id=emp-a", self.cookie_a)
+                self.assertEqual(r["estado"], 200, f"{ruta} ya no responde a lo propio")
+        r = self._get("/api/gestoria_trabajos?empresa_id=emp-a", self.cookie_a)
+        self.assertEqual(r["estado"], 200)
+        r = self._get("/api/gestoria_asientos?empresa_id=emp-a", self.cookie_a)
+        self.assertEqual(r["estado"], 200)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,8 @@ Por cada hipoteca firmada sin `cliente_id`:
    mezcla a dos personas distintas, y eso no se deshace solo.
 3. Si no hay ninguna, crea la ficha con el nombre del titular, la empresa de la
    hipoteca, el workspace y el servicio `financiaciones`, y la enlaza.
+4. Si el mismo titular sale otra vez **en este mismo lote**, se enlaza a la ficha
+   que se acaba de crear. Una ficha por titular, no una por expediente.
 
 Lo que NO hace: inventar NIF, teléfono ni email. La ficha nace con lo único que
 consta de verdad, que es el nombre.
@@ -36,6 +38,17 @@ Seguridad
   y `--rollback` deshace exactamente eso y nada más.
 - Idempotente: solo mira hipotecas firmadas con `cliente_id` vacío, así que
   repetirlo no duplica.
+
+Lo que salió mal el 2026-08-04
+------------------------------
+El índice de clientes se carga una vez, antes de decidir. Diez pólizas del mismo
+tomador sin ficha consultaban las diez el mismo índice vacío, las diez caían en «no
+existe» y salían **diez fichas idénticas con una póliza cada una**. Dejó 49 fichas de
+más: GARCISA MASAE diez veces, JUAN RAMOS ocho, JOSE LUIS TORRES seis.
+
+El guion ya se cuidaba de no elegir mal entre varias candidatas —eso mezcla a dos
+personas y no se deshace— pero no de fabricar él mismo esas candidatas. Arreglado en el
+punto 4 de arriba.
 
 Uso
 ---
@@ -88,9 +101,24 @@ def clave_de_nombre(valor):
 
     Ordenar las palabras es lo que hace que "MOHAMED BOUZYANE" y "BOUZYANE MOHAMED"
     sean la misma clave. En este CRM el orden nombre/apellido no es fiable.
+
+    **Los números se conservan.** Antes se quitaban junto con los signos, y en una
+    administración de fincas eso es justo lo que no se puede hacer: las comunidades se
+    llaman calle y número. "Sierra Bermeja 5" y "Sierra Bermeja 7" daban la misma clave,
+    igual que "Emilio Prados 26" y "Emilio Prados 6", o "Barcenillas 6" y "Barcenillas
+    12". Y este guion **enlaza sin preguntar cuando encuentra una sola candidata**: la
+    póliza de un edificio se habría colgado del edificio de al lado, en silencio.
+
+    Comprobado en producción el 2026-08-25: no ha llegado a pasar —ninguna póliza ni
+    hipoteca está enlazada a una ficha que sólo difiera en el número—, así que esto
+    quita la trampa antes de pisarla.
+
+    Conservarlos hace la clave más estricta, y en esa dirección se falla bien: como
+    mucho deja una ficha duplicada, que se ve y se arregla. Enlazar a quien no es no se
+    ve.
     """
     texto = unicodedata.normalize("NFKD", str(valor or "")).encode("ascii", "ignore").decode()
-    texto = re.sub(r"[^a-z ]", " ", texto.lower())
+    texto = re.sub(r"[^a-z0-9 ]", " ", texto.lower())
     return " ".join(sorted(texto.split()))
 
 
@@ -248,8 +276,15 @@ def main(argv=None):
             else:
                 a_crear.append(fila)
 
+        # Cuántas fichas se van a crear DE VERDAD: los titulares distintos que hay en
+        # `a_crear`, no las filas. Si en el resumen se cuentan las filas, un lote con
+        # diez pólizas del mismo señor anuncia diez fichas y crea una.
+        nombres_nuevos = {clave_de_nombre(f["cliente"]) for f in a_crear}
         print(f"  se enlazan a una ficha ya existente  {len(a_enlazar)}")
-        print(f"  se crean fichas nuevas               {len(a_crear)}")
+        print(f"  se crean fichas nuevas               {len(nombres_nuevos)}")
+        if len(a_crear) > len(nombres_nuevos):
+            print(f"     ({len(a_crear) - len(nombres_nuevos)} expedientes más comparten "
+                  f"titular con otro de este mismo lote y se enlazan a la ficha nueva)")
         print(f"  ambiguas, se dejan como están        {len(ambiguas)}")
         for fila, candidatos in ambiguas:
             print(f"     ! {fila['cliente']}: {len(candidatos)} fichas con ese nombre")
@@ -277,9 +312,38 @@ def main(argv=None):
             )
             enlazados += 1
 
+        # Una ficha por titular, no una por expediente.
+        #
+        # El índice de clientes se carga UNA vez, antes de decidir. Si el mismo titular
+        # aparece en diez pólizas y no tenía ficha, las diez consultan el mismo índice
+        # vacío, las diez caen en «no existe» y se creaban diez fichas idénticas. Pasó:
+        # el 2026-08-04 este guion dejó 49 fichas de más, entre ellas GARCISA MASAE diez
+        # veces y JUAN RAMOS ocho, cada una con exactamente una póliza colgando.
+        #
+        # El guion ya se cuidaba de no elegir mal entre varias candidatas —eso mezcla a
+        # dos personas y no se deshace— pero no de fabricar él mismo esas candidatas.
+        #
+        # La primera fila de cada nombre crea la ficha; las demás se enlazan a ella,
+        # igual que si ya hubiera existido.
+        creadas_en_esta_pasada = {}
         for fila in a_crear:
+            clave = clave_de_nombre(fila["cliente"])
+            gemela = creadas_en_esta_pasada.get(clave)
+            if gemela:
+                conn.execute(
+                    f"UPDATE {cfg['tabla']} SET cliente_id = ?, updated_at = ? WHERE id = ?",
+                    (gemela, ahora, fila["id"]),
+                )
+                conn.execute(
+                    f"INSERT INTO {TABLA_RESPALDO} (hipoteca_id, cliente_id, cliente_creado, vinculo_id, creado_en, tabla_origen)"
+                    " VALUES (?, ?, 0, '', ?, ?)",
+                    (fila["id"], gemela, ahora, cfg["tabla"]),
+                )
+                enlazados += 1
+                continue
             cliente_id = nuevo_id()
             vinculo_id = nuevo_id()
+            creadas_en_esta_pasada[clave] = cliente_id
             conn.execute(
                 """
                 INSERT INTO clientes (id, empresa_id, nombre, estado, workspace_id, created_at, updated_at)

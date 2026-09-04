@@ -2654,6 +2654,11 @@ const workspaceFincasBudgetBrandCompany = document.getElementById("workspaceFinc
 const workspaceFincasBudgetBuildingPhoto = document.getElementById("workspaceFincasBudgetBuildingPhoto");
 const workspaceFincasBudgetBuildingPhotoPreview = document.getElementById("workspaceFincasBudgetBuildingPhotoPreview");
 const workspaceFincasBudgetBuildingPhotoStatus = document.getElementById("workspaceFincasBudgetBuildingPhotoStatus");
+const workspacePericialForm = document.getElementById("workspacePericialForm");
+const workspacePericialStatus = document.getElementById("workspacePericialStatus");
+const workspacePericialResetBtn = document.getElementById("workspacePericialResetBtn");
+const workspacePericialesTable = document.getElementById("workspacePericialesTable");
+const workspacePericialesInfo = document.getElementById("workspacePericialesInfo");
 const workspaceFincasBudgetQuickForm = document.getElementById("workspaceFincasBudgetQuickForm");
 const workspaceFincasBudgetOpenEngine = document.getElementById("workspaceFincasBudgetOpenEngine");
 const workspaceFincasBudgetResetBtn = document.getElementById("workspaceFincasBudgetResetBtn");
@@ -2847,6 +2852,164 @@ const closestFromEvent = (event, selector) => {
   if (!el || typeof el.closest !== "function") return null;
   return el.closest(sel);
 };
+
+/* El patrón de pestañas del W3C para todas las barras de módulo.
+ *
+ * Hasta ahora eran botones sueltos: cuál estaba abierta se decía solo con un borde
+ * dorado, así que con lector de pantalla se oían ocho botones iguales, y el tabulador
+ * obligaba a pasar por todos para llegar al contenido.
+ *
+ * Se aplica en tiempo de ejecución y no tocando el marcado de cada barra, por dos
+ * razones: hay nueve, no ocho —la de RRHH se genera desde JavaScript y no tiene id—,
+ * y cada módulo pinta la suya a su manera. Aquí solo se lee la clase `.active` que
+ * todas mantienen ya, y se traduce a lo que el navegador y el lector necesitan.
+ *
+ * `aria-controls` es opcional en la especificación y solo se pone donde el panel se
+ * puede resolver: fincas y seguros lo tienen por convención de atributo, los demás
+ * cambian de vista con manejadores delegados y no hay panel que señalar. Si algún día
+ * adoptan la convención, lo cogen sin tocar nada. */
+const ETIQUETA_DE_BARRA = {
+  workspaceViewTabs: "Vistas del espacio de trabajo",
+  workspaceTenantTabs: "Secciones del cliente",
+  workspaceFincasTabs: "Módulo de fincas",
+  viewTabs: "Secciones del CRM",
+  segurosTabs: "Módulo de seguros",
+  gestoriaModuleTabs: "Módulo de gestoría",
+  clienteOperativaTabs: "Operativa del cliente",
+  clienteDocsTabs: "Documentos del cliente",
+};
+
+let _contadorDePestanas = 0;
+
+/** El atributo con el que la barra identifica sus pestañas: cada módulo usa el suyo. */
+const atributoDePestana = (boton) => {
+  const encontrado = Array.from(boton?.attributes || []).find(
+    (a) => a.name.startsWith("data-") && /tab|module|view/.test(a.name),
+  );
+  return encontrado ? encontrado.name : "";
+};
+
+/** Escapa el valor para meterlo en un selector de atributo.
+ *
+ * `CSS.escape` no está en todas partes —falta en navegadores viejos y en jsdom—, y sin
+ * este respaldo la excepción tumbaba la función entera: la barra se quedaba sin roles
+ * y sin teclado, que es justo lo contrario de lo que se venía a arreglar. */
+const escapaParaSelector = (valor) => {
+  const texto = String(valor);
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") return CSS.escape(texto);
+  return texto.replace(/["\\]/g, "\\$&");
+};
+
+/** El panel que abre una pestaña, si se puede resolver. Devuelve null si no. */
+const panelDePestana = (barra, boton, atributo) => {
+  if (!atributo) return null;
+  const valor = boton.getAttribute(atributo);
+  if (!valor) return null;
+  const candidatos = [
+    atributo.endsWith("-btn") ? atributo.slice(0, -4) : null,
+    atributo,
+    atributo.replace("-tab", "-panel"),
+  ].filter(Boolean);
+  for (const nombre of candidatos) {
+    let posibles = [];
+    try {
+      posibles = Array.from(document.querySelectorAll(`[${nombre}="${escapaParaSelector(valor)}"]`));
+    } catch (e) {
+      continue;
+    }
+    const panel = posibles.find((el) => !barra.contains(el));
+    if (panel) return panel;
+  }
+  return null;
+};
+
+const activarPatronDePestanas = (raiz = document) => {
+  raiz.querySelectorAll?.(".tc-modulebar").forEach((barra) => {
+    const visibles = () =>
+      Array.from(barra.querySelectorAll(".tab.tc-module")).filter(
+        (b) => !b.classList.contains("hidden"),
+      );
+    if (!visibles().length) return;
+
+    const sincroniza = () => {
+      const pestanas = visibles();
+      const hayActiva = pestanas.some((b) => b.classList.contains("active"));
+      pestanas.forEach((boton, i) => {
+        const activa = boton.classList.contains("active");
+        boton.setAttribute("role", "tab");
+        boton.setAttribute("aria-selected", activa ? "true" : "false");
+        // Tabindex itinerante: la barra entera es UNA parada del tabulador, y dentro
+        // se anda con las flechas. Antes había que pasar por las nueve pestañas para
+        // llegar al contenido.
+        boton.tabIndex = activa || (!hayActiva && i === 0) ? 0 : -1;
+        const atributo = atributoDePestana(boton);
+        const panel = panelDePestana(barra, boton, atributo);
+        if (!panel) return;
+        if (!boton.id) boton.id = `pestana-${++_contadorDePestanas}`;
+        if (!panel.id) panel.id = `panel-${++_contadorDePestanas}`;
+        boton.setAttribute("aria-controls", panel.id);
+        panel.setAttribute("role", "tabpanel");
+        panel.setAttribute("aria-labelledby", boton.id);
+      });
+    };
+
+    if (barra.dataset.pestanasListas === "1") {
+      sincroniza();
+      return;
+    }
+    barra.dataset.pestanasListas = "1";
+    barra.setAttribute("role", "tablist");
+    if (!barra.getAttribute("aria-label")) {
+      barra.setAttribute("aria-label", ETIQUETA_DE_BARRA[barra.id] || "Secciones");
+    }
+
+    barra.addEventListener("keydown", (evento) => {
+      const orden = visibles();
+      const actual = orden.indexOf(document.activeElement);
+      if (actual < 0) return;
+      // Solo izquierda/derecha e inicio/fin: la barra es horizontal, y arriba/abajo
+      // en una que envuelve en dos filas significaría otra cosa.
+      const salto = { ArrowRight: 1, ArrowLeft: -1 }[evento.key];
+      let destino = -1;
+      if (salto) destino = (actual + salto + orden.length) % orden.length;
+      else if (evento.key === "Home") destino = 0;
+      else if (evento.key === "End") destino = orden.length - 1;
+      else return;
+      evento.preventDefault();
+      orden[destino].focus();
+      orden[destino].click();
+    });
+
+    // La clase `.active` la pone cada módulo por su cuenta; aquí solo se escucha.
+    try {
+      new MutationObserver(sincroniza).observe(barra, {
+        attributes: true,
+        attributeFilter: ["class"],
+        subtree: true,
+      });
+    } catch (e) {}
+    sincroniza();
+  });
+};
+
+// Las barras que se pintan más tarde —RRHH, y las secciones que se hidratan al
+// entrar— se enganchan la primera vez que alguien las toca.
+document.addEventListener(
+  "focusin",
+  (evento) => {
+    const barra = evento.target?.closest?.(".tc-modulebar");
+    if (barra && barra.dataset.pestanasListas !== "1") activarPatronDePestanas(barra.parentNode || document);
+  },
+  true,
+);
+document.addEventListener(
+  "pointerdown",
+  (evento) => {
+    const barra = evento.target?.closest?.(".tc-modulebar");
+    if (barra && barra.dataset.pestanasListas !== "1") activarPatronDePestanas(barra.parentNode || document);
+  },
+  true,
+);
 
 const initDensityToggle = () => {
   applyDensityMode(getStoredDensityMode());
@@ -3781,7 +3944,6 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 		const crmClientesInfo = document.getElementById("crmClientesInfo");
 		const crmClientesAz = document.getElementById("crmClientesAz");
 		const crmClientesPrintBtn = document.getElementById("crmClientesPrintBtn");
-			const crmViewAnalisis = document.getElementById("crmViewAnalisis");
 			const crmViewCaptaciones = document.getElementById("crmViewCaptaciones");
 			const crmCaptacionesTitle = document.getElementById("crmCaptacionesTitle");
 				const crmViewInmuebles = document.getElementById("crmViewInmuebles");
@@ -3805,14 +3967,6 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 						const crmDemandasDiscardBtn = document.getElementById("crmDemandasDiscardBtn");
 						const crmDemandasPrintBtn = document.getElementById("crmDemandasPrintBtn");
 						const crmDemandaOrigenFilter = document.getElementById("crmDemandaOrigenFilter");
-						const crmViewRelaciones = document.getElementById("crmViewRelaciones");
-					const crmRelacionesPreset = document.getElementById("crmRelacionesPreset");
-					const crmRelacionesAz = document.getElementById("crmRelacionesAz");
-					const crmRelacionesPrintBtn = document.getElementById("crmRelacionesPrintBtn");
-				const crmRelacionesRefresh = document.getElementById("crmRelacionesRefresh");
-				const crmRelacionesSearch = document.getElementById("crmRelacionesSearch");
-				const crmRelacionesTable = document.getElementById("crmRelacionesTable");
-				const crmRelacionesInfo = document.getElementById("crmRelacionesInfo");
 			const crmViewVisitas = document.getElementById("crmViewVisitas");
 			const crmViewAgenda = document.getElementById("crmViewAgenda");
 			const crmViewDashboard = document.getElementById("crmViewDashboard");
@@ -3825,8 +3979,6 @@ const crmRecentClearBtn = document.getElementById("crmRecentClearBtn");
 			const crmAgendaNext = document.getElementById("crmAgendaNext");
 			const crmAgendaDay = document.getElementById("crmAgendaDay");
 			const crmAgendaCalendar = document.getElementById("crmAgendaCalendar");
-		const crmViewInformadores = document.getElementById("crmViewInformadores");
-		const crmViewEdificios = document.getElementById("crmViewEdificios");
 		const crmViewLegal = document.getElementById("crmViewLegal");
 		const crmViewSeguros = document.getElementById("crmViewSeguros");
 		const crmSegurosMount = document.getElementById("crmSegurosMount");
@@ -3884,14 +4036,6 @@ const crmResumenPendientes = document.getElementById("crmResumenPendientes");
 	const crmAgendaCliente = document.getElementById("crmAgendaCliente");
 	const crmAgendaInmueble = document.getElementById("crmAgendaInmueble");
 	const crmDemandasSteps = document.getElementById("crmDemandasSteps");
-	const crmInformadoresSearch = document.getElementById("crmInformadoresSearch");
-	const crmInformadoresTable = document.getElementById("crmInformadoresTable");
-	const crmInformadoresInfo = document.getElementById("crmInformadoresInfo");
-const crmInformadoresCrear = document.getElementById("crmInformadoresCrear");
-const crmEdificiosTipoFilter = document.getElementById("crmEdificiosTipoFilter");
-const crmEdificiosSearch = document.getElementById("crmEdificiosSearch");
-const crmEdificiosTable = document.getElementById("crmEdificiosTable");
-const crmEdificiosInfo = document.getElementById("crmEdificiosInfo");
 const inmoLegalCopilotForm = document.getElementById("inmoLegalCopilotForm");
 const inmoLegalArea = document.getElementById("inmoLegalArea");
 const inmoLegalTopic = document.getElementById("inmoLegalTopic");
@@ -4688,6 +4832,28 @@ const euroFormatter = new Intl.NumberFormat("es-ES", {
   maximumFractionDigits: 2,
 });
 
+// Guarda un apunte de comunidad. Si el importe es lo bastante grande, el servidor no
+// lo bloquea: pide confirmarlo. Un tope duro dejaría fuera una derrama legítima; esto
+// solo atrapa el dedazo y el importe pegado con formato raro, que es de donde salen las
+// cifras imposibles.
+const guardarApunteDeComunidad = async (payload) => {
+  const enviar = async (cuerpo) => {
+    const r = await fetch("/api/workspace_fincas_contabilidad", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cuerpo),
+    });
+    return { estado: r.status, datos: await r.json().catch(() => ({})) };
+  };
+  let { estado, datos } = await enviar(payload);
+  if (estado === 409 && datos?.requiere_confirmacion) {
+    if (!window.confirm(`${datos.error}\n\n¿Lo guardo así?`)) return null;
+    ({ estado, datos } = await enviar({ ...payload, confirmado: true }));
+  }
+  if (datos?.error) throw new Error(datos.error);
+  return datos;
+};
+
 const formatEuros = (value) => {
   if (value === null || value === undefined || value === "") return euroFormatter.format(0);
   if (typeof value === "number") return euroFormatter.format(Number.isFinite(value) ? value : 0);
@@ -4697,8 +4863,14 @@ const formatEuros = (value) => {
   const hasComma = text.includes(",");
   const hasDot = text.includes(".");
   if (hasComma && hasDot) {
-    // es-ES: dots for thousands, comma for decimals
-    text = text.replace(/\./g, "").replace(",", ".");
+    // Manda el separador que va el último: es el decimal. Suponer siempre es-ES
+    // convertía "1,234.56" —lo que se pega de una factura o un Excel en inglés— en
+    // 1,23: mil veces menos, y sin que nada avisara.
+    if (text.lastIndexOf(",") > text.lastIndexOf(".")) {
+      text = text.replace(/\./g, "").replace(",", ".");   // 20.000,50
+    } else {
+      text = text.replace(/,/g, "");                      // 20,000.50
+    }
   } else if (hasComma) {
     text = text.replace(",", ".");
   } else if (hasDot) {
@@ -4731,6 +4903,11 @@ const formatDateTime = (value) => {
 };
 
 const formatEurosCompact = (value) => formatEuros(value).replace(/\s/g, "");
+
+// Por debajo de esta confianza, el conciliador bancario no se fía del emparejamiento.
+// Es el mismo umbral con el que el servidor cuenta los de «baja confianza» al importar
+// el extracto: si aquí fuera otro, la pantalla y el resumen dirían cosas distintas.
+const CONCILIACION_CONFIANZA_MINIMA = 55;
 
 const numberFormatter = new Intl.NumberFormat("es-ES");
 const quantityFormatter = new Intl.NumberFormat("es-ES", {
@@ -5434,18 +5611,23 @@ const shouldPreferTenantRouting = () => {
   return Boolean(String(state.currentWorkspaceId || "").trim());
 };
 
-const restoreWorkspaceCompanyContextFromStorage = () => {
+const restoreWorkspaceCompanyContextFromStorage = (opts = {}) => {
+  // `force` la usa `loadWorkspaceDetail` para que lo guardado en localStorage gane
+  // siempre sobre lo que hubiera en `state` al llegar aquí, en vez de aplicarse solo
+  // "si estaba vacío" (guard que dejaba lo persistido sin aplicar si algo anterior ya
+  // había puesto un valor, aunque fuera el de una carga previa).
+  const force = Boolean(opts?.force);
   try {
     const wsCompanyId = String(localStorage.getItem("crm.currentWorkspaceCompanyWsId") || "").trim();
     const legacyCompanyId = String(localStorage.getItem("crm.currentWorkspaceCompanyId") || "").trim();
     const companyName = String(localStorage.getItem("crm.currentWorkspaceCompanyName") || "").trim();
-    if (wsCompanyId && !String(state.currentWorkspaceCompanyWsId || "").trim()) {
+    if (wsCompanyId && (force || !String(state.currentWorkspaceCompanyWsId || "").trim())) {
       state.currentWorkspaceCompanyWsId = wsCompanyId;
     }
-    if (legacyCompanyId && !String(state.currentWorkspaceCompanyId || "").trim()) {
+    if (legacyCompanyId && (force || !String(state.currentWorkspaceCompanyId || "").trim())) {
       state.currentWorkspaceCompanyId = legacyCompanyId;
     }
-    if (companyName && !String(state.currentWorkspaceCompanyName || "").trim()) {
+    if (companyName && (force || !String(state.currentWorkspaceCompanyName || "").trim())) {
       state.currentWorkspaceCompanyName = companyName;
     }
   } catch (_e) {}
@@ -7156,6 +7338,12 @@ const WORKSPACE_MODULE_STRUCTURE = {
     badge: "Servicio activo",
     description: "Comunidades, incidencias, juntas y seguimiento.",
   },
+  periciales: {
+    section: "crm_services",
+    family: "Subservicio CRM",
+    badge: "Servicio activo",
+    description: "Informes periciales de valoración de inmuebles, con testigos, evidencia y firma.",
+  },
   documental: {
     section: "workspace_engines",
     family: "Transversal",
@@ -7342,6 +7530,31 @@ const isGrupoModerniaWorkspace = () => {
 const workspaceHasEnabledModule = (moduleKey = "") =>
   new Set(state.currentWorkspaceEnabledModules || []).has(String(moduleKey || "").trim());
 
+// Siete tarjetas del Hub declaran de qué módulo dependen —`data-workspace-module`
+// con una clave, o `data-workspace-module-any` con una lista— y nadie leía ninguno
+// de los dos atributos: se enseñaban todas siempre. Un workspace sin seguros veía
+// igualmente «Seguros del workspace», vacía, y lo mismo con gestoría, financiación,
+// inmobiliaria, contabilidad y facturas recibidas.
+//
+// La salvaguarda importa más que la regla: mientras no se sepa qué módulos tiene el
+// workspace —al arrancar, o si la petición falla— no se esconde nada. Vale más una
+// tarjeta de sobra que un Hub en blanco porque una lista llegó tarde.
+const sincronizaTarjetasPorModulo = (raiz = document) => {
+  const modulos = state.currentWorkspaceEnabledModules;
+  if (!Array.isArray(modulos) || !modulos.length) return;
+  const activos = new Set(modulos.map((k) => normalizeWorkspaceModuleKey(k)));
+  const tiene = (clave) => activos.has(normalizeWorkspaceModuleKey(clave));
+  raiz.querySelectorAll("[data-workspace-module]").forEach((el) => {
+    const clave = String(el.dataset.workspaceModule || "").trim();
+    if (clave) el.classList.toggle("hidden", !tiene(clave));
+  });
+  raiz.querySelectorAll("[data-workspace-module-any]").forEach((el) => {
+    const claves = String(el.dataset.workspaceModuleAny || "")
+      .split(",").map((k) => k.trim()).filter(Boolean);
+    if (claves.length) el.classList.toggle("hidden", !claves.some(tiene));
+  });
+};
+
 const canUseLegalCopilot = () => isGrupoModerniaWorkspace() || workspaceHasEnabledModule("copilot");
 
 const syncCrmLegalAvailability = () => {
@@ -7416,6 +7629,7 @@ const getWorkspaceViewLabel = (value = "") => {
     overview: "Resumen",
     operations: "Operativa",
     fincas: "Fincas",
+    periciales: "Peritajes",
     rrhh: "RRHH",
     motores: "Motores",
     tenant: "Ajustes",
@@ -8049,7 +8263,7 @@ const renderWorkspaceEntryBanner = () => {
     bloqueado: "Bloqueado",
   }[normalizeSimple(goLiveStatusRaw)] || goLiveStatusRaw);
   const allowedTenantViews = mode === "tenant"
-    ? ["operations", "fincas", "rrhh", "motores", ...(canManage ? ["tenant"] : [])]
+    ? ["operations", "fincas", "periciales", "rrhh", "motores", ...(canManage ? ["tenant"] : [])]
     : ["overview", "tenant"];
   const nextView =
     mode === "tenant"
@@ -8152,7 +8366,7 @@ const shouldShowWorkspaceCompanySwitcher = () => {
   if (!Array.isArray(companies) || companies.length <= 1) return false;
   const view = String(state.currentWorkspaceView || "overview").trim().toLowerCase();
   // Solo cuando afecta al trabajo diario (evita confusión en Configuración/Clientes/Resumen).
-  return ["operations", "fincas", "rrhh", "motores"].includes(view);
+  return ["operations", "fincas", "periciales", "rrhh", "motores"].includes(view);
 };
 
 const updateWorkspaceEntryChrome = () => {
@@ -8209,19 +8423,29 @@ const updateWorkspaceEntryChrome = () => {
   workspaceViewButtons.forEach((button) => {
     const viewKey = button.dataset.workspaceViewTab || "";
     if (tenantOperationalMode) {
+      // «Ajustes» (la vista `tenant`) se pintaba habilitado con `canManageWorkspace`,
+      // pero `setWorkspaceView` sólo deja entrar a `isPrivilegedUser`. Cuando los dos
+      // criterios discrepan, el botón parece pulsable —cursor de mano, opacidad
+      // plena— y al pulsarlo te devuelve a Operativa sin decir nada: parece que la
+      // aplicación se ha quedado colgada. Aquí se usa el mismo criterio que decide
+      // la navegación, para que el botón no prometa lo que no puede cumplir. El
+      // permiso no se toca: lo que se corrige es que la pantalla mienta.
+      const puedeAjustes = canManageWorkspace && isPrivilegedUser(authUser);
       const shouldShow =
         viewKey === "operations"
         || viewKey === "fincas"
+        || viewKey === "periciales"
         || viewKey === "rrhh"
         || (viewKey === "motores" && canManageWorkspace)
-        || (viewKey === "tenant" && canManageWorkspace);
+        || (viewKey === "tenant" && puedeAjustes);
       button.classList.toggle("hidden", !shouldShow);
-      button.disabled = viewKey === "tenant" && !canManageWorkspace;
+      button.disabled = viewKey === "tenant" && !puedeAjustes;
       return;
     }
     button.classList.remove("hidden");
     button.disabled = false;
   });
+  sincronizaTarjetasPorModulo();
   renderWorkspaceTenantContext();
   renderWorkspaceEntryBanner();
 };
@@ -8511,7 +8735,7 @@ const renderWorkspaceCompanySwitcher = (rows = []) => {
 
 const normalizeWorkspaceViewKey = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
-  if (["overview", "tenant", "clients", "operations", "rrhh", "motores", "fincas"].includes(key)) {
+  if (["overview", "tenant", "clients", "operations", "rrhh", "motores", "fincas", "periciales"].includes(key)) {
     return key;
   }
   return "overview";
@@ -9332,7 +9556,7 @@ const setWorkspaceView = (view = "overview", options = {}) => {
   if (tenantMode && normalized === "overview") {
     normalized = "operations";
   }
-  const tenantAllowed = new Set(["operations", "fincas", "rrhh", "motores"]);
+  const tenantAllowed = new Set(["operations", "fincas", "periciales", "rrhh", "motores"]);
   if (tenantMode && !forceTenantView && normalized !== "tenant" && !tenantAllowed.has(normalized)) {
     normalized = "operations";
   }
@@ -9424,6 +9648,11 @@ const setWorkspaceView = (view = "overview", options = {}) => {
   }
   if (normalized === "fincas") {
     setWorkspaceFincasTab(state.workspaceFincasTab || "dashboard");
+  }
+  if (normalized === "periciales") {
+    hydrateWorkspaceCompanySelects();
+    void refreshWorkspacePericialPeritos();
+    void refreshWorkspacePericiales();
   }
   syncHoldingUrlParams();
   if (workspaceCompanySwitcher) {
@@ -10455,6 +10684,17 @@ const WORKSPACE_LAUNCHERS = {
       focusWorkspaceView("fincas", workspaceFincasCommunityForm);
     },
   },
+  periciales: {
+    label: "Peritajes",
+    actionLabel: "Ver módulo",
+    action: () => {
+      if (isTenantWorkspaceMode()) {
+        focusWorkspaceView("periciales", workspacePericialForm, { scroll: true, forceTenantView: true });
+        return;
+      }
+      focusWorkspaceView("periciales", workspacePericialForm);
+    },
+  },
   facturacion: {
     label: "Facturación",
     actionLabel: "Gestionar",
@@ -10631,6 +10871,17 @@ const WORKSPACE_HOME_CONTAINERS = [
     actionLabel: "Abrir fincas",
   },
   {
+    key: "periciales",
+    title: "Peritajes",
+    kicker: "Vertical",
+    icon: "file-check",
+    description: "Informes periciales de valoración de inmuebles, con testigos, evidencia y firma.",
+    requireAny: ["periciales"],
+    modules: ["periciales", "documental"],
+    action: WORKSPACE_LAUNCHERS.periciales?.action || null,
+    actionLabel: "Abrir peritajes",
+  },
+  {
     key: "simuladores",
     title: "Simuladores",
     kicker: "Vertical",
@@ -10723,6 +10974,12 @@ const loadWorkspaceClients = async (query = "") => {
   const rows = Array.isArray(data.rows) ? data.rows : [];
   state.currentWorkspaceClients = rows;
   syncWorkspaceClientOptions(rows);
+  // El total va a la lista, no a la línea de estado: esa la pisa `openWorkspaceClient360`
+  // un momento después con el cliente seleccionado, que es lo suyo. Y va guardado en
+  // `state` junto a las filas, no pasado por parámetro: hay seis sitios que repintan
+  // esta lista, y los otros cinco lo perderían.
+  state.currentWorkspaceClientsTotal = Number(data?.total || rows.length);
+  state.currentWorkspaceClientsQuery = query || "";
   renderWorkspaceClientBase(rows);
   const currentId = String(state.currentWorkspaceClientId || "");
   const stillExists = rows.some((row) => String(row.id || "") === currentId);
@@ -11267,11 +11524,25 @@ const renderWorkspaceTenantSummary = (workspace = {}) => {
 const renderWorkspaceClientBase = (rows = []) => {
   if (!workspaceClientBase) return;
   const items = Array.isArray(rows) ? rows : [];
+  const total = Number(state.currentWorkspaceClientsTotal || 0);
+  const busqueda = String(state.currentWorkspaceClientsQuery || "");
   if (!items.length) {
-    workspaceClientBase.innerHTML = "<p class='muted'>Sin clientes finales vinculados todavía a este workspace.</p>";
+    workspaceClientBase.innerHTML = busqueda
+      ? `<p class='muted'>Ningún cliente coincide con «${escapeHtml(busqueda)}».</p>`
+      : "<p class='muted'>Sin clientes finales vinculados todavía a este workspace.</p>";
     return;
   }
+  // Una lista de 120 sobre 2.262 clientes se ve exactamente igual que la lista completa
+  // de una gestoría pequeña: nada distingue «éstos son todos» de «éstos son los
+  // primeros». El buscador sí llega a los demás, pero primero hay que saber que los hay.
+  const hayMas = Number(total || 0) > items.length;
+  const recuento = hayMas
+    ? (busqueda
+        ? `${items.length} de ${Number(total).toLocaleString("es-ES")} coincidencias · afina la búsqueda para ver el resto`
+        : `${items.length} de ${Number(total).toLocaleString("es-ES")} clientes · busca por nombre, DNI, teléfono o email para llegar al resto`)
+    : `${items.length} cliente${items.length === 1 ? "" : "s"}`;
   workspaceClientBase.innerHTML = `
+    <p class="muted workspace-client-count">${escapeHtml(recuento)}</p>
     <div class="workspace-billing-list">
       ${items
         .map(
@@ -13270,6 +13541,7 @@ const prefillWorkspaceCompanyEditorFromRow = (company) => {
   set("nombre", String(company?.nombre || ""));
   set("logo_url", String(company?.logo_url || ""));
   set("razon_social", String(company?.razon_social || ""));
+  set("nombre_comercial", String(company?.nombre_comercial || ""));
   set("nif", String(company?.nif || ""));
   set("direccion", String(company?.direccion || ""));
   set("direccion_fiscal", String(company?.direccion_fiscal || ""));
@@ -16321,8 +16593,9 @@ const renderWorkspaceRrhhHub = () => {
 	              </label>
               <label>
                 Rol
-                <select name="rol">
-                  ${roleOptions.map((item) => `<option ${String(selected?.rol || "Lectura") === String(item) ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}
+                <select name="rol" required>
+                  ${selected ? "" : '<option value="" selected>— elige un rol —</option>'}
+                  ${roleOptions.map((item) => `<option ${String(selected?.rol || "") === String(item) ? "selected" : ""}>${escapeHtml(item)}</option>`).join("")}
                 </select>
               </label>
               <label>
@@ -17210,7 +17483,8 @@ const renderWorkspaceRrhhHub = () => {
                           <label>
                             Rol
                             <select id="rrhhAccessCreateRol">
-                              ${ADMIN_ROLE_OPTIONS.map((r) => `<option ${r === "Lectura" ? "selected" : ""}>${escapeHtml(r)}</option>`).join("")}
+                              <option value="" selected>— elige un rol —</option>
+                              ${ADMIN_ROLE_OPTIONS.map((r) => `<option>${escapeHtml(r)}</option>`).join("")}
                             </select>
                           </label>
                           <div class="span-2 rrhh-service-grid" data-rrhh-service-scope="new">
@@ -18531,6 +18805,15 @@ const renderWorkspaceRrhhHub = () => {
       deleteUserBtn.disabled = true;
       if (status) status.textContent = "Eliminando...";
       try {
+        // El acceso primero: la baja puede negarse —uno no puede echarse a sí mismo, ni
+        // dejar el espacio sin administrador— y al revés la persona ya habría desaparecido
+        // de la plantilla conservando su usuario, que es el peor de los dos estados.
+        const respUser = await apiPost("/api/usuarios_delete", {
+          workspace_id: state.currentWorkspaceId,
+          id: userId,
+          confirm: "DESACTIVAR",
+        });
+        if (respUser?.error) throw new Error(respUser.error);
         if (personaId) {
           const respFicha = await apiPost("/api/workspace_registro_personal_delete", {
             workspace_id: state.currentWorkspaceId,
@@ -18546,12 +18829,6 @@ const renderWorkspaceRrhhHub = () => {
             state.currentWorkspaceData.timeEmployees = removeLocal(state.currentWorkspaceData.timeEmployees);
           }
         }
-        const respUser = await apiPost("/api/usuarios_delete", {
-          workspace_id: state.currentWorkspaceId,
-          id: userId,
-          confirm: "DESACTIVAR",
-        });
-        if (respUser?.error) throw new Error(respUser.error);
         if (Array.isArray(state.usersList)) {
           state.usersList = state.usersList.filter((u) => String(u?.id || "").trim() !== userId);
         }
@@ -19503,7 +19780,7 @@ const renderWorkspaceRrhhHub = () => {
       }
       const usuario = String(document.getElementById("rrhhAccessCreateUsuario")?.value || "").trim();
       const email = String(document.getElementById("rrhhAccessCreateEmail")?.value || "").trim();
-      const rol = String(document.getElementById("rrhhAccessCreateRol")?.value || "Lectura").trim();
+      const rol = String(document.getElementById("rrhhAccessCreateRol")?.value || "").trim();
       const scope = workspaceRrhhHub.querySelector('[data-rrhh-service-scope="new"]');
       const keys = scope
         ? Array.from(scope.querySelectorAll('input[type="checkbox"][data-rrhh-service-check]'))
@@ -19513,6 +19790,15 @@ const renderWorkspaceRrhhHub = () => {
         : [];
       if (!usuario || !email) {
         if (status) status.textContent = "Usuario y email requeridos.";
+        return;
+      }
+      // El rol venía preseleccionado en «Lectura», que es el único que impide
+      // escribir. Quien daba de alta a un compañero sin fijarse lo creaba sin poder
+      // trabajar, y el rol no daba señales hasta que empezó a aplicarse de verdad:
+      // siete personas de producción acabaron así. Ahora hay que elegirlo, y ningún
+      // valor por defecto decide por nadie —tampoco uno que conceda escritura—.
+      if (!rol) {
+        if (status) status.textContent = "Elige el rol: decide si esta persona puede escribir o sólo leer.";
         return;
       }
       if (!keys.length) {
@@ -21879,10 +22165,18 @@ const renderWorkspaceRemittancesList = (rows = []) => {
   `;
 };
 
+// El backend resuelve `empresa_id` contra la tabla legacy `empresas` (razón
+// social, CIF, logo del PDF...), no contra `workspace_companies`. Mandar el id
+// nuevo colaba un id que no existía en `empresas`: el presupuesto se guardaba,
+// pero el emisor salía en blanco y el registro no aparecía en los listados
+// filtrados por empresa. `legacy_empresa_id` es siempre el id que hay que
+// mandar cuando existe.
+const companyLegacyId = (row) => String(row?.legacy_empresa_id || row?.id || "").trim();
+
 const hydrateWorkspaceCompanySelects = () => {
   const companies = state.currentWorkspaceDetail?.companies || [];
-  const defaultCompanyId = state.currentWorkspaceCompanyId || companies[0]?.id || "";
-  const html = companies.map((row) => `<option value="${escapeHtml(String(row.id))}">${escapeHtml(row.nombre || "-")}</option>`).join("");
+  const defaultCompanyId = state.currentWorkspaceCompanyId || companyLegacyId(companies[0]) || "";
+  const html = companies.map((row) => `<option value="${escapeHtml(companyLegacyId(row))}">${escapeHtml(row.nombre || "-")}</option>`).join("");
   [
     workspaceBillingForm,
     workspaceBudgetForm,
@@ -21895,6 +22189,7 @@ const hydrateWorkspaceCompanySelects = () => {
     workspaceRemittancesForm,
     workspaceFincasProviderForm,
     workspaceFincasBudgetQuickForm,
+    workspacePericialForm,
   ].forEach((form) => {
     const select = form?.querySelector('[name="empresa_id"]');
     if (select) {
@@ -21906,7 +22201,7 @@ const hydrateWorkspaceCompanySelects = () => {
       const soloFincas = form === workspaceFincasBudgetQuickForm || form === workspaceFincasCommunityForm;
       const administradoras = companies.filter((c) => Number(c.administra_fincas || 0));
       select.innerHTML = soloFincas && administradoras.length
-        ? administradoras.map((c) => `<option value="${escapeHtml(String(c.id))}">${escapeHtml(c.nombre || c.razon_social || c.id)}</option>`).join("")
+        ? administradoras.map((c) => `<option value="${escapeHtml(companyLegacyId(c))}">${escapeHtml(c.nombre || c.razon_social || c.id)}</option>`).join("")
         : html;
       // En fincas, el alta nueva sale por la sociedad marcada para ello. Las
       // comunidades que ya existen conservan la suya: quien las precarga sobrescribe
@@ -21914,15 +22209,320 @@ const hydrateWorkspaceCompanySelects = () => {
       // pantalla.
       const paraAltasNuevas = soloFincas && administradoras.find((c) => Number(c.fincas_por_defecto || 0));
       if (paraAltasNuevas) {
-        select.value = paraAltasNuevas.id;
+        select.value = companyLegacyId(paraAltasNuevas);
       } else if (defaultCompanyId) {
         select.value = defaultCompanyId;
       }
-      if (!String(select.value || "").trim() && companies[0]?.id) {
-        select.value = companies[0].id;
+      if (!String(select.value || "").trim() && companies[0]) {
+        select.value = companyLegacyId(companies[0]);
       }
     }
   });
+};
+
+// --- Peritajes de valoración -------------------------------------------
+
+// El desplegable de perito estaba vacío: nunca se rellenaba con los usuarios
+// de verdad del workspace. Reutiliza `/api/usuarios` (mismo endpoint que ya
+// usan los selectores de responsable), acotado por workspace.
+const refreshWorkspacePericialPeritos = async () => {
+  const select = workspacePericialForm?.querySelector('[name="perito_usuario_id"]');
+  if (!select || !state.currentWorkspaceId) return;
+  let usuarios = [];
+  try {
+    const data = await api(`/api/usuarios?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`);
+    usuarios = (data?.rows || []).filter((u) => Number(u.activo ?? 1));
+  } catch (e) {
+    return;
+  }
+  const previo = select.value;
+  select.innerHTML = `<option value="">Selecciona perito</option>${usuarios
+    .map((u) => {
+      const nombre = `${u.nombre || ""} ${u.apellido || ""}`.trim() || u.usuario || u.id;
+      return `<option value="${escapeHtml(u.id)}" data-colegiado="${escapeHtml(u.colegiado_numero || "")}">${escapeHtml(nombre)}</option>`;
+    })
+    .join("")}`;
+  if (previo && Array.from(select.options).some((opt) => opt.value === previo)) {
+    select.value = previo;
+  }
+};
+
+// Al elegir perito, si el nº de colegiado del formulario está vacío se
+// autorrellena con el que ya tuviera guardado ese usuario — sin pisar lo que
+// se hubiera escrito a mano (puede firmar un sustituto con otro nº).
+workspacePericialForm?.querySelector('[name="perito_usuario_id"]')?.addEventListener("change", (ev) => {
+  const opt = ev.target.selectedOptions?.[0];
+  const colegiadoField = workspacePericialForm.querySelector('[name="colegiado_numero"]');
+  const colegiado = opt?.dataset?.colegiado || "";
+  if (colegiadoField && colegiado && !colegiadoField.value.trim()) {
+    colegiadoField.value = colegiado;
+  }
+});
+
+const fillWorkspacePericialForm = (row = null) => {
+  if (!workspacePericialForm) return;
+  workspacePericialForm.reset();
+  const set = (name, value) => {
+    const el = workspacePericialForm.querySelector(`[name="${name}"]`);
+    if (el) el.value = value == null ? "" : String(value);
+  };
+  set("id", row?.id || "");
+  set("workspace_id", state.currentWorkspaceId || "");
+  set("denominacion_manual", row?.denominacion_manual || "");
+  set("direccion_manual", row?.direccion_manual || "");
+  set("referencia_catastral_manual", row?.referencia_catastral_manual || "");
+  set("finalidad", row?.finalidad || "");
+  set("procedimiento_referencia", row?.procedimiento_referencia || "");
+  set("perito_usuario_id", row?.perito_usuario_id || "");
+  set("colegiado_numero", row?.colegiado_numero || "");
+  set("fecha_encargo", row?.fecha_encargo || "");
+  set("fecha_visita", row?.fecha_visita || "");
+  set("fecha_valoracion", row?.fecha_valoracion || "");
+  set("superficie_catastral", row?.superficie_catastral || "");
+  set("superficie_registral", row?.superficie_registral || "");
+  set("superficie_medida", row?.superficie_medida || "");
+  set("superficie_calculo_usada", row?.superficie_calculo_usada || "");
+  set("motivo_superficie_usada", row?.motivo_superficie_usada || "");
+  hydrateWorkspaceCompanySelects();
+  if (row?.empresa_id) {
+    const sel = workspacePericialForm.querySelector('[name="empresa_id"]');
+    if (sel) sel.value = row.empresa_id;
+  }
+  if (workspacePericialStatus) {
+    workspacePericialStatus.textContent = row ? `Editando: ${row.finalidad || row.id}` : "";
+  }
+};
+
+const refreshWorkspacePericiales = async ({ silent = false } = {}) => {
+  if (!state.currentWorkspaceId) return;
+  try {
+    const data = await api(`/api/workspace_periciales?workspace_id=${encodeURIComponent(state.currentWorkspaceId)}`);
+    state.workspacePericialesRows = Array.isArray(data?.rows) ? data.rows : [];
+  } catch (error) {
+    if (!silent && workspacePericialesInfo) workspacePericialesInfo.textContent = error?.message || "No se pudo cargar.";
+    return;
+  }
+  renderWorkspacePericialesList();
+};
+
+const workspacePericialEstadoBadge = (estado) => {
+  const e = String(estado || "").trim();
+  if (e === "Firmado") return "Firmado";
+  if (e === "Ratificado") return "Ratificado";
+  return e || "Encargado";
+};
+
+const renderWorkspacePericialesList = () => {
+  if (!workspacePericialesTable) return;
+  const rows = state.workspacePericialesRows || [];
+  if (workspacePericialesInfo) workspacePericialesInfo.textContent = `${rows.length} expediente${rows.length === 1 ? "" : "s"}`;
+  if (!rows.length) {
+    workspacePericialesTable.innerHTML = "<p class='muted'>Sin expedientes todavía.</p>";
+    return;
+  }
+  workspacePericialesTable.innerHTML = `
+    <div class="workspace-billing-list">
+      ${rows.map((row) => {
+        const denom = row.inmueble_denominacion || "Inmueble sin denominación";
+        const valor = row.valor_final ? euroFormatter.format(Number(row.valor_final)) : "—";
+        const firmado = String(row.estado || "") === "Firmado";
+        return `
+          <div class="workspace-billing-row">
+            <div>
+              <strong>${escapeHtml(denom)}</strong>
+              <div class="muted">${escapeHtml(row.finalidad || "-")} · ${escapeHtml(workspacePericialEstadoBadge(row.estado))} · ${escapeHtml(row.perito_nombre || "sin perito asignado")}</div>
+            </div>
+            <div class="workspace-billing-meta">
+              <span>${escapeHtml(valor)}</span>
+              <a class="secondary ghost button-inline" href="/api/workspace_pericial_pdf?id=${encodeURIComponent(row.id)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}" target="_blank" rel="noreferrer">PDF</a>
+              ${!firmado ? `<button type="button" class="secondary ghost button-inline" data-pericial-edit="${escapeHtml(row.id)}">Editar</button>` : ""}
+              <button type="button" class="secondary ghost button-inline" data-pericial-gestionar="${escapeHtml(row.id)}">Testigos / Firma</button>
+              ${!firmado ? `<button type="button" class="secondary ghost button-inline" data-pericial-delete="${escapeHtml(row.id)}">Borrar</button>` : ""}
+            </div>
+          </div>
+        `;
+      }).join("")}
+    </div>
+  `;
+  workspacePericialesTable.querySelectorAll("[data-pericial-edit]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const row = rows.find((r) => r.id === btn.dataset.pericialEdit);
+      if (row) fillWorkspacePericialForm(row);
+    });
+  });
+  workspacePericialesTable.querySelectorAll("[data-pericial-gestionar]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const row = rows.find((r) => r.id === btn.dataset.pericialGestionar);
+      if (row) void openPericialModal(row);
+    });
+  });
+  workspacePericialesTable.querySelectorAll("[data-pericial-delete]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      if (!window.confirm("¿Borrar este expediente pericial? No se puede deshacer.")) return;
+      try {
+        await apiPost("/api/workspace_pericial_delete", { workspace_id: state.currentWorkspaceId, id: btn.dataset.pericialDelete });
+        await refreshWorkspacePericiales();
+      } catch (error) {
+        if (workspacePericialesInfo) workspacePericialesInfo.textContent = error?.message || "No se pudo borrar.";
+      }
+    });
+  });
+};
+
+workspacePericialForm?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const fd = new FormData(workspacePericialForm);
+  const payload = Object.fromEntries(fd.entries());
+  payload.workspace_id = state.currentWorkspaceId || "";
+  try {
+    if (workspacePericialStatus) workspacePericialStatus.textContent = "Guardando...";
+    await apiPost("/api/workspace_pericial", payload);
+    if (workspacePericialStatus) workspacePericialStatus.textContent = "Guardado.";
+    fillWorkspacePericialForm(null);
+    await refreshWorkspacePericiales();
+  } catch (error) {
+    if (workspacePericialStatus) workspacePericialStatus.textContent = error?.message || "No se pudo guardar.";
+  }
+});
+
+workspacePericialResetBtn?.addEventListener("click", () => fillWorkspacePericialForm(null));
+
+const openPericialModal = async (row) => {
+  let modal = document.getElementById("pericialModal");
+  if (!modal) {
+    modal = document.createElement("div");
+    modal.id = "pericialModal";
+    modal.className = "modal hidden";
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 720px;">
+        <div class="modal-header">
+          <h3>Testigos, evidencia y firma</h3>
+          <button type="button" class="secondary ghost" data-pericial-modal-close>Cerrar</button>
+        </div>
+        <div class="modal-body">
+          <div id="pericialModalChecklist" class="muted"></div>
+          <h4>Testigos</h4>
+          <div id="pericialModalTestigos"></div>
+          <form id="pericialModalTestigoForm" class="form-grid">
+            <label>Fuente<input name="fuente" placeholder="Idealista, notaría..." required /></label>
+            <label>Fecha de captura<input name="fecha_captura" type="date" /></label>
+            <label>Precio (€)<input name="precio" inputmode="decimal" required /></label>
+            <label>Superficie (m²)<input name="superficie" inputmode="decimal" required /></label>
+            <div class="form-actions span-2">
+              <button type="submit">Añadir testigo</button>
+              <span id="pericialModalTestigoStatus" class="muted"></span>
+            </div>
+          </form>
+          <div class="form-actions" style="margin-top:16px;">
+            <button type="button" id="pericialModalGenerarPdf" class="secondary ghost">Generar PDF</button>
+            <button type="button" id="pericialModalFirmar" class="primary">Solicitar firma</button>
+          </div>
+          <div id="pericialModalStatus" class="muted"></div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    modal.querySelector("[data-pericial-modal-close]").addEventListener("click", () => {
+      modal.classList.add("hidden");
+      modal.classList.remove("open");
+    });
+    modal.addEventListener("click", (ev) => {
+      if (ev.target === modal) {
+        modal.classList.add("hidden");
+        modal.classList.remove("open");
+      }
+    });
+  }
+  modal.dataset.pericialId = row.id;
+  modal.classList.remove("hidden");
+  modal.classList.add("open");
+  await refreshPericialModalContent(row.id);
+
+  const testigoForm = modal.querySelector("#pericialModalTestigoForm");
+  testigoForm.onsubmit = async (event) => {
+    event.preventDefault();
+    const fd = new FormData(testigoForm);
+    const payload = Object.fromEntries(fd.entries());
+    payload.workspace_id = state.currentWorkspaceId || "";
+    payload.pericial_id = row.id;
+    const statusEl = modal.querySelector("#pericialModalTestigoStatus");
+    try {
+      if (statusEl) statusEl.textContent = "Guardando...";
+      await apiPost("/api/workspace_pericial_testigo", payload);
+      testigoForm.reset();
+      if (statusEl) statusEl.textContent = "Añadido.";
+      await refreshPericialModalContent(row.id);
+      await refreshWorkspacePericiales({ silent: true });
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error?.message || "No se pudo guardar.";
+    }
+  };
+
+  modal.querySelector("#pericialModalGenerarPdf").onclick = async () => {
+    const statusEl = modal.querySelector("#pericialModalStatus");
+    try {
+      if (statusEl) statusEl.textContent = "Generando...";
+      await apiPost("/api/workspace_pericial_pdf", { workspace_id: state.currentWorkspaceId, id: row.id });
+      if (statusEl) statusEl.textContent = "PDF generado. Puedes descargarlo desde el listado.";
+    } catch (error) {
+      if (statusEl) statusEl.textContent = error?.message || "No se pudo generar.";
+    }
+  };
+
+  modal.querySelector("#pericialModalFirmar").onclick = async () => {
+    const statusEl = modal.querySelector("#pericialModalStatus");
+    const signerNombre = window.prompt("Nombre de quien firma:", "") || "";
+    if (!signerNombre.trim()) return;
+    const signerNif = window.prompt("NIF de quien firma:", "") || "";
+    try {
+      if (statusEl) statusEl.textContent = "Solicitando firma...";
+      const res = await apiPost("/api/workspace_pericial_firmar", {
+        workspace_id: state.currentWorkspaceId, pericial_id: row.id,
+        signer_nombre: signerNombre, signer_nif: signerNif,
+      });
+      const url = res?.solicitud?.public_url ? `${window.location.origin}${res.solicitud.public_url}` : "";
+      if (statusEl) {
+        statusEl.textContent = url
+          ? `Solicitud creada. Enlace de firma (compártelo con el perito): ${url}`
+          : "Solicitud creada.";
+      }
+      await refreshWorkspacePericiales({ silent: true });
+    } catch (error) {
+      const detalle = error?.data?.faltan ? ` — ${error.data.faltan.join(" ")}` : "";
+      if (statusEl) statusEl.textContent = (error?.message || "No se pudo solicitar la firma.") + detalle;
+    }
+  };
+};
+
+const refreshPericialModalContent = async (pericialId) => {
+  const modal = document.getElementById("pericialModal");
+  if (!modal) return;
+  let detalle;
+  try {
+    detalle = await api(`/api/workspace_pericial?id=${encodeURIComponent(pericialId)}&workspace_id=${encodeURIComponent(state.currentWorkspaceId || "")}`);
+  } catch (error) {
+    return;
+  }
+  const checklistEl = modal.querySelector("#pericialModalChecklist");
+  const faltan = detalle?.checklist_pendiente || [];
+  if (checklistEl) {
+    checklistEl.innerHTML = faltan.length
+      ? `<strong>Pendiente para poder firmar:</strong><ul>${faltan.map((f) => `<li>${escapeHtml(f)}</li>`).join("")}</ul>`
+      : "<strong>Listo para firmar.</strong>";
+  }
+  const testigosEl = modal.querySelector("#pericialModalTestigos");
+  const testigos = (detalle?.testigos || []).filter((t) => (t.estado || "activo") === "activo");
+  if (testigosEl) {
+    testigosEl.innerHTML = testigos.length
+      ? `<div class="workspace-billing-list">${testigos.map((t) => `
+          <div class="workspace-billing-row">
+            <div><strong>${escapeHtml(t.fuente || "-")}</strong>
+              <div class="muted">${escapeHtml(t.fecha_captura || "-")} · ${euroFormatter.format(Number(t.precio || 0))} · ${Number(t.superficie || 0)} m²</div>
+            </div>
+            <div class="workspace-billing-meta"><span>${t.valor_homogeneizado ? euroFormatter.format(Number(t.valor_homogeneizado)) + "/m²" : "—"}</span></div>
+          </div>`).join("")}</div>`
+      : "<p class='muted'>Sin testigos todavía.</p>";
+  }
 };
 
 const ensureWorkspaceCompaniesLoaded = async () => {
@@ -23507,11 +24107,11 @@ const fillWorkspaceFincasCommunityForm = (record = null) => {
     num_trasteros: "",
     num_aparcamientos: "",
     cuota_sugerida: "",
-    cuota_mensual: "",
+    honorario_mensual: "",
     foto_edificio_key: "",
     ...(record || {}),
   };
-  ["id", "workspace_id", "empresa_id", "nombre", "referencia_catastral", "cif", "direccion", "presidente", "secretario", "estado", "num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos", "cuota_sugerida", "cuota_mensual", "foto_edificio_key"].forEach((field) => {
+  ["id", "workspace_id", "empresa_id", "nombre", "referencia_catastral", "cif", "direccion", "presidente", "secretario", "estado", "num_vecinos", "num_locales", "num_trasteros", "num_aparcamientos", "cuota_sugerida", "honorario_mensual", "foto_edificio_key"].forEach((field) => {
     const input = workspaceFincasCommunityForm.querySelector(`[name="${field}"]`);
     if (input) input.value = payload[field] ?? "";
   });
@@ -23527,7 +24127,7 @@ const fillWorkspaceFincasCommunityForm = (record = null) => {
     suggestedInput.value = formatEurosCompact(suggested);
   }
   try {
-    const cuotaInput = workspaceFincasCommunityForm.querySelector('[name="cuota_mensual"]');
+    const cuotaInput = workspaceFincasCommunityForm.querySelector('[name="honorario_mensual"]');
     if (cuotaInput && String(cuotaInput.value || "").trim()) {
       cuotaInput.value = formatEurosCompact(parseMoneyValue(cuotaInput.value));
     }
@@ -23670,8 +24270,9 @@ const renderWorkspaceFincasCommunityFicha = async () => {
           <input name="num_aparcamientos" inputmode="numeric" value="${escapeHtml(String(record.num_aparcamientos ?? ""))}" />
         </label>
         <label>
-          Cuota mensual
-          <input name="cuota_mensual" inputmode="decimal" value="${escapeHtml(String(record.cuota_mensual ?? ""))}" />
+          Honorario mensual (nuestra minuta)
+          <input name="honorario_mensual" inputmode="decimal"
+                 value="${escapeHtml(String(record.honorario_mensual ?? record.cuota_mensual ?? ""))}" />
         </label>
         <div class="form-grid-section span-all">Domiciliación (SEPA)</div>
         <label class="span-2">
@@ -23743,7 +24344,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
         <div class="workspace-mini-kpis">
           <div class="workspace-mini-kpi"><span>Propietarios</span><strong>${numberFormatter.format(c.propietarios || 0)}</strong></div>
           <div class="workspace-mini-kpi"><span>Coeficientes</span><strong>${pct(c.suma_coeficientes)}</strong></div>
-          <div class="workspace-mini-kpi"><span>Cuota mensual</span><strong>${euroFormatter.format(d.comunidad?.cuota_mensual || 0)}</strong></div>
+          <div class="workspace-mini-kpi"><span>Honorario mensual</span><strong>${euroFormatter.format(d.comunidad?.honorario_mensual ?? d.comunidad?.cuota_mensual ?? 0)}</strong></div>
           <div class="workspace-mini-kpi"><span>Con portal</span><strong>${d.portal?.con_acceso || 0} / ${d.portal?.de || 0}</strong></div>
         </div>
 
@@ -23805,6 +24406,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
             <div class="form-actions span-all">
               <button type="submit">Guardar</button>
               <button type="button" class="secondary ghost" data-vecino-nuevo>Nuevo</button>
+              <button type="button" class="secondary ghost" data-vecino-mandato>Orden de domiciliación SEPA</button>
             </div>
           </form>
           <details class="fincas-tarifa-panel" data-censo-import>
@@ -23889,6 +24491,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
                       <button type="button" class="secondary ghost" data-vecino-portal="${escapeHtml(String(v.id || ""))}">Enlace del portal</button>
                       <button type="button" class="secondary ghost" data-vecino-edit="${escapeHtml(String(v.id || ""))}">Editar</button>
                       <button type="button" class="secondary ghost" data-vecino-borrar="${escapeHtml(String(v.id || ""))}">Borrar</button>
+                      <button type="button" class="secondary ghost" data-vecino-suprimir="${escapeHtml(String(v.id || ""))}">Suprimir datos (RGPD)</button>
                     </span>
                   </div>
                 </div>
@@ -23926,6 +24529,46 @@ const renderWorkspaceFincasCommunityFicha = async () => {
             }
           });
         });
+        // Art. 17 para un comunero. «Borrar» es para un alta equivocada; quien ya tiene
+        // recibos o votos en junta no se borra —eso dejaba la contabilidad sin dueño—:
+        // se le quita la identidad y los apuntes se quedan.
+        (listWrap?.querySelectorAll("[data-vecino-suprimir]") || []).forEach((btn) => {
+          btn.addEventListener("click", async () => {
+            const v = items.find((row) => String(row.id || "") === String(btn.dataset.vecinoSuprimir || ""));
+            if (!v) return;
+            const quien = v.nombre || v.piso || "este propietario";
+            const confirmacion = window.prompt(
+              `Vas a suprimir los datos personales de ${quien}.\n\n` +
+                "Se borra su acceso al portal y se vacían NIF, teléfono, correo, IBAN y mandato.\n" +
+                "Se conservan recibos, apuntes y actas, porque la ley obliga, pero dejan de " +
+                "identificar a nadie. El piso y su coeficiente se quedan en la comunidad.\n\n" +
+                "Esto no se puede deshacer. Escribe SUPRIMIR para confirmar:"
+            );
+            if (String(confirmacion || "").trim().toUpperCase() !== "SUPRIMIR") return;
+            const motivo = window.prompt("Motivo (queda registrado junto a quién y cuándo):",
+                                         "Solicitud del interesado") || "";
+            btn.disabled = true;
+            try {
+              const data = await postJsonWithDbRetry("/api/workspace_fincas_vecino_suprimir", {
+                workspace_id: workspaceId, vecino_id: v.id, confirm: "SUPRIMIR", motivo,
+              });
+              const conservado = Object.entries(data?.conservado || {});
+              window.alert(
+                (data?.aviso || "Datos suprimidos.") +
+                (conservado.length
+                  ? "\n\nConservado por obligación legal (ya anónimo):\n" +
+                    conservado.map(([, x]) => `  · ${x.motivo}: ${x.filas}`).join("\n")
+                  : "")
+              );
+              await loadVecinos();
+            } catch (e) {
+              if (listStatus) listStatus.textContent = e?.message || "No se pudo suprimir.";
+              window.alert(e?.message || "No se pudo suprimir.");
+            } finally {
+              btn.disabled = false;
+            }
+          });
+        });
         (listWrap?.querySelectorAll("[data-vecino-borrar]") || []).forEach((btn) => {
           btn.addEventListener("click", async () => {
             const v = items.find((row) => String(row.id || "") === String(btn.dataset.vecinoBorrar || ""));
@@ -23935,7 +24578,10 @@ const renderWorkspaceFincasCommunityFicha = async () => {
               await postJsonWithDbRetry("/api/workspace_fincas_vecino_delete", { workspace_id: workspaceId, id: v.id });
               await loadVecinos();
             } catch (e) {
+              // El servidor puede negarse porque tiene contabilidad detrás, y ese motivo
+              // hay que leerlo: dice qué hacer en su lugar.
               if (listStatus) listStatus.textContent = e?.message || "No se pudo borrar.";
+              window.alert(e?.message || "No se pudo borrar.");
             }
           });
         });
@@ -23951,6 +24597,16 @@ const renderWorkspaceFincasCommunityFicha = async () => {
       if (titleEl) titleEl.textContent = "Nuevo propietario";
     };
     workspaceFincasCommunityFichaPanel.querySelector("[data-vecino-nuevo]")?.addEventListener("click", reset);
+    workspaceFincasCommunityFichaPanel.querySelector("[data-vecino-mandato]")?.addEventListener("click", () => {
+      // La orden se genera con la referencia que va a viajar al banco, así que hay que
+      // haber guardado al propietario antes: sin id no hay mandato que emitir.
+      const vecinoId = String(form?.querySelector('[name="id"]')?.value || "").trim();
+      if (!vecinoId) {
+        if (statusEl) statusEl.textContent = "Guarda primero al propietario.";
+        return;
+      }
+      window.open(`/api/workspace_fincas_mandato?workspace_id=${encodeURIComponent(workspaceId)}&id=${encodeURIComponent(vecinoId)}`, "_blank");
+    });
     workspaceFincasCommunityFichaPanel.querySelector("[data-censo-cargar]")?.addEventListener("click", async () => {
       const texto = workspaceFincasCommunityFichaPanel.querySelector("[data-censo-texto]")?.value || "";
       const reemplazar = workspaceFincasCommunityFichaPanel.querySelector("[data-censo-reemplazar]")?.checked;
@@ -24000,7 +24656,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
     workspaceFincasCommunityFichaPanel.innerHTML = `
       <div class="form-grid" style="align-items:end;">
         <label>Periodo <input type="month" data-recibos-periodo value="${mesActual}" /></label>
-        <label>Importe a repartir (€) <input data-recibos-importe inputmode="decimal" placeholder="Cuota mensual de la ficha" /></label>
+        <label>Importe a repartir (€) <input data-recibos-importe inputmode="decimal" placeholder="Presupuesto anual aprobado ÷ 12" /></label>
         <label class="span-2">Concepto <input data-recibos-concepto placeholder="Cuota de comunidad" /></label>
         <div class="form-actions span-all">
           <button type="button" data-recibos-emitir>Emitir recibos</button>
@@ -24032,6 +24688,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
             <div class="workspace-mini-kpi"><span>Devuelto</span><strong>${euroFormatter.format(r.devuelto || 0)}</strong></div>
           </div>
           ${r.sin_iban ? `<p class="censo-aviso">${r.sin_iban} recibo(s) sin cuenta válida: quedarán fuera de la remesa. Un IBAN mal tecleado tumba el fichero entero en el banco.</p>` : ""}
+          ${Number(data?.total || 0) > filas.length ? `<p class="muted">Se listan ${numberFormatter.format(filas.length)} de ${numberFormatter.format(Number(data.total))} recibos. Los importes de arriba sí son los de todos.</p>` : ""}
         ` : "";
         panel.querySelector("[data-recibos-list]").innerHTML = filas.length ? `
           <div class="workspace-billing-list">
@@ -24129,9 +24786,17 @@ const renderWorkspaceFincasCommunityFicha = async () => {
         try {
           res = await postJsonWithDbRetry("/api/workspace_fincas_recibos_emitir", cuerpo);
         } catch (err) {
-          if (!/Ya hay recibos emitidos/.test(String(err?.message || ""))) throw err;
-          if (!window.confirm(`Ya hay recibos de ${cuerpo.periodo}. ¿Rehacer los que sigan pendientes?`)) { di(""); return; }
-          res = await postJsonWithDbRetry("/api/workspace_fincas_recibos_emitir", { ...cuerpo, reemitir: "1" });
+          // Dos situaciones distintas y dos preguntas distintas. Antes había una sola,
+          // «¿rehacer los pendientes?», y decir que sí a una derrama borraba la cuota
+          // ordinaria del mes.
+          const aviso = String(err?.message || "");
+          if (/Ya hay \d+ recibos/.test(aviso)) {
+            if (!window.confirm(`${aviso}\n\n¿Los rehago?`)) { di(""); return; }
+            res = await postJsonWithDbRetry("/api/workspace_fincas_recibos_emitir", { ...cuerpo, reemitir: "1" });
+          } else if (/ya hay recibos de otro concepto/i.test(aviso)) {
+            if (!window.confirm(`${aviso}\n\n¿Lo emito como cargo aparte?`)) { di(""); return; }
+            res = await postJsonWithDbRetry("/api/workspace_fincas_recibos_emitir", { ...cuerpo, confirmado: true });
+          } else throw err;
         }
         const avisos = [`${res.creados} recibos por ${euroFormatter.format(res.total)}.`];
         if (res.reparto_por_partes) avisos.push("Nadie tenía coeficiente: se ha repartido a partes iguales.");
@@ -24166,6 +24831,7 @@ const renderWorkspaceFincasCommunityFicha = async () => {
       <div class="form-grid" style="align-items:end;">
         <label class="span-2">Junta <select data-junta-sel></select></label>
         <div class="form-actions span-2">
+          <button type="button" class="secondary ghost" data-junta-convocatoria>Descargar convocatoria</button>
           <button type="button" class="secondary ghost" data-junta-acta>Descargar acta</button>
           <span class="muted" data-junta-status></span>
         </div>
@@ -24200,18 +24866,27 @@ const renderWorkspaceFincasCommunityFicha = async () => {
           <input type="checkbox" data-segunda ${r.asistencia?.segunda_convocatoria ? "checked" : ""} />
           <span>Segunda convocatoria — las mayorías se cuentan sobre los asistentes (LPH art. 17.7)</span>
         </label>
+        <label class="fincas-extra" style="max-width:520px;">
+          <span>Acta comunicada el</span>
+          <input type="date" data-acta-notificada value="${escapeHtml(String(r.acuerdos?.[0]?.plazo_ausentes?.acta_notificada || ""))}" />
+          <span class="muted">Desde ese día corren los 30 naturales del cómputo de ausentes (art. 17.8).</span>
+        </label>
         <p class="muted">El quórum lo decide quien preside: aquí solo están las cifras.</p>
         <h4>Asistencia</h4>
         <div class="workspace-billing-list">
           ${(r.propietarios || []).map((p) => `
             <div class="workspace-billing-row">
               <div><strong>${escapeHtml(p.piso || "—")} · ${escapeHtml(p.nombre || "")}</strong>
-                <div class="muted">${Number(p.coeficiente || 0).toFixed(4)} %${p.representado_por ? ` · representado por ${escapeHtml(p.representado_por)}` : ""}</div></div>
+                <div class="muted">${Number(p.coeficiente || 0).toFixed(4)} %${p.representado_por ? ` · representado por ${escapeHtml(p.representado_por)}` : ""}${p.sin_derecho_voto ? " · <strong>sin derecho de voto</strong> (no está al corriente, art. 15.2)" : ""}</div></div>
               <div class="workspace-billing-meta">
                 <label class="fincas-extra" style="border:0;padding:0;">
                   <input type="checkbox" data-asiste="${escapeHtml(String(p.id))}" ${p.asiste ? "checked" : ""} />
                   <span>Asiste</span>
                 </label>
+                ${p.sin_derecho_voto ? `<label class="fincas-extra" style="border:0;padding:0;" title="Márcalo solo si antes de empezar la junta ha pagado, ha impugnado judicialmente la deuda o la ha consignado.">
+                  <input type="checkbox" data-habilita="${escapeHtml(String(p.id))}" />
+                  <span>Tiene voto</span>
+                </label>` : ""}
                 <input placeholder="Representado por" value="${escapeHtml(p.representado_por || "")}" data-repre="${escapeHtml(String(p.id))}" style="max-width:180px;" />
               </div>
             </div>`).join("")}
@@ -24228,7 +24903,9 @@ const renderWorkspaceFincasCommunityFicha = async () => {
             <div class="muted">
               A favor ${ac.favor} · en contra ${ac.contra} · abstenciones ${ac.abstencion} —
               ${Number(ac.favor_propietarios).toFixed(2)} % de propietarios y ${Number(ac.favor_coeficiente).toFixed(2)} % de coeficiente,
-              sobre ${escapeHtml(ac.sobre || "toda la comunidad")}.
+              sobre ${escapeHtml(ac.sobre || "toda la comunidad")}${(r.sin_derecho_voto || []).length
+                ? `, descontando a ${(r.sin_derecho_voto || []).length} sin derecho de voto (queda ${Number(r.asistencia?.coeficiente_con_voto || 0).toFixed(2)} % de coeficiente)`
+                : ""}.
             </div>
             <label>Mayoría exigida
               <select data-mayoria="${escapeHtml(String(ac.id))}">
@@ -24237,11 +24914,63 @@ const renderWorkspaceFincasCommunityFicha = async () => {
               </select>
             </label>
             ${ac.articulo ? `<div class="muted">Según ${escapeHtml(ac.articulo)}.</div>` : ""}
+            ${ac.computa_ausentes && ac.ausentes_pendientes ? `
+              <div class="muted" style="border-left:3px solid var(--acento,#888);padding-left:.6rem;">
+                <strong>Pendiente del cómputo de ausentes (art. 17.8).</strong>
+                ${ac.ausentes_pendientes} ausente${ac.ausentes_pendientes === 1 ? "" : "s"}
+                (${Number(ac.ausentes_pendientes_coeficiente || 0).toFixed(2)} % de coeficiente)
+                no ${ac.ausentes_pendientes === 1 ? "ha" : "han"} manifestado discrepancia.
+                Contándolos a favor: ${Number(ac.favor_con_ausentes_propietarios || 0).toFixed(2)} % de
+                propietarios y ${Number(ac.favor_con_ausentes_coeficiente || 0).toFixed(2)} % de coeficiente
+                → <strong>${ac.aprobado_con_ausentes === true ? "APROBADO" : ac.aprobado_con_ausentes === false ? "seguiría sin aprobarse" : "sin mayoría asignada"}</strong>.
+                ${ac.plazo_ausentes?.acta_notificada
+                  ? `Plazo hasta el ${escapeHtml(ac.plazo_ausentes.vence)}${Number.isFinite(ac.plazo_ausentes.dias_restantes) ? ` (${ac.plazo_ausentes.dias_restantes} días)` : ""}.`
+                  : "<strong>No consta la fecha de comunicación del acta: el plazo no ha empezado.</strong>"}
+                <div style="margin-top:.35rem;">Discrepancias recibidas:
+                  ${(ac.ausentes_nominales || []).map((v) => `
+                    <label class="fincas-extra" style="border:0;padding:0;margin-right:.6rem;">
+                      <input type="checkbox" data-discrepa="${escapeHtml(String(ac.id))}" data-discrepante="${escapeHtml(String(v.vecino_id || ""))}" ${v.discrepa ? "checked" : ""} />
+                      <span>${escapeHtml(v.piso || v.nombre || "")}</span>
+                    </label>`).join("") || "<span class='muted'>ninguna</span>"}
+                </div>
+              </div>` : ""}
+
+            ${(ac.impugnaciones || []).length ? `
+              <div class="muted" style="border-left:3px solid #c0392b;padding-left:.6rem;">
+                <strong>Impugnado.</strong>
+                ${(ac.impugnaciones || []).map((i) => `${escapeHtml(i.nombre || "")} (${escapeHtml(i.piso || "")}) el ${escapeHtml(i.fecha || "")} — ${escapeHtml(i.motivo_etiqueta || "")} ${i.articulo ? `(${escapeHtml(i.articulo)})` : ""}`).join("; ")}.
+                <br />La impugnación <strong>no suspende</strong> la ejecución del acuerdo, salvo que el juez la suspenda cautelarmente (art. 18.4).
+                <div style="margin-top:.35rem;">
+                  ${(ac.impugnaciones || []).map((i) => `<button type="button" class="secondary ghost" data-retira-imp="${escapeHtml(String(ac.id))}" data-retira-vecino="${escapeHtml(String(i.vecino_id))}">Retirar la de ${escapeHtml(i.piso || i.nombre || "")}</button>`).join(" ")}
+                </div>
+              </div>` : ""}
+            <details style="margin:.4rem 0;">
+              <summary class="muted">Anotar una impugnación (art. 18)</summary>
+              <div class="form-grid" style="align-items:end;">
+                <label>Propietario
+                  <select data-imp-vecino="${escapeHtml(String(ac.id))}">
+                    ${(r.propietarios || []).map((p) => `<option value="${escapeHtml(String(p.id))}">${escapeHtml(p.piso || p.nombre || "")}</option>`).join("")}
+                  </select>
+                </label>
+                <label>Motivo
+                  <select data-imp-motivo="${escapeHtml(String(ac.id))}">
+                    <option value="lesivo_comunidad">Gravemente lesivo para la comunidad — 3 meses</option>
+                    <option value="perjudicial_abuso">Gravemente perjudicial o abuso de derecho — 3 meses</option>
+                    <option value="ley_estatutos">Contrario a la ley o a los estatutos — 1 año</option>
+                  </select>
+                </label>
+                <label class="span-2">Notas <input data-imp-notas="${escapeHtml(String(ac.id))}" placeholder="Ej. presentada en el juzgado nº 3" /></label>
+                <div class="form-actions span-all">
+                  <button type="button" data-imp-anota="${escapeHtml(String(ac.id))}">Anotar</button>
+                  <span class="muted">Plazo desde la junta: 3 meses hasta el ${escapeHtml(ac.plazo_impugnacion?.vence_tres_meses || "—")}; un año hasta el ${escapeHtml(ac.plazo_impugnacion?.vence_un_ano || "—")}.</span>
+                </div>
+              </div>
+            </details>
             <div class="junta-votos">
               ${(r.propietarios || []).map((p) => `
                 <label class="fincas-extra">
                   <span>${escapeHtml(p.piso || p.nombre)}</span>
-                  <select data-voto="${escapeHtml(String(ac.id))}" data-vecino="${escapeHtml(String(p.id))}">
+                  <select data-voto="${escapeHtml(String(ac.id))}" data-vecino="${escapeHtml(String(p.id))}" ${p.sin_derecho_voto ? `disabled title="No está al corriente: puede asistir y deliberar, pero no vota (art. 15.2 LPH)."` : ""}>
                     <option value="">—</option>
                     <option value="Favor">A favor</option>
                     <option value="Contra">En contra</option>
@@ -24272,6 +25001,13 @@ const renderWorkspaceFincasCommunityFicha = async () => {
           junta_id: juntaId, vecino_id: el.dataset.asiste, asiste: el.checked ? "1" : "0",
           representado_por: cuerpo.querySelector(`[data-repre="${el.dataset.asiste}"]`)?.value || "",
         })));
+      cuerpo.querySelectorAll("[data-habilita]").forEach((el) => el.addEventListener("change", () =>
+        manda("/api/workspace_fincas_junta_asistencia", {
+          junta_id: juntaId, vecino_id: el.dataset.habilita,
+          asiste: cuerpo.querySelector(`[data-asiste="${el.dataset.habilita}"]`)?.checked ? "1" : "0",
+          representado_por: cuerpo.querySelector(`[data-repre="${el.dataset.habilita}"]`)?.value || "",
+          derecho_voto: el.checked ? "1" : "",
+        })));
       cuerpo.querySelectorAll("[data-repre]").forEach((el) => el.addEventListener("change", () =>
         manda("/api/workspace_fincas_junta_asistencia", {
           junta_id: juntaId, vecino_id: el.dataset.repre,
@@ -24286,6 +25022,44 @@ const renderWorkspaceFincasCommunityFicha = async () => {
       cuerpo.querySelectorAll("[data-voto]").forEach((el) => el.addEventListener("change", () =>
         manda("/api/workspace_fincas_junta_voto", {
           acuerdo_id: el.dataset.voto, vecino_id: el.dataset.vecino, voto: el.value,
+        })));
+      cuerpo.querySelectorAll("[data-imp-anota]").forEach((btn) => btn.addEventListener("click", async () => {
+        const id = btn.dataset.impAnota;
+        const cuerpoImp = {
+          acuerdo_id: id,
+          vecino_id: cuerpo.querySelector(`[data-imp-vecino="${id}"]`)?.value || "",
+          motivo: cuerpo.querySelector(`[data-imp-motivo="${id}"]`)?.value || "",
+          notas: cuerpo.querySelector(`[data-imp-notas="${id}"]`)?.value || "",
+        };
+        const anota = async (extra) => {
+          const res = await postJsonWithDbRetry("/api/workspace_fincas_junta_impugnacion",
+            { workspace_id: workspaceId, ...cuerpoImp, ...extra });
+          if (res?.aviso) window.alert(res.aviso);
+          if (res?.recuento) pinta(res.recuento);
+        };
+        try {
+          await anota({});
+        } catch (err) {
+          // Las dos salidas que ofrece el servidor: confirmar fuera de plazo, o decir
+          // que el acuerdo va de cuotas de participación —la excepción del 18.2—.
+          const aviso = String(err?.message || "");
+          if (/plazo para impugnar/i.test(aviso)) {
+            if (window.confirm(`${aviso}\n\n¿La anoto igualmente?`)) await anota({ confirmado: true });
+          } else if (/cuotas de participación/i.test(aviso)) {
+            if (window.confirm(`${aviso}\n\n¿El acuerdo es sobre las cuotas de participación?`)) await anota({ afecta_cuotas: "1" });
+          } else window.alert(aviso);
+        }
+      }));
+      cuerpo.querySelectorAll("[data-retira-imp]").forEach((btn) => btn.addEventListener("click", () =>
+        manda("/api/workspace_fincas_junta_impugnacion", {
+          acuerdo_id: btn.dataset.retiraImp, vecino_id: btn.dataset.retiraVecino, retirar: "1",
+        })));
+      cuerpo.querySelector("[data-acta-notificada]")?.addEventListener("change", (ev) =>
+        manda("/api/workspace_fincas_junta_notificar_acta", { junta_id: juntaId, fecha: ev.target.value || "" }));
+      cuerpo.querySelectorAll("[data-discrepa]").forEach((el) => el.addEventListener("change", () =>
+        manda("/api/workspace_fincas_junta_discrepancia", {
+          acuerdo_id: el.dataset.discrepa, vecino_id: el.dataset.discrepante,
+          discrepa: el.checked ? "1" : "0",
         })));
       cuerpo.querySelector("[data-segunda]")?.addEventListener("change", (ev) =>
         manda("/api/workspace_fincas_junta_convocatoria", { junta_id: juntaId, segunda: ev.target.checked ? "1" : "0" }));
@@ -24321,6 +25095,10 @@ const renderWorkspaceFincasCommunityFicha = async () => {
     panel.querySelector("[data-junta-acta]")?.addEventListener("click", () => {
       if (!sel.value) { if (estado) estado.textContent = "Elige una junta."; return; }
       window.open(`/api/workspace_fincas_acta?workspace_id=${encodeURIComponent(workspaceId)}&id=${encodeURIComponent(sel.value)}`, "_blank");
+    });
+    panel.querySelector("[data-junta-convocatoria]")?.addEventListener("click", () => {
+      if (!sel.value) { if (estado) estado.textContent = "Elige una junta."; return; }
+      window.open(`/api/workspace_fincas_convocatoria?workspace_id=${encodeURIComponent(workspaceId)}&id=${encodeURIComponent(sel.value)}`, "_blank");
     });
     await cargar();
     return;
@@ -25113,12 +25891,8 @@ const renderWorkspaceFincasCommunityFicha = async () => {
 	          payload.workspace_id = workspaceId;
 	          payload.comunidad_id = comunidadId;
 	          if (!payload.estado) payload.estado = "Manual";
-	          const res = await fetch("/api/workspace_fincas_contabilidad", {
-	            method: "POST",
-	            headers: { "Content-Type": "application/json" },
-	            body: JSON.stringify(payload),
-	          }).then((r) => r.json());
-	          if (res?.error) throw new Error(res.error);
+	          const res = await guardarApunteDeComunidad(payload);
+	          if (res === null) return;
 	          await refreshWorkspaceFincasLedger({ force: true, silent: true });
 	          reset();
 	          if (statusEl) statusEl.textContent = "Guardado.";
@@ -25387,8 +26161,8 @@ const openFincasCommunityFichaModal = (record) => {
             </select>
           </div>
           <div>
-            <label>Cuota mensual</label>
-            <input name="cuota_mensual" value="${escapeHtml(String(record.cuota_mensual || ""))}" />
+            <label>Honorario mensual (nuestra minuta)</label>
+            <input name="honorario_mensual" value="${escapeHtml(String(record.honorario_mensual || record.cuota_mensual || ""))}" />
           </div>
           <div>
             <label>Viviendas</label>
@@ -25843,12 +26617,8 @@ const openFincasCommunityFichaModal = (record) => {
 	            payload.workspace_id = workspaceId;
 	            payload.comunidad_id = comunidadId;
 	            if (!payload.estado) payload.estado = "Manual";
-	            const res = await fetch("/api/workspace_fincas_contabilidad", {
-	              method: "POST",
-	              headers: { "Content-Type": "application/json" },
-	              body: JSON.stringify(payload),
-	            }).then((r) => r.json());
-	            if (res?.error) throw new Error(res.error);
+	            const res = await guardarApunteDeComunidad(payload);
+	            if (res === null) return;
 	            await refreshWorkspaceFincasLedger({ force: true, silent: true });
 	            resetLedgerForm();
 	            setSubtab("manual");
@@ -26204,7 +26974,7 @@ const renderWorkspaceFincasCommunityList = (rows = []) => {
         const aparcamientos = numberFormatter.format(Number(row.num_aparcamientos || 0));
         const abiertas = numberFormatter.format(Number(row.incidencias_abiertas || 0));
         const cuotaSug = formatEurosCompact(Number(row.cuota_sugerida || 0));
-        const cuota = formatEurosCompact(Number(row.cuota_mensual || 0));
+        const cuota = formatEurosCompact(Number(row.honorario_mensual ?? row.cuota_mensual ?? 0));
         const subtitleParts = [];
         if (empresa) subtitleParts.push(escapeHtml(empresa));
         if (cif) subtitleParts.push(`CIF: ${escapeHtml(cif)}`);
@@ -26495,7 +27265,8 @@ const renderWorkspaceFincasDashboard = () => {
   const communities = filterWorkspaceFincasRowsByCompany(raw.fincasCommunities || []);
   const communityIds = new Set(communities.map((row) => String(row.id || "")).filter(Boolean));
   const comuneros = communities.reduce((acc, row) => acc + (Number(row.num_vecinos || 0) || 0), 0);
-  const cuotaMensual = communities.reduce((acc, row) => acc + (Number(row.cuota_mensual || 0) || 0), 0);
+  // La suma de lo que nos pagan las comunidades, no de lo que pagan sus vecinos.
+  const cuotaMensual = communities.reduce((acc, row) => acc + (Number(row.honorario_mensual ?? row.cuota_mensual ?? 0) || 0), 0);
   const budgetsBase = shouldScopeFincasByCompany()
     ? filterWorkspaceRowsByCompany(raw.budgetRows || [])
     : (Array.isArray(raw.budgetRows) ? raw.budgetRows : []);
@@ -26526,7 +27297,7 @@ const renderWorkspaceFincasDashboard = () => {
   const kpis = [
     { label: "Comunidades", value: numberFormatter.format(communities.length || 0), note: `Contexto: ${ctxLabel}` },
     { label: "Comuneros", value: numberFormatter.format(comuneros || 0), note: "Suma de viviendas" },
-    { label: "Cuota mensual", value: euroFormatter.format(cuotaMensual || 0), note: "Suma de cuotas por comunidad" },
+    { label: "Honorario mensual", value: euroFormatter.format(cuotaMensual || 0), note: "Lo que nos pagan las comunidades" },
     { label: "Ingresos", value: euroFormatter.format(ingresos || 0), note: "Desde contabilidad (ingresos)" },
     { label: "Gastos", value: euroFormatter.format(gastos || 0), note: "Desde contabilidad (gastos)" },
     {
@@ -26667,6 +27438,8 @@ const setWorkspaceFincasTab = (tab = "dashboard") => {
     workspaceFincasTabs.querySelectorAll("[data-fincas-tab-btn]").forEach((button) => {
       const key = normalizeWorkspaceFincasTab(button.dataset.fincasTabBtn || "");
       button.classList.toggle("active", key === normalized);
+      // El `aria-selected` y el tabindex los pone `activarPatronDePestanas`, que
+      // escucha esta misma clase para las nueve barras a la vez.
     });
   }
   document.querySelectorAll("[data-fincas-tab]").forEach((panel) => {
@@ -28548,6 +29321,10 @@ const showWorkspaceConfigSkeletons = () => {
 
 const loadWorkspaceDetail = async (workspaceId) => {
   if (!workspaceId) return;
+  // Sin esto, la empresa activa que se guardó al pulsar "Activar contexto" nunca se
+  // aplicaba en una carga de página nueva: el match de más abajo comparaba contra un
+  // state.currentWorkspaceCompany* todavía vacío y siempre caía a companies[0].
+  restoreWorkspaceCompanyContextFromStorage({ force: true });
   state.currentWorkspaceId = workspaceId;
   state.currentWorkspaceMemberRole = "";
   let wsNombre = "";
@@ -28669,6 +29446,11 @@ const loadWorkspaceDetail = async (workspaceId) => {
     const wantedWs = String(state.currentWorkspaceCompanyWsId || "").trim();
     if (wantedWs && rowWsId && rowWsId === wantedWs) return true;
     if (wantedLegacy && rowLegacyId && rowLegacyId === wantedLegacy) return true;
+    // Alguna ruta de "Activar contexto" guarda el id legado de empresas en la
+    // casilla del id v2 (visto en producción: workspace_company_id con el mismo
+    // valor que empresas.id). Sin esto, esa selección nunca vuelve a encontrar su
+    // fila tras una recarga y cae siempre a companies[0].
+    if (wantedWs && rowLegacyId && rowLegacyId === wantedWs) return true;
     return false;
   });
   const picked = companyMatch || companies[0] || null;
@@ -28683,6 +29465,17 @@ const loadWorkspaceDetail = async (workspaceId) => {
     state.currentWorkspaceCompanyWsId = companiesV2.length ? String(picked?.id || "") : "";
     state.currentWorkspaceCompanyId = companiesV2.length ? String(picked?.legacy_empresa_id || "") : String(picked?.id || "");
   }
+  // Autocorrección: si el companyMatch de arriba encontró la fila por su
+  // legacy_empresa_id (porque lo persistido en localStorage era ese id, no el v2),
+  // aquí ya tenemos el id v2 correcto en `picked.id`. Sin volver a guardarlo, la
+  // próxima carga —y cualquier llamada que use directamente el valor persistido,
+  // como /api/workspace_service_matrix— seguiría enviando el id equivocado y
+  // recibiendo 403 para siempre.
+  try {
+    localStorage.setItem("crm.currentWorkspaceCompanyWsId", String(state.currentWorkspaceCompanyWsId || ""));
+    localStorage.setItem("crm.currentWorkspaceCompanyId", String(state.currentWorkspaceCompanyId || ""));
+    localStorage.setItem("crm.currentWorkspaceCompanyName", String(state.currentWorkspaceCompanyName || ""));
+  } catch (e) {}
   const companyQuery = getWorkspaceCompanyQuery();
   const timeMonth = normalizeMonthValue(state.workspaceTimeMonth || "");
   state.workspaceTimeMonth = timeMonth;
@@ -28815,6 +29608,9 @@ const loadWorkspaceDetail = async (workspaceId) => {
     fincasMeetings = boot?.fincas_meetings || await safeWorkspaceApi(`/api/workspace_fincas_juntas?workspace_id=${encodeURIComponent(workspaceId)}`, { rows: [] });
   }
   state.currentWorkspaceClients = workspaceClients.rows || [];
+  // La carga inicial trae 60; el total dice de cuántos son esos 60.
+  state.currentWorkspaceClientsTotal = Number(workspaceClients.total || (workspaceClients.rows || []).length);
+  state.currentWorkspaceClientsQuery = "";
   state.currentWorkspaceData = {
     docs,
     billingRows: billingRows.rows || [],
@@ -29903,15 +30699,12 @@ const syncCrmTecnocloudVerticalNav = () => {
               "alquileres",
               "compraventas",
               "demandas",
-              "relaciones",
               "visitas",
               "agenda",
-              "informadores",
-              "edificios",
               "legal",
             ]);
 	  if (forcedCrm === "inmo" || forcedCrm === "inmobiliaria") {
-	    ["resumen", "dashboard", "captaciones", "inmuebles", "clientes", "agenda", "visitas", "demandas", "relaciones"].forEach((k) =>
+	    ["resumen", "dashboard", "captaciones", "inmuebles", "clientes", "agenda", "visitas", "demandas"].forEach((k) =>
 	      allowedViews.add(k)
 	    );
 	  }
@@ -30060,7 +30853,7 @@ const ensureCrmForcedInmoNavVisibility = () => {
 
   const unhide = (root) => {
     if (!root) return;
-    ["resumen", "captaciones", "inmuebles", "clientes", "agenda", "visitas", "demandas", "relaciones"].forEach(
+    ["resumen", "captaciones", "inmuebles", "clientes", "agenda", "visitas", "demandas"].forEach(
       (key) => {
         root.querySelectorAll(`[data-crm-view="${key}"]`).forEach((btn) => btn.classList.remove("hidden-context"));
       }
@@ -30179,12 +30972,11 @@ const openCrmInmobiliario = () => {
   setTab("crm");
   updateTableVisibility();
   syncCrmLegalAvailability();
-  setCrmWorkspaceView(state.crmWorkspaceView || "resumen");
-  // Evita lanzar 3 requests grandes a la vez (Render/PG puede estar frío).
-  loadCrmCaptaciones();
-  window.setTimeout(() => loadCrmInmuebles(), 120);
-  window.setTimeout(() => loadCrmCompraventas(), 240);
-  // Mantener URL "crm=inmo" para que los deep-links funcionen aunque `openCompany` haya puesto `?empresa=...`.
+  // La URL, antes de elegir la vista: `setCrmWorkspaceView` pregunta a
+  // `resolveCrmTecnocloudVertical()` en qué vertical está, y ésta mira el `?crm=`
+  // antes que nada. Si se pone después, la vertical se deduce de la vista anterior.
+  // Mantener `crm=inmo` sirve además para que los deep-links funcionen aunque
+  // `openCompany` haya puesto `?empresa=...`.
   const currentParams = new URLSearchParams(window.location.search);
   ensureTenantParams(currentParams);
   currentParams.delete("empresa");
@@ -30193,6 +30985,19 @@ const openCrmInmobiliario = () => {
   currentParams.delete("poliza");
   currentParams.set("crm", "inmo");
   setUrlParams(currentParams);
+  // Abrir el CRM inmobiliario volvía a la última vista usada, fuera de la vertical
+  // que fuera: quien había estado en Financiaciones pulsaba «Inmobiliaria» y
+  // aterrizaba en `crmViewFin`, un panel de dos píxeles y vacío. Reproducible las
+  // tres veces que se probó. Una vista de otra vertical no es «donde lo dejé» en
+  // ésta: se entra por la portada del módulo.
+  const VISTAS_DE_OTRA_VERTICAL = new Set(["fin", "seguros", "gestoria"]);
+  const vistaRecordada = String(state.crmWorkspaceView || "").trim();
+  setCrmWorkspaceView(
+    !vistaRecordada || VISTAS_DE_OTRA_VERTICAL.has(vistaRecordada) ? "resumen" : vistaRecordada);
+  // Evita lanzar 3 requests grandes a la vez (Render/PG puede estar frío).
+  loadCrmCaptaciones();
+  window.setTimeout(() => loadCrmInmuebles(), 120);
+  window.setTimeout(() => loadCrmCompraventas(), 240);
   // Asegura navegación base visible incluso si la URL venía sin `crm=inmo` (openCompany puede haberla sobrescrito).
   try {
     ensureCrmForcedInmoNavVisibility();
@@ -30229,11 +31034,8 @@ const getCrmSearchTargetForView = (view = "") => {
   if (nextView === "alquileres") return crmAlquilerSearch;
   if (nextView === "compraventas") return crmCompraventaSearch;
   if (nextView === "demandas") return crmDemandaSearch;
-  if (nextView === "relaciones") return crmRelacionesSearch;
   if (nextView === "visitas") return crmVisitaSearch;
   if (nextView === "agenda") return crmAgendaSearch;
-  if (nextView === "informadores") return crmInformadoresSearch;
-  if (nextView === "edificios") return crmEdificiosSearch;
   if (nextView === "seguros") return segurosCrmSearch;
   if (nextView === "fin") return finAsesoramientosSearch;
   return null;
@@ -30281,9 +31083,7 @@ const applyCrmGlobalSearchToCurrentView = () => {
   } else if (view === "agenda") {
     loadCrmAgenda();
   } else if (view === "informadores") {
-    loadCrmInformadores();
   } else if (view === "edificios") {
-    loadCrmEdificios();
   } else if (view === "seguros") {
     loadSegurosCrm();
   } else if (view === "fin") {
@@ -30862,7 +31662,7 @@ const matchTcAz = (az, raw) => {
 	  if (empresaId && crmAzCompanyKey !== empresaId) {
 	    crmAzCompanyKey = empresaId;
 	    if (!state.crmAz) state.crmAz = {};
-	    ["clientes", "inmuebles", "captaciones", "demandas", "agenda", "relaciones"].forEach((scope) => {
+	    ["clientes", "inmuebles", "captaciones", "demandas", "agenda"].forEach((scope) => {
 	      state.crmAz[scope] = loadCrmAzValue(scope);
 	    });
 	  }
@@ -30870,7 +31670,6 @@ const matchTcAz = (az, raw) => {
 	  renderTcAzBar(crmInmueblesAz, "inmuebles", () => loadCrmInmuebles());
 	  renderTcAzBar(crmDemandasAz, "demandas", () => loadCrmDemandas());
 	  renderTcAzBar(crmAgendaAz, "agenda", () => loadCrmAgenda());
-	  renderTcAzBar(crmRelacionesAz, "relaciones", () => loadCrmRelacionesCruce());
 	};
 
 const loadCrmRecentItems = () => {
@@ -33918,7 +34717,7 @@ const openHolding = (options = {}) => {
     .toLowerCase();
   if (mode === "tenant" && !canManageWorkspace) {
     const viewKey = normalizeSimple(requestedView);
-    if (viewKey && !["operations", "rrhh", "fincas", "motores"].includes(viewKey)) {
+    if (viewKey && !["operations", "rrhh", "fincas", "periciales", "motores"].includes(viewKey)) {
       requestedView = "";
     }
   }
@@ -35645,8 +36444,14 @@ const toNumber = (value) => {
   const hasComma = text.includes(",");
   const hasDot = text.includes(".");
   if (hasComma && hasDot) {
-    // es-ES: dots for thousands, comma for decimals
-    text = text.replace(/\./g, "").replace(",", ".");
+    // Manda el separador que va el último: es el decimal. Suponer siempre es-ES
+    // convertía "1,234.56" —lo que se pega de una factura o un Excel en inglés— en
+    // 1,23: mil veces menos, y sin que nada avisara.
+    if (text.lastIndexOf(",") > text.lastIndexOf(".")) {
+      text = text.replace(/\./g, "").replace(",", ".");   // 20.000,50
+    } else {
+      text = text.replace(/,/g, "");                      // 20,000.50
+    }
   } else if (hasComma) {
     text = text.replace(",", ".");
   } else if (hasDot) {
@@ -36259,15 +37064,27 @@ const normalizeDateInput = (value) => {
   if (!text) {
     return "";
   }
-  if (text.includes("/")) {
-    const parts = text.split(/[\\/.-]/).map((part) => part.trim());
-    if (parts.length >= 3) {
-      const [day, month, yearRaw] = parts;
-      if (day && month && yearRaw) {
-        const year = yearRaw.length === 2 ? `20${yearRaw}` : yearRaw;
-        return `${year.padStart(4, "0")}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
-      }
-    }
+  // Una fecha que no existe no se corrige sola: "31/02/2026" salía como "2026-02-31" y
+  // el navegador la convertía en el 3 de marzo sin decir nada. Y sólo se traducía si
+  // llevaba barras, así que "31-02-2026" o "31.02.2026" —que también se teclean— se
+  // guardaban tal cual. Se valida el día del calendario y, si no existe, se devuelve
+  // vacío: mejor un hueco que una fecha distinta de la que quería la persona.
+  const existeEnElCalendario = (y, m, d) => {
+    const f = new Date(Date.UTC(y, m - 1, d));
+    return f.getUTCFullYear() === y && f.getUTCMonth() === m - 1 && f.getUTCDate() === d;
+  };
+  const diaMesAnio = text.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/);
+  if (diaMesAnio) {
+    const day = Number(diaMesAnio[1]);
+    const month = Number(diaMesAnio[2]);
+    const year = Number(diaMesAnio[3].length === 2 ? `20${diaMesAnio[3]}` : diaMesAnio[3]);
+    if (!existeEnElCalendario(year, month, day)) return "";
+    return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    if (!existeEnElCalendario(Number(iso[1]), Number(iso[2]), Number(iso[3]))) return "";
+    return text;
   }
   if (text.includes("-")) {
     return text;
@@ -36882,7 +37699,7 @@ const isValidDocumento = (value) => {
 
 // CRM Inmobiliario: 5 fases principales (el resto se trata como histórico/extra).
 const CRM_ETAPAS_MAIN = ["Inmueble", "Noticia", "Encargo", "Propuesta", "Vendido"];
-const CRM_ETAPAS_EXTRA = ["Cerrado negativamente", "Alquiler"];
+const CRM_ETAPAS_EXTRA = ["Cerrado negativamente", "Alquilado"];
 const CRM_ETAPAS = [...CRM_ETAPAS_MAIN, ...CRM_ETAPAS_EXTRA];
 
 const normalizeCrmMainEtapa = (value) => {
@@ -36895,7 +37712,8 @@ const normalizeCrmMainEtapa = (value) => {
     return "Vendido";
   }
   if (key.includes("cerrado")) return "Cerrado negativamente";
-  if (key.includes("alquil")) return "Alquiler";
+  // «Alquiler» se leía como «está en alquiler» cuando quiere decir «está alquilado».
+  if (key.includes("alquil")) return "Alquilado";
   return "Inmueble";
 };
 
@@ -37957,6 +38775,15 @@ const bindPostalLookup = (formEl) => {
 const GESTORIA_SUBTIPOS = {
   "Cuota mensual": ["Autónomo", "Empresa"],
   "Gestión administrativa": ["Cliente Renta", "Gestiones Administrativas", "Renta", "Puntual"],
+};
+
+// gestoria_trabajos.estado en producción solo usa "Finalizado" — "completado" no
+// aparece nunca. Varios cálculos de "vencidas"/SLA comparaban solo contra
+// "completado" y por eso contaban como vencido cualquier trabajo ya finalizado
+// con fecha pasada (394 de 394 "vencidas" resultaron estar Finalizadas).
+const esEstadoTrabajoTerminado = (estado) => {
+  const norm = String(estado || "").trim().toLowerCase();
+  return norm === "completado" || norm === "finalizado";
 };
 
 const GESTORIA_TRABAJO_CATEGORIES = [
@@ -40188,7 +41015,7 @@ const syncInmuebleArchivePendingButton = () => {
   const stage = resolveInmuebleMainEtapa(inmueble, captacion);
   const enabled = Boolean(state.currentInmuebleId);
   // Mostrar solo cuando el inmueble ya está en cierre positivo (Vendido/Alquiler) o cierre negativo.
-  const visible = ["Vendido", "Alquiler", "Cerrado negativamente"].includes(stage);
+  const visible = ["Vendido", "Alquilado", "Cerrado negativamente"].includes(stage);
   inmuebleArchivePendingBtn.classList.toggle("hidden", !visible);
   inmuebleArchivePendingBtn.disabled = !enabled;
 };
@@ -42417,6 +43244,15 @@ const loadSegurosForClienteContabilidad = async (clienteId) => {
   if (gestoriaContabilidadSegurosCache.has(key)) {
     return gestoriaContabilidadSegurosCache.get(key) || [];
   }
+  // Si ya está la lista completa de la empresa en caché (un solo /api/tabla), se filtra
+  // en cliente en vez de pedir /api/seguros_cliente por cada cliente. Sin esto, la cola
+  // contable disparaba un Promise.all sin límite —una petición por cada cliente
+  // distinto entre los asientos, hasta 200+ a la vez— y tumbaba el backend con 502.
+  if (Array.isArray(segurosContabilidadAllCache)) {
+    const rows = segurosContabilidadAllCache.filter((s) => String(s.cliente_id || "").trim() === key);
+    gestoriaContabilidadSegurosCache.set(key, rows);
+    return rows;
+  }
   try {
     const payload = await api(`/api/seguros_cliente?cliente_id=${encodeURIComponent(key)}&uploaded_only=0`);
     const rows = Array.isArray(payload?.rows) ? payload.rows : [];
@@ -42650,14 +43486,11 @@ const loadGestoriaContabilidad = () => {
       gestoriaContabilidadInfo.textContent = "";
       return;
     }
-    const clienteIds = [
-      ...new Set(
-        rows
-          .flatMap((row) => parseGestoriaContaClienteIds(row.cliente_ids_json, row.cliente_id))
-          .filter(Boolean)
-      ),
-    ];
-    await Promise.all(clienteIds.map((clienteId) => loadSegurosForClienteContabilidad(clienteId)));
+    // Antes: una petición /api/seguros_cliente por cada cliente distinto entre los
+    // asientos (Promise.all sin límite, hasta 200+ a la vez). Ahora: una sola carga en
+    // bloque de todas las pólizas de la empresa, y loadSegurosForClienteContabilidad
+    // filtra en cliente a partir de esa caché.
+    await loadAllSegurosForContabilidad();
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
@@ -42827,14 +43660,11 @@ const loadSegurosContabilidad = () => {
       }
       return;
     }
-    const clienteIds = [
-      ...new Set(
-        rows
-          .flatMap((row) => parseGestoriaContaClienteIds(row.cliente_ids_json, row.cliente_id))
-          .filter(Boolean)
-      ),
-    ];
-    await Promise.all(clienteIds.map((clienteId) => loadSegurosForClienteContabilidad(clienteId)));
+    // Antes: una petición /api/seguros_cliente por cada cliente distinto entre los
+    // asientos (Promise.all sin límite, hasta 200+ a la vez). Ahora: una sola carga en
+    // bloque de todas las pólizas de la empresa, y loadSegurosForClienteContabilidad
+    // filtra en cliente a partir de esa caché.
+    await loadAllSegurosForContabilidad();
     const table = document.createElement("table");
     const thead = document.createElement("thead");
     const trHead = document.createElement("tr");
@@ -43460,7 +44290,7 @@ const loadGestoriaPipeline = () => {
           const estado = row.estado || "-";
           const responsable = row.responsable || "Sin asignar";
           let slaBadge = "";
-          if (row.sla_dias && row.fecha_inicio && String(estado).toLowerCase() !== "completado") {
+          if (row.sla_dias && row.fecha_inicio && !esEstadoTrabajoTerminado(estado)) {
             const due = new Date(row.fecha_inicio);
             const days = parseInt(row.sla_dias, 10);
             if (!Number.isNaN(due.getTime()) && !Number.isNaN(days)) {
@@ -45443,7 +46273,6 @@ const setCrmWorkspaceView = (view = "resumen") => {
 		  "resumen",
 		  "clientes",
 		  "dashboard",
-		  "analisis",
 		  "captaciones",
 		  "inmuebles",
 		  "inmueble_ficha",
@@ -45451,11 +46280,8 @@ const setCrmWorkspaceView = (view = "resumen") => {
 		  "alquileres",
 		  "compraventas",
 	    "demandas",
-	    "relaciones",
 	    "visitas",
 	    "agenda",
-	    "informadores",
-    "edificios",
     "legal",
     "seguros",
     "fin",
@@ -45503,7 +46329,6 @@ const setCrmWorkspaceView = (view = "resumen") => {
 			  const viewMap = {
 				  resumen: crmViewResumen,
 				  dashboard: crmViewDashboard,
-				  analisis: crmViewAnalisis,
 				  clientes: crmViewClientes,
 				  captaciones: crmViewCaptaciones,
 				  inmuebles: crmViewInmuebles,
@@ -45511,11 +46336,8 @@ const setCrmWorkspaceView = (view = "resumen") => {
 				  alquileres: crmViewAlquileres,
 				  compraventas: crmViewCompraventas,
 				  demandas: crmViewDemandas,
-				  relaciones: crmViewRelaciones,
 				  visitas: crmViewVisitas,
 				  agenda: crmViewAgenda,
-				  informadores: crmViewInformadores,
-				  edificios: crmViewEdificios,
 				  legal: crmViewLegal,
 				  seguros: crmViewSeguros,
 				  fin: crmViewFin,
@@ -45587,15 +46409,12 @@ const setCrmWorkspaceView = (view = "resumen") => {
 	  } else if (nextView === "demandas") {
 	    loadCrmDemandas();
 	  } else if (nextView === "relaciones") {
-	    loadCrmRelacionesCruce();
 	  } else if (nextView === "visitas") {
 	    loadCrmVisitas();
 	  } else if (nextView === "agenda") {
 	    loadCrmAgenda();
   } else if (nextView === "informadores") {
-    loadCrmInformadores();
   } else if (nextView === "edificios") {
-    loadCrmEdificios();
   } else if (nextView === "legal") {
     if (inmoLegalResponse && !String(inmoLegalResponse.textContent || "").trim()) {
       inmoLegalResponse.innerHTML = "<div class='muted'>Selecciona un tema o escribe una pregunta para obtener una guía operativa.</div>";
@@ -45615,11 +46434,8 @@ const setCrmWorkspaceView = (view = "resumen") => {
 		  loadCrmAlquileres();
 		  loadCrmCompraventas();
 		  loadCrmDemandas();
-		  loadCrmRelacionesCruce();
 	    loadCrmVisitas();
 	    loadCrmAgenda();
-	    loadCrmInformadores();
-	    loadCrmEdificios();
 	  }
 	};
 
@@ -52597,7 +53413,11 @@ const renderClienteRelaciones = (relations = []) => {
   state.currentClienteRelaciones.forEach((row) => {
     const tr = document.createElement("tr");
     const personTd = document.createElement("td");
-    personTd.innerHTML = `<strong>${formatNombreCliente(row.counterpart_nombre || "") || "-"}</strong><div class="muted">${row.counterpart_nif || "-"}</div>`;
+    // El nombre y el NIF salen de la ficha del cliente, y ahí escribe gente: sin escapar,
+    // un nombre con etiquetas se ejecuta al abrir la pestaña de relaciones. Es el único
+    // sitio del front donde se colaba un campo de la base sin pasar por escapeHtml.
+    personTd.innerHTML = `<strong>${escapeHtml(formatNombreCliente(row.counterpart_nombre || "") || "-")}</strong>`
+      + `<div class="muted">${escapeHtml(String(row.counterpart_nif || "-"))}</div>`;
     tr.appendChild(personTd);
     const vinculoTd = document.createElement("td");
     vinculoTd.textContent = row.vinculo || "-";
@@ -54143,7 +54963,7 @@ const runCaptacionConversion = async (captacionId, rowMap = {}, destino = "") =>
     compraventa: "Vendido",
     vendido: "Vendido",
     cerrado_negativamente: "Cerrado negativamente",
-    alquiler: "Alquiler",
+    alquiler: "Alquilado",
   }[destino] || destino;
   const ok = window.confirm(
     `¿Convertir la captación "${rowMap.direccion || rowMap.propietario || captacionId}" a ${destinationLabel}?`
@@ -54227,7 +55047,7 @@ const runCurrentInmuebleConversion = (destino) => {
     compraventa: "Vendido",
     vendido: "Vendido",
     cerrado_negativamente: "Cerrado negativamente",
-    alquiler: "Alquiler",
+    alquiler: "Alquilado",
   }[destino] || destino;
   const ok = window.confirm(
     `¿Convertir el inmueble "${inmueble.direccion || inmueble.referencia || inmuebleId}" a ${destinationLabel}?`
@@ -54514,11 +55334,29 @@ const loadCrmClientes = async ({ force = false } = {}) => {
 	  } catch (e) {}
 	};
 
-const resolveCaptacionCodePrefix = (etapa) => {
+// La sigla que va delante de la dirección es lo ÚNICO que dice el estado en la tabla
+// densa: no hay columna de estado. Antes devolvía "EN" para todo lo que no fuera
+// Inmueble o Noticia, así que un piso vendido, uno alquilado y uno cerrado en negativo
+// se veían igual que uno en venta. Y hacía falta separar el escaparate del desenlace:
+// «en venta» no es «vendido», y «en alquiler» no es «alquilado».
+const resolveCaptacionCodePrefix = (etapa, operacion = "") => {
+  // Arras y reserva están comprometidas pero la venta no se ha consumado. El sistema
+  // las agrupa dentro de «Vendido» para el embudo —eso viene de antes—, así que hay que
+  // mirar la fase tal como está escrita antes de normalizarla, o un piso reservado se
+  // anuncia como vendido.
+  const faseCruda = normalizeSimple(etapa || "");
+  if (faseCruda.includes("arras")) return "AR";
+  if (faseCruda.includes("reserv")) return "RS";
   const stage = normalizeCrmMainEtapa(etapa || "") || "Inmueble";
+  const esAlquiler = normalizeSimple(operacion || "").includes("alquil");
   if (stage === "Inmueble") return "IN";
   if (stage === "Noticia") return "NT";
-  return "EN";
+  if (stage === "Vendido") return "VD";
+  if (stage === "Alquilado") return "AQ";
+  if (stage === "Cerrado negativamente") return "CN";
+  // Encargo, Propuesta y Contrato de arras siguen en el escaparate: lo que cambia es
+  // si se vende o se alquila.
+  return esAlquiler ? "EA" : "EV";
 };
 
 const resolveCaptacionDotTone = (row = {}) => {
@@ -54581,7 +55419,7 @@ const buildCrmCaptacionesDenseTableNode = (rows = []) => {
 	    tr.appendChild(dotTd);
 
     const stage = normalizeCrmMainEtapa(row.etapa || "") || "Inmueble";
-    const prefix = resolveCaptacionCodePrefix(stage);
+    const prefix = resolveCaptacionCodePrefix(stage, row.tipo_operacion || row.operacion || "");
     const isVerified = String(row?.noticia_verificada ?? "").trim() === "1";
     const address = String(row.direccion || "").trim() || "-";
     const localidad = [row.poblacion || "", row.provincia || ""].filter(Boolean).join(" · ");
@@ -55934,7 +56772,7 @@ const renderCrmInicioBoard = (pipelineItems = []) => {
       const inmuebleId = String(row.inmueble_id || row.id || "").trim();
       const captacionId = String(row.captacion_id || "").trim();
       const stage = normalizeStage(row.stage || row.estado || "");
-      const codePrefix = resolveCaptacionCodePrefix(stage);
+      const codePrefix = resolveCaptacionCodePrefix(stage, row.tipo_operacion || row.operacion || "");
       const direccion = String(row.direccion || "").trim() || "Sin dirección";
       const propietario = String(row.propietario || row.propietarios || "").trim() || "Propietario pendiente";
       const proxima = String(row.proxima_accion || "").trim() || "Sin próxima acción definida.";
@@ -58347,7 +59185,7 @@ const buildCrmInmueblesDenseTableNode = (rows = []) => {
 
 		    const inmuebleTd = document.createElement("td");
 		    const stage = normalizeCrmMainEtapa(row?.estado || "") || "Inmueble";
-		    const prefix = resolveCaptacionCodePrefix(stage);
+		    const prefix = resolveCaptacionCodePrefix(stage, row.tipo_operacion || row.operacion || "");
 	    const address = String(row.direccion || "").trim() || "Sin dirección";
 	    inmuebleTd.innerHTML = `<a class="tc-link" href="#" data-open-inmueble="1">${escapeHtml(`${prefix} - ${address}`)}</a>`;
 	    const link = inmuebleTd.querySelector('a[data-open-inmueble]');
@@ -58848,273 +59686,6 @@ const loadCrmMapaInmuebles = ({ force = false } = {}) => {
     });
 };
 
-const loadCrmRelacionesCruce = ({ force = false } = {}) => {
-  if (!crmRelacionesTable) return;
-  const scope = resolveInmoScopeParams();
-  if (!scope || (!scope.empresa_id && !scope.workspace_id)) {
-    crmRelacionesTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
-    if (crmRelacionesInfo) crmRelacionesInfo.textContent = "";
-    return;
-  }
-  const empresaId = String(scope.empresa_id || "").trim();
-  crmRelacionesTable.innerHTML = "<p class='muted'>Calculando relaciones...</p>";
-  const demandasParams = new URLSearchParams({
-    ...(scope.workspace_id ? { workspace_id: String(scope.workspace_id || "").trim() } : {}),
-    ...(empresaId ? { empresa_id: String(empresaId || "").trim() } : {}),
-    limit: "2000",
-    offset: "0",
-  });
-	  Promise.all([
-	    api(`/api/inmuebles?${new URLSearchParams(scope).toString()}`).catch(() => ({ rows: [] })),
-	    api(`/api/demandas?${demandasParams.toString()}`).catch(() => ({ rows: [] })),
-	  ])
-    .then(([inmoData, demData]) => {
-      const inmuebles = Array.isArray(inmoData?.rows) ? inmoData.rows : [];
-      const demandas = Array.isArray(demData?.rows) ? demData.rows : [];
-      cachedCrmInmuebles = inmuebles;
-      cachedCrmDemandas = demandas;
-
-	      const qRaw = String(crmRelacionesSearch?.value || "").trim();
-		    const preset = normalizeSimple(crmRelacionesPreset?.value || "recientes") || "recientes";
-		    const az = String(state.crmAz?.relaciones || "").trim().toUpperCase();
-      const isClosed = (row) => normalizeSimple(row?.estado || "").includes("cerrad");
-      const baseDemandas = preset === "cerradas" ? demandas.filter((d) => isClosed(d)) : demandas.filter((d) => !isClosed(d));
-
-      const scoreMatch = (demanda, inmueble) => {
-        let score = 0;
-        const precioMax = Number(demanda?.precio_max || 0);
-        const precio = Number(inmueble?.precio_objetivo || 0);
-        if (precioMax > 0 && precio > 0) {
-          const ratio = precio / precioMax;
-          if (ratio <= 1) score += Math.max(0, 40 - Math.round((1 - ratio) * 20));
-          else return -1;
-        } else {
-          score += 10;
-        }
-        const m2Min = Number(demanda?.m2_min || 0);
-        const m2 = Number(inmueble?.m2 || 0);
-        if (m2Min > 0 && m2 > 0) {
-          if (m2 >= m2Min) score += 15;
-          else return -1;
-        } else {
-          score += 5;
-        }
-        const habMin = Number(demanda?.habitaciones_min || 0);
-        const hab = Number(inmueble?.habitaciones || 0);
-        if (habMin > 0 && hab > 0) {
-          if (hab >= habMin) score += 10;
-          else return -1;
-        } else {
-          score += 3;
-        }
-        const banMin = Number(demanda?.banos_min || 0);
-        const ban = Number(inmueble?.banos || 0);
-        if (banMin > 0 && ban > 0) {
-          if (ban >= banMin) score += 6;
-          else return -1;
-        } else {
-          score += 2;
-        }
-        const etapa = normalizeCrmMainEtapa(inmueble?.estado || "") || "";
-        if (etapa === "Inmueble" || etapa === "Noticia") score += 8;
-        if (etapa === "Vendido") return -1;
-        return score;
-      };
-
-      const pairs = [];
-      const matchPreset = (demanda) => {
-        if (!demanda) return false;
-        if (preset === "recientes") return true;
-        const fase = normalizeSimple(demanda?.fase || "");
-        const estado = normalizeSimple(demanda?.estado || "");
-        const packed = `${fase} ${estado}`.trim();
-        if (preset === "gestionar") return packed.includes("gest") || packed.includes("visto") || packed.includes("gusta") || packed.includes("rebaj") || packed.includes("int");
-        if (preset === "no_gusta") return packed.includes("no") && packed.includes("gusta");
-        if (preset === "propuesta") return packed.includes("propuest");
-        if (preset === "negociacion") return packed.includes("negoci");
-        if (preset === "cerradas") return true;
-        return true;
-      };
-      baseDemandas.filter(matchPreset).forEach((demanda) => {
-        const matches = inmuebles
-          .map((inmueble) => ({ inmueble, score: scoreMatch(demanda, inmueble) }))
-          .filter((hit) => hit.score >= 0)
-          .sort((a, b) => b.score - a.score)
-          .slice(0, 5);
-        matches.forEach((hit) => {
-          pairs.push({
-            demanda,
-            inmueble: hit.inmueble,
-            score: hit.score,
-          });
-        });
-      });
-
-	      const matchQuery = createAdvancedSearchMatcher(qRaw, {
-	        text: (pair) =>
-	          [
-	            pair?.demanda?.cliente,
-	            pair?.demanda?.pedido,
-	            pair?.demanda?.tipo,
-	            pair?.demanda?.tipologia,
-	            pair?.demanda?.subtipologia,
-	            pair?.demanda?.fase,
-	            pair?.demanda?.estado,
-	            pair?.inmueble?.referencia,
-	            pair?.inmueble?.direccion,
-	            pair?.inmueble?.referencia_catastral,
-	            pair?.inmueble?.poblacion,
-	            pair?.inmueble?.provincia,
-	          ]
-	            .map((v) => String(v || ""))
-	            .join(" "),
-	        fields: {
-	          cliente: (pair) => pair?.demanda?.cliente,
-	          pedido: (pair) => pair?.demanda?.pedido,
-	          tipo: (pair) => pair?.demanda?.tipo,
-	          fase: { get: (pair) => pair?.demanda?.fase, match: "equals" },
-	          estado: { get: (pair) => pair?.demanda?.estado, match: "equals" },
-	          referencia: (pair) => pair?.inmueble?.referencia,
-	          referencia_catastral: (pair) => pair?.inmueble?.referencia_catastral,
-	          poblacion: (pair) => pair?.inmueble?.poblacion,
-	          provincia: (pair) => pair?.inmueble?.provincia,
-	        },
-	      });
-	      const filteredPairs = pairs.filter((pair) => {
-	        if (!matchTcAz(az, pair?.demanda?.cliente || pair?.demanda?.pedido || pair?.demanda?.tipo || "")) return false;
-	        return matchQuery(pair);
-	      });
-
-      const table = document.createElement("table");
-      table.className = "crm-dense-table crm-relaciones-table";
-      const thead = document.createElement("thead");
-      thead.innerHTML = `
-        <tr>
-          <th style="width:34px;"></th>
-          <th>Encargo: Respon...</th>
-          <th>Pedido</th>
-          <th>Interés del client...</th>
-          <th>Notas asociada a...</th>
-          <th>Fecha de creación</th>
-          <th>Fecha de la últim...</th>
-          <th>Inmueble</th>
-          <th>Score</th>
-        </tr>
-      `;
-      table.appendChild(thead);
-      const tbody = document.createElement("tbody");
-	    const parseIsoMs = (value) => {
-	      const raw = String(value || "").trim();
-	      if (!raw) return 0;
-	      const ts = Date.parse(raw);
-	      return Number.isFinite(ts) ? ts : 0;
-	    };
-      filteredPairs
-        .slice()
-        .sort((a, b) => {
-          if (preset === "recientes" || preset === "gestionar") {
-            const tsA = parseIsoMs(a?.demanda?.updated_at || a?.demanda?.created_at);
-            const tsB = parseIsoMs(b?.demanda?.updated_at || b?.demanda?.created_at);
-            return tsB - tsA || b.score - a.score;
-          }
-          return b.score - a.score;
-        })
-        .slice(0, 250)
-        .forEach((pair) => {
-          const tr = document.createElement("tr");
-          tr.addEventListener("click", () => {
-            const inmuebleId = String(pair?.inmueble?.id || "").trim();
-            if (inmuebleId) openInmuebleDetail(inmuebleId, "relaciones");
-          });
-          const selectTd = document.createElement("td");
-          selectTd.className = "crm-dense-select";
-          const checkbox = document.createElement("input");
-          checkbox.type = "checkbox";
-          checkbox.addEventListener("click", (event) => event.stopPropagation());
-          selectTd.appendChild(checkbox);
-          tr.appendChild(selectTd);
-
-          const respTd = document.createElement("td");
-          respTd.textContent = String(pair?.inmueble?.responsable_gestion || pair?.inmueble?.agente || pair?.inmueble?.oficina || "").trim();
-          tr.appendChild(respTd);
-
-          const demandaTitle = String(pair?.demanda?.pedido || pair?.demanda?.tipo || "Pedido").trim();
-          const pedidoTd = document.createElement("td");
-          pedidoTd.className = "crm-dense-main";
-          pedidoTd.innerHTML = `<a class="tc-link" href="#" data-open-demanda="1"><strong>${escapeHtml(demandaTitle)}</strong></a>`;
-          const pedidoLink = pedidoTd.querySelector('a[data-open-demanda]');
-          if (pedidoLink) {
-            pedidoLink.addEventListener("click", (event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              const demandaId = String(pair?.demanda?.id || "").trim();
-              if (demandaId) openDemandaDetail(demandaId);
-            });
-          }
-          tr.appendChild(pedidoTd);
-
-          const interesTd = document.createElement("td");
-          interesTd.textContent = [pair?.demanda?.fase, pair?.demanda?.estado].filter(Boolean).join(" · ") || "-";
-          tr.appendChild(interesTd);
-
-          const notasTd = document.createElement("td");
-          notasTd.textContent = String(pair?.demanda?.notas || pair?.demanda?.observaciones || "").trim();
-          tr.appendChild(notasTd);
-
-          const createdTd = document.createElement("td");
-          const created = String(pair?.demanda?.created_at || pair?.demanda?.fecha_insercion || "").trim();
-          const createdKey = created ? created.slice(0, 10) : "";
-          createdTd.textContent = createdKey ? (formatCell("fecha", createdKey) || createdKey) : "-";
-          tr.appendChild(createdTd);
-
-          const updatedTd = document.createElement("td");
-          const updated = String(pair?.demanda?.updated_at || pair?.demanda?.fecha_modificacion || "").trim();
-          const updatedKey = updated ? updated.slice(0, 10) : "";
-          updatedTd.textContent = updatedKey ? (formatCell("fecha", updatedKey) || updatedKey) : "-";
-          tr.appendChild(updatedTd);
-
-          const inmTd = document.createElement("td");
-          inmTd.className = "crm-dense-main";
-          const inmAddress = buildInmuebleDisplayAddress(pair?.inmueble) || pair?.inmueble?.direccion || "-";
-          const inmStage = normalizeCrmMainEtapa(pair?.inmueble?.estado || "") || "";
-          const inmLabel = String(pair?.inmueble?.referencia || "").trim();
-          inmTd.innerHTML = `<a class="tc-link" href="#" data-open-inmueble="1"><strong>${escapeHtml(inmLabel ? `${inmLabel} - ${inmAddress}` : inmAddress)}</strong></a><div class="muted">${escapeHtml(inmStage || "")}</div>`;
-          const inmLink = inmTd.querySelector('a[data-open-inmueble]');
-          if (inmLink) {
-            inmLink.addEventListener("click", (event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              tr.click();
-            });
-          }
-          tr.appendChild(inmTd);
-
-          const scoreTd = document.createElement("td");
-          scoreTd.textContent = String(pair.score || 0);
-          tr.appendChild(scoreTd);
-
-          tbody.appendChild(tr);
-        });
-      table.appendChild(tbody);
-      enableCrmDenseTableResize(table);
-
-      crmRelacionesTable.innerHTML = "";
-      if (!filteredPairs.length) {
-        crmRelacionesTable.innerHTML = "<p class='muted'>Sin relaciones encontradas.</p>";
-      } else {
-        crmRelacionesTable.appendChild(table);
-      }
-      if (crmRelacionesInfo) {
-        const shown = Math.min(filteredPairs.length, 250);
-        const start = shown ? 1 : 0;
-        crmRelacionesInfo.textContent = `desde ${start} a ${shown} de ${shown}`;
-      }
-    })
-    .catch(() => {
-      crmRelacionesTable.innerHTML = "<p class='muted'>No se pudieron calcular las relaciones.</p>";
-      if (crmRelacionesInfo) crmRelacionesInfo.textContent = "";
-    });
-};
 
 const loadCrmCompraventas = () => {
   if (!crmCompraventasTable) {
@@ -60501,9 +61072,18 @@ const syncCrmAgendaControls = () => {
   if (crmAgendaDay && state.crmAgendaAnchorDay) crmAgendaDay.value = state.crmAgendaAnchorDay;
 };
 
+const CRM_AGENDA_DENSE_TABLE_MAX_ROWS = 500;
+
 const buildCrmAgendaDenseTableNode = (rows = []) => {
   const items = Array.isArray(rows) ? rows : [];
   if (!items.length) return null;
+  // Sin este recorte, una preset como "citas_caducadas" con miles de filas históricas
+  // construye esa misma cantidad de <tr> (6 createElement + 2 addEventListener cada
+  // una) de un tirón: bloquea la pestaña decenas de segundos. Recortamos el PINTADO,
+  // no el filtrado: renderCrmAgendaWorkspace sigue contando sobre `filtered.length`.
+  const renderItems = items.length > CRM_AGENDA_DENSE_TABLE_MAX_ROWS
+    ? items.slice(0, CRM_AGENDA_DENSE_TABLE_MAX_ROWS)
+    : items;
   const table = document.createElement("table");
   table.className = "crm-dense-table crm-agenda-table";
   const thead = document.createElement("thead");
@@ -60520,7 +61100,7 @@ const buildCrmAgendaDenseTableNode = (rows = []) => {
   `;
   table.appendChild(thead);
   const tbody = document.createElement("tbody");
-  items.forEach((row) => {
+  renderItems.forEach((row) => {
     const tr = document.createElement("tr");
     tr.dataset.actionId = String(row?.id || "").trim();
     tr.addEventListener("click", () => openCrmAgendaEditModalById(tr.dataset.actionId));
@@ -61328,6 +61908,12 @@ const renderCrmAgendaWorkspace = () => {
         crmAgendaTable.innerHTML = `<p class='muted'>Sin acciones aquí.${pista}</p>`;
       } else {
         crmAgendaTable.appendChild(node);
+        if (filtered.length > CRM_AGENDA_DENSE_TABLE_MAX_ROWS) {
+          const aviso = document.createElement("p");
+          aviso.className = "muted";
+          aviso.textContent = `Mostrando las primeras ${CRM_AGENDA_DENSE_TABLE_MAX_ROWS} de ${filtered.length} filas · afina la búsqueda, el estado o el rango de fechas para ver el resto.`;
+          crmAgendaTable.appendChild(aviso);
+        }
       }
     }
   } else {
@@ -61656,165 +62242,7 @@ const ensureCrmAgendaSelectors = async () => {
   }
 };
 
-const loadCrmInformadores = async () => {
-  if (!crmInformadoresTable) return;
-  const params = new URLSearchParams({ tabla: "clientes", include_id: "1", limit: "600" });
-  const data = await api(`/api/tabla?${params.toString()}`).catch(() => null);
-  if (!data || !Array.isArray(data.rows) || !Array.isArray(data.columns)) {
-    crmInformadoresTable.innerHTML = "<p class='muted'>No se pudieron cargar los informadores.</p>";
-    return;
-  }
-  const rowMaps = data.rows.map((row) => buildRowMap(row, data.columns));
-  const qRaw = String(crmInformadoresSearch?.value || "").trim();
-  const matchQuery = createAdvancedSearchMatcher(qRaw, {
-    text: (row) => [row?.nombre, row?.telefono, row?.movil, row?.email, row?.id_personal].map((v) => String(v || "")).join(" "),
-    fields: {
-      nombre: (row) => row?.nombre,
-      tel: (row) => row?.telefono || row?.movil,
-      movil: (row) => row?.movil,
-      email: (row) => row?.email,
-      id: (row) => row?.id_personal || row?.id,
-    },
-  });
-  const items = rowMaps.filter((row) => {
-    const perfil = normalizeSimple(row.perfil || "");
-    if (!perfil.includes("informador")) return false;
-    if (!matchQuery(row)) return false;
-    return true;
-  });
-  const table = document.createElement("table");
-  table.className = "crm-dense-table crm-informadores-table";
-  const thead = document.createElement("thead");
-  const trh = document.createElement("tr");
-  ["", "nombre", "telefono", "movil", "email", "id_personal"].forEach((col) => {
-    const th = document.createElement("th");
-    th.textContent = col ? formatHeader(col) : "";
-    trh.appendChild(th);
-  });
-  thead.appendChild(trh);
-  table.appendChild(thead);
-  const tbody = document.createElement("tbody");
-  items.forEach((row) => {
-    const tr = document.createElement("tr");
-    const recordId = String(row.id || "").trim();
-    if (recordId) {
-      tr.addEventListener("click", () => openClienteDetail(recordId));
-    }
 
-    const selectTd = document.createElement("td");
-    selectTd.className = "crm-dense-select";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.addEventListener("click", (event) => event.stopPropagation());
-    selectTd.appendChild(checkbox);
-    tr.appendChild(selectTd);
-
-    [row.nombre, row.telefono, row.movil, row.email, row.id_personal].forEach((val) => {
-      const td = document.createElement("td");
-      td.textContent = String(val || "");
-      tr.appendChild(td);
-    });
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-  enableCrmDenseTableResize(table);
-  crmInformadoresTable.innerHTML = "";
-  crmInformadoresTable.appendChild(table);
-  if (crmInformadoresInfo) {
-    crmInformadoresInfo.textContent = `Mostrando ${items.length} informadores.`;
-  }
-};
-
-const loadCrmEdificios = async () => {
-  if (!crmEdificiosTable) return;
-  const empresa = resolveCrmInmoEmpresa();
-  const empresaId = resolveLegacyEmpresaId(empresa);
-  if (!empresaId) {
-    crmEdificiosTable.innerHTML = "<p class='muted'>Sin empresa.</p>";
-    return;
-  }
-  const params = new URLSearchParams({ tabla: "inmuebles", empresa_id: empresaId, include_id: "1", limit: "600" });
-  const data = await api(`/api/tabla?${params.toString()}`).catch(() => null);
-  if (!data || !Array.isArray(data.rows) || !Array.isArray(data.columns)) {
-    crmEdificiosTable.innerHTML = "<p class='muted'>No se pudieron cargar los inmuebles.</p>";
-    return;
-  }
-  const rowMaps = data.rows.map((row) => buildRowMap(row, data.columns));
-  const tipoFilter = String(crmEdificiosTipoFilter?.value || "").trim().toLowerCase();
-  const qRaw = String(crmEdificiosSearch?.value || "").trim();
-  const matchQuery = createAdvancedSearchMatcher(qRaw, {
-    text: (row) =>
-      [row?.titulo, row?.direccion, row?.localidad, row?.poblacion, row?.provincia, row?.responsable, row?.categoria]
-        .map((v) => String(v || ""))
-        .join(" "),
-    fields: {
-      titulo: (row) => row?.titulo,
-      direccion: (row) => row?.direccion,
-      poblacion: (row) => row?.poblacion || row?.localidad,
-      provincia: (row) => row?.provincia,
-      responsable: (row) => row?.responsable,
-      categoria: (row) => row?.categoria,
-    },
-  });
-  const items = rowMaps.filter((row) => {
-    const tipo = normalizeSimple(row.tipo_inmueble || "");
-    const categoria = normalizeSimple(row.categoria || "");
-    if (tipoFilter === "edificios" && !tipo.includes("edific")) return false;
-    if (tipoFilter === "complejos" && !(tipo.includes("complej") || categoria)) return false;
-    if (!matchQuery(row)) return false;
-    return tipo.includes("edific") || tipo.includes("complej") || categoria;
-  });
-  const table = document.createElement("table");
-  table.className = "crm-dense-table crm-edificios-table";
-  const thead = document.createElement("thead");
-  const trh = document.createElement("tr");
-  ["", "inmueble", "direccion", "localidad", "categoria", "responsable", "año"].forEach((col) => {
-    const th = document.createElement("th");
-    th.textContent = col ? formatHeader(col) : "";
-    trh.appendChild(th);
-  });
-  thead.appendChild(trh);
-  table.appendChild(thead);
-  const tbody = document.createElement("tbody");
-  items.forEach((row) => {
-    const tr = document.createElement("tr");
-    const recordId = String(row.id || "").trim();
-    if (recordId) {
-      tr.addEventListener("click", () => openInmuebleDetail(recordId, "edificios"));
-    }
-
-    const selectTd = document.createElement("td");
-    selectTd.className = "crm-dense-select";
-    const checkbox = document.createElement("input");
-    checkbox.type = "checkbox";
-    checkbox.addEventListener("click", (event) => event.stopPropagation());
-    selectTd.appendChild(checkbox);
-    tr.appendChild(selectTd);
-
-    const year = row.anio_construccion || row.anio_reforma || "";
-    const cells = [
-      row.titulo || row.direccion || "",
-      row.direccion || "",
-      row.localidad || row.poblacion || "",
-      row.categoria || "",
-      row.responsable || "",
-      year || "",
-    ];
-    cells.forEach((val) => {
-      const td = document.createElement("td");
-      td.textContent = String(val || "");
-      tr.appendChild(td);
-    });
-    tbody.appendChild(tr);
-  });
-  table.appendChild(tbody);
-  enableCrmDenseTableResize(table);
-  crmEdificiosTable.innerHTML = "";
-  crmEdificiosTable.appendChild(table);
-  if (crmEdificiosInfo) {
-    crmEdificiosInfo.textContent = `Mostrando ${items.length} registros.`;
-  }
-};
 
 const renderVisitaSelects = () => {
   if (visitaInmueble) {
@@ -62972,10 +63400,13 @@ const openInmuebleDetail = (id, originView = "", options = {}) => {
 		      syncInmuebleNoticiaTab(inmueble, normalizedCaptacion);
       if (inmuebleTitle) {
         const etapa = resolveInmuebleMainEtapa(inmueble, normalizedCaptacion) || "Inmueble";
-        const tecnoStage = etapa === "Inmueble" || etapa === "Noticia" ? etapa : "Encargo";
-        const codePrefix = resolveCaptacionCodePrefix(tecnoStage);
+        // El título aplastaba todo lo que no fuera Inmueble o Noticia a «Encargo», así
+        // que la ficha de un piso vendido se encabezaba «Encargo · EN -». Se respeta la
+        // fase real, que es lo que la persona necesita leer al abrirla.
+        const codePrefix = resolveCaptacionCodePrefix(
+          etapa, inmueble.tipo_operacion || inmueble.operacion || "");
         const label = inmueble.direccion || inmueble.referencia || "Ficha de inmueble";
-        inmuebleTitle.textContent = `${tecnoStage} · ${codePrefix} - ${label}`;
+        inmuebleTitle.textContent = `${etapa} · ${codePrefix} - ${label}`;
       }
       if (inmuebleSubtitle) {
         inmuebleSubtitle.textContent =
@@ -66159,11 +66590,23 @@ const buildGestoriaWorkspaceParams = (initial = {}) => {
   return params;
 };
 
-const buildGestoriaClientesByNifParams = (nif, limit = 6) =>
-  buildGestoriaWorkspaceParams({
+const buildGestoriaClientesByNifParams = (nif, limit = 6) => {
+  const params = buildGestoriaWorkspaceParams({
     nif: String(nif || "").trim(),
     limit: String(limit || 6).trim() || "6",
   });
+  // buildGestoriaWorkspaceParams borra empresa_id en cuanto hay workspace_id: vale para
+  // listar por todo el workspace, pero esto busca duplicados por NIF antes de crear un
+  // cliente. Si el workspace aún no tiene el vínculo en workspace_companies para la
+  // empresa activa, la búsqueda vuelve vacía y el CRM ofrece crear un cliente que ya
+  // existe (visto en producción: Fincas Velazquez con NIF real, "no hay clientes con
+  // ese DNI/NIF" siendo falso). Mandamos también la empresa activa para que el backend
+  // pueda acotar por ahí si el vínculo de workspace no alcanza.
+  const empresa = resolveCrmGestoriaEmpresa();
+  const empresaId = String(empresa?.legacy_empresa_id || empresa?.id || "").trim();
+  if (empresaId) params.set("empresa_id", empresaId);
+  return params;
+};
 
 const setGestoriaDashboardView = (viewKey = "general") => {
   const key = normalizeGestoriaDashboardView(viewKey);
@@ -66428,7 +66871,7 @@ const renderGestoriaDashboardGestiones = (rows = [], { estadoFiltro = "" } = {})
     : items;
 
   const todayIso = new Date().toISOString().slice(0, 10);
-  const isDone = (row) => normalizeSimple(String(row?.estado || "")) === "completado";
+  const isDone = (row) => esEstadoTrabajoTerminado(row?.estado);
   const due = (row) => gestoriaDashComputeDueDate(row) || "";
   const isOverdue = (row) => {
     const d = due(row);
@@ -66440,7 +66883,7 @@ const renderGestoriaDashboardGestiones = (rows = [], { estadoFiltro = "" } = {})
       const st = normalizeSimple(String(row?.estado || ""));
       if (st === "encurso") acc.enCurso += 1;
       else if (st === "enespera") acc.enEspera += 1;
-      else if (st === "completado") acc.completado += 1;
+      else if (esEstadoTrabajoTerminado(st)) acc.completado += 1;
       if (isOverdue(row)) acc.vencidas += 1;
       return acc;
     },
@@ -67887,7 +68330,7 @@ const loadGestoriaDashboard = () => {
     const vencidas = trabajos.filter((t) => {
       const fin = computeDueDate(t);
       const estado = String(t.estado || "").toLowerCase();
-      return fin && fin < todayStr && estado !== "completado";
+      return fin && fin < todayStr && !esEstadoTrabajoTerminado(estado);
     });
     if (gestoriaKpiGestionesCurso) gestoriaKpiGestionesCurso.textContent = enCurso.length;
     if (gestoriaKpiGestionesEspera) gestoriaKpiGestionesEspera.textContent = enEspera.length;
@@ -67956,7 +68399,7 @@ const loadGestoriaDashboard = () => {
     const proximas = trabajos.filter((t) => {
       const fin = computeDueDate(t);
       const estado = String(t.estado || "").toLowerCase();
-      return fin && fin >= todayStr && fin <= limitStr && estado !== "completado";
+      return fin && fin >= todayStr && fin <= limitStr && !esEstadoTrabajoTerminado(estado);
     });
     renderAlertList(
       gestoriaAlertGestionesProximas,
@@ -67982,7 +68425,7 @@ const loadGestoriaDashboard = () => {
         if (estado === "en curso") grouped[responsable].enCurso += 1;
         if (estado === "en espera") grouped[responsable].enEspera += 1;
         const due = computeDueDate(row);
-        if (due && due < todayStr && estado !== "completado") {
+        if (due && due < todayStr && !esEstadoTrabajoTerminado(estado)) {
           grouped[responsable].vencidas += 1;
         }
       });
@@ -75233,6 +75676,12 @@ const renderGestoriaBancoMovimientos = (rows = []) => {
     if (gestoriaBancoMovimientosInfo) gestoriaBancoMovimientosInfo.textContent = "";
     return;
   }
+  // Sin `ui-table` esta tabla se quedaba fuera del sistema de diseño: en un móvil no
+  // se apilaba en tarjetas como las demás ni tenía scroll —el propio sistema lo
+  // desactiva por debajo de 760 px—, así que la columna de punteo salía partida y la
+  // del asiento no se alcanzaba. Justo las dos que se vienen a mirar aquí.
+  const envoltorio = document.createElement("div");
+  envoltorio.className = "ui-table ui-table-scroll";
   const table = document.createElement("table");
   table.innerHTML = `
     <thead>
@@ -75252,26 +75701,44 @@ const renderGestoriaBancoMovimientos = (rows = []) => {
   items.forEach((row) => {
     const tr = document.createElement("tr");
     const score = Number(row.conciliacion_confianza || row.matched_score || 0);
-    const badge = Number(row.punteado || 0) === 1 ? `<span class="ocr-badge ok">Punteado</span>` : `<span class="ocr-badge danger">Pendiente</span>`;
+    // Un movimiento puede estar punteado y aun así ser un emparejamiento que el
+    // conciliador automático dejó marcado para revisar. La etiqueta miraba sólo
+    // `punteado`, así que salía en verde; y el porcentaje se enseñaba «si es distinto
+    // de cero», o sea que con confianza 0 —el caso más flojo— desaparecía justo la
+    // señal que avisaba. En producción hay siete así.
+    const punteado = Number(row.punteado || 0) === 1;
+    const estadoConciliacion = String(row.conciliacion_estado || "").trim().toLowerCase();
+    const porRevisar = punteado && (estadoConciliacion === "pendiente" || score < CONCILIACION_CONFIANZA_MINIMA);
+    const badge = !punteado
+      ? `<span class="ocr-badge danger">Pendiente</span>`
+      : porRevisar
+        ? `<span class="ocr-badge media" title="Punteado, pero el emparejamiento automático quedó ${estadoConciliacion || "sin validar"} con ${Math.round(score)} % de confianza. Revísalo.">Por revisar</span>`
+        : `<span class="ocr-badge ok">Punteado</span>`;
     tr.innerHTML = `
-      <td>${escapeHtml(row.fecha_operacion || row.fecha_valor || "-")}</td>
-      <td>${escapeHtml(row.concepto || "-")}</td>
-      <td style="white-space:nowrap;">${euroFormatter.format(parseMoneyValue(row.importe || 0))}</td>
-      <td style="white-space:nowrap;">${row.saldo != null ? euroFormatter.format(parseMoneyValue(row.saldo)) : "-"}</td>
-      <td>${escapeHtml([row.banco_nombre, row.iban].filter(Boolean).join(" · ") || "-")}</td>
-      <td>${badge}${score ? ` <span class="muted">(${Math.round(score)}%)</span>` : ""}</td>
-      <td>${row.asiento_id ? escapeHtml(row.asiento_referencia || row.asiento_concepto || row.asiento_id) : "-"}</td>
+      <td data-label="Fecha">${escapeHtml(row.fecha_operacion || row.fecha_valor || "-")}</td>
+      <td data-label="Concepto">${escapeHtml(row.concepto || "-")}</td>
+      <td data-label="Importe" style="white-space:nowrap;">${euroFormatter.format(parseMoneyValue(row.importe || 0))}</td>
+      <td data-label="Saldo" style="white-space:nowrap;">${row.saldo != null ? euroFormatter.format(parseMoneyValue(row.saldo)) : "-"}</td>
+      <td data-label="Banco">${escapeHtml([row.banco_nombre, row.iban].filter(Boolean).join(" · ") || "-")}</td>
+      <td data-label="Punteo">${badge}${punteado ? ` <span class="muted">(${Math.round(score)}%)</span>` : ""}</td>
+      <td data-label="Asiento">${row.asiento_id ? escapeHtml(row.asiento_referencia || row.asiento_concepto || row.asiento_id) : "-"}</td>
     `;
     tbody.appendChild(tr);
   });
   gestoriaBancoMovimientosTable.innerHTML = "";
-  gestoriaBancoMovimientosTable.appendChild(table);
+  envoltorio.appendChild(table);
+  gestoriaBancoMovimientosTable.appendChild(envoltorio);
   gestoriaBancoMovimientosTable.querySelectorAll("[data-banco-open-asiento]").forEach((btn) => {
     btn.addEventListener("click", () => openGestoriaAsientoFichaAndScroll(btn.dataset.bancoOpenAsiento || ""));
   });
   if (gestoriaBancoMovimientosInfo) {
     const punteados = items.filter((row) => Number(row.punteado || 0) === 1).length;
-    gestoriaBancoMovimientosInfo.textContent = `Movimientos: ${items.length} · Punteados ${punteados} · Pendientes ${Math.max(0, items.length - punteados)}`;
+    const porRevisarTotal = items.filter((row) => Number(row.punteado || 0) === 1
+      && (String(row.conciliacion_estado || "").trim().toLowerCase() === "pendiente"
+          || Number(row.conciliacion_confianza || row.matched_score || 0) < CONCILIACION_CONFIANZA_MINIMA)).length;
+    gestoriaBancoMovimientosInfo.textContent = `Movimientos: ${items.length} · Punteados ${punteados - porRevisarTotal}`
+      + (porRevisarTotal ? ` · Por revisar ${porRevisarTotal}` : "")
+      + ` · Pendientes ${Math.max(0, items.length - punteados)}`;
   }
 };
 
@@ -75853,6 +76320,15 @@ const renderSimpleTable = (container, columns, rows) => {
   table.appendChild(tbody);
   container.innerHTML = "";
   container.appendChild(table);
+};
+
+// Diario/Mayor/Balance/PyG/Facturas vacíos a la vez, en modo "empresa" (no
+// "cliente"), no siempre es "no hay nada": la contabilidad de cada empresa del
+// workspace es independiente, y el usuario puede llevar activa una que nunca
+// tuvo asientos aunque otra del mismo workspace sí. "Sin datos." no lo dice.
+const gestoriaLibrosVaciosDeEmpresaAviso = (nombreEmpresa) => {
+  const nombre = String(nombreEmpresa || "").trim() || "la empresa activa";
+  return `<p class='muted'>Sin apuntes contables para «${escapeHtml(nombre)}». Si esperabas ver movimientos, comprueba que sea la empresa activa correcta: la contabilidad de cada empresa del workspace es independiente, y puede que la que buscas lleve su libro bajo otra.</p>`;
 };
 
 const getGestoriaMonthLabel = (dateStr) => {
@@ -76819,6 +77295,33 @@ const loadGestoriaClienteLibros = async (clienteIdOrOpts, empresaId = "") => {
         if (gestoriaClienteLibroIvaTable) {
           gestoriaClienteLibroIvaTable.innerHTML = "<p class='muted'>Desglose IVA cargado.</p>";
         }
+        syncGestoriaBooksDownloadButtons();
+        return;
+      }
+
+      // Con Fincas Velazquez como empresa activa, Diario/Mayor/Balance/PyG/Facturas
+      // salían vacíos sin ninguna pista de por qué: sus 1.225 asientos reales están
+      // bajo Estudio Velazquez, otra empresa del mismo workspace, y "Sin datos." no
+      // dice que hay que cambiar de empresa activa para verlos. Solo se muestra
+      // cuando TODO está vacío a la vez (no solo el diario: una empresa puede tener
+      // facturas sin conciliar todavía, y esas sí hay que seguir mostrando) y solo
+      // en modo "empresa" (no en el de "cliente", donde uno sin apuntes es normal).
+      if (!clienteId && resolvedEmpresaId && !diario.length && !mayor.length && !balance.length && !pyg.length && !facturas.length) {
+        const nombreEmpresa =
+          state.currentWorkspaceCompanyName
+          || (Array.isArray(state.empresas) ? state.empresas.find((e) => resolveLegacyEmpresaId(e) === resolvedEmpresaId || String(e?.id || "") === resolvedEmpresaId)?.nombre : "")
+          || "";
+        const aviso = gestoriaLibrosVaciosDeEmpresaAviso(nombreEmpresa);
+        if (gestoriaClienteLibroDiarioTable) gestoriaClienteLibroDiarioTable.innerHTML = aviso;
+        if (gestoriaClienteLibroMayorTable) gestoriaClienteLibroMayorTable.innerHTML = aviso;
+        if (gestoriaClienteLibroBalanceTable) gestoriaClienteLibroBalanceTable.innerHTML = aviso;
+        if (gestoriaClienteLibroPyGTable) gestoriaClienteLibroPyGTable.innerHTML = aviso;
+        if (gestoriaClienteLibroFacturasTable) gestoriaClienteLibroFacturasTable.innerHTML = aviso;
+        if (gestoriaClienteLibroIvaTable) gestoriaClienteLibroIvaTable.innerHTML = aviso;
+        if (gestoriaClienteLibroDiarioInfo) gestoriaClienteLibroDiarioInfo.textContent = "";
+        if (gestoriaClienteLibroMayorInfo) gestoriaClienteLibroMayorInfo.textContent = "";
+        if (gestoriaClienteLibroBalanceInfo) gestoriaClienteLibroBalanceInfo.textContent = "";
+        if (gestoriaClienteLibroPyGInfo) gestoriaClienteLibroPyGInfo.textContent = "";
         syncGestoriaBooksDownloadButtons();
         return;
       }
@@ -77814,6 +78317,19 @@ const attachGestoriaRentaQuickToCliente = async (clienteId, ctx = {}) => {
 
 const submitGestoriaRentaQuick = async () => {
   if (!gestoriaRentaQuickForm) return;
+  // El auto-submit al elegir archivo (change) y el submit manual del botón "Iniciar
+  // lectura" pueden dispararse casi a la vez y ambos entran aquí antes de que el
+  // primero limpie el input: sin este guard se sube y se lee el mismo PDF dos veces.
+  if (state.gestoriaRentaQuickSubmitting) return;
+  state.gestoriaRentaQuickSubmitting = true;
+  try {
+    await submitGestoriaRentaQuickInner();
+  } finally {
+    state.gestoriaRentaQuickSubmitting = false;
+  }
+};
+
+const submitGestoriaRentaQuickInner = async () => {
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) {
     if (gestoriaRentaQuickStatus) gestoriaRentaQuickStatus.textContent = "Sin workspace.";
@@ -79054,7 +79570,11 @@ const runGestoriaFacturaOcr = async ({
   const file = fileInput.files[0];
   const dataUrl = await fileToBase64(file);
   const payload = {
-    empresa_nombre: FINCAS_COMPANY,
+    // Antes iba fija a FINCAS_COMPANY: una factura OCR de un cliente de
+    // cualquier otra empresa del workspace (p.ej. Estudio Velazquez) se
+    // archivaba igualmente bajo Fincas Velazquez, porque el backend resuelve
+    // `empresa_id` solo por `empresa_nombre`, sin mirar el `cliente_id`.
+    empresa_nombre: resolveCrmGestoriaEmpresaNombre(),
     file_base64: dataUrl,
     filename: file.name || "",
     tipo_factura: tipoInput ? tipoInput.value : "compra",
@@ -80872,6 +81392,22 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     companiaInput.className = "hidden";
     form.appendChild(companiaInput);
 
+    // La prima y la comisión de la póliza NUEVA. Antes no existían estos campos y el
+    // servidor copiaba las de la compañía anterior, que es lo que se estaba arreglando.
+    const primaInput = document.createElement("input");
+    primaInput.type = "text";
+    primaInput.inputMode = "decimal";
+    primaInput.placeholder = "Prima nueva (€)";
+    primaInput.className = "hidden";
+    form.appendChild(primaInput);
+
+    const comisionInput = document.createElement("input");
+    comisionInput.type = "text";
+    comisionInput.inputMode = "decimal";
+    comisionInput.placeholder = "Comisión nueva (€)";
+    comisionInput.className = "hidden";
+    form.appendChild(comisionInput);
+
     const refInput = document.createElement("input");
     refInput.type = "text";
     refInput.placeholder = "Nueva póliza (opcional)";
@@ -80910,6 +81446,8 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
     const refreshActionFields = () => {
       const mode = actionSelect.value;
       companiaInput.classList.toggle("hidden", mode !== "cambiar_compania");
+      primaInput.classList.toggle("hidden", mode !== "cambiar_compania");
+      comisionInput.classList.toggle("hidden", mode !== "cambiar_compania");
       refInput.classList.toggle("hidden", mode === "anular");
       anulaDateInput.classList.toggle("hidden", mode !== "anular");
       anulaReasonSelect.classList.toggle("hidden", mode !== "anular");
@@ -80958,6 +81496,8 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
         payload.nueva_compania = newCompany;
         payload.fecha_cambio = today;
         if (refInput.value.trim()) payload.nueva_poliza_numero = refInput.value.trim();
+        if (primaInput.value.trim()) payload.nueva_prima_total = primaInput.value.trim();
+        if (comisionInput.value.trim()) payload.nueva_comision = comisionInput.value.trim();
       } else if (mode === "anular") {
         if (!anulaDateInput.value) {
           status.textContent = "Indica la fecha de anulación.";
@@ -80991,7 +81531,13 @@ const openClienteSeguroDetail = (row, cliente = {}, options = {}) => {
           status.textContent = resp.error;
           return;
         }
-        status.textContent = "Acción aplicada.";
+        // Lo que el servidor deja a medias hay que decirlo aquí, no en el registro:
+        // la póliza nueva sin PDF queda Pendiente, y sin prima queda sin importes.
+        status.textContent = resp?.aviso
+          ? `Acción aplicada. ${resp.aviso}`
+          : (Number(resp?.recibos_anulados || 0)
+              ? `Acción aplicada. Se han anulado ${resp.recibos_anulados} recibo(s) pendiente(s) de esa póliza.`
+              : "Acción aplicada.");
         await runAfterSave();
         if (mode === "cambiar_compania" && resp?.new_id) {
           await openSeguroById(resp.new_id, row.cliente_id || cliente.id || "");
@@ -84182,30 +84728,9 @@ if (crmMapaInmueblesRefresh) {
   });
 }
 
-if (crmRelacionesRefresh) {
-  crmRelacionesRefresh.addEventListener("click", () => loadCrmRelacionesCruce({ force: true }));
-}
 
-if (crmRelacionesPreset) {
-  crmRelacionesPreset.addEventListener("change", () => {
-    loadCrmRelacionesCruce({ force: true });
-  });
-}
 
-if (crmRelacionesPrintBtn) {
-  crmRelacionesPrintBtn.addEventListener("click", () => {
-    const title = "Relaciones Cruce";
-    const table = crmRelacionesTable?.querySelector?.("table");
-    const html = table ? table.outerHTML : "<p>Sin datos para imprimir.</p>";
-    openCrmPrintWindow({ title, html });
-  });
-}
 
-if (crmRelacionesSearch) {
-  crmRelacionesSearch.addEventListener("input", () => {
-    scheduleSave("crm-relaciones-search", () => loadCrmRelacionesCruce(), 250);
-  });
-}
 
 if (crmAgendaSearch) {
   crmAgendaSearch.addEventListener("input", () => {
@@ -84346,32 +84871,9 @@ if (crmAgendaForm) {
   });
 }
 
-if (crmInformadoresSearch) {
-  crmInformadoresSearch.addEventListener("input", () => {
-    scheduleSave("crm-informadores-search", () => loadCrmInformadores(), 250);
-  });
-}
 
-if (crmInformadoresCrear) {
-  crmInformadoresCrear.addEventListener("click", () => {
-    openClientesModule();
-    // Preselección suave: al abrir, el usuario puede marcar Perfil=Informador en el alta.
-    const perfil = document.querySelector('#clientesForm [name="perfil"]');
-    if (perfil) perfil.value = "Informador";
-  });
-}
 
-if (crmEdificiosTipoFilter) {
-  crmEdificiosTipoFilter.addEventListener("change", () => {
-    loadCrmEdificios();
-  });
-}
 
-if (crmEdificiosSearch) {
-  crmEdificiosSearch.addEventListener("input", () => {
-    scheduleSave("crm-edificios-search", () => loadCrmEdificios(), 250);
-  });
-}
 
 if (crmInmuebleSearch) {
   crmInmuebleSearch.addEventListener("input", () => {
@@ -86250,7 +86752,19 @@ if (segurosOcrSave) {
         });
       return;
     }
-    saveSegurosOcrRecord().catch(() => {});
+    saveSegurosOcrRecord().catch((err) => {
+      // Antes este error se tragaba entero: cualquier fallo dentro de
+      // saveSegurosOcrRecord (red, un campo inesperado, lo que sea) hacía
+      // que el botón "Guardar" se quedara sin hacer nada — ni mensaje en
+      // pantalla ni rastro en la consola, porque el .catch no hacía nada
+      // con el error. Así se veía "le doy a Guardar y no pasa nada".
+      console.error("saveSegurosOcrRecord", err);
+      if (segurosOcrSaveStatus) {
+        segurosOcrSaveStatus.textContent = err?.message
+          ? `Error al guardar: ${err.message}`
+          : "Error al guardar.";
+      }
+    });
   });
 }
 
@@ -87291,6 +87805,20 @@ if (irpfGainForm) {
 	    setSlotStatus("PDF generado.");
 	  };
 
+  // Cada pestaña lleva el nombre de su escenario. Antes ponía «Ejemplo 1/2/3», que
+  // además de no ser lo que dice el campo de debajo —«Nombre escenario»— tapaba el
+  // nombre que el usuario acababa de escribir: con tres abiertos, comparar era adivinar
+  // cuál era cuál. El PDF ya los llamaba «Escenario» desde el principio.
+  const pintaNombresDeEscenario = () => {
+    if (!irpfScenarioTabs) return;
+    irpfScenarioTabs.querySelectorAll("[data-irpf-slot]").forEach((btn) => {
+      const clave = String(btn.dataset.irpfSlot || "").trim();
+      const st = slotState[clave];
+      if (!st) return;
+      btn.textContent = String(st.nombre || "").trim() || `Escenario ${clave}`;
+    });
+  };
+
   const setActiveSlot = (slot) => {
     activeSlot = slot;
     if (irpfScenarioTabs) {
@@ -87298,6 +87826,7 @@ if (irpfGainForm) {
         btn.classList.toggle("active", String(btn.dataset.irpfSlot || "") === slot);
       });
     }
+    pintaNombresDeEscenario();
     renderSlotPanel();
   };
 
@@ -87325,6 +87854,7 @@ if (irpfGainForm) {
       if (irpfSlotPrecioEscritura) st.escritura = String(irpfSlotPrecioEscritura.value || "").trim();
       if (irpfSlotCalcWith) st.calc = String(irpfSlotCalcWith.value || "venta").trim();
       if (irpfSlotInclude) st.include = Boolean(irpfSlotInclude.checked);
+      pintaNombresDeEscenario();
     });
     el.addEventListener("change", () => {
       const st = slotState[activeSlot] || slotState.A;
@@ -88600,7 +89130,7 @@ if (workspaceFincasCommunityForm) {
           + (Number(workspaceFincasCommunityForm.querySelector('[name="num_aparcamientos"]')?.value || 0) || 0)
       );
       const suggestedInput = workspaceFincasCommunityForm.querySelector('[name="cuota_sugerida"]');
-      const cuotaInput = workspaceFincasCommunityForm.querySelector('[name="cuota_mensual"]');
+      const cuotaInput = workspaceFincasCommunityForm.querySelector('[name="honorario_mensual"]');
       if (suggestedInput) suggestedInput.value = formatEurosCompact(suggested);
       if (cuotaInput && !String(cuotaInput.value || "").trim()) cuotaInput.value = formatEurosCompact(suggested);
     });
@@ -88747,12 +89277,8 @@ if (workspaceFincasLedgerForm) {
     const payload = Object.fromEntries(formData.entries());
     payload.workspace_id = state.currentWorkspaceId;
     try {
-      const data = await fetch("/api/workspace_fincas_contabilidad", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }).then((res) => res.json());
-      if (data?.error) throw new Error(data.error);
+      const data = await guardarApunteDeComunidad(payload);
+      if (data === null) return;
       if (workspaceFincasLedgerStatus) workspaceFincasLedgerStatus.textContent = "Movimiento guardado.";
       await refreshWorkspaceFincasLedger({ force: true, silent: true });
       fillWorkspaceFincasLedgerForm();
@@ -93369,7 +93895,72 @@ if (authActivateForm) {
   });
 }
 
+// --- Todas las tablas dentro del sistema de diseño ------------------------------
+//
+// En `app.js` hay del orden de 137 tablas y sólo una llevaba `ui-table`. Sin esa clase
+// una tabla no se apila en tarjetas en el móvil, y como el propio sistema desactiva el
+// scroll horizontal por debajo de 760 px, lo que sobra se corta y no hay forma de
+// llegar a ello: en un listado de asientos de diez columnas se perdían Debe, Haber,
+// Factura, Punteo y Acciones.
+//
+// Se hace aquí y no en las 137 llamadas a propósito: son 137 sitios donde equivocarse,
+// y esto es una pieza que se prueba y se quita de una vez si molesta.
+const UI_TABLA_MARCA = "uiTablaLista";
+
+const aplicaSistemaDeDisenoATabla = (tabla) => {
+  if (!tabla || tabla.dataset[UI_TABLA_MARCA]) return;
+  tabla.dataset[UI_TABLA_MARCA] = "1";
+  const padre = tabla.parentElement;
+  if (padre && !tabla.closest(".ui-table")) {
+    const caja = document.createElement("div");
+    caja.className = "ui-table ui-table-scroll";
+    padre.insertBefore(caja, tabla);
+    caja.appendChild(tabla);
+  }
+  // Apilada no hay cabecera, así que cada celda tiene que decir de qué columna es.
+  const cabeceras = Array.from(tabla.querySelectorAll("thead th"))
+    .map((th) => (th.textContent || "").trim());
+  if (!cabeceras.length) return;
+  tabla.querySelectorAll("tbody tr").forEach((fila) => {
+    const celdas = Array.from(fila.children).filter((c) => c.tagName === "TD");
+    // Con celdas combinadas la posición ya no dice la columna: mejor no etiquetar que
+    // etiquetar mal.
+    if (celdas.some((c) => Number(c.getAttribute("colspan") || 1) > 1)) return;
+    celdas.forEach((celda, i) => {
+      if (celda.hasAttribute("data-label")) return;
+      if (cabeceras[i]) celda.setAttribute("data-label", cabeceras[i]);
+    });
+  });
+};
+
+const repasaLasTablas = (raiz) => {
+  try {
+    (raiz || document).querySelectorAll("table").forEach(aplicaSistemaDeDisenoATabla);
+  } catch (e) {}
+};
+
+const vigilaLasTablasQueLleguen = () => {
+  if (typeof MutationObserver === "undefined" || !document.body) return;
+  let pedido = 0;
+  const observador = new MutationObserver(() => {
+    if (pedido) return;
+    // Agrupado en un fotograma: pintar una tabla dispara muchas mutaciones seguidas.
+    pedido = window.requestAnimationFrame(() => {
+      pedido = 0;
+      // Sin escucharse a sí mismo: envolver una tabla es otra mutación.
+      observador.disconnect();
+      repasaLasTablas(document.body);
+      observador.observe(document.body, { childList: true, subtree: true });
+    });
+  });
+  repasaLasTablas(document.body);
+  observador.observe(document.body, { childList: true, subtree: true });
+};
+
+vigilaLasTablasQueLleguen();
+
 initDensityToggle();
+activarPatronDePestanas();
 UI?.boot(state);
 // Pintamos al menos las tarjetas base del home aunque la carga de datos falle o tarde.
 renderCompanyCards();

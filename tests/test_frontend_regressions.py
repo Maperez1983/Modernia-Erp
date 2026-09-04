@@ -2025,6 +2025,11 @@ class FrontendGestoriaLookupScopeTests(unittest.TestCase):
         run_node_script(script)
 
     def test_build_clientes_by_nif_params_carries_workspace_or_company_scope(self):
+        # Antes esto borraba empresa_id en cuanto había workspace_id (delegaba el
+        # acotado por completo en el vínculo workspace_companies). Si ese vínculo
+        # todavía no cubre la empresa activa, una búsqueda de NIF real volvía vacía y
+        # el CRM ofrecía crear un cliente duplicado que ya existía (visto en
+        # producción). Ahora manda también la empresa activa como respaldo.
         self._run(
             dedent(
                 """
@@ -2041,7 +2046,7 @@ class FrontendGestoriaLookupScopeTests(unittest.TestCase):
                 assert.strictEqual(scoped.get("nif"), "12345678A");
                 assert.strictEqual(scoped.get("limit"), "16");
                 assert.strictEqual(scoped.get("workspace_id"), "ws-1");
-                assert.strictEqual(scoped.get("empresa_id"), null);
+                assert.strictEqual(scoped.get("empresa_id"), "emp-1");
                 state.currentWorkspaceId = "";
                 const legacy = buildGestoriaClientesByNifParams("87654321B");
                 assert.strictEqual(legacy.get("nif"), "87654321B");
@@ -2574,6 +2579,201 @@ class WorkspaceTimeHomeProfileTests(unittest.TestCase):
                 assert.strictEqual(profile.latestEntry.fecha, "2026-07-13");
                 assert.strictEqual(profile.latestEntry.hora_inicio, "22:00");
                 assert.strictEqual(profile.latestEntry.hora_fin, "");
+                """
+            ),
+        )
+
+
+class GestoriaContabilidadSegurosFanOutTests(unittest.TestCase):
+    """La cola contable disparaba un `/api/seguros_cliente` por cada cliente
+    distinto entre los asientos —un `Promise.all` sin límite, hasta 200+ a la
+    vez en producción— y tumbaba el backend con 502. Ahora una sola carga en
+    bloque (`/api/tabla`) basta, y el acceso por cliente se resuelve
+    filtrando esa caché en el propio navegador, sin más peticiones."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const gestoriaContabilidadSegurosCache = new Map();",
+            "const loadClientesForSegurosContabilidad =",
+        ).replace("api(", "globalThis.api(")
+        cls.param_names = ["resolveCrmSegurosEmpresa", "resolveLegacyEmpresaId"]
+        cls.return_names = ["loadSegurosForClienteContabilidad", "loadAllSegurosForContabilidad"]
+
+    def _run(self, prelude: str, body: str) -> None:
+        script = make_factory_script(self.segment, self.param_names, self.return_names, prelude, body)
+        run_node_script(script)
+
+    def test_carga_en_bloque_evita_una_peticion_por_cliente(self):
+        self._run(
+            dedent(
+                """
+                const resolveCrmSegurosEmpresa = () => ({ id: "emp-a" });
+                const resolveLegacyEmpresaId = (empresa) => String(empresa?.id || "");
+                const apiCalls = [];
+                globalThis.api = async (url) => {
+                  apiCalls.push(url);
+                  return {
+                    columns: ["id", "poliza_numero", "compania", "ramo", "cliente_id"],
+                    rows: [
+                      ["seg-1", "POL-1", "Mapfre", "Auto", "cli-1"],
+                      ["seg-2", "POL-2", "Axa", "Hogar", "cli-2"],
+                    ],
+                  };
+                };
+                """
+            ),
+            dedent(
+                """
+                const { loadSegurosForClienteContabilidad, loadAllSegurosForContabilidad } = api;
+                await loadAllSegurosForContabilidad();
+                const clienteIds = ["cli-1", "cli-2", "cli-3"];
+                const results = await Promise.all(
+                  clienteIds.map((id) => loadSegurosForClienteContabilidad(id))
+                );
+                assert.strictEqual(apiCalls.length, 1, "debería bastar una sola petición en bloque");
+                assert.strictEqual(apiCalls[0].split("?")[0], "/api/tabla");
+                assert.strictEqual(results[0].length, 1);
+                assert.strictEqual(results[0][0].poliza_numero, "POL-1");
+                assert.strictEqual(results[1].length, 1);
+                assert.strictEqual(results[1][0].poliza_numero, "POL-2");
+                assert.strictEqual(results[2].length, 0);
+                """
+            ),
+        )
+
+
+class GestoriaContabilidadNoDisparaUnaPeticionPorClienteTests(unittest.TestCase):
+    """Guarda de regresión sobre el propio texto: si alguien vuelve a meter un
+    `Promise.all` de `loadSegurosForClienteContabilidad` por cada cliente, esto
+    debe fallar."""
+
+    def test_no_hay_promise_all_por_cliente(self):
+        self.assertNotIn(
+            "Promise.all(clienteIds.map((clienteId) => loadSegurosForClienteContabilidad(clienteId)))",
+            APP_SOURCE,
+        )
+
+
+class GestoriaLibrosVaciosDeEmpresaAvisoTests(unittest.TestCase):
+    """Con Fincas Velazquez como empresa activa, Diario/Mayor/Balance/PyG y
+    Facturas salían con el "Sin datos." genérico compartido por
+    renderSimpleTable, sin ninguna pista de que sus asientos reales estaban
+    bajo otra empresa del mismo workspace (Estudio Velazquez). Este mensaje
+    nombra la empresa activa y explica por qué puede estar vacía."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const gestoriaLibrosVaciosDeEmpresaAviso = (nombreEmpresa) => {",
+            "const getGestoriaMonthLabel = (dateStr) => {",
+        )
+        cls.param_names = ["escapeHtml"]
+        cls.return_names = ["gestoriaLibrosVaciosDeEmpresaAviso"]
+
+    def _run(self, body: str) -> None:
+        prelude = 'const escapeHtml = (s) => String(s).replace(/[&<>"\']/g, (c) => "&#" + c.charCodeAt(0) + ";");'
+        script = make_factory_script(self.segment, self.param_names, self.return_names, prelude, body)
+        run_node_script(script)
+
+    def test_nombra_la_empresa_activa(self):
+        self._run(
+            dedent(
+                """
+                const { gestoriaLibrosVaciosDeEmpresaAviso } = api;
+                const html = gestoriaLibrosVaciosDeEmpresaAviso("Fincas Velazquez");
+                assert.ok(html.includes("Fincas Velazquez"), html);
+                assert.ok(html.includes("empresa activa"), html);
+                """
+            )
+        )
+
+    def test_sin_nombre_cae_en_la_empresa_activa_generica(self):
+        self._run(
+            dedent(
+                """
+                const { gestoriaLibrosVaciosDeEmpresaAviso } = api;
+                const html = gestoriaLibrosVaciosDeEmpresaAviso("");
+                assert.ok(html.includes("la empresa activa»"), html);
+                """
+            )
+        )
+
+    def test_escapa_el_nombre_de_la_empresa(self):
+        self._run(
+            dedent(
+                """
+                const { gestoriaLibrosVaciosDeEmpresaAviso } = api;
+                const html = gestoriaLibrosVaciosDeEmpresaAviso("<script>alert(1)</script>");
+                assert.ok(!html.includes("<script>"), html);
+                """
+            )
+        )
+
+    def test_las_dos_colas_contables_usan_la_carga_en_bloque(self):
+        segment_general = extract_segment(
+            "const loadGestoriaContabilidad =",
+            "const loadSegurosContabilidad =",
+        )
+        segment_seguros = extract_segment(
+            "const loadSegurosContabilidad =",
+            "const formatInputDate =",
+        )
+        self.assertIn("await loadAllSegurosForContabilidad();", segment_general)
+        self.assertIn("await loadAllSegurosForContabilidad();", segment_seguros)
+
+
+class GestoriaFacturaOcrUsaLaEmpresaDelClienteTests(unittest.TestCase):
+    """`runGestoriaFacturaOcr` mandaba `empresa_nombre: FINCAS_COMPANY` fijo. El
+    backend resuelve `empresa_id` solo a partir de ese nombre (sin mirar
+    `cliente_id`), así que una factura OCR de un cliente de cualquier otra
+    empresa del workspace (Estudio Velazquez, Inversure...) se archivaba
+    igualmente bajo Fincas Velazquez: mismo cliente, empresa equivocada en el
+    asiento y en los libros. Ahora usa `resolveCrmGestoriaEmpresaNombre()`,
+    el mismo resolutor multi-nivel que ya usa el resto de Gestoría para saber
+    de qué empresa es la sesión activa."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.segment = extract_segment(
+            "const runGestoriaFacturaOcr = async ({",
+            "const updateCatalogoList =",
+        )
+        cls.param_names = ["fileToBase64", "resolveCrmGestoriaEmpresaNombre", "loadGestoriaContabilidad",
+                            "loadGestoriaClienteContaResultados", "loadGestoriaClienteLibros"]
+        cls.return_names = ["runGestoriaFacturaOcr"]
+
+    def _run(self, prelude: str, body: str) -> None:
+        script = make_factory_script(self.segment, self.param_names, self.return_names, prelude, body)
+        run_node_script(script)
+
+    def test_no_manda_fincas_velazquez_fijo(self):
+        self.assertNotIn("empresa_nombre: FINCAS_COMPANY", self.segment)
+
+    def test_usa_la_empresa_resuelta_del_cliente_activo(self):
+        self._run(
+            dedent(
+                """
+                const fileToBase64 = async () => "data:application/pdf;base64,AAAA";
+                const resolveCrmGestoriaEmpresaNombre = () => "Estudio Velazquez 2012 SL";
+                const loadGestoriaContabilidad = () => {};
+                const loadGestoriaClienteContaResultados = () => {};
+                const loadGestoriaClienteLibros = () => {};
+                let sentBody = null;
+                globalThis.fetch = async (url, opts) => {
+                  sentBody = JSON.parse(opts.body);
+                  return { json: async () => ({ factura_id: "f-1", asiento_id: "a-1" }) };
+                };
+                """
+            ),
+            dedent(
+                """
+                const { runGestoriaFacturaOcr } = api;
+                const fileInput = { files: [{ name: "f.pdf" }], value: "x" };
+                const statusEl = { textContent: "" };
+                await runGestoriaFacturaOcr({ fileInput, tipoInput: null, statusEl, clienteId: "cli-1" });
+                assert.strictEqual(sentBody.empresa_nombre, "Estudio Velazquez 2012 SL");
+                assert.strictEqual(sentBody.cliente_id, "cli-1");
                 """
             ),
         )

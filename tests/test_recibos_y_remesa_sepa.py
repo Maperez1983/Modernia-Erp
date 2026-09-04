@@ -23,9 +23,10 @@ a toda la comunidad, así que hay índice único y hay que pedirlo a propósito.
 Sobre el fichero SEPA: se genera pain.008.001.02 con el esquema estándar, pero cada banco
 tiene sus manías —el BIC, el sufijo del identificador de acreedor, cuántas secuencias
 admite por fichero—. Antes de usarlo en producción hay que validar uno de prueba con la
-entidad. Y todos los adeudos salen como `RCUR`: el primero de un mandato nuevo debería ir
-como `FRST`, pero eso exige llevar la cuenta de qué mandatos ya han cobrado alguna vez y
-hoy el CRM no la lleva.
+entidad. El primer adeudo de un mandato sale como `FRST` y los siguientes como `RCUR`,
+en bloques `PmtInf` separados: el `SeqTp` vive a nivel de bloque y hay entidades que no
+admiten mezclarlos en uno solo. Cuáles son los primeros lo decide quien llama, porque lo
+sabe la base de datos y no el generador del fichero.
 """
 
 import datetime
@@ -171,17 +172,98 @@ class ElFicheroSepaTests(unittest.TestCase):
                 self.assertRegex(e.text, r"^\d+\.\d{2}$")
             self.assertEqual(e.get("Ccy"), "EUR")
 
-    def test_esta_documentado_que_todo_va_como_recurrente(self):
-        """No es un descuido: hace falta historial de mandatos para distinguir FRST."""
-        i = SERVER.index("def build_remesa_sepa_xml")
-        cuerpo = SERVER[i: SERVER.index("\ndef ", i + 10)]
-        self.assertIn("FRST", cuerpo)
-        self.assertIn("<SeqTp>RCUR</SeqTp>", cuerpo)
+    def test_sin_saber_cuales_son_primeros_todo_va_como_recurrente(self):
+        """El comportamiento de siempre cuando no se pasa `primeros`: un solo bloque
+        RCUR. Vale para quien llame sin el argumento."""
+        self.assertEqual([e.text for e in self.raiz.findall(".//p:SeqTp", NS)], ["RCUR"])
+        self.assertEqual(len(self.raiz.findall(".//p:PmtInf", NS)), 1)
 
     def test_avisa_de_que_hay_que_validarlo_con_el_banco(self):
         i = SERVER.index("def build_remesa_sepa_xml")
         cuerpo = SERVER[i: SERVER.index("\ndef ", i + 10)]
         self.assertIn("validar un fichero de prueba con la entidad", cuerpo)
+
+
+class ElPrimerAdeudoDeUnMandatoTests(unittest.TestCase):
+    """`FRST` el primero, `RCUR` los siguientes, y en bloques separados.
+
+    Antes salía todo como `RCUR` y estaba documentado como pendiente. El motivo era
+    real: distinguirlo exige saber qué mandatos ya han cobrado alguna vez, y eso lo
+    sabe la base, no el generador del fichero. Ahora se le pasa en `primeros`.
+
+    Los dos grupos van en bloques `PmtInf` distintos porque el `SeqTp` vive a nivel de
+    bloque; mezclarlos obligaría a repetirlo por operación y hay entidades que no lo
+    admiten.
+    """
+
+    def setUp(self):
+        self.comunidad = {"nombre": "C.P. Velazquez 11", "iban": IBAN_BUENO,
+                          "acreedor_sepa": "ES12ZZZ12345678"}
+        self.remesa = {"referencia": "CPV-2026-09", "fecha_cobro": "2026-09-05"}
+        self.recibos = [
+            {"nombre": "Juan Perez", "iban": IBAN_BUENO, "mandato_ref": "MND-1A",
+             "mandato_fecha": "2024-01-15", "importe": 50.0, "concepto": "Cuota", "vecino_id": "v1"},
+            {"nombre": "Ana Ruiz", "iban": IBAN_BUENO, "mandato_ref": "MND-1B",
+             "mandato_fecha": "2026-08-20", "importe": 30.0, "concepto": "Cuota", "vecino_id": "v2"},
+        ]
+
+    def _arbol(self, primeros=None):
+        return ET.fromstring(server.build_remesa_sepa_xml(
+            self.remesa, self.comunidad, self.recibos, primeros=primeros,
+            ahora=datetime.datetime(2026, 9, 1, 9, 0, 0)))
+
+    def _bloques(self, raiz):
+        return {pi.find(".//p:SeqTp", NS).text: pi for pi in raiz.findall(".//p:PmtInf", NS)}
+
+    def test_el_nuevo_va_en_su_propio_bloque_frst(self):
+        bloques = self._bloques(self._arbol({"MND-1B"}))
+        self.assertEqual(sorted(bloques), ["FRST", "RCUR"])
+        self.assertEqual(bloques["FRST"].find(".//p:MndtId", NS).text, "MND-1B")
+        self.assertEqual(bloques["RCUR"].find(".//p:MndtId", NS).text, "MND-1A")
+
+    def test_cada_bloque_declara_lo_suyo(self):
+        bloques = self._bloques(self._arbol({"MND-1B"}))
+        self.assertEqual(bloques["FRST"].find("p:NbOfTxs", NS).text, "1")
+        self.assertEqual(bloques["FRST"].find("p:CtrlSum", NS).text, "30.00")
+        self.assertEqual(bloques["RCUR"].find("p:NbOfTxs", NS).text, "1")
+        self.assertEqual(bloques["RCUR"].find("p:CtrlSum", NS).text, "50.00")
+
+    def test_la_cabecera_sigue_cuadrando_con_la_suma_de_los_bloques(self):
+        """Si el total del fichero no cuadra, el banco lo rechaza entero."""
+        raiz = self._arbol({"MND-1B"})
+        self.assertEqual(raiz.find(".//p:GrpHdr/p:NbOfTxs", NS).text, "2")
+        self.assertEqual(raiz.find(".//p:GrpHdr/p:CtrlSum", NS).text, "80.00")
+        suma = sum(float(pi.find("p:CtrlSum", NS).text) for pi in raiz.findall(".//p:PmtInf", NS))
+        cuantos = sum(int(pi.find("p:NbOfTxs", NS).text) for pi in raiz.findall(".//p:PmtInf", NS))
+        self.assertEqual(round(suma, 2), 80.00)
+        self.assertEqual(cuantos, 2)
+
+    def test_los_dos_bloques_no_comparten_identificador(self):
+        raiz = self._arbol({"MND-1B"})
+        ids = [pi.find("p:PmtInfId", NS).text for pi in raiz.findall(".//p:PmtInf", NS)]
+        self.assertEqual(len(ids), len(set(ids)), ids)
+
+    def test_el_frst_va_delante(self):
+        """Si la entidad procesa por orden, el primer adeudo del mandato va antes."""
+        raiz = self._arbol({"MND-1B"})
+        self.assertEqual([pi.find(".//p:SeqTp", NS).text for pi in raiz.findall(".//p:PmtInf", NS)],
+                         ["FRST", "RCUR"])
+
+    def test_si_todos_son_primeros_no_se_parte_en_dos(self):
+        raiz = self._arbol({"MND-1A", "MND-1B"})
+        self.assertEqual(len(raiz.findall(".//p:PmtInf", NS)), 1)
+        self.assertEqual(raiz.find(".//p:SeqTp", NS).text, "FRST")
+        self.assertEqual(raiz.find(".//p:PmtInfId", NS).text, "CPV-2026-09")
+
+    def test_quien_decide_es_el_endpoint_y_mira_la_base(self):
+        """Nunca cobrado -> FRST. Y firmado después del último cobro -> FRST otra vez,
+        porque eso es un mandato nuevo del mismo propietario."""
+        i = SERVER.index('if path == "/api/workspace_fincas_remesa_sepa"')
+        cuerpo = SERVER[i: SERVER.index("\n        if path ==", i + 10)]
+        self.assertIn("MAX(rm.fecha_cobro)", cuerpo)
+        self.assertIn("primeros=primeros", cuerpo)
+        self.assertIn("firma > anterior", cuerpo)
+        self.assertIn("r.remesa_id != ?", cuerpo)
 
 
 class ElCircuitoCompletoTests(unittest.TestCase):

@@ -31428,9 +31428,11 @@ def guarda_consentimiento_de_portal(conn, acceso, *, ambito, agencia, nombre, ni
     try:
         fila = conn.execute(
             "SELECT a.integrity_hash FROM portal_consentimientos a "
-            "WHERE COALESCE(a.integrity_hash,'') <> '' AND NOT EXISTS ("
-            "  SELECT 1 FROM portal_consentimientos b WHERE COALESCE(b.prev_hash,'') = a.integrity_hash) "
-            "ORDER BY a.created_at DESC, a.id DESC LIMIT 1"
+            "WHERE a.acceso_id = ? AND COALESCE(a.integrity_hash,'') <> '' AND NOT EXISTS ("
+            "  SELECT 1 FROM portal_consentimientos b "
+            "  WHERE b.acceso_id = a.acceso_id AND COALESCE(b.prev_hash,'') = a.integrity_hash) "
+            "ORDER BY a.created_at DESC, a.id DESC LIMIT 1",
+            (registro["acceso_id"],),
         ).fetchone()
         if fila:
             prev_hash = str(row_value(fila, "integrity_hash", "") or "")
@@ -33245,9 +33247,11 @@ def apunta_evento_de_oferta(conn, oferta_id, quien, que, *, detalle="", importe=
     try:
         fila = conn.execute(
             "SELECT a.integrity_hash FROM inmueble_oferta_eventos a "
-            "WHERE COALESCE(a.integrity_hash,'') <> '' AND NOT EXISTS ("
-            "  SELECT 1 FROM inmueble_oferta_eventos b WHERE COALESCE(b.prev_hash,'') = a.integrity_hash) "
-            "ORDER BY a.created_at DESC, a.id DESC LIMIT 1"
+            "WHERE a.oferta_id = ? AND COALESCE(a.integrity_hash,'') <> '' AND NOT EXISTS ("
+            "  SELECT 1 FROM inmueble_oferta_eventos b "
+            "  WHERE b.oferta_id = a.oferta_id AND COALESCE(b.prev_hash,'') = a.integrity_hash) "
+            "ORDER BY a.created_at DESC, a.id DESC LIMIT 1",
+            (str(oferta_id or ""),),
         ).fetchone()
         if fila:
             prev_hash = str(row_value(fila, "integrity_hash", "") or "")
@@ -46799,7 +46803,8 @@ def resolve_clientes_by_nif_rows(conn, nif, *, limit=6, services=None, workspace
         limit_val = 6
     normalized_services = [normalize_service_key(service) for service in (services or []) if normalize_service_key(service)]
 
-    if normalized_services:
+    def _rows_via_clientes_empresas():
+        # Camino principal: el vínculo cliente↔empresa vive en clientes_empresas.
         service_clause, service_values = service_sql_match_clause("ce", normalized_services)
         where = [service_clause] if service_clause else []
         values = list(service_values)
@@ -46819,13 +46824,16 @@ def resolve_clientes_by_nif_rows(conn, nif, *, limit=6, services=None, workspace
                 scope_parts.append("COALESCE(c.workspace_id, '') = ?")
                 values.append(workspace_id)
             empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id, solo_operativas=True) or []
+            # Si el caller manda una empresa_id explícita (la empresa activa en el CRM),
+            # la unimos aunque el vínculo workspace_companies todavía no la incluya: si no,
+            # un workspace con ese vínculo a medio migrar hace que una búsqueda de NIF real
+            # vuelva vacía y el CRM ofrezca crear un cliente duplicado que ya existe.
+            if empresa_id and empresa_id not in empresa_ids:
+                empresa_ids = [*empresa_ids, empresa_id]
             if empresa_ids:
                 placeholders_ws = ",".join(["?"] * len(empresa_ids))
                 scope_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
                 values.extend(empresa_ids)
-            elif empresa_id:
-                scope_parts.append("COALESCE(ce.empresa_id, '') = ?")
-                values.append(empresa_id)
             if not scope_parts:
                 # Sin forma de acotar preferimos no sugerir nada a sugerir clientes
                 # de otro tenant.
@@ -46852,41 +46860,66 @@ def resolve_clientes_by_nif_rows(conn, nif, *, limit=6, services=None, workspace
             values,
         ).fetchall()
 
-    c_cols = table_columns(conn, "clientes") or set()
-    where = ["REPLACE(REPLACE(UPPER(COALESCE(nif, '')), ' ', ''), '-', '') = ?"]
-    values = [nif_norm]
-    if workspace_id:
-        if "workspace_id" in c_cols:
-            empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id, solo_operativas=True) or []
-            if empresa_ids:
-                placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                where.insert(0, f"(COALESCE(workspace_id, '') = ? OR (COALESCE(workspace_id, '') = '' AND COALESCE(empresa_id, '') IN ({placeholders_ws})))")
-                values[0:0] = [workspace_id, *empresa_ids]
+    def _rows_via_clientes_directo():
+        # Respaldo: clientes con empresa_id puesto directamente en `clientes` pero sin
+        # fila en clientes_empresas todavía (altas antiguas o del flujo rápido "crear
+        # cliente y asignar renta"). Antes esto y lo de arriba eran ramas alternativas
+        # según hubiera `services` o no — y un rol sin restricción (admin) hace que
+        # `services` llegue vacío, así que ESTA rama débil era la que de verdad se
+        # ejecutaba para admins, sin ver clientes_empresas: devolvía "no existe" de
+        # clientes que sí existen y el CRM ofrecía crear un duplicado. Ahora se
+        # consultan ambas siempre y se combinan, no una u otra.
+        c_cols = table_columns(conn, "clientes") or set()
+        where = ["REPLACE(REPLACE(UPPER(COALESCE(nif, '')), ' ', ''), '-', '') = ?"]
+        values = [nif_norm]
+        if workspace_id:
+            if "workspace_id" in c_cols:
+                empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id, solo_operativas=True) or []
+                if empresa_id and empresa_id not in empresa_ids:
+                    empresa_ids = [*empresa_ids, empresa_id]
+                if empresa_ids:
+                    placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                    where.insert(0, f"(COALESCE(workspace_id, '') = ? OR (COALESCE(workspace_id, '') = '' AND COALESCE(empresa_id, '') IN ({placeholders_ws})))")
+                    values[0:0] = [workspace_id, *empresa_ids]
+                else:
+                    where.insert(0, "COALESCE(workspace_id, '') = ?")
+                    values.insert(0, workspace_id)
             else:
-                where.insert(0, "COALESCE(workspace_id, '') = ?")
-                values.insert(0, workspace_id)
-        else:
-            empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id, solo_operativas=True) or []
-            if empresa_ids:
-                placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                where.insert(0, f"COALESCE(empresa_id, '') IN ({placeholders_ws})")
-                values[0:0] = list(empresa_ids)
-            else:
-                return []
-    elif empresa_id and "empresa_id" in c_cols:
-        where.insert(0, "COALESCE(empresa_id, '') = ?")
-        values.insert(0, empresa_id)
-    values.append(limit_val)
-    return conn.execute(
-        f"""
-        SELECT id, nombre, nif, telefono, email
-        FROM clientes
-        WHERE {' AND '.join(where)}
-        ORDER BY updated_at DESC, created_at DESC
-        LIMIT ?
-        """,
-        values,
-    ).fetchall()
+                empresa_ids = resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id, solo_operativas=True) or []
+                if empresa_id and empresa_id not in empresa_ids:
+                    empresa_ids = [*empresa_ids, empresa_id]
+                if empresa_ids:
+                    placeholders_ws = ",".join(["?"] * len(empresa_ids))
+                    where.insert(0, f"COALESCE(empresa_id, '') IN ({placeholders_ws})")
+                    values[0:0] = list(empresa_ids)
+                else:
+                    return []
+        elif empresa_id and "empresa_id" in c_cols:
+            where.insert(0, "COALESCE(empresa_id, '') = ?")
+            values.insert(0, empresa_id)
+        values.append(limit_val)
+        return conn.execute(
+            f"""
+            SELECT id, nombre, nif, telefono, email
+            FROM clientes
+            WHERE {' AND '.join(where)}
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT ?
+            """,
+            values,
+        ).fetchall()
+
+    combined = []
+    seen_ids = set()
+    for row in [*_rows_via_clientes_empresas(), *_rows_via_clientes_directo()]:
+        rid = row["id"]
+        if rid in seen_ids:
+            continue
+        seen_ids.add(rid)
+        combined.append(row)
+        if len(combined) >= limit_val:
+            break
+    return combined
 
 
 def build_service_scope_filter(conn, table_name: str, alias: str, workspace_id: str, empresa_id: str):

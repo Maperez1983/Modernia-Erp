@@ -1217,6 +1217,31 @@ class DeLaOfertaALaReservaTests(BaseComprador):
         for f in filas:
             self.assertTrue(f["integrity_hash"])
 
+    def test_dos_ofertas_en_paralelo_no_comparten_cadena(self):
+        """Cada oferta tiene su propia historia: que otra oferta escriba un evento
+        justo en medio no puede colarse como si fuera el anterior de ésta."""
+        S.apunta_evento_de_oferta(self.conn, "ofA", "comprador", "presenta la oferta", now="2026-08-12 09:00:00")
+        S.apunta_evento_de_oferta(self.conn, "ofB", "comprador", "presenta la oferta", now="2026-08-12 09:00:01")
+        S.apunta_evento_de_oferta(self.conn, "ofA", "la agencia", "acepta la oferta", now="2026-08-12 09:00:02")
+        S.apunta_evento_de_oferta(self.conn, "ofB", "la agencia", "rechaza la oferta", now="2026-08-12 09:00:03")
+        self.conn.commit()
+
+        de_a = self.conn.execute(
+            "SELECT que, prev_hash, integrity_hash FROM inmueble_oferta_eventos "
+            "WHERE oferta_id = 'ofA' ORDER BY created_at ASC").fetchall()
+        de_b = self.conn.execute(
+            "SELECT que, prev_hash, integrity_hash FROM inmueble_oferta_eventos "
+            "WHERE oferta_id = 'ofB' ORDER BY created_at ASC").fetchall()
+
+        self.assertEqual(de_a[0]["prev_hash"], "", "el primer evento de A no puede colgar de B")
+        self.assertEqual(de_b[0]["prev_hash"], "", "el primer evento de B no puede colgar de A")
+        self.assertEqual(de_a[1]["prev_hash"], de_a[0]["integrity_hash"])
+        self.assertEqual(de_b[1]["prev_hash"], de_b[0]["integrity_hash"])
+        hashes_de_a = {f["integrity_hash"] for f in de_a}
+        hashes_de_b = {f["integrity_hash"] for f in de_b}
+        self.assertNotIn(de_b[1]["prev_hash"], hashes_de_a)
+        self.assertNotIn(de_a[1]["prev_hash"], hashes_de_b)
+
     def test_tocar_un_apunte_despues_se_nota(self):
         self._oferta()
         fila = self.conn.execute("SELECT * FROM inmueble_oferta_eventos LIMIT 1").fetchone()

@@ -8,12 +8,29 @@ from textwrap import dedent
 ROOT = Path(__file__).resolve().parents[1]
 
 
+
+# Módulos de Node que estas pruebas necesitan y que viven en `node_modules`, que está
+# en .gitignore: en una copia recién clonada no están.
+MODULOS_DE_NODE = ("jsdom", "puppeteer-core", "lighthouse", "chrome-launcher")
+
+
+def _falta_un_modulo_de_node(salida):
+    """El fallo salía como un volcado de pila de Node y se leía como si lo probado
+    estuviera roto —nos costó dar por rojas siete pruebas que estaban perfectamente—.
+    Se mira el fallo concreto, y no la presencia del módulo por adelantado, para no
+    saltarse las pruebas que usan Node sin necesitar ninguno de estos paquetes."""
+    t = str(salida or "")
+    return any(f"Cannot find module '{m}'" in t for m in MODULOS_DE_NODE)
+
+
 def run_node_script(script: str) -> None:
     node = shutil.which("node")
     if not node:
         raise unittest.SkipTest("node no está disponible")
     result = subprocess.run([node, "-e", script], capture_output=True, text=True)
     if result.returncode:
+        if _falta_un_modulo_de_node(result.stderr):
+            raise unittest.SkipTest("faltan dependencias de Node: ejecuta `npm install` en la raíz")
         if result.stdout:
             print(result.stdout)
         if result.stderr:
