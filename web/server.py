@@ -4517,6 +4517,137 @@ def find_existing_seguro_id(conn, empresa_id, poliza_numero, compania, exclude_i
     return ""
 
 
+_ACENTOS_SQL = (
+    # Minúsculas Y mayúsculas: el `UPPER()` de SQLite sólo toca ASCII (no
+    # existe ICU en este entorno), así que una "ó" en minúscula sobrevive a
+    # `UPPER('Barceló')` tal cual — hay que quitarle la tilde ANTES de mayusculizar,
+    # no después, o "BARCELo" nunca casa con "BARCELO".
+    ("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u"),
+    ("à", "a"), ("è", "e"), ("ì", "i"), ("ò", "o"), ("ù", "u"),
+    ("ñ", "n"), ("ü", "u"), ("ç", "c"),
+    ("Á", "A"), ("É", "E"), ("Í", "I"), ("Ó", "O"), ("Ú", "U"),
+    ("À", "A"), ("È", "E"), ("Ì", "I"), ("Ò", "O"), ("Ù", "U"),
+    ("Ñ", "N"), ("Ü", "U"), ("Ç", "C"),
+)
+
+
+def _sql_sin_acentos(expr):
+    """Envuelve una expresión SQL para comparar en mayúsculas y sin tildes.
+
+    Sólo `UPPER`/`REPLACE`, que existen igual en SQLite y en Postgres (no hace
+    falta tocar `db_backend.py`). Sirve para que "BARCELO" (lo que saca un OCR,
+    casi siempre sin tildes) encuentre "Barceló" guardado con tilde.
+    """
+    out = str(expr)
+    for accented, plain in _ACENTOS_SQL:
+        out = f"REPLACE({out}, '{accented}', '{plain}')"
+    return f"UPPER({out})"
+
+
+def _sin_acentos_python(value):
+    text = unicodedata.normalize("NFD", str(value or ""))
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    return text.upper()
+
+
+def _cliente_nombre_search_clause(q, alias="c"):
+    """Condición SQL para buscar un cliente por nombre a partir de texto libre.
+
+    El tomador de una póliza suele venir con el nombre legal completo
+    ("COMUNIDAD DE PROPIETARIOS CALLE BARCELÓ Nº 4"), mientras que en el CRM
+    la comunidad puede estar dada de alta con un nombre más corto o distinto
+    ("CP Barceló 4"). Un `nombre LIKE '%q%'` a secas sólo encuentra al cliente
+    si su nombre GUARDADO contiene el texto entero del OCR, que casi nunca
+    pasa al revés: el cliente existía y el OCR decía "no encontrado", y se
+    acababa creando una ficha duplicada. Aquí se prueba también lo contrario
+    (que el texto del OCR contenga el nombre guardado) y por palabra suelta
+    de 4+ letras, para que baste con que una palabra distintiva coincida — y
+    todo sin tildes ni mayúsculas/minúsculas, porque el texto de un OCR casi
+    nunca respeta las tildes del nombre tal y como está dado de alta.
+    El filtrado fino de cuál es el mejor candidato lo hace luego el que
+    llama (frontend: `scoreNameSimilarity`).
+    """
+    q_clean = str(q or "").strip()
+    if not q_clean:
+        return "", []
+    nombre_expr = _sql_sin_acentos(f"{alias}.nombre")
+    q_norm = _sin_acentos_python(q_clean)
+    clauses = [f"{nombre_expr} LIKE ?"]
+    values = [f"%{q_norm}%"]
+    if len(q_clean) >= 4:
+        clauses.append(f"(LENGTH({alias}.nombre) >= 4 AND ? LIKE '%' || {nombre_expr} || '%')")
+        values.append(q_norm)
+    palabras_vistas = set()
+    for palabra in re.split(r"\s+", q_clean):
+        palabra_norm = _sin_acentos_python(palabra.strip())
+        if len(palabra_norm) < 4 or palabra_norm in palabras_vistas:
+            continue
+        palabras_vistas.add(palabra_norm)
+        if len(palabras_vistas) > 8:
+            break
+        clauses.append(f"{nombre_expr} LIKE ?")
+        values.append(f"%{palabra_norm}%")
+    return f"({' OR '.join(clauses)})", values
+
+
+_SEGURO_ESTADOS_NO_ACTIVOS = {"ANULADA", "SUSTITUIDA", "RECHAZADA", "DENEGADA"}
+
+
+def find_cliente_poliza_activa(conn, empresa_id, cliente_id, ramo="", exclude_poliza_numero=""):
+    """¿Este cliente ya tiene una póliza (no anulada/sustituida) de este ramo?
+
+    Se usa en el alta por OCR para distinguir una póliza nueva de verdad de
+    una renovación o un cambio de compañía: si el cliente ya aparece pero el
+    número de póliza que trae el OCR no coincide con ninguna existente (la
+    renovación casi siempre trae uno nuevo), antes se creaba una fila suelta
+    sin enlazar con la anterior. Igual que `find_existing_seguro_id`, se deja
+    fuera la base migrada/legada (`MIGRADO LEGADO`/`LEGACY`): esa base se
+    aísla a propósito y no se opera sobre ella con las altas nuevas.
+    """
+    empresa_id = str(empresa_id or "").strip()
+    cliente_id = str(cliente_id or "").strip()
+    if not empresa_id or not cliente_id:
+        return None
+    ramo_norm = normalize_lookup_text(ramo or "")
+    excl_norm = normalize_poliza_key(exclude_poliza_numero) if exclude_poliza_numero else ""
+    try:
+        rows = conn.execute(
+            """
+            SELECT id, poliza_numero, compania, ramo, estado, fecha_vencimiento, prima_total
+            FROM seguros
+            WHERE empresa_id = ? AND cliente_id = ?
+            """,
+            (empresa_id, cliente_id),
+        ).fetchall()
+    except Exception:
+        return None
+    candidatos = []
+    for row in rows:
+        estado_key = normalize_lookup_text(row["estado"] or "")
+        if not estado_key or estado_key in _SEGURO_ESTADOS_NO_ACTIVOS:
+            continue
+        if "MIGRADO LEGADO" in estado_key or "LEGACY" in estado_key:
+            continue
+        if excl_norm and normalize_poliza_key(row["poliza_numero"]) == excl_norm:
+            continue
+        if ramo_norm and normalize_lookup_text(row["ramo"] or "") != ramo_norm:
+            continue
+        candidatos.append(row)
+    if not candidatos:
+        return None
+    candidatos.sort(key=lambda r: str(r["fecha_vencimiento"] or ""), reverse=True)
+    row = candidatos[0]
+    return {
+        "id": row["id"],
+        "poliza_numero": row["poliza_numero"] or "",
+        "compania": row["compania"] or "",
+        "ramo": row["ramo"] or "",
+        "estado": row["estado"] or "",
+        "fecha_vencimiento": row["fecha_vencimiento"] or "",
+        "prima_total": row["prima_total"],
+    }
+
+
 def find_reusable_hipoteca_open_record(
     conn,
     empresa_id,
@@ -107956,6 +108087,31 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
 
+        if path == "/api/seguros_cliente_poliza_existente":
+            # Alta por OCR: una vez emparejado el cliente, ¿ya tiene una póliza de
+            # este ramo? Si la trae, es una renovación o un cambio de compañía y
+            # el front ofrece enlazarla en vez de crear una fila suelta.
+            cliente_id = str(params.get("cliente_id", [""])[0] or "").strip()
+            ramo = str(params.get("ramo", [""])[0] or "").strip()
+            exclude_poliza_numero = str(params.get("exclude_poliza_numero", [""])[0] or "").strip()
+            empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
+            empresa_nombre = str(params.get("empresa_nombre", [""])[0] or "").strip()
+            if not empresa_id and empresa_nombre:
+                empresa_id = resolve_seguros_ocr_empresa_id({"empresa_nombre": empresa_nombre}, conn)
+            if not cliente_id or not empresa_id:
+                json_response(self, {"poliza_existente": None})
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_empresa_membership(conn, session, empresa_id, write=False)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            poliza = find_cliente_poliza_activa(
+                conn, empresa_id, cliente_id, ramo=ramo, exclude_poliza_numero=exclude_poliza_numero,
+            )
+            json_response(self, {"poliza_existente": poliza})
+            return
+
         if path == "/api/seguros_movimientos":
             seguro_id = str(params.get("seguro_id", [""])[0] or "").strip()
             if not seguro_id:
@@ -112447,10 +112603,12 @@ class Handler(BaseHTTPRequestHandler):
                     where.append("s.empresa_id = ?")
                     values.append(empresa_id)
                 if q:
+                    nombre_clause, nombre_values = _cliente_nombre_search_clause(q)
                     where.append(
-                        "(c.nombre LIKE ? OR c.nif LIKE ? OR c.telefono LIKE ? OR c.email LIKE ?)"
+                        f"({nombre_clause} OR c.nif LIKE ? OR c.telefono LIKE ? OR c.email LIKE ?)"
                     )
-                    values.extend([f"%{q}%"] * 4)
+                    values.extend(nombre_values)
+                    values.extend([f"%{q}%"] * 3)
                 if estado:
                     where.append("c.estado = ?")
                     values.append(estado)
@@ -112543,10 +112701,12 @@ class Handler(BaseHTTPRequestHandler):
                     where.append("ce.empresa_id = ?")
                     values.append(empresa_id)
                 if q:
+                    nombre_clause, nombre_values = _cliente_nombre_search_clause(q)
                     where.append(
-                        "(c.nombre LIKE ? OR c.nif LIKE ? OR c.telefono LIKE ? OR c.email LIKE ?)"
+                        f"({nombre_clause} OR c.nif LIKE ? OR c.telefono LIKE ? OR c.email LIKE ?)"
                     )
-                    values.extend([f"%{q}%"] * 4)
+                    values.extend(nombre_values)
+                    values.extend([f"%{q}%"] * 3)
                 if estado:
                     where.append("c.estado = ?")
                     values.append(estado)

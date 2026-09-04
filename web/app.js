@@ -2244,6 +2244,7 @@ const state = {
   segurosBdtOcrClienteId: "",
   segurosOcrQuality: null,
   segurosOcrParsedFields: {},
+  segurosOcrPolizaExistente: null,
   currentClienteData: null,
   currentClienteGestoriaData: null,
   workspaces: [],
@@ -3727,6 +3728,11 @@ const segurosOcrClienteStatus = document.getElementById("segurosOcrClienteStatus
 const segurosOcrClienteCreate = document.getElementById("segurosOcrClienteCreate");
 const segurosOcrClienteAddService = document.getElementById("segurosOcrClienteAddService");
 const segurosOcrClienteOpen = document.getElementById("segurosOcrClienteOpen");
+const segurosOcrRenovacionWrap = document.getElementById("segurosOcrRenovacionWrap");
+const segurosOcrRenovacionAviso = document.getElementById("segurosOcrRenovacionAviso");
+const segurosOcrRenovacionBtn = document.getElementById("segurosOcrRenovacionBtn");
+const segurosOcrCambioCompaniaBtn = document.getElementById("segurosOcrCambioCompaniaBtn");
+const segurosOcrEsNuevaBtn = document.getElementById("segurosOcrEsNuevaBtn");
 const segurosOcrRaw = document.getElementById("segurosOcrRaw");
 const seguroOcrEstado = document.getElementById("seguroOcrEstado");
 const seguroOcrProduccion = document.getElementById("seguroOcrProduccion");
@@ -72663,6 +72669,9 @@ const resetSegurosOcrAggregator = (options = {}) => {
   state.segurosOcrClienteId = keepCliente ? previousClienteId : "";
   state.segurosOcrQuality = null;
   state.segurosOcrParsedFields = {};
+  state.segurosOcrPolizaExistente = null;
+  if (segurosOcrRenovacionWrap) segurosOcrRenovacionWrap.classList.add("hidden");
+  if (segurosOcrRenovacionAviso) segurosOcrRenovacionAviso.textContent = "";
   if (keepCliente && state.segurosOcrClienteId) {
     setOcrClienteUi(getOcrClienteContext(), {
       status: keepStatus || "Póliza guardada. Puedes abrir la ficha del cliente.",
@@ -72857,6 +72866,220 @@ const resolveOcrClienteMatch = async (type, fields) => {
     showOpen: true,
   });
 };
+
+// Una vez emparejado el cliente en el alta por OCR, ¿ya tiene una póliza de este
+// ramo? Si el número que trae el OCR no coincide con ninguna existente —lo normal
+// en una renovación o un cambio de compañía, que casi siempre traen uno nuevo—
+// antes se guardaba como fila suelta sin enlazar con la anterior.
+const checkSegurosOcrPolizaExistente = async (fields = {}) => {
+  if (segurosOcrRenovacionWrap) segurosOcrRenovacionWrap.classList.add("hidden");
+  state.segurosOcrPolizaExistente = null;
+  if (!state.segurosOcrClienteId) return;
+  const scope = getSegurosOcrLookupScope();
+  const params = new URLSearchParams({ cliente_id: state.segurosOcrClienteId });
+  if (fields.ramo) params.set("ramo", fields.ramo);
+  if (fields.poliza_numero) params.set("exclude_poliza_numero", fields.poliza_numero);
+  if (scope.empresa_id) {
+    params.set("empresa_id", scope.empresa_id);
+  } else {
+    params.set("empresa_nombre", resolveCrmSegurosEmpresaNombre());
+  }
+  let data = null;
+  try {
+    data = await api(`/api/seguros_cliente_poliza_existente?${params.toString()}`);
+  } catch {
+    return;
+  }
+  const poliza = data?.poliza_existente;
+  if (!poliza || !poliza.id) return;
+  state.segurosOcrPolizaExistente = poliza;
+  if (segurosOcrRenovacionAviso) {
+    const venc = poliza.fecha_vencimiento
+      ? ` vigente hasta ${normalizeDateInput(poliza.fecha_vencimiento) || poliza.fecha_vencimiento}`
+      : "";
+    segurosOcrRenovacionAviso.textContent =
+      `Este cliente ya tiene una póliza de ${poliza.ramo || "este ramo"} con ` +
+      `${poliza.compania || "compañía sin indicar"} (nº ${poliza.poliza_numero || "sin número"})${venc}. ` +
+      `¿Qué es esta?`;
+  }
+  if (segurosOcrRenovacionWrap) segurosOcrRenovacionWrap.classList.remove("hidden");
+};
+
+// Renovación con la MISMA compañía: se actualiza la póliza ya existente (misma
+// fila), no se crea una independiente. `seguros_poliza_accion` (renovar) deja
+// constancia del movimiento; `seguros_update` vuelca encima los datos frescos
+// del OCR (prima nueva, fechas, el PDF) porque "renovar" por sí solo no los toca.
+const aplicarSegurosOcrRenovacionMismaCompania = async () => {
+  const poliza = state.segurosOcrPolizaExistente;
+  if (!poliza || !poliza.id) return;
+  const file =
+    segurosOcrFile && segurosOcrFile.files && segurosOcrFile.files.length
+      ? segurosOcrFile.files[0]
+      : null;
+  if (!file) {
+    if (segurosOcrRenovacionAviso) {
+      segurosOcrRenovacionAviso.textContent = "Adjunta el PDF de la renovación antes de continuar.";
+    }
+    return;
+  }
+  const empresaNombre = resolveCrmSegurosEmpresaNombre();
+  if (segurosOcrSaveStatus) segurosOcrSaveStatus.textContent = "Subiendo y enlazando renovación...";
+  let polizaKey = "";
+  let polizaUrl = "";
+  try {
+    const upload = await uploadFileToS3(file, "seguros", segurosOcrSaveStatus);
+    polizaKey = upload?.key || "";
+    polizaUrl = upload?.public_url || "";
+  } catch (err) {
+    if (segurosOcrSaveStatus) segurosOcrSaveStatus.textContent = `Error al subir: ${err.message}`;
+    return;
+  }
+  const fechaEfecto = seguroOcrFechaEfecto ? seguroOcrFechaEfecto.value : "";
+  const fechaVencimiento = seguroOcrFechaVencimiento ? seguroOcrFechaVencimiento.value : "";
+  const polizaNumero = seguroOcrPoliza ? seguroOcrPoliza.value.trim() : "";
+  const accionResp = await fetch("/api/seguros_poliza_accion", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      empresa_nombre: empresaNombre,
+      id: poliza.id,
+      accion: "renovar",
+      nueva_fecha_vencimiento: fechaVencimiento,
+      nueva_poliza_ref: polizaNumero && polizaNumero !== poliza.poliza_numero ? polizaNumero : "",
+    }),
+  })
+    .then((r) => r.json())
+    .catch(() => ({ error: "Error al renovar" }));
+  if (accionResp?.error) {
+    if (segurosOcrSaveStatus) segurosOcrSaveStatus.textContent = accionResp.error;
+    return;
+  }
+  const updatePayload = {
+    empresa_nombre: empresaNombre,
+    id: poliza.id,
+    cliente_id: state.segurosOcrClienteId || "",
+    estado: seguroOcrEstado ? seguroOcrEstado.value : "En vigor",
+    tomador: seguroOcrTomador ? seguroOcrTomador.value.trim() : "",
+    fecha_efecto: fechaEfecto,
+    fecha_vencimiento: fechaVencimiento,
+    prima_neta: toNumber(seguroOcrPrimaNeta ? seguroOcrPrimaNeta.value : ""),
+    prima_total: toNumber(seguroOcrPrimaTotal ? seguroOcrPrimaTotal.value : ""),
+    poliza_key: polizaKey,
+    poliza_url: polizaUrl,
+  };
+  if (polizaNumero) updatePayload.poliza_numero = polizaNumero;
+  const comisionEstimada = getSegurosOcrComisionAmount();
+  if (Number.isFinite(comisionEstimada)) updatePayload.comision = comisionEstimada;
+  const updateResp = await fetch("/api/seguros_update", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updatePayload),
+  })
+    .then((r) => r.json())
+    .catch(() => ({ error: "Error al guardar la renovación" }));
+  if (updateResp?.error) {
+    if (segurosOcrSaveStatus) segurosOcrSaveStatus.textContent = updateResp.error;
+    return;
+  }
+  resetSegurosOcrAggregator({
+    keepCliente: true,
+    status: "Renovación guardada sobre la póliza existente. Puedes abrir la ficha del cliente.",
+  });
+  refreshClientesSummary();
+  loadSegurosCrm();
+};
+
+// Cambio de compañía: usa el mismo endpoint ya probado que el selector de
+// acciones de la lista de pólizas (`/api/seguros_cambio_compania`). Crea la
+// póliza nueva y deja la anterior "Sustituida" y enlazada — no hereda prima ni
+// comisión de la vieja a propósito.
+const aplicarSegurosOcrCambioCompania = async () => {
+  const poliza = state.segurosOcrPolizaExistente;
+  if (!poliza || !poliza.id) return;
+  const nuevaCompania = seguroOcrCompania ? seguroOcrCompania.value.trim() : "";
+  if (!nuevaCompania) {
+    if (segurosOcrRenovacionAviso) {
+      segurosOcrRenovacionAviso.textContent = "Indica la compañía nueva antes de continuar.";
+    }
+    return;
+  }
+  const file =
+    segurosOcrFile && segurosOcrFile.files && segurosOcrFile.files.length
+      ? segurosOcrFile.files[0]
+      : null;
+  const empresaNombre = resolveCrmSegurosEmpresaNombre();
+  let polizaKey = "";
+  let polizaUrl = "";
+  if (file) {
+    if (segurosOcrSaveStatus) segurosOcrSaveStatus.textContent = "Subiendo póliza...";
+    try {
+      const upload = await uploadFileToS3(file, "seguros", segurosOcrSaveStatus);
+      polizaKey = upload?.key || "";
+      polizaUrl = upload?.public_url || "";
+    } catch (err) {
+      if (segurosOcrSaveStatus) segurosOcrSaveStatus.textContent = `Error al subir: ${err.message}`;
+      return;
+    }
+  }
+  const payload = {
+    empresa_nombre: empresaNombre,
+    id: poliza.id,
+    nueva_compania: nuevaCompania,
+    fecha_cambio:
+      (seguroOcrFechaEfecto ? seguroOcrFechaEfecto.value : "") ||
+      new Date().toISOString().slice(0, 10),
+  };
+  const polizaNumero = seguroOcrPoliza ? seguroOcrPoliza.value.trim() : "";
+  if (polizaNumero) payload.nueva_poliza_numero = polizaNumero;
+  const primaTotal = toNumber(seguroOcrPrimaTotal ? seguroOcrPrimaTotal.value : "");
+  if (Number.isFinite(primaTotal)) payload.nueva_prima_total = primaTotal;
+  const comisionEstimada = getSegurosOcrComisionAmount();
+  if (Number.isFinite(comisionEstimada)) payload.nueva_comision = comisionEstimada;
+  if (polizaKey) {
+    payload.poliza_key = polizaKey;
+    payload.poliza_url = polizaUrl;
+  }
+  if (segurosOcrSaveStatus) segurosOcrSaveStatus.textContent = "Guardando cambio de compañía...";
+  const resp = await fetch("/api/seguros_cambio_compania", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+    .then((r) => r.json())
+    .catch(() => ({ error: "Error al cambiar de compañía" }));
+  if (resp?.error) {
+    if (segurosOcrSaveStatus) segurosOcrSaveStatus.textContent = resp.error;
+    return;
+  }
+  const aviso = resp?.aviso ? ` ${resp.aviso}` : "";
+  resetSegurosOcrAggregator({
+    keepCliente: true,
+    status: `Cambio de compañía guardado.${aviso}`,
+  });
+  refreshClientesSummary();
+  loadSegurosCrm();
+};
+
+if (segurosOcrRenovacionBtn) {
+  segurosOcrRenovacionBtn.addEventListener("click", () => {
+    aplicarSegurosOcrRenovacionMismaCompania().catch((err) => {
+      if (segurosOcrSaveStatus) segurosOcrSaveStatus.textContent = err?.message || "Error al renovar.";
+    });
+  });
+}
+if (segurosOcrCambioCompaniaBtn) {
+  segurosOcrCambioCompaniaBtn.addEventListener("click", () => {
+    aplicarSegurosOcrCambioCompania().catch((err) => {
+      if (segurosOcrSaveStatus) segurosOcrSaveStatus.textContent = err?.message || "Error al cambiar de compañía.";
+    });
+  });
+}
+if (segurosOcrEsNuevaBtn) {
+  segurosOcrEsNuevaBtn.addEventListener("click", () => {
+    state.segurosOcrPolizaExistente = null;
+    if (segurosOcrRenovacionWrap) segurosOcrRenovacionWrap.classList.add("hidden");
+  });
+}
 
 const linkClienteSegurosService = async (clienteId, ctx, tomador = "") => {
   const ensureEmpresas = state.empresas && state.empresas.length
@@ -87012,9 +87235,10 @@ if (segurosOcrButton) {
         if (segurosOcrRaw) {
           segurosOcrRaw.value = (data.text || "").trim();
         }
-        resolveOcrClienteMatch("alta", data.fields || {}).then(() => {
+        resolveOcrClienteMatch("alta", data.fields || {}).then(async () => {
           if (state.segurosOcrClienteId) {
-            if (segurosOcrSaveStatus) {
+            await checkSegurosOcrPolizaExistente(data.fields || {});
+            if (segurosOcrSaveStatus && !state.segurosOcrPolizaExistente) {
               segurosOcrSaveStatus.textContent =
                 "Cliente detectado. Revisa datos y pulsa Guardar póliza.";
             }

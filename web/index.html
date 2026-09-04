@@ -6751,6 +6751,12 @@
               <button type="button" id="segurosOcrClienteOpen" class="ghost hidden">Abrir ficha</button>
               <span id="segurosOcrClienteStatus" class="muted"></span>
             </div>
+            <div class="form-actions hidden" id="segurosOcrRenovacionWrap">
+              <span id="segurosOcrRenovacionAviso" class="muted"></span>
+              <button type="button" id="segurosOcrRenovacionBtn" class="secondary">Es una renovación (misma compañía)</button>
+              <button type="button" id="segurosOcrCambioCompaniaBtn" class="secondary">Es un cambio de compañía</button>
+              <button type="button" id="segurosOcrEsNuevaBtn" class="ghost">Es una póliza nueva de verdad</button>
+            </div>
             <div class="form-actions">
               <button type="button" id="segurosOcrSave">Guardar póliza</button>
               <span id="segurosOcrSaveStatus" class="muted"></span>
@@ -12104,7 +12110,7 @@
               "app-routing.js?v=13",
               "app_shared.js?v=2",
               "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js",
-              "app.js?v=937",
+              "app.js?v=938",
               // Panel de la operación en la ficha del inmueble. Va aparte de
               // `app.js` a propósito: cuelga de una sola pantalla y se monta solo.
               "inmo_operacion.js?v=1",
