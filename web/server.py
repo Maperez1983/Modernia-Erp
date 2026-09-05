@@ -53214,13 +53214,19 @@ def enforce_empresa_membership(conn, session, empresa_id, *, write=False):
     if not eid:
         return False, "No autorizado"
     try:
+        # Una empresa puede estar vinculada por la tabla legacy `workspace_empresas`
+        # o por la v2 `workspace_companies` (legacy_empresa_id) — algunos flujos
+        # (p.ej. altas seguidas de un backfill, o compraventas/seguros en los tests
+        # de regresión) solo escriben una de las dos. Mirar solo `workspace_empresas`
+        # rechazaba como "sin workspace vinculado" a empresas que sí lo tenían, vía
+        # la otra tabla.
         ws_rows = conn.execute(
             """
-            SELECT workspace_id
-            FROM workspace_empresas
-            WHERE empresa_id = ?
+            SELECT workspace_id FROM workspace_empresas WHERE empresa_id = ?
+            UNION
+            SELECT workspace_id FROM workspace_companies WHERE legacy_empresa_id = ?
             """,
-            (eid,),
+            (eid, eid),
         ).fetchall()
     except Exception:
         _rollback_best_effort(conn)
@@ -73238,6 +73244,15 @@ class Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             json_response(self, {"error": "JSON invalido"}, status=400)
             return
+        # Copia del `empresa_id`/`workspace_company_id` TAL COMO llegó del cliente, antes
+        # de que el pipeline de compat (más abajo) inyecte un `empresa_id` de fallback
+        # (p.ej. la empresa técnica de plataforma) en `payload` para evitar 500s. Las
+        # comprobaciones de pertenencia deben mirar solo lo que el cliente pidió de
+        # verdad, nunca un valor que el propio servidor rellenó después.
+        _raw_client_empresa_id = str(payload.get("empresa_id") or "").strip() if isinstance(payload, dict) else ""
+        _raw_client_workspace_company_id = (
+            str(payload.get("workspace_company_id") or "").strip() if isinstance(payload, dict) else ""
+        )
 
         if parsed.path not in AUTH_PUBLIC_POST_ENDPOINTS and not self._require_api_auth():
             return
@@ -73393,9 +73408,18 @@ class Handler(BaseHTTPRequestHandler):
                     }.get(parsed.path)
                     if path_service:
                         payload["servicio"] = path_service
+                # `conn` se usa más abajo en el gate "Fase 5" (fuera de este `if`), así que
+                # tiene que quedar asignada SIEMPRE, no solo cuando falta `empresa_id`. Antes,
+                # si el payload YA traía un `empresa_id` (el caso normal de un ataque: mandarlo
+                # directo, ajeno), esta rama entera se saltaba, `conn` quedaba sin asignar y el
+                # `enforce_empresa_membership` de más abajo reventaba con `UnboundLocalError` —
+                # atrapado por un `except Exception: pass` que lo dejaba pasar en silencio. Es
+                # decir: la comprobación de pertenencia de empresa, pensada precisamente para
+                # bloquear un `empresa_id` ajeno, nunca llegaba a ejecutarse en ese caso.
+                # Confirmado en vivo contra /api/gestoria_sociedades.
+                conn = get_db(self.db_path)
+                self._track_conn(conn)
                 if not str(payload.get("empresa_id") or "").strip():
-                    conn = get_db(self.db_path)
-                    self._track_conn(conn)
                     # Compat v2: si viene workspace_id + workspace_company_id, resolvemos empresa_id legacy
                     # antes de aplicar heurísticas por nombre/servicio.
                     try:
@@ -75385,6 +75409,36 @@ class Handler(BaseHTTPRequestHandler):
             if (ws_id or wc_id) and not path_value.startswith("/api/workspace_"):
                 session_tmp = getattr(self, "auth_session", None) or self._current_session()
                 eid = str(payload.get("empresa_id") or "").strip()
+                # Un `empresa_id` explícito en el payload no es de fiar solo porque
+                # `workspace_id` sea el propio del actor: sin esta comprobación, cualquier
+                # miembro de un workspace podía escribir en la empresa de OTRO tenant con
+                # solo conocer (o adivinar) su empresa_id, colando `workspace_id` (el suyo,
+                # válido) junto a `empresa_id` (ajeno) en el mismo payload. Confirmado en vivo
+                # contra /api/gestoria_sociedades: creaba filas con el empresa_id de otro
+                # tenant, visibles después en el listado de esa víctima.
+                # Ojo: NO usar `eid` aquí — un bloque anterior (compat "Fase 5") puede
+                # haber rellenado `payload["empresa_id"]` con la empresa técnica de
+                # plataforma (fallback de `infer_empresa_id_for_payload` cuando solo hay
+                # `workspace_id`) antes de llegar aquí. Validar ESE valor rechazaba altas
+                # legítimas sin empresa explícita (p.ej. /api/captaciones con solo
+                # workspace_id). Solo nos interesa si el CLIENTE mandó un empresa_id de
+                # verdad.
+                if _raw_client_empresa_id and ws_id and not workspace_actor_is_privileged(conn, session_tmp):
+                    try:
+                        linked = conn.execute(
+                            """
+                            SELECT 1 FROM workspace_companies WHERE workspace_id = ? AND legacy_empresa_id = ?
+                            UNION
+                            SELECT 1 FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ?
+                            LIMIT 1
+                            """,
+                            (ws_id, _raw_client_empresa_id, ws_id, _raw_client_empresa_id),
+                        ).fetchone()
+                    except Exception:
+                        linked = None
+                    if not linked:
+                        json_response(self, {"error": "empresa_id no pertenece a ese workspace"}, status=403)
+                        return
                 if not eid and ws_id:
                     try:
                         eid_res, err2 = resolve_payload_legacy_empresa_id(conn, session_tmp, payload, write=True)
@@ -75428,6 +75482,52 @@ class Handler(BaseHTTPRequestHandler):
                 if not ok:
                     json_response(self, {"error": err or "No autorizado"}, status=403)
                     return
+                # `enforce_workspace_membership` solo comprueba que el actor pertenece a
+                # `ws_id`; no que el `empresa_id`/`workspace_company_id` que traiga el
+                # payload esté vinculado a ESE workspace. Confirmado en vivo en
+                # /api/workspace_fincas_comunidades: un miembro legítimo de su propio
+                # workspace podía escribir un `empresa_id` de otro tenant en la fila,
+                # aunque la fila siguiera viviendo bajo su propio workspace_id.
+                # /api/workspace_empresa_link es precisamente el endpoint que CREA el
+                # vínculo workspace<->empresa: en el momento de la petición la empresa
+                # legítimamente aún no está en `workspace_companies` de ese workspace.
+                if not workspace_actor_is_privileged(conn, session) and parsed.path != "/api/workspace_empresa_link":
+                    # Usamos el `empresa_id` TAL COMO llegó del cliente (capturado antes de
+                    # cualquier inyección de fallback más arriba en este mismo método) — si
+                    # leyéramos `payload.get("empresa_id")` aquí, un endpoint sin empresa_id
+                    # propio (p.ej. /api/workspace_company_update) vería el `empresa_id` de la
+                    # empresa técnica de plataforma que el pipeline de compat rellena para
+                    # evitar 500s, y este chequeo la rechazaría por no estar vinculada a ese
+                    # workspace — un falso positivo confirmado en vivo.
+                    payload_eid = _raw_client_empresa_id
+                    payload_wcid = _raw_client_workspace_company_id
+                    if payload_eid:
+                        try:
+                            linked = conn.execute(
+                                """
+                                SELECT 1 FROM workspace_companies WHERE workspace_id = ? AND legacy_empresa_id = ?
+                                UNION
+                                SELECT 1 FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ?
+                                LIMIT 1
+                                """,
+                                (ws_id, payload_eid, ws_id, payload_eid),
+                            ).fetchone()
+                        except Exception:
+                            linked = None
+                        if not linked:
+                            json_response(self, {"error": "empresa_id no pertenece a ese workspace"}, status=403)
+                            return
+                    if payload_wcid:
+                        try:
+                            linked_wc = conn.execute(
+                                "SELECT 1 FROM workspace_companies WHERE workspace_id = ? AND id = ? LIMIT 1",
+                                (ws_id, payload_wcid),
+                            ).fetchone()
+                        except Exception:
+                            linked_wc = None
+                        if not linked_wc:
+                            json_response(self, {"error": "workspace_company_id no pertenece a ese workspace"}, status=403)
+                            return
         if parsed.path in ("/api/acciones", "/api/acciones_update", "/api/acciones_delete"):
             # Service-first: en acciones (agenda) la operativa debe depender de workspace+servicio,
             # no de empresa. Aun así, por legacy, la tabla requiere `empresa_id NOT NULL`,
@@ -85266,6 +85366,14 @@ class Handler(BaseHTTPRequestHandler):
             if not doc_key:
                 json_response(self, {"error": "doc_key requerido"}, status=400)
                 return
+            # Sin esto, cualquiera que gestione UN workspace podía mandar el doc_key
+            # de otro tenant (subido por otra persona) y que el servidor lo descargara
+            # y procesara como si fueran sus propias nóminas — mismo patrón que ya se
+            # arregló en seguros_ocr_async (fuga de NIF/salario vía un s3_key ajeno).
+            ok_key, err_key = _s3_key_visible_for_user(conn, session, doc_key)
+            if not ok_key:
+                json_response(self, {"error": err_key or "No autorizado"}, status=403)
+                return
             if year < 2000 or year > 2100:
                 json_response(self, {"error": "year inválido"}, status=400)
                 return
@@ -89628,14 +89736,20 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
             scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
-            if scope_empresa_id:
-                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
-                if cliente_access == "missing":
-                    json_response(self, {"error": "cliente no encontrado"}, status=404)
-                    return
-                if cliente_access == "forbidden":
-                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
-                    return
+            # Un payload que llega sin `empresa_id` resoluble (p.ej. con un `empresa_nombre`
+            # inventado, que este endpoint no comprueba) dejaba `scope_empresa_id` vacío y
+            # saltaba la comprobación entera: cualquiera podía tocar la config contable de
+            # OTRO cliente/tenant con solo conocer su `cliente_id`. Confirmado en vivo.
+            if not scope_empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
+            if cliente_access == "missing":
+                json_response(self, {"error": "cliente no encontrado"}, status=404)
+                return
+            if cliente_access == "forbidden":
+                json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                return
             periodo = payload.get("periodo")
             fecha_inicio = payload.get("fecha_inicio")
             responsable = payload.get("responsable")
@@ -89674,14 +89788,16 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "cliente_id, periodo y tareas requeridos"}, status=400)
                 return
             scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
-            if scope_empresa_id:
-                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
-                if cliente_access == "missing":
-                    json_response(self, {"error": "cliente no encontrado"}, status=404)
-                    return
-                if cliente_access == "forbidden":
-                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
-                    return
+            if not scope_empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
+            if cliente_access == "missing":
+                json_response(self, {"error": "cliente no encontrado"}, status=404)
+                return
+            if cliente_access == "forbidden":
+                json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                return
             conn.execute(
                 "DELETE FROM gestoria_conta_tasks WHERE cliente_id = ? AND periodo = ?",
                 (cliente_id, periodo),
@@ -92982,14 +93098,19 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
             scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
-            if scope_empresa_id:
-                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
-                if cliente_access == "missing":
-                    json_response(self, {"error": "cliente no encontrado"}, status=404)
-                    return
-                if cliente_access == "forbidden":
-                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
-                    return
+            # Mismo patrón que en gestoria_modelos/gestoria_conta_config: sin empresa_id
+            # resoluble el chequeo se saltaba entero (IDOR confirmado en vivo en el
+            # equivalente de gestoría; aquí se corrige antes de que llegue a explotarse).
+            if not scope_empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
+            if cliente_access == "missing":
+                json_response(self, {"error": "cliente no encontrado"}, status=404)
+                return
+            if cliente_access == "forbidden":
+                json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                return
             prefs = (
                 "prioridad_precio",
                 "prioridad_compania",
@@ -99640,14 +99761,16 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "cliente_id, entry_id y ejercicio requeridos"}, status=400)
                 return
             scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
-            if scope_empresa_id:
-                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
-                if cliente_access == "missing":
-                    json_response(self, {"error": "cliente no encontrado"}, status=404)
-                    return
-                if cliente_access == "forbidden":
-                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
-                    return
+            if not scope_empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
+            if cliente_access == "missing":
+                json_response(self, {"error": "cliente no encontrado"}, status=404)
+                return
+            if cliente_access == "forbidden":
+                json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                return
             cg_row = conn.execute(
                 "SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ?",
                 (cliente_id,),
@@ -101416,14 +101539,16 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
             scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
-            if scope_empresa_id:
-                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
-                if cliente_access == "missing":
-                    json_response(self, {"error": "cliente no encontrado"}, status=404)
-                    return
-                if cliente_access == "forbidden":
-                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
-                    return
+            if not scope_empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
+            if cliente_access == "missing":
+                json_response(self, {"error": "cliente no encontrado"}, status=404)
+                return
+            if cliente_access == "forbidden":
+                json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                return
             new_id = os.urandom(16).hex()
             principal = 1 if str(payload.get("principal", "0")) in ("1", "true", "True") else 0
             conn.execute(
@@ -101461,21 +101586,23 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
             scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
-            if scope_empresa_id:
-                row = conn.execute(
-                    "SELECT cliente_id FROM cliente_profesional WHERE id = ?",
-                    (record_id,),
-                ).fetchone()
-                if not row:
-                    json_response(self, {"error": "id requerido"}, status=400)
-                    return
-                cliente_access = resolve_cliente_scope_access(conn, row["cliente_id"], empresa_id=scope_empresa_id)
-                if cliente_access == "missing":
-                    json_response(self, {"error": "cliente no encontrado"}, status=404)
-                    return
-                if cliente_access == "forbidden":
-                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
-                    return
+            if not scope_empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            row = conn.execute(
+                "SELECT cliente_id FROM cliente_profesional WHERE id = ?",
+                (record_id,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            cliente_access = resolve_cliente_scope_access(conn, row["cliente_id"], empresa_id=scope_empresa_id)
+            if cliente_access == "missing":
+                json_response(self, {"error": "cliente no encontrado"}, status=404)
+                return
+            if cliente_access == "forbidden":
+                json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                return
             allowed = ("cnae", "iae", "actividad", "iban", "principal")
             updates = {key: payload.get(key) for key in allowed if key in payload}
             if not updates:
@@ -101509,21 +101636,23 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
             scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
-            if scope_empresa_id:
-                row = conn.execute(
-                    "SELECT cliente_id FROM cliente_profesional WHERE id = ?",
-                    (record_id,),
-                ).fetchone()
-                if not row:
-                    json_response(self, {"error": "id requerido"}, status=400)
-                    return
-                cliente_access = resolve_cliente_scope_access(conn, row["cliente_id"], empresa_id=scope_empresa_id)
-                if cliente_access == "missing":
-                    json_response(self, {"error": "cliente no encontrado"}, status=404)
-                    return
-                if cliente_access == "forbidden":
-                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
-                    return
+            if not scope_empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            row = conn.execute(
+                "SELECT cliente_id FROM cliente_profesional WHERE id = ?",
+                (record_id,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            cliente_access = resolve_cliente_scope_access(conn, row["cliente_id"], empresa_id=scope_empresa_id)
+            if cliente_access == "missing":
+                json_response(self, {"error": "cliente no encontrado"}, status=404)
+                return
+            if cliente_access == "forbidden":
+                json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                return
             conn.execute("DELETE FROM cliente_profesional WHERE id = ?", (record_id,))
         elif parsed.path == "/api/gestoria_modelos":
             cliente_id = payload.get("cliente_id")
@@ -101531,14 +101660,16 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
             scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
-            if scope_empresa_id:
-                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
-                if cliente_access == "missing":
-                    json_response(self, {"error": "cliente no encontrado"}, status=404)
-                    return
-                if cliente_access == "forbidden":
-                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
-                    return
+            if not scope_empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
+            if cliente_access == "missing":
+                json_response(self, {"error": "cliente no encontrado"}, status=404)
+                return
+            if cliente_access == "forbidden":
+                json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                return
             new_id = os.urandom(16).hex()
             conn.execute(
                 """
@@ -101568,21 +101699,28 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
             scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
-            if scope_empresa_id:
-                row = conn.execute(
-                    "SELECT cliente_id FROM gestoria_modelos WHERE id = ?",
-                    (record_id,),
-                ).fetchone()
-                if not row:
-                    json_response(self, {"error": "id requerido"}, status=400)
-                    return
-                cliente_access = resolve_cliente_scope_access(conn, row["cliente_id"], empresa_id=scope_empresa_id)
-                if cliente_access == "missing":
-                    json_response(self, {"error": "cliente no encontrado"}, status=404)
-                    return
-                if cliente_access == "forbidden":
-                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
-                    return
+            # Sin `empresa_id` resoluble (basta con no mandarlo, o mandar un
+            # `empresa_nombre` inventado que este endpoint no valida) `scope_empresa_id`
+            # quedaba vacío y la comprobación se saltaba entera: cualquiera podía editar
+            # el modelo fiscal de OTRO cliente/tenant con solo conocer su `id`. Confirmado
+            # en vivo contra /api/gestoria_modelos_delete (mismo patrón).
+            if not scope_empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            row = conn.execute(
+                "SELECT cliente_id FROM gestoria_modelos WHERE id = ?",
+                (record_id,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            cliente_access = resolve_cliente_scope_access(conn, row["cliente_id"], empresa_id=scope_empresa_id)
+            if cliente_access == "missing":
+                json_response(self, {"error": "cliente no encontrado"}, status=404)
+                return
+            if cliente_access == "forbidden":
+                json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                return
             allowed = ("modelo", "periodicidad", "proxima_fecha", "responsable", "estado", "notas")
             updates = {key: payload.get(key) for key in allowed if key in payload}
             if not updates:
@@ -101601,21 +101739,23 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
             scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
-            if scope_empresa_id:
-                row = conn.execute(
-                    "SELECT cliente_id FROM gestoria_modelos WHERE id = ?",
-                    (record_id,),
-                ).fetchone()
-                if not row:
-                    json_response(self, {"error": "id requerido"}, status=400)
-                    return
-                cliente_access = resolve_cliente_scope_access(conn, row["cliente_id"], empresa_id=scope_empresa_id)
-                if cliente_access == "missing":
-                    json_response(self, {"error": "cliente no encontrado"}, status=404)
-                    return
-                if cliente_access == "forbidden":
-                    json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
-                    return
+            if not scope_empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            row = conn.execute(
+                "SELECT cliente_id FROM gestoria_modelos WHERE id = ?",
+                (record_id,),
+            ).fetchone()
+            if not row:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            cliente_access = resolve_cliente_scope_access(conn, row["cliente_id"], empresa_id=scope_empresa_id)
+            if cliente_access == "missing":
+                json_response(self, {"error": "cliente no encontrado"}, status=404)
+                return
+            if cliente_access == "forbidden":
+                json_response(self, {"error": "cliente fuera de la empresa"}, status=403)
+                return
             conn.execute("DELETE FROM gestoria_modelos WHERE id = ?", (record_id,))
             audit("gestoria_modelo", record_id, "eliminar", None, payload.get("usuario"))
         elif parsed.path == "/api/gestoria_asiento_punteo_banco":

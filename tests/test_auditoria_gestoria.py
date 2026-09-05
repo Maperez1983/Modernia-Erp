@@ -514,17 +514,28 @@ class LosCuatroDeEscrituraSinNingunControlTests(BaseGestoria):
         """`empresa_id = payload.get("empresa_id") or empresa.get("id")`: por el
         cortocircuito de `or`, el valor que mandara el cliente ganaba siempre que
         viniera relleno, así que un `empresa_id` ajeno reconstruía facturas (y su
-        asiento contable) de otra empresa. Con `empresa_nombre` resuelto a la
-        propia (Empresa A) por la sesión, un intento de colar `empresa_id=emp-b`
-        no debe tocar ni ver la factura de la empresa B."""
+        asiento contable) de otra empresa.
+
+        Aquella vez el propio endpoint ignoraba el `empresa_id` del payload y
+        resolvía la empresa por sesión (`empresa_nombre` -> "Empresa A"), así que
+        colar `empresa_id=emp-b` solo lograba un reparse vacío (total=0) sin
+        tocar la factura de la empresa B. Ahora el gate compartido de pertenencia
+        ("Fase 5") ni deja llegar la petición: un `empresa_id` que la sesión no
+        puede acreditar se rechaza con 403 antes de que el endpoint haga nada,
+        lo cual cubre la misma garantía (la factura de la empresa B queda
+        intacta) de forma más estricta."""
         base = dict(created_at=AHORA, updated_at=AHORA)
         self._ins("gestoria_facturas", dict(id="fac-b", empresa_id="emp-b", cliente_id="cli-b",
                                             raw_text="Factura de la empresa B", **base))
         r = self._post("/api/gestoria_facturas_reparse",
                        {"empresa_nombre": "Empresa A", "empresa_id": "emp-b",
                         "cliente_id": "cli-b"}, self.cookie_a)
-        self.assertEqual(r["json"].get("total"), 0,
-                         "el reparse ha alcanzado la factura de la empresa B")
+        self.assertEqual(r["estado"], 403,
+                         "un empresa_id que la sesión no puede acreditar debe rechazarse, no procesarse")
+        factura_b = self.conn.execute(
+            "SELECT raw_text FROM gestoria_facturas WHERE id = 'fac-b'").fetchone()
+        self.assertEqual(factura_b["raw_text"], "Factura de la empresa B",
+                         "la factura de la empresa B no debe tocarse")
 
     def test_el_import_de_movimientos_no_sigue_el_empresa_id_del_cuerpo(self):
         """El `workspace_id` del payload se validaba contra la sesión, pero el
