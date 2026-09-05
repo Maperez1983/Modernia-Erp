@@ -23274,7 +23274,14 @@ def limpia_tomador(valor):
 
         Se exige que NO sea todo mayúsculas —para no comerse «SL», «SA», «SLU»— ni un
         nombre propio con la inicial en mayúscula, que dejaría fuera un «Ana» final.
+        Tampoco un número: ni mayúscula ni minúscula tiene, así que sin este descarte
+        caía en la misma regla que «up»/«oD» — y una comunidad de propietarios SÍ
+        termina legítimamente en un número de portal («Comunidad Alameda 5»,
+        «CP Barceló 4»): se perdía el número final y con él la coincidencia al buscar
+        ese cliente por nombre.
         """
+        if tok.isdigit():
+            return False
         return len(tok) <= 4 and not tok.isupper() and not tok.istitle()
 
     trozos = bruto.split()
@@ -25607,15 +25614,31 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         if pol_match:
             fields["poliza_numero"] = pol_match.group(1).strip()
         tom_match = re.search(
-            r"DATOS\s+DEL\s+TOMADOR\s+DEL\s+SEGURO\s*[\r\n]+\s*([^\n]+)",
+            r"DATOS\s+DEL\s+TOMADOR\s+DEL\s+SEGURO\s*[\r\n]+\s*(?:TOMADOR\s*:\s*)?([^\n]+)",
             text,
             re.IGNORECASE,
         )
         if tom_match:
-            tom = normalize_person_name(tom_match.group(1)).strip(" ,;:-")
+            tom = tom_match.group(1)
+            # La comunidad va con su C.I.F. pegado en la misma línea ("Comunidad
+            # de Propietarios Barceló 4     C.I.F. H29446622"); sin cortarlo, el
+            # tomador salía con el CIF dentro del nombre — y de paso estropeaba
+            # la búsqueda de cliente por nombre en el alta por OCR.
+            tom = re.split(r"\bC\.?I\.?F\.?\b", tom, maxsplit=1, flags=re.IGNORECASE)[0]
+            tom = normalize_person_name(tom).strip(" ,;:-")
             if tom:
                 fields["tomador"] = tom
-        nif_match = re.search(r"DATOS\s+DEL\s+TOMADOR[\s\S]{0,220}?NIF\s*:\s*([A-Z0-9]{8,9})", text, re.IGNORECASE)
+        # La etiqueta de este documento es "C.I.F." (con puntos), no "NIF": ningún
+        # patrón general la reconocía porque buscan el sustring "CIF" seguido, y
+        # "C.I.F." no lo contiene tal cual. Sin esto, dni/nif quedaban vacíos o se
+        # rellenaban más abajo con OTRO NIF cualquiera del documento (p.ej. el de
+        # la propia aseguradora), que además rompía el emparejamiento de cliente
+        # por NIF en el alta por OCR.
+        nif_match = re.search(
+            r"TOMADOR[\s\S]{0,220}?C\.?I\.?F\.?\s*([A-Z][0-9]{7}[0-9A-Z])",
+            text,
+            re.IGNORECASE,
+        )
         if nif_match:
             fields["dni"] = nif_match.group(1).upper()
             fields["nif"] = fields["dni"]

@@ -107,6 +107,11 @@ class LoQueNoPuedeRomperTests(unittest.TestCase):
                   "ESTUDIO VELAZQUEZ 2012 SL"):
             self.assertEqual(leido(x), x, x)
 
+    def test_una_comunidad_termina_legitimamente_en_su_numero_de_portal(self):
+        """Un número no tiene mayúsculas ni minúsculas: caía en la regla de «up»/«oD»."""
+        for x in ("Comunidad de Propietarios Barcelo 4", "Comunidad Alameda 12"):
+            self.assertEqual(leido(x), x, x)
+
 
 class ElFiltroEstaEnchufadoTests(unittest.TestCase):
     """Las de arriba prueban las piezas; ésta, que el lector las use.

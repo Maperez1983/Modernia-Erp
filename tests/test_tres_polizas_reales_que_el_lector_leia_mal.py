@@ -26,7 +26,13 @@ de Santa Lucía Hogar no admite el punto de millares de "145.991" y por eso nunc
 llegaba a machear, dejando en pie el número que había cogido antes un atajo genérico
 de última instancia. Las fechas salían vacías/basura porque el patrón exige "DIA"
 sin tilde y el documento, como todo documento real en español, la lleva ("DEL DÍA 4
-de septiembre de 2026").
+de septiembre de 2026"). Y el CIF salía mal (o el de otra entidad del documento)
+porque la etiqueta aquí es "C.I.F." con puntos, no "NIF" — encima el tomador se
+guardaba con el CIF pegado detrás («...Barceló 4     C.I.F. H29446622»), y al
+cortarlo, la limpieza general de tomadores (`limpia_tomador`) se comía también el
+"4" del final: un número no tiene mayúsculas ni minúsculas, así que caía en la misma
+regla pensada para restos de OCR como «up»/«oD»/«pl» — y una comunidad de
+propietarios termina legítimamente en su número de portal.
 """
 
 import os
@@ -142,8 +148,7 @@ MEDIADOR: FINCAS VELAZQUEZ, S.L.
 PÓLIZA NÚMERO      145.991
                    SEGURO SEGURCOMUNIDAD HOGAR
                      DATOS DEL TOMADOR DEL SEGURO
-DATOS DEL TOMADOR DEL SEGURO
-Comunidad de Propietarios Barceló 4     C.I.F. H29446622
+TOMADOR:               Comunidad de Propietarios Barceló 4     C.I.F. H29446622
 
                             DURACIÓN DEL SEGURO
 DESDE LAS 00:00 HORAS DEL DÍA 4 de septiembre de 2026
@@ -166,6 +171,21 @@ PRIMA TOTAL:                              2.480,30
     def test_la_fecha_de_vencimiento_se_lee_con_dia_acentuado(self):
         fields = parse_poliza_text(self.TEXTO)
         self.assertEqual(fields.get("fecha_vencimiento"), "04/09/2027")
+
+    def test_el_cif_es_el_de_la_comunidad_no_otro_del_documento(self):
+        """La etiqueta es "C.I.F." con puntos, no "NIF": ningún patrón la veía."""
+        fields = parse_poliza_text(self.TEXTO)
+        self.assertEqual(fields.get("dni"), "H29446622")
+        self.assertEqual(fields.get("nif"), "H29446622")
+
+    def test_el_tomador_no_lleva_el_cif_pegado(self):
+        fields = parse_poliza_text(self.TEXTO)
+        self.assertNotIn("H29446622", fields.get("tomador") or "")
+
+    def test_el_tomador_conserva_el_numero_de_portal(self):
+        """"4" al final es el portal del edificio, no un resto de OCR como "up"/"pl"."""
+        fields = parse_poliza_text(self.TEXTO)
+        self.assertEqual(fields.get("tomador"), "Comunidad de Propietarios Barceló 4")
 
 
 if __name__ == "__main__":
