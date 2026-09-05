@@ -73291,7 +73291,15 @@ class Handler(BaseHTTPRequestHandler):
         # Nota: no aplica a endpoints de administración de workspaces/empresas que deben ser explícitos.
         # Importante: endpoints `workspace_*` (p.ej. registro horario) se acotan por `workspace_id`
         # y validan permisos por workspace; no deben quedar bloqueados por esta inferencia/validación de empresa_id.
-        if parsed.path not in {
+        # Esto ya lo decía el comentario de arriba, pero el código solo excluía una lista concreta
+        # de rutas `workspace_*` (registro horario, alta de miembros...), no el prefijo entero. Con
+        # el gate "Fase 5" ya funcionando (antes moría en silencio por un UnboundLocalError, ver
+        # commit que lo arregló), cualquier `workspace_fincas_*`/`workspace_rrhh_*`/etc. que no manda
+        # `empresa_id` (la mayoría: se acotan por `comunidad_id`/`vecino_id`, no por empresa) caía en
+        # la inferencia de "empresa técnica de plataforma" y esa empresa casi nunca está vinculada al
+        # workspace del cliente real → 403 "Empresa sin workspace vinculado" en un flujo legítimo.
+        # Confirmado en vivo contra /api/workspace_fincas_junta_asistencia.
+        if (not parsed.path.startswith("/api/workspace_")) and parsed.path not in {
             "/api/login",
             "/api/logout",
             "/api/auth_set_password",
@@ -87551,26 +87559,32 @@ class Handler(BaseHTTPRequestHandler):
                     skipped += 1
                     continue
 
-                    conn.execute(
-                        """
-                        INSERT INTO workspace_fincas_contabilidad (
-                          id, workspace_id, comunidad_id, fecha, estado, tipo, concepto, importe, notas, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
-                        """,
-                        (
-                            os.urandom(16).hex(),
-                            workspace_id,
-                            comunidad_id,
-                            fecha,
-                            "Pendiente de casar",
-                            tipo,
-                            concepto,
-                            float(importe),
-                            notas,
-                            now,
-                            now,
-                        ),
-                    )
+                # Estaba indentado un nivel de más, colgando del `if exists:` y
+                # después del `continue`: nunca se ejecutaba, ni para duplicados
+                # (el continue cortaba antes) ni para movimientos nuevos (el `if`
+                # no entraba). El extracto bancario se "importaba" con un
+                # `inserted: N` que no correspondía a ninguna fila real en
+                # workspace_fincas_contabilidad — la tabla se quedaba vacía.
+                conn.execute(
+                    """
+                    INSERT INTO workspace_fincas_contabilidad (
+                      id, workspace_id, comunidad_id, fecha, estado, tipo, concepto, importe, notas, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                    """,
+                    (
+                        os.urandom(16).hex(),
+                        workspace_id,
+                        comunidad_id,
+                        fecha,
+                        "Pendiente de casar",
+                        tipo,
+                        concepto,
+                        float(importe),
+                        notas,
+                        now,
+                        now,
+                    ),
+                )
                 inserted += 1
             conn.commit()
             json_response(self, {"ok": True, "inserted": inserted, "skipped": skipped, "total": len(movements)})
@@ -88059,21 +88073,39 @@ class Handler(BaseHTTPRequestHandler):
                 if not junta_id or not vecino_id:
                     json_response(self, {"error": "junta_id y vecino_id requeridos"}, status=400)
                     return
+                if not conn.execute(
+                    "SELECT 1 FROM workspace_fincas_juntas WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (junta_id, workspace_id),
+                ).fetchone():
+                    json_response(self, {"error": "junta no encontrada"}, status=404)
+                    return
+                if not conn.execute(
+                    "SELECT 1 FROM workspace_fincas_vecinos WHERE id = ? AND workspace_id = ? LIMIT 1",
+                    (vecino_id, workspace_id),
+                ).fetchone():
+                    json_response(self, {"error": "propietario no encontrado"}, status=404)
+                    return
                 asiste = 1 if str(payload.get("asiste") or "").strip().lower() in {"1", "true", "si", "sí"} else 0
                 representado = str(payload.get("representado_por") or "").strip() or None
                 # Vacío = manda la deuda. 1 = ha pagado, impugnado o consignado y vota.
                 crudo_voto = payload.get("derecho_voto")
                 derecho_voto = (None if str(crudo_voto or "").strip() in {"", "None"}
                                 else (1 if str(crudo_voto).strip().lower() in {"1", "true", "si", "sí"} else 0))
+                # Sin el `workspace_id` en el WHERE (de la búsqueda y del UPDATE), un
+                # `junta_id`/`vecino_id` de OTRO workspace encontraba y modificaba la
+                # asistencia/voto real de un vecino ajeno en su propia junta — confirmado
+                # en vivo: bastaba con conocer esos dos ids para falsificar quién asistió
+                # y con qué derecho de voto en una junta de una comunidad ajena.
                 existente = conn.execute(
-                    "SELECT id FROM workspace_fincas_junta_asistentes WHERE junta_id = ? AND vecino_id = ? LIMIT 1",
-                    (junta_id, vecino_id),
+                    "SELECT id FROM workspace_fincas_junta_asistentes "
+                    "WHERE junta_id = ? AND vecino_id = ? AND workspace_id = ? LIMIT 1",
+                    (junta_id, vecino_id, workspace_id),
                 ).fetchone()
                 if existente:
                     conn.execute(
                         "UPDATE workspace_fincas_junta_asistentes SET asiste = ?, representado_por = ?, "
-                        "derecho_voto = ?, updated_at = datetime(?) WHERE id = ?",
-                        (asiste, representado, derecho_voto, now, row_value(existente, "id", "")),
+                        "derecho_voto = ?, updated_at = datetime(?) WHERE id = ? AND workspace_id = ?",
+                        (asiste, representado, derecho_voto, now, row_value(existente, "id", ""), workspace_id),
                     )
                 else:
                     conn.execute(
