@@ -23336,6 +23336,31 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             if m:
                 return m.group(1).strip()
         return ""
+    def _quitar_bloque_mediador(value):
+        # "Datos de tu mediador"/"Datos del mediador" imprime el teléfono, el
+        # email y la dirección DE LA CORREDURÍA, no del cliente — y en pólizas
+        # a doble columna (p.ej. Zurich "Motor GO!") va ANTES que los datos del
+        # tomador, así que un pick() normal (primera coincidencia) se quedaba
+        # con los de la correduría en vez de los del cliente.
+        return re.sub(
+            r"Datos\s+(?:de|del)\s+(?:tu\s+)?mediador.*?"
+            r"(?=¿Qui[eé]n\s+es\s+el\s+titular|Datos\s+del\s+titular|Datos\s+Tomador|"
+            r"Tomador\s+del\s+Seguro|\Z)",
+            " ",
+            str(value or ""),
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+    text_sin_mediador = _quitar_bloque_mediador(text)
+    cleaned_sin_mediador = _quitar_bloque_mediador(cleaned)
+    def pick_evitando_mediador(patterns):
+        for pat in patterns:
+            m = re.search(pat, text_sin_mediador, re.IGNORECASE)
+            if m:
+                return m.group(1).strip()
+            m = re.search(pat, cleaned_sin_mediador, re.IGNORECASE)
+            if m:
+                return m.group(1).strip()
+        return pick(patterns)
     def normalize_ocr_digits(value):
         if not value:
             return ""
@@ -24084,6 +24109,13 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         return ""
     fields = {}
     fields["tomador"] = pick([
+        # iptiQ/Gallen (pólizas de impago de alquiler): la etiqueta es
+        # "Nombre/Razon Social:" y aparece CUATRO veces en el documento
+        # (Mediador, Tomador, Asegurado y Beneficiario, estos dos últimos
+        # vacíos); ninguno de los patrones de más abajo reconocía la barra en
+        # "Nombre/Razon Social", así que el tomador salía siempre vacío. Se
+        # ancla explícitamente a la sección "Tomador del Seguro/Asegurado".
+        r"Tomador\s+del\s+Seguro/Asegurado.{0,80}?Nombre/Raz[oó]n\s+Social\s*:?\s*([^\n]+)",
         r"DATOS\s+DEL\s+TOMADOR\s+Y\s+PROPIETARIO\s+Nombre\s+([A-ZÁÉÍÓÚÑ ,.'\-]{5,})\s+Documento\s+ID",
         r"P[oó]liza/Spto\s+[0-9]{8,14}\s*/\s*[0-9]{1,3}\s*\n+\s*([A-ZÁÉÍÓÚÑ ,.'\-]{5,})",
         r"TOMADOR\s+([A-ZÁÉÍÓÚÑ ,.'\-]{5,}?)\s+NIF\b",
@@ -24107,27 +24139,32 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     if fields["tomador"]:
         fields["tomador"] = normalize_person_name(fields["tomador"])
     fields["dni"] = pick([
-        r"(?:TOMADOR|ASEGURADO)[\s\S]{0,160}?NIF\s*[:\-]?\s*([A-Z0-9]{8,9})",
-        r"DOC\.?\s*ID\.?\s*[:\-]?\s*([A-Z0-9\-]+)",
-        r"Doc\.?\s*Identificaci[oó]n\s*[:\-]?\s*([A-Z0-9\-]+)",
-        r"NIF/CIF\s*[:\-]?\s*([A-Z0-9\-]+)",
+        # `.` en la clase de caracteres: un NIF/DNI escrito "51.229.709-S" (con
+        # puntos de miles) se cortaba en el primer punto ("51"), ese trozo de
+        # 2 caracteres no era válido y el fallback más suelto de más abajo
+        # acababa cogiendo OTRO NIF del documento (p.ej. el de la propia
+        # aseguradora, que también aparece en la letra pequeña de la póliza).
+        r"(?:TOMADOR|ASEGURADO)[\s\S]{0,160}?NIF\s*[:\-]?\s*([A-Z0-9.\-]{8,11})",
+        r"DOC\.?\s*ID\.?\s*[:\-]?\s*([A-Z0-9.\-]+)",
+        r"Doc\.?\s*Identificaci[oó]n\s*[:\-]?\s*([A-Z0-9.\-]+)",
+        r"NIF/CIF\s*[:\-]?\s*([A-Z0-9.\-]+)",
         r"DNI\s*[:\-]?\s*([0-9]{8}[A-Z])",
-        r"NIF\s*[:\-]?\s*([A-Z0-9\-]+)",
-        r"CIF\s*[:\-]?\s*([A-Z0-9\-]+)",
-        r"DNI/NIF\s*[:\-]?\s*([A-Z0-9\-]+)",
-        r"Documento\s*[:\-]?\s*([A-Z0-9\-]+)",
+        r"NIF\s*[:\-]?\s*([A-Z0-9.\-]+)",
+        r"CIF\s*[:\-]?\s*([A-Z0-9.\-]+)",
+        r"DNI/NIF\s*[:\-]?\s*([A-Z0-9.\-]+)",
+        r"Documento\s*[:\-]?\s*([A-Z0-9.\-]+)",
         r"\b([0-9]{8}[A-Z])\b",
         r"\b([ABCDEFGHJNPQRSUVW][0-9]{7}[0-9A-Z])\b",
         r"\b([XYZ][0-9]{7}[A-Z])\b",
     ])
-    fields["telefono"] = pick([
+    fields["telefono"] = pick_evitando_mediador([
         r"Tel[eé]fono\s*[:\-]?\s*([0-9\s]{9,})",
         r"M[oó]vil\s*[:\-]?\s*([0-9\s]{9,})",
     ])
-    fields["email"] = pick([
+    fields["email"] = pick_evitando_mediador([
         r"([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})",
     ])
-    fields["direccion"] = pick([
+    fields["direccion"] = pick_evitando_mediador([
         r"TOMADOR[\s\S]{0,220}?NIF\s*:\s*[A-Z0-9]{8,9}\s*\n\s*([^\n]+)\s*\n\s*(\d{5}\s+[A-ZÁÉÍÓÚÑ\s]+)",
         r"Direcci[oó]n\s*[:\-]?\s*([^\n]+)",
         r"Direcci[oó]n\s+([A-Z0-9ÁÉÍÓÚÑ\s,./-]+?\s+\d{5}\s+[A-ZÁÉÍÓÚÑ\s]+)",
@@ -24176,6 +24213,14 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
     if fields["fecha_nacimiento"]:
         fields["fecha_nacimiento"] = normalize_ocr_date(fields["fecha_nacimiento"])
     fields["poliza_numero"] = pick([
+        # Santa Lucía ("SegurComunidad" y similares): la etiqueta va con
+        # "PÓLIZA" y "NÚMERO" como dos palabras separadas por varios espacios,
+        # y el número lleva punto de millares ("145.991"). Sin esto, en un
+        # documento largo (esta póliza son 70 páginas con un índice delante)
+        # el primer patrón que encontraba algo era uno de los genéricos de
+        # más abajo, y encontraba antes la palabra "Contrato" del ÍNDICE
+        # ("Bases del contrato ....... 25") que el número real de la página 2.
+        r"P[ÓO]LIZA\s+N[ÚU]MERO\s*[:#]?\s*([0-9]{1,3}(?:\.[0-9]{3})*)",
         r"p[oó]liza\s*(?:n[º°o]|no\.?)\s*[:#]?\s*([0-9]{2}-[0-9]{7,})",
         r"P[oó]liza/Spto\s*([0-9]{8,14})(?:\s*/\s*[0-9]{1,3})?",
         r"Referencia\s*[:#]?\s*([A-Z0-9]{8,})",
@@ -24266,8 +24311,13 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         r"(MULTIRRIESGO\s+COMERCIOS?\s+Y\s+AUTOEMPRENDEDORES)",
         r"(MULTIRRIESGO\s+COMERCIOS?)",
         r"Condiciones\s+Particulares\s+Ocaso\s+([A-ZÁÉÍÓÚÑa-z\s]{4,})",
-        r"Ramo\s*[:\-]?\s*([^\n]+)",
-        r"Modalidad\s*[:\-]?\s*([^\n]+)",
+        # `\b`: sin frontera de palabra, "ramo" también hace match dentro de
+        # "repaRAMOs" ("Te lo reparamos", texto de una garantía de asistencia
+        # en una póliza de coche) y capturaba la "s" suelta que le seguía —
+        # que además `canonicalize_ramo` toma como alias de "Responsabilidad
+        # civil", así que una póliza de Auto salía con el ramo cambiado.
+        r"\bRamo\b\s*[:\-]?\s*([^\n]+)",
+        r"\bModalidad\b\s*[:\-]?\s*([^\n]+)",
         r"Modalidad\s+([A-ZÁÉÍÓÚÑa-z\s]+?)\s+Datos\s+Tomador",
         r"Producto\s*[:\-]?\s*([^\n]+)",
         r"Seguro\s*de\s*([A-ZÁÉÍÓÚÑa-z\s]+?)(?:\\.|\\n|Datos)",
@@ -24553,7 +24603,27 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             re.IGNORECASE | re.DOTALL,
         )
         fields["prima_total"] = fallback.group(1) if fallback else ""
-    anual_row = re.search(r"\bAnual\b(.{0,4000})", text, re.IGNORECASE | re.DOTALL)
+    # Zurich "Motor GO!" (y similares): "Precio: 465,41 € Pago semestral / 1er
+    # recibo: 284,51 € / Resto recibos: 180,90 €" no tiene neta/total en el
+    # sentido normal — "Precio" es el importe del periodo de pago completo y
+    # "Resto recibos" es sólo el importe de LAS CUOTAS SIGUIENTES a la primera,
+    # no el total de la póliza. Antes de que el fallback genérico de más abajo
+    # (que solo mira "Anual" y coge el primer/último importe con € que
+    # encuentre) los confundiera con neta/total, se ancla aquí a la etiqueta
+    # "Precio" y se deja `prima_neta` vacía: no hay una cifra "neta" real que
+    # extraer de este formato, y vacío avisa mejor que un número inventado.
+    precio_pago = re.search(
+        r"Precio\s*:\s*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})\s*€",
+        text,
+        re.IGNORECASE,
+    )
+    if precio_pago and (
+        not fields.get("prima_total")
+        or not re.match(r"^[0-9.,]+$", str(fields.get("prima_total")).strip())
+    ):
+        fields["prima_total"] = precio_pago.group(1)
+        fields["prima_neta"] = ""
+    anual_row = None if precio_pago else re.search(r"\bAnual\b(.{0,4000})", text, re.IGNORECASE | re.DOTALL)
     if anual_row:
         amounts = re.findall(r"([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})\s*€", anual_row.group(1))
         if amounts:
@@ -25526,11 +25596,11 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         fields["compania"] = "Santa Lucia"
         fields["ramo"] = "Hogar"
         pol_match = re.search(
-            r"P[ÓO]LIZA\s+N[ÚU]MERO\s*[\r\n]+\s*([A-Z0-9\-]{5,})",
+            r"P[ÓO]LIZA\s+N[ÚU]MERO\s*[\r\n]+\s*([A-Z0-9.\-]{5,})",
             text,
             re.IGNORECASE,
         ) or re.search(
-            r"P[ÓO]LIZA\s+N[ÚU]MERO\s*[:#]?\s*([A-Z0-9\-]{5,})",
+            r"P[ÓO]LIZA\s+N[ÚU]MERO\s*[:#]?\s*([A-Z0-9.\-]{5,})",
             text,
             re.IGNORECASE,
         )
@@ -25554,13 +25624,16 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
             "mayo": "05", "junio": "06", "julio": "07", "agosto": "08",
             "septiembre": "09", "octubre": "10", "noviembre": "11", "diciembre": "12",
         }
+        # D[IÍ]A: el patrón exigía "DIA" sin tilde y el documento real lleva
+        # "DÍA" con tilde ("DESDE LAS 00:00 HORAS DEL DÍA 4 de septiembre de
+        # 2026"), así que nunca hacía match y las fechas se quedaban vacías.
         eff_match = re.search(
-            r"DESDE\s+LAS\s+[0-9]{2}:[0-9]{2}\s+HORAS\s+DEL\s+DIA\s+([0-9]{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+([0-9]{4})",
+            r"DESDE\s+LAS\s+[0-9]{2}:[0-9]{2}\s+HORAS\s+DEL\s+D[IÍ]A\s+([0-9]{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+([0-9]{4})",
             text,
             re.IGNORECASE,
         )
         exp_match = re.search(
-            r"HASTA\s+LAS\s+[0-9]{2}:[0-9]{2}\s+HORAS\s+DEL\s+DIA\s+([0-9]{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+([0-9]{4})",
+            r"HASTA\s+LAS\s+[0-9]{2}:[0-9]{2}\s+HORAS\s+DEL\s+D[IÍ]A\s+([0-9]{1,2})\s+de\s+([a-záéíóú]+)\s+de\s+([0-9]{4})",
             text,
             re.IGNORECASE,
         )
