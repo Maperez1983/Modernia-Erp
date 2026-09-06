@@ -120316,15 +120316,19 @@ class Handler(BaseHTTPRequestHandler):
                 values.append(year_filter)
 
             if q:
-                q_lower = str(q or "").lower()
+                # Sin esto, "García" (como lo escribe cualquier usuario) no encuentra
+                # "GARCIA" (como suele quedar tras un import/OCR) porque LOWER() sólo
+                # normaliza mayúsculas, no tildes. _sql_sin_acentos/_sin_acentos_python
+                # normalizan ambos lados igual (mayúsculas + sin diacríticos).
+                q_norm = _sin_acentos_python(q)
                 if field_filter and field_filter in visible_columns:
-                    where.append(f"LOWER(CAST(t.{quote_ident(field_filter)} AS TEXT)) LIKE ?")
-                    values.append(f"%{q_lower}%")
+                    where.append(f"{_sql_sin_acentos(f'CAST(t.{quote_ident(field_filter)} AS TEXT)')} LIKE ?")
+                    values.append(f"%{q_norm}%")
                 else:
                     if text_columns:
-                        likes = " OR ".join([f"LOWER(CAST(t.{quote_ident(col)} AS TEXT)) LIKE ?" for col in text_columns])
+                        likes = " OR ".join([f"{_sql_sin_acentos(f'CAST(t.{quote_ident(col)} AS TEXT)')} LIKE ?" for col in text_columns])
                         where.append(f"({likes})")
-                        values.extend([f"%{q_lower}%"] * len(text_columns))
+                        values.extend([f"%{q_norm}%"] * len(text_columns))
 
             if estado_filter and "estado" in visible_columns:
                 where.append(f"t.{quote_ident('estado')} = ?")
