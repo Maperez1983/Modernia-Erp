@@ -6201,8 +6201,23 @@ def hipotecas_contabilidad_where_clause(alias="gc"):
 
 
 def compute_hipotecas_contabilidad_totals(conn, empresa_id, year=None):
-    where = ["gc.empresa_id = ?", hipotecas_contabilidad_where_clause("gc")]
-    values = [empresa_id]
+    """`empresa_id` acepta un id suelto o una lista/tupla de ids.
+
+    Antes solo aceptaba un id suelto: en un workspace con varias empresas vinculadas,
+    llamar al dashboard solo con `workspace_id` (el caso normal, ver comentario de
+    `/api/hipoteca_dashboard`) dejaba `ingresos`/`gastos`/`resultado`/`rentabilidad_ratio`
+    en 0 aunque hubiera movimientos reales en las otras empresas del mismo workspace,
+    mientras el resto del dashboard (que sí usa `build_service_scope_filter`) los sumaba bien.
+    """
+    if isinstance(empresa_id, (list, tuple, set)):
+        empresa_ids = [str(e or "").strip() for e in empresa_id if str(e or "").strip()]
+    else:
+        empresa_ids = [str(empresa_id or "").strip()] if str(empresa_id or "").strip() else []
+    if not empresa_ids:
+        return {"ingresos": 0.0, "gastos": 0.0, "comision_cliente": 0.0, "resultado": 0.0, "rentabilidad_ratio": None}
+    placeholders = ",".join(["?"] * len(empresa_ids))
+    where = [f"gc.empresa_id IN ({placeholders})", hipotecas_contabilidad_where_clause("gc")]
+    values = list(empresa_ids)
     if year:
         where.append("substr(NULLIF(gc.fecha, ''), 1, 4) = ?")
         values.append(str(year))
@@ -93041,8 +93056,19 @@ class Handler(BaseHTTPRequestHandler):
                         (now, f"%{record_id}%"),
                     )
         elif parsed.path == "/api/seguros_ofertas":
-            if not cliente_existe(conn, payload.get("cliente_id")):
+            # El alta no tiene empresa_id propio (el tenant se deriva de cliente_id) y el
+            # frontend no manda workspace_id, así que el gate central "Fase 5" no tiene nada
+            # que validar. Sin este chequeo por fila, cualquier usuario autenticado podía
+            # crear una oferta bajo el cliente_id de OTRO tenant con solo conocerlo —
+            # confirmado en vivo (2026-09-05). Mismo patrón que ofertas_update/delete.
+            _cli_row = conn.execute(
+                "SELECT id, empresa_id FROM clientes WHERE id = ?",
+                (payload.get("cliente_id"),),
+            ).fetchone()
+            if not _cli_row:
                 json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _cli_row, "Cliente"):
                 return
             conn.execute(
                 """
@@ -93435,8 +93461,16 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/seguros_referidos":
-            if not cliente_existe(conn, payload.get("cliente_id")):
+            # Mismo gap que seguros_ofertas: sin este chequeo, cualquier usuario autenticado
+            # podía crear un "referido" bajo el cliente_id de OTRO tenant con solo conocerlo.
+            _cli_row_ref = conn.execute(
+                "SELECT id, empresa_id FROM clientes WHERE id = ?",
+                (payload.get("cliente_id"),),
+            ).fetchone()
+            if not _cli_row_ref:
                 json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _cli_row_ref, "Cliente"):
                 return
             conn.execute(
                 """
@@ -93456,6 +93490,11 @@ class Handler(BaseHTTPRequestHandler):
                 ),
             )
         elif parsed.path == "/api/seguros_campanas":
+            # El alta no tenía el mismo guard que ya protege _update/_delete de esta tabla
+            # compartida entre tenants: cualquier actor autenticado podía crear una campaña
+            # global (confirmado en vivo, 2026-09-05).
+            if not self._enforce_global_catalog_write(conn, "Campaña"):
+                return
             precio_base = parse_money_value(payload.get("precio_base"))
             comision_pct = parse_money_value(payload.get("comision_pct"))
             comision_fija = parse_money_value(payload.get("comision_fija"))
@@ -93561,6 +93600,10 @@ class Handler(BaseHTTPRequestHandler):
                 pass
             conn.execute("DELETE FROM seguros_campanas WHERE id = ?", (record_id,))
         elif parsed.path == "/api/seguros_comisiones":
+            # Mismo gap que en seguros_campanas: el alta no exigía actor privilegiado
+            # pese a que su _update/_delete sí lo hacen para esta tabla global.
+            if not self._enforce_global_catalog_write(conn, "Regla de comisión"):
+                return
             conn.execute(
                 """
                 INSERT INTO seguros_comisiones (
@@ -93703,6 +93746,18 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            # Sin este SELECT+scope, cualquier actor autenticado podía reescribir estado/notas/
+            # responsable de la renovación de OTRO tenant adivinando el id (confirmado en vivo,
+            # 2026-09-05) — mismo patrón ya cerrado en seguros_checklist_update.
+            _ren_row = conn.execute(
+                "SELECT id, empresa_id FROM seguros_renovaciones WHERE id = ?",
+                (record_id,),
+            ).fetchone()
+            if not _ren_row:
+                json_response(self, {"error": "Renovación no encontrada"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _ren_row, "Renovación"):
+                return
             updates = {}
             for key in (
                 "estado",
@@ -93738,6 +93793,9 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE seguros_renovaciones SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
+            # Sin commit explícito el cambio no persistía en sqlite (mismo patrón que
+            # ya causó datos "guardados" que en realidad se perdían en otros handlers).
+            conn.commit()
             json_response(self, {"ok": True, "id": record_id})
             return
         elif parsed.path == "/api/fin_checklist_generate":
@@ -93746,7 +93804,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "asesoramiento_id requerido"}, status=400)
                 return
             ases_row = conn.execute(
-                "SELECT estado FROM asesoramientos_financiacion WHERE id = ? LIMIT 1",
+                "SELECT estado, empresa_id FROM asesoramientos_financiacion WHERE id = ? LIMIT 1",
                 (asesoramiento_id,),
             ).fetchone()
             # Si el asesoramiento no existe se seguía adelante igualmente, insertando
@@ -93754,6 +93812,11 @@ class Handler(BaseHTTPRequestHandler):
             # 500. Es un id que no existe, no un fallo del servidor.
             if not ases_row:
                 json_response(self, {"error": "Asesoramiento no encontrado"}, status=404)
+                return
+            # Este endpoint no lleva empresa_id/workspace_id en el payload (exento del gate
+            # central): sin este chequeo, cualquier actor podía borrar y regenerar el
+            # checklist de un asesoramiento de OTRO tenant solo adivinando el id.
+            if not self._enforce_row_empresa_scope(conn, ases_row, "Asesoramiento"):
                 return
             stage = normalize_fin_stage(ases_row["estado"])
             conn.execute(
@@ -93810,6 +93873,23 @@ class Handler(BaseHTTPRequestHandler):
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            # Mismo gap que fin_checklist_generate: sin resolver el asesoramiento dueño de
+            # esta tarea y comprobar su empresa, cualquier actor podía reescribir el
+            # checklist (estado/responsable) de un asesoramiento de OTRO tenant por id.
+            _fchk_row = conn.execute(
+                """
+                SELECT a.empresa_id AS empresa_id
+                FROM fin_checklist c
+                JOIN asesoramientos_financiacion a ON a.id = c.asesoramiento_id
+                WHERE c.id = ?
+                """,
+                (record_id,),
+            ).fetchone()
+            if not _fchk_row:
+                json_response(self, {"error": "Tarea no encontrada"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _fchk_row, "Tarea"):
+                return
             updates = {}
             for key in ("estado", "responsable", "fecha_limite"):
                 if key in payload:
@@ -93844,6 +93924,10 @@ class Handler(BaseHTTPRequestHandler):
             poliza = conn.execute("SELECT * FROM seguros WHERE id = ?", (poliza_id,)).fetchone()
             if not poliza:
                 json_response(self, {"error": "Póliza no encontrada"}, status=404)
+                return
+            # Sin este chequeo, el DNI/prima/comisión de la póliza de OTRO tenant se leía
+            # y se mandaba tal cual a OpenAI con solo conocer el id.
+            if not self._enforce_row_empresa_scope(conn, poliza, "Póliza"):
                 return
             poliza_data = dict(poliza)
             cliente = None
@@ -93900,6 +93984,10 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             if not ases:
                 json_response(self, {"error": "Asesoramiento no encontrado"}, status=404)
+                return
+            # Sin este chequeo, DNI/ingresos/patrimonio/préstamos de un asesoramiento de
+            # OTRO tenant se leían y se mandaban tal cual a OpenAI con solo el id.
+            if not self._enforce_row_empresa_scope(conn, ases, "Asesoramiento"):
                 return
             cliente1 = None
             cliente2 = None
@@ -102274,10 +102362,19 @@ class Handler(BaseHTTPRequestHandler):
             cliente = str(payload.get("cliente") or "").strip()
             cliente_id = str(payload.get("cliente_id") or "").strip() or None
             # Aquí el cliente es opcional —se puede abrir un estudio sin ficha— pero si
-            # viene uno, tiene que existir.
-            if cliente_id and not cliente_existe(conn, cliente_id):
-                json_response(self, {"error": "Cliente no encontrado"}, status=404)
-                return
+            # viene uno, tiene que existir Y ser de la empresa del actor: `cliente_existe`
+            # solo comprobaba lo primero, así que se podía enlazar el cliente_id de OTRO
+            # tenant a tu hipoteca (a diferencia de hipotecas_update, que sí lo valida).
+            if cliente_id:
+                _hip_cliente_access = resolve_cliente_scope_access(
+                    conn, cliente_id, empresa_id=empresa["id"] if empresa else ""
+                )
+                if _hip_cliente_access == "missing":
+                    json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                    return
+                if _hip_cliente_access == "forbidden":
+                    json_response(self, {"error": "Cliente fuera de la empresa"}, status=403)
+                    return
             fecha_encargo = str(payload.get("fecha_encargo") or "").strip() or None
             precio = parse_optional_float(payload.get("precio"))
             importe_hipoteca = parse_optional_float(payload.get("importe_hipoteca"))
@@ -107199,13 +107296,31 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/fin_inmobiliarias":
+            # Sin WHERE alguno: cualquier sesión autenticada veía las agencias/oficinas de
+            # hipotecas de TODOS los tenants, no solo del suyo.
+            _fi_session = getattr(self, "auth_session", None) or self._current_session()
+            _fi_privileged = workspace_actor_is_privileged(conn, _fi_session) if _fi_session else True
+            _fi_scope_ids = resolve_empresa_ids_for_request(
+                conn,
+                empresa_id=params.get("empresa_id", [""])[0],
+                workspace_id=params.get("workspace_id", [""])[0],
+            )
+            where_clause = "WHERE inmobiliaria_compra IS NOT NULL AND TRIM(inmobiliaria_compra) <> ''"
+            values = []
+            if not _fi_privileged:
+                if not _fi_scope_ids:
+                    json_response(self, {"items": []})
+                    return
+                where_clause += f" AND empresa_id IN ({','.join('?' * len(_fi_scope_ids))})"
+                values = list(_fi_scope_ids)
             rows = conn.execute(
-                """
+                f"""
                 SELECT DISTINCT TRIM(inmobiliaria_compra) AS nombre
                 FROM hipotecas
-                WHERE inmobiliaria_compra IS NOT NULL AND TRIM(inmobiliaria_compra) <> ''
+                {where_clause}
                 ORDER BY nombre
-                """
+                """,
+                values,
             ).fetchall()
             json_response(self, {"items": [row["nombre"] for row in rows if row["nombre"]]})
             return
@@ -108022,12 +108137,28 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/seguros_ofertas":
+            # `seguros_ofertas` no tiene empresa_id propio: el tenant se deriva del cliente.
+            # Sin acotar por la empresa del actor, esto lista ofertas (con nombre de cliente)
+            # de TODOS los tenants, tanto con cliente_id ajeno como sin filtro alguno.
             cliente_id = params.get("cliente_id", [""])[0]
+            _of_session = getattr(self, "auth_session", None) or self._current_session()
+            _of_privileged = workspace_actor_is_privileged(conn, _of_session) if _of_session else True
+            _of_scope_ids = resolve_empresa_ids_for_request(
+                conn,
+                empresa_id=params.get("empresa_id", [""])[0],
+                workspace_id=params.get("workspace_id", [""])[0],
+            )
+            if not _of_privileged and not _of_scope_ids:
+                json_response(self, {"error": "empresa_id o workspace_id requerido"}, status=400)
+                return
             where = []
             values = []
             if cliente_id:
                 where.append("o.cliente_id = ?")
                 values.append(cliente_id)
+            if not _of_privileged:
+                where.append(f"c.empresa_id IN ({','.join('?' * len(_of_scope_ids))})")
+                values.extend(_of_scope_ids)
             where_clause = f"WHERE {' AND '.join(where)}" if where else ""
             rows = conn.execute(
                 f"""
@@ -108049,6 +108180,14 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
+            _pref_cli = conn.execute(
+                "SELECT id, empresa_id FROM clientes WHERE id = ?", (cliente_id,)
+            ).fetchone()
+            if not _pref_cli:
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _pref_cli, "Cliente"):
+                return
             row = conn.execute(
                 """
                 SELECT cliente_id, prioridad_precio, prioridad_compania, prioridad_coberturas, notas
@@ -108066,6 +108205,25 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = str(params.get("empresa_id", [""])[0] or "").strip()
             if not seguro_id and not cliente_id and not empresa_id:
                 json_response(self, {"error": "seguro_id, cliente_id o empresa_id requerido"}, status=400)
+                return
+            # El gate central de GET solo mira `empresa_id` como query param: llamando solo con
+            # `seguro_id` o `cliente_id` se evitaba por completo. Resolvemos la empresa real del
+            # recurso pedido y validamos pertenencia antes de tocar la tabla.
+            _idd_scope_row = None
+            if seguro_id:
+                _idd_scope_row = conn.execute(
+                    "SELECT empresa_id FROM seguros WHERE id = ?", (seguro_id,)
+                ).fetchone()
+            elif cliente_id:
+                _idd_scope_row = conn.execute(
+                    "SELECT empresa_id FROM clientes WHERE id = ?", (cliente_id,)
+                ).fetchone()
+            elif empresa_id:
+                _idd_scope_row = {"empresa_id": empresa_id}
+            if not _idd_scope_row:
+                json_response(self, {"error": "Recurso no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _idd_scope_row, "Póliza"):
                 return
             where = []
             values = []
@@ -108116,6 +108274,10 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id or not cliente_id:
                 json_response(self, {"error": "empresa_id y cliente_id requeridos (o seguro_id)"}, status=400)
                 return
+            # `empresa_id` puede llegar derivado de `seguro_id` (arriba) sin que el gate central
+            # lo haya visto nunca como query param: validar pertenencia explícitamente aquí.
+            if not self._enforce_row_empresa_scope(conn, {"empresa_id": empresa_id}, "Cliente"):
+                return
             row = conn.execute(
                 """
                 SELECT id, empresa_id, cliente_id, consent_json, metodo, created_by, updated_by, created_at, updated_at
@@ -108137,14 +108299,34 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/seguros_referidos":
+            # Sin WHERE alguno: cualquier sesión autenticada veía los referidos (con nombre
+            # de cliente) de TODOS los tenants. `seguros_referidos` no tiene empresa_id propio,
+            # el tenant se deriva del cliente igual que en seguros_ofertas.
+            _ref_session = getattr(self, "auth_session", None) or self._current_session()
+            _ref_privileged = workspace_actor_is_privileged(conn, _ref_session) if _ref_session else True
+            _ref_scope_ids = resolve_empresa_ids_for_request(
+                conn,
+                empresa_id=params.get("empresa_id", [""])[0],
+                workspace_id=params.get("workspace_id", [""])[0],
+            )
+            if not _ref_privileged and not _ref_scope_ids:
+                json_response(self, {"error": "empresa_id o workspace_id requerido"}, status=400)
+                return
+            where_clause = ""
+            values = []
+            if not _ref_privileged:
+                where_clause = f"WHERE c.empresa_id IN ({','.join('?' * len(_ref_scope_ids))})"
+                values = list(_ref_scope_ids)
             rows = conn.execute(
-                """
+                f"""
                 SELECT r.id, r.cliente_id, r.referido_por, r.notas,
                        COALESCE(c.nombre, '') AS cliente
                 FROM seguros_referidos r
                 LEFT JOIN clientes c ON c.id = r.cliente_id
+                {where_clause}
                 ORDER BY r.created_at DESC
-                """
+                """,
+                values,
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
@@ -108170,6 +108352,14 @@ class Handler(BaseHTTPRequestHandler):
                 limit = 5
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
+                return
+            _rec_cli = conn.execute(
+                "SELECT id, empresa_id FROM clientes WHERE id = ?", (cliente_id,)
+            ).fetchone()
+            if not _rec_cli:
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _rec_cli, "Cliente"):
                 return
             ramo = canonicalize_ramo(ramo_raw)
 
@@ -108385,6 +108575,15 @@ class Handler(BaseHTTPRequestHandler):
             if not seguro_id:
                 json_response(self, {"error": "seguro_id requerido"}, status=400)
                 return
+            # El gate central solo mira empresa_id/workspace_id como query param; esta ruta
+            # solo recibe seguro_id, así que sin este chequeo cualquier sesión válida podía
+            # leer movimientos (prima, comisión, doc_key) de una póliza de OTRO tenant.
+            _mov_pol = conn.execute("SELECT empresa_id FROM seguros WHERE id = ?", (seguro_id,)).fetchone()
+            if not _mov_pol:
+                json_response(self, {"error": "Póliza no encontrada"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _mov_pol, "Póliza"):
+                return
             rows = conn.execute(
                 """
                 SELECT
@@ -108407,6 +108606,12 @@ class Handler(BaseHTTPRequestHandler):
             seguro_id = str(params.get("seguro_id", [""])[0] or "").strip()
             if not seguro_id:
                 json_response(self, {"error": "seguro_id requerido"}, status=400)
+                return
+            _ver_pol = conn.execute("SELECT empresa_id FROM seguros WHERE id = ?", (seguro_id,)).fetchone()
+            if not _ver_pol:
+                json_response(self, {"error": "Póliza no encontrada"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _ver_pol, "Póliza"):
                 return
             rows = conn.execute(
                 """
@@ -108438,6 +108643,13 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Versión no encontrada"}, status=404)
                 return
+            # El más grave de los GET sin scope: sin esto, el snapshot íntegro de la póliza
+            # (todos sus campos en ese momento) de OTRO tenant se leía solo con el id de versión.
+            _snap_pol = conn.execute(
+                "SELECT empresa_id FROM seguros WHERE id = ?", (row["seguro_id"],)
+            ).fetchone()
+            if _snap_pol and not self._enforce_row_empresa_scope(conn, _snap_pol, "Póliza"):
+                return
             payload = dict(row)
             # Si es JSON válido, lo devolvemos parseado para que el frontend lo use directamente.
             try:
@@ -108463,6 +108675,19 @@ class Handler(BaseHTTPRequestHandler):
             )
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
+                return
+            # Sin empresa_id, todas las cláusulas de abajo son `(? = '' OR ...)` → sin filtro
+            # real: cualquier sesión válida podía leer (y con `autolink`, incluso REASIGNAR)
+            # pólizas de cualquier tenant por cliente_id o por coincidencia de nombre del
+            # tomador. El gate central ya valida pertenencia cuando empresa_id SÍ viaja
+            # (siempre lo hace en uso normal, vía apiRaw); aquí solo cerramos el caso "vacío".
+            _cli_pol_session = getattr(self, "auth_session", None) or self._current_session()
+            if (
+                not empresa_id
+                and _cli_pol_session
+                and not workspace_actor_is_privileged(conn, _cli_pol_session)
+            ):
+                json_response(self, {"error": "empresa_id o workspace_id requerido"}, status=400)
                 return
             where = ["cliente_id = ?"]
             values = [cliente_id]
@@ -108741,6 +108966,20 @@ class Handler(BaseHTTPRequestHandler):
             cliente_id = params.get("cliente_id", [""])[0]
             if not seguro_id and not cliente_id:
                 json_response(self, {"error": "seguro_id o cliente_id requerido"}, status=400)
+                return
+            _evt_scope_row = None
+            if seguro_id:
+                _evt_scope_row = conn.execute(
+                    "SELECT empresa_id FROM seguros WHERE id = ?", (seguro_id,)
+                ).fetchone()
+            elif cliente_id:
+                _evt_scope_row = conn.execute(
+                    "SELECT empresa_id FROM clientes WHERE id = ?", (cliente_id,)
+                ).fetchone()
+            if not _evt_scope_row:
+                json_response(self, {"error": "Recurso no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _evt_scope_row, "Póliza"):
                 return
             where = []
             values = []
@@ -109406,6 +109645,22 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = params.get("empresa_id", [""])[0]
             if not seguro_id and not cliente_id and not empresa_id:
                 json_response(self, {"error": "seguro_id, cliente_id o empresa_id requerido"}, status=400)
+                return
+            _recl_scope_row = None
+            if empresa_id:
+                _recl_scope_row = {"empresa_id": empresa_id}
+            elif seguro_id:
+                _recl_scope_row = conn.execute(
+                    "SELECT empresa_id FROM seguros WHERE id = ?", (seguro_id,)
+                ).fetchone()
+            elif cliente_id:
+                _recl_scope_row = conn.execute(
+                    "SELECT empresa_id FROM clientes WHERE id = ?", (cliente_id,)
+                ).fetchone()
+            if not _recl_scope_row:
+                json_response(self, {"error": "Recurso no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _recl_scope_row, "Reclamación"):
                 return
             where = []
             values = []
@@ -115789,8 +116044,13 @@ class Handler(BaseHTTPRequestHandler):
                 tuple(ambito_valores),
             ).fetchall()
 
-            conta_year = compute_hipotecas_contabilidad_totals(conn, empresa_id, selected_year)
-            conta_total = compute_hipotecas_contabilidad_totals(conn, empresa_id)
+            _conta_empresa_ids = (
+                resolve_workspace_scope_empresa_ids(conn, workspace_id, empresa_id=empresa_id)
+                if workspace_id
+                else ([empresa_id] if empresa_id else [])
+            )
+            conta_year = compute_hipotecas_contabilidad_totals(conn, _conta_empresa_ids, selected_year)
+            conta_total = compute_hipotecas_contabilidad_totals(conn, _conta_empresa_ids)
 
             try:
                 payload = {
@@ -116058,6 +116318,11 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Hipoteca no encontrada"}, status=404)
                 return
+            # Sin empresa_id/workspace_id como query param, el gate central nunca se activa:
+            # cualquier sesión válida podía descargar la ficha completa (DNI, ingresos, banco,
+            # comisión) de una hipoteca de OTRO tenant solo con el id (confirmado en vivo, 2026-09-06).
+            if not self._enforce_row_empresa_scope(conn, row, "Hipoteca"):
+                return
             try:
                 payload = build_hipoteca_ficha_payload(conn, row)
                 pdf_bytes = build_hipoteca_ficha_pdf(payload, section=section)
@@ -116085,6 +116350,8 @@ class Handler(BaseHTTPRequestHandler):
             ).fetchone()
             if not row:
                 json_response(self, {"error": "Hipoteca no encontrada"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, row, "Hipoteca"):
                 return
             export_row = build_hipoteca_ficha_payload(conn, row)
             content = render_hipoteca_print_html(
@@ -117854,6 +118121,14 @@ class Handler(BaseHTTPRequestHandler):
             if not poliza_id:
                 json_response(self, {"error": "poliza_id requerido"}, status=400)
                 return
+            _chk_pol_row = conn.execute(
+                "SELECT empresa_id FROM seguros WHERE id = ?", (poliza_id,)
+            ).fetchone()
+            if not _chk_pol_row:
+                json_response(self, {"error": "Póliza no encontrada"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _chk_pol_row, "Póliza"):
+                return
             rows = conn.execute(
                 """
                 SELECT id, poliza_id, tarea, estado, responsable, fecha_limite
@@ -117870,6 +118145,15 @@ class Handler(BaseHTTPRequestHandler):
             asesoramiento_id = params.get("asesoramiento_id", [""])[0]
             if not asesoramiento_id:
                 json_response(self, {"error": "asesoramiento_id requerido"}, status=400)
+                return
+            _finchk_ases = conn.execute(
+                "SELECT empresa_id FROM asesoramientos_financiacion WHERE id = ?",
+                (asesoramiento_id,),
+            ).fetchone()
+            if not _finchk_ases:
+                json_response(self, {"error": "Asesoramiento no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _finchk_ases, "Asesoramiento"):
                 return
             rows = conn.execute(
                 """

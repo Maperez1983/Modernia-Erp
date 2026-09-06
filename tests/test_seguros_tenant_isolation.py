@@ -128,10 +128,13 @@ class SegurosTenantIsolationTests(unittest.TestCase):
                                           "updated_at": NOW})
 
         # seguros_ofertas no tiene empresa_id: el tenant sale del cliente.
-        cls._insert("clientes", {"id": "cliA", "empresa_id": "empA", "nombre": "Cliente de A",
-                                 "created_at": NOW, "updated_at": NOW})
-        cls._insert("clientes", {"id": "cliB", "empresa_id": "empB", "nombre": "Cliente de B",
-                                 "created_at": NOW, "updated_at": NOW})
+        # `clientes.workspace_id` es NOT NULL en runtime (ensure_not_null la refuerza tras
+        # el backfill): sin este valor, setUpClass revienta con IntegrityError y los 16 tests
+        # de esta clase quedan en ERROR sin ejecutarse (detectado 2026-09-06, preexistente).
+        cls._insert("clientes", {"id": "cliA", "empresa_id": "empA", "workspace_id": "wsA",
+                                 "nombre": "Cliente de A", "created_at": NOW, "updated_at": NOW})
+        cls._insert("clientes", {"id": "cliB", "empresa_id": "empB", "workspace_id": "wsB",
+                                 "nombre": "Cliente de B", "created_at": NOW, "updated_at": NOW})
         for oferta_id, cliente_id in (("ofA", "cliA"), ("ofB", "cliB"), ("ofB2", "cliB")):
             cls._insert("seguros_ofertas", {"id": oferta_id, "cliente_id": cliente_id,
                                             "ramo": "Hogar", "compania": "AXA",
