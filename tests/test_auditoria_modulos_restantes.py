@@ -206,7 +206,13 @@ class LosTransversalesTampocoRevientanTests(Casa):
         # Bea es la otra administradora; con dos, echar a una está permitido.
         r = self._post("/api/usuarios_delete", {"id": "u2", "workspace_id": self.ws})
         self.assertEqual(r["estado"], 200, r["json"])
-        # Ahora Ana es la única, y ni siquiera otro administrador global podría dejarlo vacío.
+        # Ahora Ana es la única. Antes del fix de 2026-09-06, cualquier `usuarios.rol`
+        # legacy ("Administrador") bastaba para intentarlo desde fuera del workspace;
+        # ahora ese atajo exige pertenencia real (Owner/Admin) al workspace concreto,
+        # así que "root" (sólo "Miembro" aquí) ya ni siquiera llega a esta comprobación
+        # de negocio — recibe 403 antes. La comprobación de "no dejar el espacio sin
+        # administrador" se sigue probando aquí, pero con quien SÍ puede llegar a
+        # ejercerla de verdad desde fuera: un superadmin real de la allowlist.
         self._ins("usuarios", dict(id="u3", nombre="Superadmin", usuario="root",
                                    email="r@x.test", rol="Administrador", activo=1,
                                    password_hash=S.hash_password(CLAVE), **base))
@@ -215,10 +221,35 @@ class LosTransversalesTampocoRevientanTests(Casa):
         cookie_root = self._post("/api/login", {"usuario": "root", "password": CLAVE},
                                  cookie=False)["cookie"]
         anterior, self.cookie = self.cookie, cookie_root
+        prev_allowlist = S.APP_SUPERADMIN_USERNAMES
+        S.APP_SUPERADMIN_USERNAMES = "root"
         try:
             r = self._post("/api/usuarios_delete", {"id": "u1", "workspace_id": self.ws})
             self.assertEqual(r["estado"], 409, r["json"])
             self.assertIn("único administrador", str(r["json"]))
+        finally:
+            self.cookie = anterior
+            S.APP_SUPERADMIN_USERNAMES = prev_allowlist
+
+    def test_un_administrador_legacy_ajeno_ya_ni_llega_a_intentarlo(self):
+        """Antes del fix de 2026-09-06, `usuarios.rol="Administrador"` era un atajo
+        GLOBAL: cualquier tenant con ese rol podía tocar usuarios de OTRO workspace.
+        Confirmado en vivo ese día con una cadena completa de toma de cuenta
+        cross-tenant. Ahora ese rol legacy solo cuenta si el actor YA es Owner/Admin
+        real del workspace objetivo (o de alguno de los del usuario objetivo)."""
+        base = dict(created_at=AHORA, updated_at=AHORA)
+        self._ins("workspaces", dict(id="ws-ajeno", nombre="Otro tenant", slug="ws-ajeno",
+                                     estado="Activo", plan="Enterprise", **base))
+        self._ins("usuarios", dict(id="u9", nombre="Root ajeno", usuario="root_ajeno",
+                                   email="ra@x.test", rol="Administrador", activo=1,
+                                   password_hash=S.hash_password(CLAVE), **base))
+        # "root_ajeno" es Administrador global pero no pertenece a self.ws en absoluto.
+        cookie_root = self._post("/api/login", {"usuario": "root_ajeno", "password": CLAVE},
+                                 cookie=False)["cookie"]
+        anterior, self.cookie = self.cookie, cookie_root
+        try:
+            r = self._post("/api/usuarios_update", {"id": "u1", "password": "OtraClave123!"})
+            self.assertEqual(r["estado"], 403, r["json"])
         finally:
             self.cookie = anterior
 

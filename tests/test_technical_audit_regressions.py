@@ -1853,6 +1853,15 @@ class TechnicalAuditRegressionTests(unittest.TestCase):
                 VALUES ('wm-worker', 'ws-1', 'u-worker', 'Miembro', datetime('now'), datetime('now'))
                 """
             )
+            # Desde 2026-09-06 el bypass por rol legacy ("Administrador"/"Admin") exige
+            # pertenencia real (Owner/Admin) al workspace concreto — antes bastaba el rol
+            # de sesión sin ninguna fila en `workspace_miembros`.
+            conn.execute(
+                """
+                INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
+                VALUES ('wm-manager', 'ws-1', 'u-manager', 'Admin', datetime('now'), datetime('now'))
+                """
+            )
             conn.execute(
                 """
                 INSERT INTO workspace_registro_personal (
@@ -2410,6 +2419,14 @@ class GestoriaServerRouteRegressionTests(unittest.TestCase):
               created_at TEXT,
               updated_at TEXT
             );
+            CREATE TABLE workspace_miembros (
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL,
+              usuario_id TEXT NOT NULL,
+              rol TEXT NOT NULL DEFAULT 'Miembro',
+              created_at TEXT,
+              updated_at TEXT
+            );
             CREATE TABLE cliente_gestoria (
               id TEXT PRIMARY KEY,
               cliente_id TEXT UNIQUE,
@@ -2598,6 +2615,16 @@ class GestoriaServerRouteRegressionTests(unittest.TestCase):
             VALUES (?, ?, ?, ?, 1)
             """,
             ("wc-1", "ws-1", "emp-1", "Empresa Uno"),
+        )
+        # Desde 2026-09-06, el bypass por rol legacy ("ADMINISTRADOR") exige pertenencia
+        # real (Owner/Admin) al workspace concreto cuando el llamante pasa `workspace_id` —
+        # antes bastaba con el rol de sesión, sin tocar `workspace_miembros` en absoluto.
+        self.conn.execute(
+            """
+            INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at)
+            VALUES ('wm-admin', 'ws-1', 'u-admin', 'Owner', datetime(?), datetime(?))
+            """,
+            (now, now),
         )
         self.conn.execute(
             """

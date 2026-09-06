@@ -118,11 +118,13 @@ class ClientesStatsAcotaPorTenantTests(unittest.TestCase):
 
     def test_no_queda_ningun_recuento_global_sin_condicion(self):
         bloque = self._bloque()
-        # El total pelado solo puede quedar como respaldo cuando no llega workspace.
+        # El total pelado solo puede quedar como respaldo cuando no llega workspace,
+        # y desde 2026-09-06 ni siquiera ahí sin ser actor privilegiado: sin esto
+        # contaba TODOS los clientes de la plataforma a cualquier usuario autenticado.
         i = bloque.index('SELECT COUNT(*) AS total FROM clientes"')
         antes = bloque[:i]
         self.assertIn("elif ws_where:", antes)
-        self.assertIn("else:", antes)
+        self.assertIn("elif workspace_actor_is_privileged(conn, _stats_session):", antes)
 
 
 class NoSePideDosVecesLoMismoALaVezTests(unittest.TestCase):

@@ -52598,10 +52598,61 @@ def is_superadmin_actor(conn, session):
         return True
     return False
 
-def workspace_actor_is_privileged(conn, session):
+def _workspace_ids_linked_to_empresa(conn, empresa_id):
+    """Todos los workspaces vinculados a una empresa (legacy `workspace_empresas` o v2
+    `workspace_companies`). Misma resolución que usa `enforce_empresa_membership`,
+    factorizada aquí para que `workspace_actor_is_privileged` pueda comprobar
+    pertenencia real sin duplicar la consulta."""
+    eid = str(empresa_id or "").strip()
+    if not eid:
+        return []
+    try:
+        rows = conn.execute(
+            """
+            SELECT workspace_id FROM workspace_empresas WHERE empresa_id = ?
+            UNION
+            SELECT workspace_id FROM workspace_companies WHERE legacy_empresa_id = ?
+            """,
+            (eid, eid),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        rows = []
+    return [
+        str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip()
+        for r in (rows or [])
+        if str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip()
+    ]
+
+
+def workspace_actor_is_privileged(conn, session, *, workspace_id=None, empresa_id=None):
     """
     Determina permisos usando la sesión y el mecanismo seguro existente.
-    No eleva privilegios a partir de `rol` o `servicio` leídos de la DB.
+    No eleva privilegios a partir de `rol` o `servicio` leídos de la DB... salvo
+    el bypass legacy de abajo, que es precisamente el que este fix acota.
+
+    El rol legacy (`workspace_session_is_privileged`: Administrador/Admin/Direccion/
+    Control/Administracion en `usuarios.rol`, una opción NORMAL del alta de usuario,
+    no un flag oculto de superadmin) actuaba como privilegio GLOBAL cross-tenant:
+    cualquier usuario con ese rol, de CUALQUIER tenant, pasaba como privilegiado para
+    CUALQUIER workspace/empresa. Confirmado en vivo (2026-09-06): con una sesión
+    "Administrador" de un tenant, se pudo (1) leer memberships completos de un
+    usuario de OTRO tenant vía `admin_user_lookup`, (2) cambiarle la contraseña vía
+    `usuarios_update` sin mandar `workspace_id`, (3) iniciar sesión como esa víctima,
+    y (4) borrar el workspace de otro tenant entero vía `workspace_delete`. Esta
+    misma función es la que usan `enforce_workspace_membership`/`enforce_empresa_membership`
+    (y por tanto casi todo el aislamiento multi-tenant de la app), así que el hueco
+    no era local a un endpoint: se saltaba cualquier comprobación de tenant.
+
+    Ahora, cuando el llamante SÍ sabe sobre qué recurso pregunta (le pasa
+    `workspace_id` o `empresa_id`, el caso normal en `enforce_workspace_membership`/
+    `enforce_empresa_membership`/`workspace_actor_can_manage_workspace`), el bypass
+    por rol legacy exige que el actor sea YA Owner/Admin real de ESE workspace
+    concreto — nunca de forma global. Sin `workspace_id`/`empresa_id` (llamada "a
+    pelo", sin contexto — quedan varios sitios así) se conserva el comportamiento
+    anterior, para no romper de golpe sitios que aún no pasan ese contexto; un
+    superadmin real (`is_superadmin_actor`) sigue siendo privilegiado siempre, con
+    o sin contexto, como debe ser.
     """
     # Modo estricto: solo superadmin allowlisted puede hacer acciones globales.
     if APP_SUPERADMIN_ENFORCE:
@@ -52610,6 +52661,26 @@ def workspace_actor_is_privileged(conn, session):
     if is_superadmin_actor(conn, session):
         return True
     if workspace_session_is_privileged(session):
+        ws_id = str(workspace_id or "").strip()
+        eid = str(empresa_id or "").strip()
+        if ws_id or eid:
+            if not session or not conn:
+                return False
+            user_id = str(session.get("user_id") or "").strip()
+            if not user_id:
+                return False
+            target_ws_ids = [ws_id] if ws_id else _workspace_ids_linked_to_empresa(conn, eid)
+            for one_ws_id in target_ws_ids:
+                try:
+                    member = fetch_workspace_member(conn, one_ws_id, user_id)
+                except Exception:
+                    # BD degradada/fixture mínima sin `workspace_miembros`: no es motivo
+                    # para reventar con 500, simplemente esta vía no concede privilegio.
+                    _rollback_best_effort(conn)
+                    member = None
+                if member and _normalize_workspace_member_role(member.get("rol") or "") in {"Owner", "Admin"}:
+                    return True
+            return False
         return True
     if not session or not conn:
         return False
@@ -52640,7 +52711,7 @@ def workspace_actor_can_manage_workspace(conn, session, workspace_id):
     - Admin global (usuarios.rol) puede gestionar cualquier workspace.
     - Owner/Admin en workspace_miembros puede gestionar ese workspace.
     """
-    if workspace_actor_is_privileged(conn, session):
+    if workspace_actor_is_privileged(conn, session, workspace_id=workspace_id):
         return True
     if not conn or not session:
         return False
@@ -52657,6 +52728,25 @@ def workspace_actor_can_manage_workspace(conn, session, workspace_id):
         return False
     role_norm = _normalize_workspace_member_role(member.get("rol") or "")
     return role_norm in {"Owner", "Admin"}
+
+
+def _actor_is_workspace_owner_or_super(conn, session, workspace_id):
+    """Solo un Owner real (o superadmin) puede conceder el rol Owner.
+
+    `workspace_actor_can_manage_workspace` acepta tanto Owner como Admin, así que
+    no basta para esto: un Admin podía autopromocionarse (o promocionar a un
+    tercero) a Owner sin que nadie con ese rango se lo hubiera concedido.
+    """
+    if is_superadmin_actor(conn, session):
+        return True
+    if not conn or not session:
+        return False
+    ws_id = str(workspace_id or "").strip()
+    user_id = str(session.get("user_id") or "").strip()
+    if not ws_id or not user_id:
+        return False
+    member = fetch_workspace_member(conn, ws_id, user_id)
+    return bool(member) and _normalize_workspace_member_role(member.get("rol") or "") == "Owner"
 
 
 def _normalize_workspace_member_role(value):
@@ -53002,7 +53092,7 @@ def enforce_workspace_membership(conn, session, workspace_id, *, write=False):
         return False, "Tu usuario es de solo lectura"
     if not WORKSPACE_MEMBERSHIP_ENFORCE:
         return True, ""
-    if workspace_actor_is_privileged(conn, session):
+    if workspace_actor_is_privileged(conn, session, workspace_id=workspace_id):
         return True, ""
     if not session:
         return False, "No autorizado"
@@ -53223,7 +53313,7 @@ def enforce_empresa_membership(conn, session, empresa_id, *, write=False):
     """
     if not WORKSPACE_MEMBERSHIP_ENFORCE:
         return True, ""
-    if workspace_actor_is_privileged(conn, session):
+    if workspace_actor_is_privileged(conn, session, empresa_id=empresa_id):
         return True, ""
     eid = str(empresa_id or "").strip()
     if not eid:
@@ -70098,7 +70188,7 @@ class Handler(BaseHTTPRequestHandler):
             return True
         session = getattr(self, "auth_session", None) or self._current_session()
         try:
-            if workspace_actor_is_privileged(conn, session):
+            if workspace_actor_is_privileged(conn, session, empresa_id=eid):
                 return True
         except Exception:
             pass
@@ -78947,8 +79037,11 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"error": "Usa GET"}, status=405)
             return
         elif parsed.path == "/api/usuarios":
+            # Sin pasar el workspace_id del payload, cualquier "Administrador" legacy de
+            # CUALQUIER tenant podía plantar un usuario nuevo (con el rol que quisiera,
+            # incluido "Administrador") dentro del workspace de OTRO tenant.
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
+            if not workspace_actor_is_privileged(conn, session, workspace_id=str(payload.get("workspace_id") or "").strip()):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             nombre = normalize_person_name(payload.get("nombre"))
@@ -79032,7 +79125,27 @@ class Handler(BaseHTTPRequestHandler):
             return
         elif parsed.path == "/api/usuarios_invitar":
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
+            user_id = str(payload.get("id") or "").strip()
+            if not user_id:
+                json_response(self, {"error": "id requerido"}, status=400)
+                return
+            # Mismo hueco que `usuarios_update`: sin resolver el workspace real del
+            # usuario OBJETIVO, cualquier "Administrador" legacy de cualquier tenant
+            # podía invitar (reenviar activación) a un usuario de OTRO tenant.
+            _inv_target_ws_ids = [
+                str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip()
+                for r in (
+                    conn.execute(
+                        "SELECT workspace_id FROM workspace_miembros WHERE usuario_id = ?",
+                        (user_id,),
+                    ).fetchall()
+                    or []
+                )
+            ]
+            if not any(
+                workspace_actor_is_privileged(conn, session, workspace_id=w)
+                for w in (_inv_target_ws_ids or [""])
+            ):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             try:
@@ -79041,10 +79154,6 @@ class Handler(BaseHTTPRequestHandler):
                 conn.commit()
             except Exception:
                 pass
-            user_id = str(payload.get("id") or "").strip()
-            if not user_id:
-                json_response(self, {"error": "id requerido"}, status=400)
-                return
             row = conn.execute(
                 """
                 SELECT id, nombre, apellido, usuario, email, activo, password_hash
@@ -79163,7 +79272,41 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
             workspace_id = str(payload.get("workspace_id") or "").strip()
-            is_global_admin = workspace_actor_is_privileged(conn, session)
+            # `workspace_actor_is_privileged` a pelo (sin workspace_id) trataba el rol legacy
+            # ("Administrador", una opción normal del alta de usuario) como privilegio GLOBAL:
+            # cualquier "Administrador" de CUALQUIER tenant podía cambiar la contraseña/rol de
+            # un usuario de OTRO tenant sin mandar workspace_id siquiera (confirmado en vivo,
+            # toma de cuenta completa, 2026-09-06). El `workspace_id` del payload no sirve para
+            # decidir esto: es el atacante quien lo escribe. La pertenencia real del actor tiene
+            # que comprobarse contra los workspaces REALES del usuario OBJETIVO.
+            _target_ws_ids = [
+                str(row_value(r, "workspace_id") or row_value(r, 0) or "").strip()
+                for r in (
+                    conn.execute(
+                        "SELECT workspace_id FROM workspace_miembros WHERE usuario_id = ?",
+                        (user_id,),
+                    ).fetchall()
+                    or []
+                )
+            ]
+            if not _target_ws_ids:
+                # Legacy de un único workspace (o usuario objetivo aún sin fila en
+                # workspace_miembros): no hay "otro tenant" al que escalar, así que
+                # conservamos el comportamiento anterior en vez de bloquear la gestión
+                # legítima de una instalación single-tenant.
+                try:
+                    _ws_total = int(
+                        row_value(conn.execute("SELECT COUNT(*) AS n FROM workspaces").fetchone(), "n", 0) or 0
+                    )
+                except Exception:
+                    _ws_total = 0
+                if _ws_total <= 1:
+                    _target_ws_ids = [""]
+            is_global_admin = is_superadmin_actor(conn, session) or any(
+                workspace_actor_is_privileged(conn, session, workspace_id=w) if w
+                else workspace_actor_is_privileged(conn, session)
+                for w in _target_ws_ids
+            )
             if not is_global_admin:
                 # Workspace-admin: sólo permite cambios acotados y sólo sobre miembros del workspace.
                 if not session or not workspace_id or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
@@ -79854,7 +79997,11 @@ class Handler(BaseHTTPRequestHandler):
             # indicar SU workspace, gestionarlo y que la empresa esté vinculada a él
             # (antes exigía privilegio global -> ni los Owner/Admin podían archivar y un
             # rol de sesión "global" podía tocar empresas de otros tenants).
-            is_super = bool(session and workspace_actor_is_privileged(conn, session))
+            # Bare (sin empresa_id) esto daba `is_super=True` a cualquier "Administrador"
+            # legacy de CUALQUIER tenant, saltándose todo el bloque de abajo (pensado
+            # precisamente para exigir workspace_id + pertenencia + vínculo) y, con
+            # `hard`+`purge`, purgando en cascada la empresa de OTRO tenant.
+            is_super = bool(session and workspace_actor_is_privileged(conn, session, empresa_id=empresa_id))
             if not is_super:
                 if not workspace_id:
                     json_response(self, {"error": "workspace_id requerido"}, status=400)
@@ -80586,6 +80733,12 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
+            # `workspace_actor_can_manage_workspace` acepta tanto Owner como Admin, y esta
+            # función no comprobaba que el rol asignado no superase el del actor: un Admin
+            # (no Owner) podía autopromocionarse (o promocionar a un tercero) a Owner.
+            if role == "Owner" and not _actor_is_workspace_owner_or_super(conn, session, workspace_id):
+                json_response(self, {"error": "Solo un Owner puede asignar el rol Owner"}, status=403)
+                return
             matches = fetch_active_users_by_login(conn, login)
             if not matches:
                 json_response(self, {"error": "Usuario no encontrado"}, status=404)
@@ -80629,6 +80782,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            if role == "Owner" and not _actor_is_workspace_owner_or_super(conn, session, workspace_id):
+                json_response(self, {"error": "Solo un Owner puede asignar el rol Owner"}, status=403)
                 return
             ensure_workspace_core_tables(conn)
             # valida existencia del usuario
@@ -80978,9 +81134,14 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "id": workspace_id})
             return
         elif parsed.path == "/api/workspace_delete":
-            # Eliminación fuerte de un workspace (solo superadmin).
+            # Eliminación fuerte de un workspace (solo superadmin). El check anterior
+            # (`workspace_session_is_privileged` + `workspace_actor_is_privileged` a pelo)
+            # aceptaba el rol legacy "Administrador" de CUALQUIER tenant — confirmado en
+            # vivo (2026-09-06): con esa sesión se borró en cascada el workspace de OTRO
+            # tenant entero. Esta es una acción irreversible y global por diseño (el propio
+            # comentario ya decía "solo superadmin"): exige el superadmin real de la allowlist.
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_session_is_privileged(session) or not workspace_actor_is_privileged(conn, session):
+            if not is_superadmin_actor(conn, session):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             workspace_id = str(payload.get("id") or payload.get("workspace_id") or "").strip()
@@ -81314,8 +81475,14 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         elif parsed.path == "/api/admin_user_force_reset_invite":
+            # Herramienta de soporte de plataforma: resetea la contraseña de CUALQUIER
+            # usuario (por login/email, sin acotar a workspace) y devuelve el enlace de
+            # activación en la propia respuesta HTTP. Con el check anterior
+            # (`workspace_actor_is_privileged` a pelo), cualquier "Administrador" legacy
+            # de un tenant podía tomar la cuenta de un usuario de OTRO tenant — paso 2 de
+            # la cadena de toma de cuenta confirmada en vivo (2026-09-06). Exige superadmin real.
             session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
+            if not is_superadmin_actor(conn, session):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             login = str(payload.get("login") or payload.get("usuario") or payload.get("email") or "").strip()
@@ -81892,6 +82059,19 @@ class Handler(BaseHTTPRequestHandler):
                 total += max(float(row["total"] or 0.0) - float(row["cobrado_total"] or 0.0), 0.0)
             referencia = str(payload.get("referencia") or "").strip() or f"REM-{datetime.now().strftime('%Y%m%d-%H%M')}"
             record_id = str(payload.get("id") or "").strip() or os.urandom(16).hex()
+            # A diferencia de sus hermanos (facturación, cobros, series, presupuestos,
+            # contratos), este endpoint no comprobaba que un `id` ya existente
+            # perteneciera al workspace del actor antes del INSERT OR REPLACE/ON CONFLICT
+            # UPDATE: se podía reasignar (secuestrar) una remesa de OTRO tenant pasando su
+            # id, sobrescribiendo su workspace_id/empresa_id/fecha_cargo/total/estado.
+            if payload.get("id"):
+                _existing_remesa = conn.execute(
+                    "SELECT id FROM workspace_facturacion_remesas WHERE id = ? AND workspace_id = ?",
+                    (record_id, workspace_id),
+                ).fetchone()
+                if not _existing_remesa:
+                    json_response(self, {"error": "Remesa no encontrada"}, status=404)
+                    return
             remesa_values = (
                 record_id,
                 workspace_id,
@@ -85251,6 +85431,14 @@ class Handler(BaseHTTPRequestHandler):
                 if not row:
                     json_response(self, {"error": "documento no encontrado"}, status=404)
                     return
+                # A diferencia de gasto/ausencia (que sí comparan `row["persona_id"]` contra
+                # la persona del actor), aquí faltaba: un empleado no-gestor podía editar el
+                # documento (DNI/contrato/baja médica) de OTRO empleado del mismo workspace
+                # con solo conocer su `id`, siempre que su propio `persona_id` pasara el check
+                # de arriba.
+                if str(row["persona_id"] or "").strip() != persona_id:
+                    json_response(self, {"error": "persona_id no coincide"}, status=409)
+                    return
                 prev = dict(row)
                 conn.execute(
                     """
@@ -85739,20 +85927,54 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "id": config_id})
             return
         elif parsed.path == "/api/workspace_registro_notifications":
+            # Esta ruta también existe como GET (protegida por el gate central de `handle_api`
+            # + auto-scoping a la persona propia si no es gestor). El POST leía los mismos
+            # parámetros de la query string pero sin pasar por ningún gate ni comprobación
+            # propia: cualquier sesión válida en CUALQUIER workspace veía el feed de fichajes/
+            # ausencias/altas de OTRO tenant solo cambiando el verbo HTTP a POST.
             workspace_id = params.get("workspace_id", [""])[0]
             limit = params.get("limit", ["40"])[0]
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
-            json_response(self, fetch_workspace_notifications(conn, workspace_id, limit=limit))
+            _rn_session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, _rn_session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            _rn_persona_id = ""
+            if not workspace_actor_can_manage_workspace(conn, _rn_session, workspace_id):
+                _rn_user_id = str((_rn_session or {}).get("user_id") or "").strip()
+                _rn_persona_id = workspace_persona_id_for_user(conn, workspace_id, _rn_user_id)
+                if not _rn_persona_id:
+                    json_response(self, {"rows": []})
+                    return
+            json_response(
+                self,
+                fetch_workspace_notifications(conn, workspace_id, limit=limit, persona_id=_rn_persona_id or None),
+            )
             return
         elif parsed.path == "/api/workspace_registro_horario_xml":
+            # Mismo gap que _notifications: sin ningún chequeo, exportaba los fichajes
+            # (nombre, empresa, horas) de un workspace ajeno solo con conocerlo.
             workspace_id = params.get("workspace_id", [""])[0]
             month = params.get("month", [""])[0]
             persona_id = (params.get("persona_id", [""])[0] or "").strip()
             if not workspace_id:
                 json_response(self, {"error": "workspace_id requerido"}, status=400)
                 return
+            _rx_session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, _rx_session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            if not workspace_actor_can_manage_workspace(conn, _rx_session, workspace_id):
+                _rx_user_id = str((_rx_session or {}).get("user_id") or "").strip()
+                _rx_own_persona_id = workspace_persona_id_for_user(conn, workspace_id, _rx_user_id)
+                if not _rx_own_persona_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
+                persona_id = _rx_own_persona_id
             rows = fetch_workspace_time_entries(conn, workspace_id, limit=5000, month=month, persona_id=persona_id)["rows"]
             person = {"persona_nombre": rows[0]["persona_nombre"] if rows else "", "empresa_nombre": rows[0]["empresa_nombre"] if rows else ""}
             xml_bytes = build_workspace_time_xml(rows, persona_name=person["persona_nombre"], company_name=person["empresa_nombre"], month=month)
@@ -85760,12 +85982,25 @@ class Handler(BaseHTTPRequestHandler):
             binary_response(self, xml_bytes, content_type="application/xml; charset=utf-8", filename=filename)
             return
         elif parsed.path == "/api/workspace_registro_horario_pdf":
+            # Mismo gap que _notifications/_xml: sin chequeo alguno exportaba el PDF con
+            # NIF/email de la persona y NIF/dirección de la empresa de un tenant ajeno.
             workspace_id = params.get("workspace_id", [""])[0]
             month = params.get("month", [""])[0]
             persona_id = (params.get("persona_id", [""])[0] or "").strip()
             if not workspace_id or not persona_id:
                 json_response(self, {"error": "workspace_id y persona_id requeridos"}, status=400)
                 return
+            _rp_session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_workspace_membership(conn, _rp_session, workspace_id)
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
+            if _rp_session and not workspace_actor_can_manage_workspace(conn, _rp_session, workspace_id):
+                _rp_user_id = str((_rp_session or {}).get("user_id") or "").strip()
+                _rp_own_persona = workspace_persona_id_for_user(conn, workspace_id, _rp_user_id)
+                if not _rp_own_persona or _rp_own_persona != persona_id:
+                    json_response(self, {"error": "No autorizado"}, status=403)
+                    return
             rows = fetch_workspace_time_entries(conn, workspace_id, limit=5000, month=month, persona_id=persona_id)["rows"]
             summary = build_workspace_time_summary(rows, month=month)
             persona = next((row for row in summary["rows"] if str(row.get("persona_id") or "") == persona_id), {})
@@ -97400,14 +97635,14 @@ class Handler(BaseHTTPRequestHandler):
             if not inmueble:
                 json_response(self, {"error": "Inmueble no encontrado"}, status=404)
                 return
-            try:
-                session = getattr(self, "auth_session", None) or self._current_session()
-                ok, err = enforce_empresa_membership(conn, session, inmueble["empresa_id"])
-                if not ok:
-                    json_response(self, {"error": err or "No autorizado"}, status=403)
-                    return
-            except Exception:
-                pass
+            # A diferencia del modo lote (arriba, sin try/except), este `try/except: pass`
+            # convertía cualquier fallo real de `enforce_empresa_membership` (no una simple
+            # denegación, que no lanza) en un fail-open: la petición seguía como autorizada.
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err = enforce_empresa_membership(conn, session, inmueble["empresa_id"])
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
+                return
             if not sobrescribir and not texto_del_anuncio_es_nuestro(inmueble):
                 json_response(self, {"ok": False, "respetado": True, "id": inmueble_id,
                                      "titulo_anuncio": row_value(inmueble, "titulo_anuncio", ""),
@@ -99506,6 +99741,10 @@ class Handler(BaseHTTPRequestHandler):
             if not row:
                 json_response(self, {"error": "Vínculo no encontrado"}, status=404)
                 return
+            # Sin este chequeo, cualquier actor autenticado podía desvincular el servicio
+            # de un cliente de OTRO tenant con solo conocer el id del vínculo.
+            if not self._enforce_row_empresa_scope(conn, row, "Vínculo"):
+                return
             conn.execute("DELETE FROM clientes_empresas WHERE id = ?", (rel_id,))
             conn.commit()
             json_response(
@@ -99523,6 +99762,15 @@ class Handler(BaseHTTPRequestHandler):
             cliente_id = payload.get("id")
             if not cliente_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            # Sin empresa_id/workspace_id en el payload, la Fase 5 no valida nada (no
+            # resuelve el `id` de la fila objetivo): cualquier actor autenticado podía
+            # reescribir NIF/teléfono/email/dirección de un cliente de OTRO tenant.
+            _cu_row = conn.execute("SELECT id, empresa_id FROM clientes WHERE id = ?", (cliente_id,)).fetchone()
+            if not _cu_row:
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _cu_row, "Cliente"):
                 return
             allowed = (
                 "nombre",
@@ -99691,6 +99939,15 @@ class Handler(BaseHTTPRequestHandler):
             rel_id = payload.get("id")
             if not rel_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            # Sin este chequeo, cualquier actor autenticado podía reescribir el
+            # servicio/estado/captado_por de un vínculo cliente-empresa de OTRO tenant
+            # (p.ej. desactivar una póliza/expediente ajeno) con solo conocer el id.
+            _ceu_row = conn.execute("SELECT id, empresa_id FROM clientes_empresas WHERE id = ?", (rel_id,)).fetchone()
+            if not _ceu_row:
+                json_response(self, {"error": "Vínculo no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _ceu_row, "Vínculo"):
                 return
             allowed = (
                 "servicio",
@@ -100792,31 +101049,23 @@ class Handler(BaseHTTPRequestHandler):
             usar_en_seguros = 1 if str(payload.get("usar_en_seguros") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
             usar_en_inmobiliaria = 1 if str(payload.get("usar_en_inmobiliaria") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
             declaracion_conjunta = 1 if str(payload.get("declaracion_conjunta") or "").strip().lower() in {"1", "true", "yes", "si", "sí"} else 0
-            if scope_empresa_id:
-                cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
-                related_access = resolve_cliente_scope_access(conn, related_cliente_id, empresa_id=scope_empresa_id)
-                if cliente_access == "missing" or related_access == "missing":
-                    json_response(self, {"error": "Cliente relacionado no válido"}, status=404)
-                    return
-                if cliente_access == "forbidden" or related_access == "forbidden":
-                    json_response(self, {"error": "Cliente fuera de la empresa"}, status=403)
-                    return
-            else:
-                rows = conn.execute(
-                    """
-                    SELECT id, empresa_id
-                    FROM clientes
-                    WHERE id IN (?, ?)
-                    """,
-                    (cliente_id, related_cliente_id),
-                ).fetchall()
-                if len(rows) != 2:
-                    json_response(self, {"error": "Cliente relacionado no válido"}, status=404)
-                    return
-                empresa_ids = {str(row["empresa_id"] or "").strip() for row in rows if str(row["empresa_id"] or "").strip()}
-                if len(empresa_ids) > 1:
-                    json_response(self, {"error": "Cliente fuera de la empresa"}, status=403)
-                    return
+            # Sin `scope_empresa_id` resoluble, la única comprobación que había era que
+            # los dos clientes compartieran empresa entre SÍ — nunca que el ACTOR
+            # perteneciera a esa empresa. Un actor de la empresa A que conociera los ids
+            # de dos clientes de la empresa B podía crear/editar relaciones entre ellos
+            # sin ningún vínculo con B. Igual que en `seguros_preferencias`/
+            # `cliente_profesional`: sin contexto de empresa resoluble, se rechaza.
+            if not scope_empresa_id:
+                json_response(self, {"error": "empresa_id requerido"}, status=400)
+                return
+            cliente_access = resolve_cliente_scope_access(conn, cliente_id, empresa_id=scope_empresa_id)
+            related_access = resolve_cliente_scope_access(conn, related_cliente_id, empresa_id=scope_empresa_id)
+            if cliente_access == "missing" or related_access == "missing":
+                json_response(self, {"error": "Cliente relacionado no válido"}, status=404)
+                return
+            if cliente_access == "forbidden" or related_access == "forbidden":
+                json_response(self, {"error": "Cliente fuera de la empresa"}, status=403)
+                return
             if not relation_id:
                 existing = conn.execute(
                     """
@@ -100830,9 +101079,17 @@ class Handler(BaseHTTPRequestHandler):
                 ).fetchone()
                 relation_id = existing["id"] if existing else os.urandom(16).hex()
             current = conn.execute(
-                "SELECT id FROM cliente_relaciones WHERE id = ?",
+                "SELECT id, cliente_id FROM cliente_relaciones WHERE id = ?",
                 (relation_id,),
             ).fetchone()
+            # Si el `id` ya existe, tiene que ser una relación a la que el actor ya tenía
+            # acceso (por su `cliente_id` original) — si no, un `id` ajeno adivinado/
+            # filtrado por otra vía se podría "robar" repuntándolo a clientes propios.
+            if current and resolve_cliente_scope_access(
+                conn, current["cliente_id"], empresa_id=scope_empresa_id
+            ) != "ok":
+                json_response(self, {"error": "Relación fuera de la empresa"}, status=403)
+                return
             if current:
                 conn.execute(
                     """
@@ -100887,6 +101144,18 @@ class Handler(BaseHTTPRequestHandler):
             relation_id = str(payload.get("id") or "").strip()
             if not relation_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            # Cero comprobación de tenant: cualquier actor autenticado podía borrar
+            # cualquier relación cliente-cliente de cualquier otro tenant por su id.
+            _crd_row = conn.execute("SELECT id, cliente_id FROM cliente_relaciones WHERE id = ?", (relation_id,)).fetchone()
+            if not _crd_row:
+                json_response(self, {"error": "Relación no encontrada"}, status=404)
+                return
+            _crd_scope_empresa_id = str(payload.get("empresa_id") or (empresa["id"] if empresa else "") or "").strip()
+            if not _crd_scope_empresa_id or resolve_cliente_scope_access(
+                conn, _crd_row["cliente_id"], empresa_id=_crd_scope_empresa_id
+            ) != "ok":
+                json_response(self, {"error": "empresa_id requerido o relación fuera de la empresa"}, status=403)
                 return
             conn.execute("DELETE FROM cliente_relaciones WHERE id = ?", (relation_id,))
             conn.commit()
@@ -102779,11 +103048,17 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/admin_user_lookup":
+            # Herramienta de soporte de plataforma: busca por login/email SIN acotar a
+            # workspace y devuelve memberships en todos los workspaces del usuario
+            # encontrado. Con `workspace_actor_is_privileged` a pelo, cualquier
+            # "Administrador" legacy de un tenant podía usarlo como reconocimiento
+            # cross-tenant (paso 1 de la cadena de toma de cuenta confirmada en vivo,
+            # 2026-09-06). Exige superadmin real.
             session = self._current_session()
             if not session:
                 json_response(self, {"error": "No autenticado"}, status=401)
                 return
-            if not workspace_actor_is_privileged(conn, session):
+            if not is_superadmin_actor(conn, session):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             login = (params.get("login", [""])[0] or "").strip()
@@ -104570,6 +104845,18 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/workspace_presupuesto_pdf":
             budget_id = params.get("id", [""])[0]
             workspace_id = params.get("workspace_id", [""])[0]
+            # Defensa en profundidad: a diferencia de `/api/workspace_contrato_pdf`
+            # (mismo tipo de endpoint), este no comprobaba membership en el propio
+            # handler — dependía enteramente del gate genérico de `handle_api` sobre
+            # el query param `workspace_id`.
+            _wpp_session = getattr(self, "auth_session", None) or self._current_session()
+            if not _wpp_session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            _wpp_ok, _wpp_err = enforce_workspace_membership(conn, _wpp_session, workspace_id)
+            if not _wpp_ok:
+                json_response(self, {"error": _wpp_err or "No autorizado"}, status=403)
+                return
             payload = fetch_workspace_budget_pdf_payload(conn, budget_id, workspace_id=workspace_id)
             if not payload:
                 json_response(self, {"error": "presupuesto no encontrado"}, status=404)
@@ -104650,6 +104937,14 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/workspace_presupuesto_encargo_pdf":
             budget_id = params.get("id", [""])[0]
             workspace_id = params.get("workspace_id", [""])[0]
+            _wpe_session = getattr(self, "auth_session", None) or self._current_session()
+            if not _wpe_session:
+                json_response(self, {"error": "No autenticado"}, status=401)
+                return
+            _wpe_ok, _wpe_err = enforce_workspace_membership(conn, _wpe_session, workspace_id)
+            if not _wpe_ok:
+                json_response(self, {"error": _wpe_err or "No autorizado"}, status=403)
+                return
             payload = fetch_workspace_budget_encargo_payload(conn, budget_id, workspace_id=workspace_id)
             if not payload:
                 json_response(self, {"error": "presupuesto no encontrado"}, status=404)
@@ -106649,7 +106944,17 @@ class Handler(BaseHTTPRequestHandler):
             """
             empresas_agg = sql_group_concat("e.nombre", " | ")
             servicios_agg = sql_group_concat("ce.servicio", " | ")
+            _stats_session = getattr(self, "auth_session", None) or self._current_session()
             if is_seguros_view and ("seguros" in normalized_services or not normalized_services):
+                if empresa_id:
+                    _cs_ok, _cs_err = enforce_empresa_membership(conn, _stats_session, empresa_id)
+                    if not _cs_ok:
+                        json_response(self, {"error": _cs_err or "No autorizado"}, status=403)
+                        return
+                elif not workspace_actor_is_privileged(conn, _stats_session):
+                    # Sin empresa_id, contaba pólizas de TODOS los tenants.
+                    json_response(self, {"total": 0})
+                    return
                 where = ["s.cliente_id IS NOT NULL"]
                 values = []
                 if empresa_id:
@@ -106697,8 +107002,12 @@ class Handler(BaseHTTPRequestHandler):
                     f"SELECT COUNT(*) AS total FROM clientes c WHERE {ws_where}",
                     ws_values,
                 ).fetchone()
-            else:
+            elif workspace_actor_is_privileged(conn, _stats_session):
                 total = conn.execute("SELECT COUNT(*) AS total FROM clientes").fetchone()
+            else:
+                # Sin workspace_id ni servicio resoluble, contaba TODOS los clientes de
+                # la plataforma en vez de devolver 0.
+                total = {"total": 0}
             json_response(self, {"total": total["total"] if total else 0})
             return
 
@@ -107127,6 +107436,18 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, [dict(r) for r in rows])
                 return
             if is_seguros_view and ("seguros" in normalized_services or not normalized_services):
+                # A diferencia de las otras dos ramas de este mismo endpoint (gestoría y
+                # genérica), esta ni exigía `enforce_workspace_membership` cuando SÍ venía
+                # `workspace_id`, ni devolvía `[]` cuando no venía ninguno de los dos —
+                # volcaba clientes con póliza de TODOS los tenants.
+                if workspace_id:
+                    _cls_ok, _cls_err = enforce_workspace_membership(conn, session, workspace_id)
+                    if not _cls_ok:
+                        json_response(self, {"error": _cls_err or "No autorizado"}, status=403)
+                        return
+                elif not empresa_id:
+                    json_response(self, [])
+                    return
                 where = ["s.cliente_id IS NOT NULL"]
                 values = []
                 seguros_cols = table_columns(conn, "seguros") or set()
@@ -107290,8 +107611,13 @@ class Handler(BaseHTTPRequestHandler):
                         # Sin forma de acotar por workspace no devolvemos todo: sería enseñar
                         # clientes de otros tenants.
                         rows = []
-                else:
+                elif workspace_actor_is_privileged(conn, session):
                     rows = conn.execute(f"SELECT {cliente_list_cols} FROM clientes c ORDER BY c.nombre").fetchall()
+                else:
+                    # Sin workspace_id/servicio y sin privilegio, no hay ámbito que
+                    # comprobar: antes esto volcaba la tabla `clientes` completa de toda
+                    # la plataforma a cualquier usuario autenticado.
+                    rows = []
             json_response(self, [dict(r) for r in rows])
             return
 
@@ -107353,6 +107679,15 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id:
                 json_response(self, {"error": "id requerido"}, status=400)
                 return
+            # Sin comprobar empresa_id/workspace_id, cualquier usuario autenticado con
+            # acceso a cualquier módulo leía el dosier completo (identidad + pólizas +
+            # hipotecas + gestoría) de un cliente de OTRO tenant solo con su id.
+            _cf_row = conn.execute("SELECT id, empresa_id FROM clientes WHERE id = ?", (cliente_id,)).fetchone()
+            if not _cf_row:
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _cf_row, "Cliente"):
+                return
             servicio = (params.get("servicio", [""])[0] or "").strip()
             services = parse_services_param(servicio)
             ficha = build_cliente_ficha_payload(conn, cliente_id, services)
@@ -107366,10 +107701,16 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/cliente":
-            # Compatibilidad con frontend antiguo.
+            # Compatibilidad con frontend antiguo. Mismo hueco que `/api/cliente_ficha`.
             cliente_id = params.get("id", [""])[0]
             if not cliente_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            _c_row = conn.execute("SELECT id, empresa_id FROM clientes WHERE id = ?", (cliente_id,)).fetchone()
+            if not _c_row:
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _c_row, "Cliente"):
                 return
             servicio = (params.get("servicio", [""])[0] or "").strip()
             services = parse_services_param(servicio)
@@ -107399,6 +107740,17 @@ class Handler(BaseHTTPRequestHandler):
             services = parse_services_param(servicio)
             workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
             empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            # Omitir workspace_id/empresa_id buscaba por NIF en TODA la base, sin filtro
+            # de tenant; y aunque se mandaran, tampoco se validaba que el actor
+            # perteneciera a ellos (el cliente podía pedir el workspace_id de OTRO tenant).
+            _cl_session = getattr(self, "auth_session", None) or self._current_session()
+            if not workspace_id and not empresa_id:
+                json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
+                return
+            _cl_ok, _cl_err = enforce_workspace_or_empresa_scope(conn, _cl_session, workspace_id, empresa_id)
+            if not _cl_ok:
+                json_response(self, {"error": _cl_err or "No autorizado"}, status=403)
+                return
             row = resolve_cliente_lookup_row(
                 conn,
                 nif,
@@ -107555,6 +107907,14 @@ class Handler(BaseHTTPRequestHandler):
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
                 return
+            # Sin esto, filtraba nombre+NIF del cliente y de sus relacionados de
+            # cualquier tenant con solo pasar su cliente_id.
+            _crg_row = conn.execute("SELECT id, empresa_id FROM clientes WHERE id = ?", (cliente_id,)).fetchone()
+            if not _crg_row:
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _crg_row, "Cliente"):
+                return
             json_response(self, {"rows": fetch_cliente_relaciones(conn, cliente_id)})
             return
 
@@ -107583,6 +107943,15 @@ class Handler(BaseHTTPRequestHandler):
                 limit_val = 6
             if not nif_norm:
                 json_response(self, {"rows": []})
+                return
+            # Igual que `cliente_lookup`: sin workspace_id/empresa_id resoluble, esto
+            # buscaba candidatos por NIF entre TODOS los tenants que compartan servicio.
+            if not workspace_id and not empresa_id:
+                json_response(self, {"rows": []})
+                return
+            _cbn_ok, _cbn_err = enforce_workspace_or_empresa_scope(conn, session, workspace_id, empresa_id)
+            if not _cbn_ok:
+                json_response(self, {"error": _cbn_err or "No autorizado"}, status=403)
                 return
             rows = resolve_clientes_by_nif_rows(
                 conn,
@@ -109777,6 +110146,14 @@ class Handler(BaseHTTPRequestHandler):
             cliente_id = params.get("cliente_id", [""])[0]
             if not cliente_id:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
+                return
+            # Filtraba el IBAN y actividad/CNAE/IAE de cualquier cliente de cualquier
+            # tenant por su cliente_id (el POST de este mismo dato sí estaba protegido).
+            _cp_row = conn.execute("SELECT id, empresa_id FROM clientes WHERE id = ?", (cliente_id,)).fetchone()
+            if not _cp_row:
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _cp_row, "Cliente"):
                 return
             rows = conn.execute(
                 """
@@ -113103,6 +113480,17 @@ class Handler(BaseHTTPRequestHandler):
             servicios_agg = sql_group_concat("ce.servicio", " | ")
             seguros_servicios_agg = sql_group_concat("COALESCE(NULLIF(ce.servicio, ''), 'seguros')", " | ")
             if is_seguros_view and ("seguros" in normalized_services or not normalized_services):
+                # Mismo hueco que en `/api/clientes_list`: sin `enforce_workspace_membership`
+                # cuando venía `workspace_id`, y sin ningún ámbito cuando no venía ninguno de
+                # los dos — volcaba clientes con póliza de TODOS los tenants.
+                if workspace_id:
+                    _cl2_ok, _cl2_err = enforce_workspace_membership(conn, session, workspace_id)
+                    if not _cl2_ok:
+                        json_response(self, {"error": _cl2_err or "No autorizado"}, status=403)
+                        return
+                elif not empresa_id:
+                    json_response(self, [])
+                    return
                 where = ["s.cliente_id IS NOT NULL"]
                 values = []
                 empresa_id = str(empresa_id or "").strip()
@@ -113173,6 +113561,14 @@ class Handler(BaseHTTPRequestHandler):
                     values,
                 ).fetchall()
             else:
+                # Sin workspace_id, empresa_id ni servicio, este bloque no acotaba nada en
+                # absoluto: `where`/`where_clause` quedaban vacíos y el SELECT volcaba hasta
+                # `limit` (controlado por el propio query string, sin tope) clientes de
+                # TODOS los tenants.
+                if not workspace_id and not str(empresa_id or "").strip() and not services:
+                    if not workspace_actor_is_privileged(conn, session):
+                        json_response(self, {"columns": [], "rows": []})
+                        return
                 where = []
                 values = []
                 service_filter = None
@@ -114010,6 +114406,16 @@ class Handler(BaseHTTPRequestHandler):
             captacion_id = params.get("captacion_id", [""])[0].strip()
             if not captacion_id:
                 json_response(self, {"error": "captacion_id requerido"}, status=400)
+                return
+            # Gemelo de `/api/inmueble` (línea ~113916, que sí lleva `enforce_inmueble_access`
+            # desde que se cerró el mismo hueco: "bastaba con conocer un id para leer la ficha
+            # completa de otra agencia"). Este endpoint se quedó sin el mismo parche: sin esto,
+            # cualquier sesión autenticada podía leer el `inmueble_id` de una captación ajena, o
+            # si aún no existía, CREAR una fila en `inmuebles` bajo la empresa de otro tenant.
+            _ie_session = getattr(self, "auth_session", None) or self._current_session()
+            ok, err, _ = enforce_inmueble_access(conn, _ie_session, captacion_id, write=True, tabla="captaciones")
+            if not ok:
+                json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
             captacion = conn.execute(
                 "SELECT * FROM captaciones WHERE id = ? LIMIT 1",

@@ -153,14 +153,20 @@ class ElAtajoDeAdministradorTests(unittest.TestCase):
         f = self.conn.execute("SELECT asunto FROM acciones WHERE id = ?", (accion_id,)).fetchone()
         return f["asunto"] if f else None
 
-    # ---------- el atajo, tal y como está hoy ----------
+    # ---------- el atajo, cerrado desde 2026-09-06 ----------
 
-    def test_hoy_un_administrador_entra_en_un_workspace_ajeno(self):
-        """Documenta el comportamiento por defecto. Si algún día deja de ser así,
-        conviene enterarse por aquí y no por una sorpresa."""
+    def test_un_administrador_ya_no_entra_en_un_workspace_ajeno(self):
+        """Este test documentaba el comportamiento por defecto ANTES del fix de
+        2026-09-06 (aserción 200: el atajo cruzaba de workspace). Confirmado en vivo
+        ese día con una cadena de explotación completa (toma de cuenta cross-tenant
+        vía `usuarios_update` + `workspace_delete`), se cerró en la raíz:
+        `workspace_actor_is_privileged` ahora exige, cuando se le pasa `workspace_id`/
+        `empresa_id`, que el actor sea YA Owner/Admin real de ESE workspace concreto —
+        el atajo por rol legacy deja de ser global incluso con `APP_SUPERADMIN_ENFORCE=0`
+        (el default). admin_a es Owner de ws-a, no de ws-b, así que ahora es 403."""
         S.APP_SUPERADMIN_ENFORCE = False
-        self.assertEqual(self._tocar("admin_a", "cita-b", "ws-b"), 200)
-        self.assertEqual(self._asunto("cita-b"), "TOCADA")
+        self.assertEqual(self._tocar("admin_a", "cita-b", "ws-b"), 403)
+        self.assertEqual(self._asunto("cita-b"), "Cita de B")
 
     def test_hoy_quien_no_es_administrador_no_entra(self):
         """El atajo es del rol, no un agujero de la guarda de pertenencia."""
