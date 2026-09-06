@@ -94486,14 +94486,15 @@ class Handler(BaseHTTPRequestHandler):
             company = None
             company_warning = ""
             if empresa_id:
+                # Antes, si la empresa no estaba vinculada al workspace del actor, solo se
+                # añadía un aviso y se devolvía igualmente el sector/CNAE/convenio/política
+                # de vacaciones de esa empresa — de OTRO tenant si el `empresa_id` era ajeno.
+                _lc_session = getattr(self, "auth_session", None) or self._current_session()
+                _lc_ok, _lc_err = enforce_empresa_membership(conn, _lc_session, empresa_id)
+                if not _lc_ok:
+                    json_response(self, {"error": _lc_err or "No autorizado"}, status=403)
+                    return
                 try:
-                    if workspace_id:
-                        linked = conn.execute(
-                            "SELECT 1 FROM workspace_empresas WHERE workspace_id = ? AND empresa_id = ? LIMIT 1",
-                            (workspace_id, empresa_id),
-                        ).fetchone()
-                        if not linked:
-                            company_warning = "Empresa no vinculada al workspace."
                     row = conn.execute(
                         """
                         SELECT id, nombre,
@@ -94640,6 +94641,11 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, result, status=400)
                 return
             if str(payload.get("registrar_en_radar") or "").strip().lower() in {"1", "true", "yes", "si"}:
+                # Mismo motivo que `legal_radar_items`: esto escribe en la tabla global
+                # compartida entre tenants, y `accion_recomendada`/`resumen` son texto
+                # libre del llamante que el copiloto legal de todos acabaría mostrando.
+                if not self._enforce_global_catalog_write(conn, "Novedad legal"):
+                    return
                 outcome = upsert_legal_radar_item_from_detection(
                     conn,
                     {
@@ -94800,6 +94806,13 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         elif parsed.path == "/api/legal_radar_items":
+            # `legal_radar_items` es una tabla GLOBAL (sin empresa_id/workspace_id):
+            # una fila la ve y la usa el copiloto legal de TODOS los tenants. Sin este
+            # guard, cualquier usuario autenticado con cualquier servicio asignado podía
+            # crear una "novedad legal" falsa (con la acción recomendada que quisiera)
+            # visible para todos — mismo patrón que seguros_campanas/seguros_comisiones.
+            if not self._enforce_global_catalog_write(conn, "Novedad legal"):
+                return
             area = normalize_legal_area(payload.get("area") or "inmobiliaria")
             titulo = str(payload.get("titulo") or "").strip()
             if not titulo:
@@ -94814,7 +94827,7 @@ class Handler(BaseHTTPRequestHandler):
                   topic_key, url, resumen, accion_recomendada, affected_documents, affected_workflows,
                   affected_clauses, impact_score, created_at, updated_at
                 ) VALUES (
-                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+                  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
                 )
                 """,
                 (
@@ -94838,11 +94851,21 @@ class Handler(BaseHTTPRequestHandler):
                     now,
                 ),
             )
-            audit_event(conn, empresa["id"], "legal_radar", item_id, "Crear novedad legal", usuario=payload.get("usuario"), detalles={"area": area, "titulo": titulo}, now=now)
+            # `legal_radar_items` es global (sin empresa_id propio): `empresa` no siempre
+            # está resuelta aquí (la petición no tiene por qué traer empresa_nombre/
+            # workspace_id) y `empresa["id"]` sobre `None` tumbaba el alta con un 500 en
+            # cualquier llamada que no colara una empresa de forma incidental.
+            audit_event(conn, empresa["id"] if empresa else None, "legal_radar", item_id, "Crear novedad legal", usuario=payload.get("usuario"), detalles={"area": area, "titulo": titulo}, now=now)
             conn.commit()
             json_response(self, {"ok": True, "id": item_id})
             return
         elif parsed.path == "/api/legal_radar_items_update":
+            # Mismo motivo que el alta: sin esto, cualquier usuario autenticado podía
+            # reescribir cualquier campo (incluido `estado`/`accion_recomendada`) de
+            # cualquier novedad legal compartida entre tenants, o marcarla "aplicado"
+            # para silenciarla en el copiloto de todos.
+            if not self._enforce_global_catalog_write(conn, "Novedad legal"):
+                return
             record_id = str(payload.get("id") or "").strip()
             if not record_id:
                 json_response(self, {"error": "id requerido"}, status=400)
@@ -94888,7 +94911,8 @@ class Handler(BaseHTTPRequestHandler):
                 f"UPDATE legal_radar_items SET {set_clause}, updated_at = datetime(?) WHERE id = ?",
                 values,
             )
-            audit_event(conn, empresa["id"], "legal_radar", record_id, "Actualizar novedad legal", usuario=payload.get("usuario"), detalles={"area": normalize_legal_area(payload.get("area") or "inmobiliaria"), "estado": updates.get("estado")}, now=now)
+            # Mismo `empresa` potencialmente None que en el alta.
+            audit_event(conn, empresa["id"] if empresa else None, "legal_radar", record_id, "Actualizar novedad legal", usuario=payload.get("usuario"), detalles={"area": normalize_legal_area(payload.get("area") or "inmobiliaria"), "estado": updates.get("estado")}, now=now)
             conn.commit()
             json_response(self, {"ok": True, "id": record_id})
             return
