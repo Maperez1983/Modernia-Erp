@@ -2914,6 +2914,14 @@ class GestoriaServerRouteRegressionTests(unittest.TestCase):
         self.conn.execute(
             "CREATE TABLE IF NOT EXISTS auditoria (id TEXT PRIMARY KEY, empresa_id TEXT, entidad TEXT, entidad_id TEXT, accion TEXT, usuario TEXT, detalles TEXT, created_at TEXT)"
         )
+        # Desde 2026-09-06 el rol legacy ("ADMINISTRADOR") solo actúa como privilegio
+        # cuando el actor es YA Owner/Admin real del workspace de la empresa objetivo —
+        # sin esta fila, "u-1" no tenía ningún vínculo con "ws-1"/"emp-1" (ya enlazadas
+        # entre sí por `_seed_gestoria_workspace` en `setUp`).
+        self.conn.execute(
+            "INSERT INTO workspace_miembros (id, workspace_id, usuario_id, rol, created_at, updated_at) "
+            "VALUES ('wm-u1', 'ws-1', 'u-1', 'Owner', datetime('now'), datetime('now'))"
+        )
         self.conn.commit()
         session = {"user_id": "u-1", "rol": "ADMINISTRADOR", "servicio": "Financiaciones"}
         status, _h, body = self._call_gestoria_post_route("/api/hipotecas_delete", {"id": "h1", "empresa_id": "emp-1"}, session)

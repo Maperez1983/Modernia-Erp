@@ -49299,7 +49299,12 @@ def fetch_workspace_cliente_360(conn, workspace_id, cliente_id):
         service_key = normalize_service_key(row.get("referencia_tipo") or row.get("tipo"))
         if row_empresa_id and row_empresa_id not in empresa_set:
             continue
-        if row_empresa_id or service_key in allowed_service_keys:
+        # Un documento sin `empresa_id` pasaba igual si su servicio coincidía con alguno
+        # activo del cliente EN ESTE tenant — pero `clientes`/`cliente_360` es global, así
+        # que un doc de OTRO tenant sin empresa_id (dato legacy/mal migrado) se colaba en
+        # cuanto el cliente compartido tuviera ese mismo servicio activo aquí. Sin forma de
+        # probar de quién es, se excluye (igual que ya hacían `facturas`/`acciones`/etc.).
+        if row_empresa_id:
             docs_all.append(row)
             docs_by_service[service_key if service_key in docs_by_service else "otros"].append(row)
 
@@ -49315,9 +49320,12 @@ def fetch_workspace_cliente_360(conn, workspace_id, cliente_id):
         row for row in (payload.get("servicios", {}).get("acciones") or [])
         if str(row.get("empresa_id") or "") in empresa_set
     ]
+    # Antes, una póliza sin `empresa_id` (dato legacy/mal migrado) pasaba el filtro sin
+    # importar el tenant — en un cliente compartido entre workspaces, el 360 de un tenant
+    # ajeno la habría mostrado igual. Mismo criterio fail-closed que el resto de listas.
     seguros_rows = [
         row for row in (payload.get("servicios", {}).get("seguros") or [])
-        if not row.get("empresa_id") or str(row.get("empresa_id") or "") in empresa_set
+        if str(row.get("empresa_id") or "") in empresa_set
     ]
 
     historico = []
@@ -76641,6 +76649,14 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/iivtnu_param_upsert":
+            # `iivtnu_param_sets`/`iivtnu_municipios` son un catálogo GLOBAL (sin
+            # empresa_id/workspace_id) compartido por todos los tenants que usan el
+            # simulador de plusvalía — mismo patrón que seguros_campanas/comisiones y el
+            # radar legal, que ya necesitaron este guard. Sin él, cualquier usuario
+            # autenticado podía cambiar el tipo de gravamen de cualquier municipio,
+            # afectando al cálculo de TODOS los tenants.
+            if not self._enforce_global_catalog_write(conn, "Parámetro IIVTNU"):
+                return
             try:
                 ensure_iivtnu_schema(conn)
             except Exception:
@@ -76768,6 +76784,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             slot = str(payload.get("slot") or "").strip().upper() or "A"
             scenario_id = str(payload.get("id") or "").strip()
+            if scenario_id:
+                _fsu_owner = conn.execute(
+                    "SELECT empresa_id, cliente_id FROM fiscal_scenarios WHERE id = ?", (scenario_id,)
+                ).fetchone()
+                if _fsu_owner and (
+                    str(_fsu_owner["empresa_id"] or "") != empresa_id
+                    or str(_fsu_owner["cliente_id"] or "") != cliente_id
+                ):
+                    json_response(self, {"error": "Escenario fuera de tu ámbito"}, status=403)
+                    return
             if not scenario_id:
                 try:
                     existing = conn.execute(
@@ -76848,7 +76874,13 @@ class Handler(BaseHTTPRequestHandler):
 
             now_expr = "sqlite_datetime('now')" if db_is_postgres_enabled() else "datetime('now','localtime')"
             try:
-                exists = conn.execute("SELECT 1 FROM fiscal_scenarios WHERE id = ? LIMIT 1", (scenario_id,)).fetchone()
+                # Sin `empresa_id`/`cliente_id` en el WHERE, el gate Fase 5 (que valida el
+                # `empresa_id` DECLARADO por el actor, no el de la fila objetivo) no evitaba
+                # que un `id` ajeno sobrescribiera el escenario fiscal de OTRO tenant/cliente.
+                exists = conn.execute(
+                    "SELECT 1 FROM fiscal_scenarios WHERE id = ? AND empresa_id = ? AND cliente_id = ? LIMIT 1",
+                    (scenario_id, empresa_id, cliente_id),
+                ).fetchone()
             except Exception:
                 exists = None
             try:
@@ -76863,7 +76895,7 @@ class Handler(BaseHTTPRequestHandler):
                             payload_json = ?,
                             result_json = ?,
                             updated_at = {now_expr}
-                        WHERE id = ?
+                        WHERE id = ? AND empresa_id = ? AND cliente_id = ?
                         """,
                         (
                             slot,
@@ -76873,6 +76905,8 @@ class Handler(BaseHTTPRequestHandler):
                             payload_json,
                             result_json,
                             scenario_id,
+                            empresa_id,
+                            cliente_id,
                         ),
                     )
                 else:
@@ -76915,6 +76949,16 @@ class Handler(BaseHTTPRequestHandler):
             scenario_id = str(payload.get("id") or "").strip()
             if not scenario_id:
                 json_response(self, {"error": "id requerido"}, status=400)
+                return
+            # Este endpoint no manda empresa_id, así que el gate Fase 5 nunca se activaba
+            # (infer_empresa_id_for_payload no tiene de dónde inferirlo): cualquier actor
+            # autenticado podía borrar el escenario fiscal de CUALQUIER otro tenant/cliente
+            # con solo conocer su id, sin ninguna comprobación.
+            _fsd_row = conn.execute("SELECT id, empresa_id FROM fiscal_scenarios WHERE id = ?", (scenario_id,)).fetchone()
+            if not _fsd_row:
+                json_response(self, {"error": "Escenario no encontrado"}, status=404)
+                return
+            if not self._enforce_row_empresa_scope(conn, _fsd_row, "Escenario fiscal"):
                 return
             try:
                 conn.execute("DELETE FROM fiscal_scenarios WHERE id = ?", (scenario_id,))
@@ -89704,6 +89748,17 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_id or not source_table or not source_id:
                 json_response(self, {"error": "workspace_id, source_table y source_id requeridos"}, status=400)
                 return
+            # Como el path empieza por `/api/workspace_`, el gate "Fase 5" de POST excluye
+            # esta ruta de su enforcement genérico (por diseño: se espera que cada handler
+            # workspace_* valide su propio `workspace_id`) — este no lo hacía en absoluto.
+            # Sin esto, cualquier usuario autenticado de CUALQUIER tenant podía reasignar
+            # documentos (gestoria_docs/inmueble_docs) de un workspace ajeno con solo
+            # nombrarlo, porque `empresa_ids` se resolvía del workspace_id del ATACANTE.
+            _wda_session = getattr(self, "auth_session", None) or self._current_session()
+            _wda_ok, _wda_err = enforce_workspace_membership(conn, _wda_session, workspace_id, write=True)
+            if not _wda_ok:
+                json_response(self, {"error": _wda_err or "No autorizado"}, status=403)
+                return
             empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
             if not empresa_ids:
                 json_response(self, {"error": "workspace sin empresas"}, status=400)
@@ -91323,7 +91378,12 @@ class Handler(BaseHTTPRequestHandler):
             # Aislamiento robusto: no confiar solo en el empresa_id del cliente (que se puede
             # omitir). La hipoteca destino debe pertenecer a una empresa del actor.
             _upd_session = getattr(self, "auth_session", None) or self._current_session()
-            if row_empresa_id and not workspace_actor_is_privileged(conn, _upd_session):
+            # `workspace_actor_is_privileged` a pelo (sin `empresa_id`) trataba el rol legacy
+            # como privilegio GLOBAL: un "Administrador" de CUALQUIER tenant se saltaba por
+            # completo `enforce_empresa_membership` y podía editar la hipoteca de OTRO tenant
+            # con solo omitir `empresa_id` en el payload. Mismo patrón cerrado en el resto de
+            # la app el 2026-09-06 — aquí se había quedado sin pasar el contexto.
+            if row_empresa_id and not workspace_actor_is_privileged(conn, _upd_session, empresa_id=row_empresa_id):
                 ok_m, err_m = enforce_empresa_membership(conn, _upd_session, row_empresa_id, write=True)
                 if not ok_m:
                     json_response(self, {"error": err_m or "No autorizado"}, status=403)
@@ -91577,7 +91637,9 @@ class Handler(BaseHTTPRequestHandler):
             # Aislamiento robusto: la hipoteca debe pertenecer a una empresa del actor
             # (no confiar solo en el empresa_id del cliente, que se puede omitir).
             _del_session = getattr(self, "auth_session", None) or self._current_session()
-            if row_empresa_id and not workspace_actor_is_privileged(conn, _del_session):
+            # Mismo hueco y mismo fix que en hipotecas_update: sin pasar `empresa_id` aquí,
+            # un "Administrador" legacy de cualquier tenant podía borrar la hipoteca de OTRO.
+            if row_empresa_id and not workspace_actor_is_privileged(conn, _del_session, empresa_id=row_empresa_id):
                 ok_m, err_m = enforce_empresa_membership(conn, _del_session, row_empresa_id, write=True)
                 if not ok_m:
                     json_response(self, {"error": err_m or "No autorizado"}, status=403)
@@ -102826,7 +102888,9 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "Hipoteca no encontrada"}, status=404)
                 return
             _sign_emp = str(row_value(_sign_row, "empresa_id") or "").strip()
-            if _sign_emp and not workspace_actor_is_privileged(conn, _sign_session):
+            # Mismo hueco que hipotecas_update/delete: sin pasar `empresa_id`, un
+            # "Administrador" legacy de cualquier tenant firmaba la hipoteca de OTRO.
+            if _sign_emp and not workspace_actor_is_privileged(conn, _sign_session, empresa_id=_sign_emp):
                 ok, err = enforce_empresa_membership(conn, _sign_session, _sign_emp, write=True)
                 if not ok:
                     json_response(self, {"error": err or "No autorizado"}, status=403)
@@ -106635,14 +106699,34 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/dsar_export":
             # RGPD: export del derecho de acceso/portabilidad. Solo para actores privilegiados
-            # (admin/superadmin), ya que vuelca datos personales completos de un interesado.
-            session = getattr(self, "auth_session", None) or self._current_session()
-            if not workspace_actor_is_privileged(conn, session):
-                json_response(self, {"error": "No autorizado"}, status=403)
-                return
+            # (admin/superadmin) DEL TENANT DEL CLIENTE, ya que vuelca datos personales
+            # completos de un interesado (identidad + toda tabla con cliente_id: contratos,
+            # pólizas, hipotecas, documentos...). El check anterior llamaba a
+            # `workspace_actor_is_privileged(conn, session)` SIN pasar el workspace/empresa
+            # del cliente objetivo, cayendo en el mismo bypass global ya confirmado y cerrado
+            # en otros endpoints (2026-09-06): un "Administrador" legacy de CUALQUIER tenant
+            # podía volcar el dossier RGPD completo de un cliente de OTRO tenant con solo su id.
             cid = (params.get("cliente_id", [""])[0] or "").strip()
             if not cid:
                 json_response(self, {"error": "cliente_id requerido"}, status=400)
+                return
+            _dsar_session = getattr(self, "auth_session", None) or self._current_session()
+            _dsar_cli_row = conn.execute("SELECT id, empresa_id FROM clientes WHERE id = ?", (cid,)).fetchone()
+            if not _dsar_cli_row:
+                json_response(self, {"error": "Cliente no encontrado"}, status=404)
+                return
+            # `clientes.empresa_id` está vacío en una fracción real de la cartera (clientes
+            # vinculados solo vía `clientes_empresas`, ver `empresas_del_cliente`) — sin este
+            # respaldo, esos clientes se habrían colado por el mismo "sin contexto -> global"
+            # que se está cerrando aquí.
+            _dsar_empresa_ids = [str(row_value(_dsar_cli_row, "empresa_id", "") or "").strip()] or []
+            _dsar_empresa_ids = [e for e in _dsar_empresa_ids if e] or empresas_del_cliente(conn, cid)
+            # Mantiene la restricción original ("solo privilegiados", no cualquier miembro
+            # del tenant) pero ahora acotada a la(s) empresa(s) REAL(es) del cliente.
+            if not _dsar_empresa_ids or not any(
+                workspace_actor_is_privileged(conn, _dsar_session, empresa_id=eid) for eid in _dsar_empresa_ids
+            ):
+                json_response(self, {"error": "No autorizado"}, status=403)
                 return
             try:
                 dsar = build_dsar_export(conn, cid)
@@ -106921,6 +107005,26 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/resumen":
+            # Sin ningún parámetro de scope: `FROM empresas e` sin WHERE devolvía el
+            # volumen de negocio (BDT/seguros/gestoría/hipotecas/alquileres/inversores) de
+            # TODOS los tenants a cualquier usuario autenticado.
+            _resumen_session = getattr(self, "auth_session", None) or self._current_session()
+            _resumen_empresa_ids = resolve_empresa_ids_for_request(
+                conn,
+                empresa_id=params.get("empresa_id", [""])[0],
+                workspace_id=params.get("workspace_id", [""])[0],
+            )
+            # Panel agregado global por diseño (como `audit_inmobiliaria`): sin scope
+            # resoluble, solo un superadmin REAL puede verlo sin filtrar — el rol legacy
+            # ("Administrador" de cualquier tenant) no debe bastar aquí.
+            if not _resumen_empresa_ids and not is_superadmin_actor(conn, _resumen_session):
+                json_response(self, [])
+                return
+            _resumen_where = ""
+            _resumen_values = []
+            if _resumen_empresa_ids:
+                _resumen_where = f"WHERE e.id IN ({','.join('?' * len(_resumen_empresa_ids))})"
+                _resumen_values = list(_resumen_empresa_ids)
             rows = conn.execute(
                 f"""
                 SELECT e.nombre AS empresa,
@@ -106933,8 +107037,10 @@ class Handler(BaseHTTPRequestHandler):
                   (SELECT COUNT(*) FROM inversores i WHERE i.empresa_id = e.id) AS inversores,
                   (SELECT COUNT(*) FROM inversure_operaciones io WHERE io.empresa_id = e.id) AS inversure_ops
                 FROM empresas e
+                {_resumen_where}
                 ORDER BY e.nombre
-                """
+                """,
+                _resumen_values,
             ).fetchall()
             json_response(self, [dict(r) for r in rows])
             return
@@ -114069,11 +114175,17 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/audit_inmobiliaria":
+            # Panel agregado GLOBAL a propósito (SELECT sobre `empresas` sin WHERE, cuenta
+            # inmuebles/captaciones/operaciones de TODAS las empresas de la plataforma) —
+            # por eso exige superadmin real, no el `workspace_actor_is_privileged` "a pelo"
+            # que había antes: ese bypass, con `APP_SUPERADMIN_ENFORCE=0` (default), dejaba
+            # pasar a cualquier "Administrador" legacy de CUALQUIER tenant, filtrando
+            # metadatos operativos agregados de todos los demás tenants.
             session = getattr(self, "auth_session", None) or self._current_session()
             if not session:
                 json_response(self, {"error": "No autenticado"}, status=401)
                 return
-            if not workspace_actor_is_privileged(conn, session):
+            if not is_superadmin_actor(conn, session):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             responsable = (params.get("responsable", [""])[0] or "").strip()
