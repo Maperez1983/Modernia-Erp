@@ -129,9 +129,12 @@ class CuboSinAsignarTests(unittest.TestCase):
         self.assertIn('params.get("sin_asignar"', bloque)
         marcador = 'params.get("sin_asignar"'
         cola = bloque[bloque.index(marcador) :]
-        # La comprobación de privilegio va antes de la consulta.
+        # La comprobación de privilegio va antes de la consulta. `is_superadmin_actor`
+        # (no el bare `workspace_actor_is_privileged`, que trataba cualquier rol legacy
+        # "Administrador" de CUALQUIER tenant como privilegio de plataforma): esto es un
+        # listado sin scope por fila, así que solo un superadmin real debe verlo.
         self.assertLess(
-            cola.index("workspace_actor_is_privileged"),
+            cola.index("is_superadmin_actor"),
             cola.index("SELECT"),
             "hay que comprobar el privilegio antes de devolver clientes de nadie",
         )

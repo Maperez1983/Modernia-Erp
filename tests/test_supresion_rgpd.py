@@ -80,7 +80,7 @@ class ElEndpointTests(unittest.TestCase):
 
     def test_no_lo_hace_cualquiera(self):
         """Suprimir no es una edición más: hace falta ser responsable del workspace."""
-        self.assertIn("workspace_actor_is_privileged(conn, session)", manejador())
+        self.assertIn("workspace_actor_is_privileged(conn, session, workspace_id=ws_id)", manejador())
 
     def test_no_se_puede_suprimir_una_ficha_de_otro_workspace(self):
         cuerpo = manejador()
