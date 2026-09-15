@@ -259,5 +259,55 @@ class LaRenovacionYElCambioDeCompaniaDesdeElOcrTests(Base):
         self.assertEqual(totales[0]["n"], 2)
 
 
+class ElBuscadorDeLaListaDePolizasTests(Base):
+    """El buscador de "CRM Seguros" solo miraba las columnas de la propia póliza.
+
+    El alta por OCR ya sabía buscar el cliente por su nombre real (`_cliente_nombre_
+    search_clause`); esta lista, no — sólo el `tomador` de texto libre de la póliza, que
+    puede venir del OCR con el nombre legal completo mientras el cliente está de alta
+    con uno más corto o distinto. Buscar "Barcelo" no encontraba una póliza cuyo tomador
+    dice "Comunidad de Propietarios Barceló 4" aunque estuviera enlazada al cliente
+    "CP Barceló 4" por `cliente_id`, porque nunca se cruzaba con la ficha del cliente.
+    """
+
+    def test_encuentra_la_poliza_por_el_nombre_del_cliente_enlazado(self):
+        cli = self._cliente("CP Barceló 4")
+        self._poliza(cli, "145991", "Santa Lucia", ramo="Hogar")
+        # El tomador de la póliza, tal y como lo dejaría el OCR: el nombre legal completo,
+        # no el nombre corto con el que está de alta el cliente.
+        self.conn.execute("UPDATE seguros SET tomador = ? WHERE id = ?",
+                          ("Comunidad de Propietarios Barceló 4", "pol-145991"))
+        self.conn.commit()
+        estado, r = self._get(
+            "/api/tabla?tabla=seguros&empresa_id=emp1&q=Barcelo&include_id=1", self.cookie)
+        self.assertEqual(estado, 200, r)
+        self.assertTrue(r["rows"], "el buscador de la lista de pólizas no encontró al cliente")
+
+    def test_encuentra_por_el_cif_del_cliente_enlazado(self):
+        cli = self._cliente("CP Barceló 4", nif="H29446622")
+        self._poliza(cli, "145991", "Santa Lucia", ramo="Hogar")
+        estado, r = self._get(
+            "/api/tabla?tabla=seguros&empresa_id=emp1&q=H29446622&include_id=1", self.cookie)
+        self.assertEqual(estado, 200, r)
+        self.assertTrue(r["rows"])
+
+    def test_sigue_encontrando_por_el_tomador_de_toda_la_vida(self):
+        cli = self._cliente("Alejandro Sanchez")
+        self._poliza(cli, "Z-1", "Zurich", ramo="Auto")
+        self.conn.execute("UPDATE seguros SET tomador = ? WHERE id = ?",
+                          ("Alejandro Jose Sanchez Celis", "pol-Z-1"))
+        self.conn.commit()
+        estado, r = self._get(
+            "/api/tabla?tabla=seguros&empresa_id=emp1&q=Sanchez&include_id=1", self.cookie)
+        self.assertEqual(estado, 200, r)
+        self.assertTrue(r["rows"])
+
+    def test_no_afecta_a_otras_tablas_como_hipotecas(self):
+        """El JOIN con clientes es sólo para "seguros": otras tablas de /api/tabla no lo necesitan."""
+        estado, r = self._get(
+            "/api/tabla?tabla=hipotecas&empresa_id=emp1&q=Barcelo", self.cookie)
+        self.assertEqual(estado, 200, r)
+
+
 if __name__ == "__main__":
     unittest.main()

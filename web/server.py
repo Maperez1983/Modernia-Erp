@@ -935,6 +935,15 @@ OCR_OPENAI_VISION_PAGES = max(0, int(os.environ.get("OCR_OPENAI_VISION_PAGES", "
 OCR_OPENAI_VISION_DPI = max(120, int(os.environ.get("OCR_OPENAI_VISION_DPI", "220")))
 OCR_USE_OCRMYPDF = os.environ.get("OCR_USE_OCRMYPDF", "0").strip().lower() in ("1", "true", "yes", "si", "sí", "on")
 OCR_EXPERT_MODE = os.environ.get("OCR_EXPERT_MODE", "1").strip().lower() not in ("0", "false", "no", "off")
+# Proveedor de IA para todas las funciones "copilot" (resúmenes, extracción de campos,
+# plantillas de contrato...): "openai" (por defecto, sin cambios) u "ollama" para usar un
+# servidor Ollama propio en vez de la API de OpenAI. Pensado primero para desarrollo/pruebas
+# locales; en Render se deja "openai" hasta decidir si se expone producción.
+AI_PROVIDER = os.environ.get("AI_PROVIDER", "openai").strip().lower()
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1")
+OLLAMA_VISION_MODEL = os.environ.get("OLLAMA_VISION_MODEL", "llama3.2-vision")
+OLLAMA_TIMEOUT_SECONDS = max(5, int(os.environ.get("OLLAMA_TIMEOUT_SECONDS", "60")))
 WORKSPACE_TIME_SWEEP_ENABLED = (
     os.environ.get("WORKSPACE_TIME_SWEEP_ENABLED", "0" if os.environ.get("RENDER") else "1").strip().lower()
     not in ("0", "false", "no", "off")
@@ -18692,7 +18701,12 @@ def process_seguros_ocr(payload, conn, *, session=None):
             missing_required = any(not fields.get(key) for key in required_keys)
         if (not fast_mode) and openai_available() and external_ok and (missing_required or candidate_score(best_quality) < 320):
             log_seguros_ocr_external_transfer(
-                conn, empresa_id, "openai", raw_bytes, session=session, extra={"modo": "vision+texto"}
+                conn,
+                empresa_id,
+                "ollama" if AI_PROVIDER == "ollama" else "openai",
+                raw_bytes,
+                session=session,
+                extra={"modo": "vision+texto"},
             )
             ai_text = text or ""
             if doc_text and doc_text.strip():
@@ -21404,7 +21418,83 @@ def compute_fin_quality(fields):
     return compute_ocr_quality(fields, required)
 
 def openai_available():
+    if AI_PROVIDER == "ollama":
+        return True
     return bool(os.environ.get("OPENAI_API_KEY"))
+
+def _call_ollama_chat(payload):
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        f"{OLLAMA_BASE_URL}/api/chat",
+        data=data,
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=OLLAMA_TIMEOUT_SECONDS) as resp:
+            res = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as err:
+        body = ""
+        try:
+            body = err.read().decode("utf-8", errors="replace")
+        except Exception:
+            body = ""
+        return "", f"Ollama error ({err.code}): {body or err}"
+    except Exception as err:
+        return "", f"Ollama error: {err} (¿está encendido y accesible en {OLLAMA_BASE_URL}?)"
+    message = (res or {}).get("message") or {}
+    return str(message.get("content") or "").strip(), ""
+
+def call_ollama(prompt, model=None, temperature=0.2, max_tokens=600, system_text=None):
+    sys_text = system_text or "Eres un copiloto interno para un CRM de seguros. Responde en español."
+    payload = {
+        "model": model or OLLAMA_MODEL,
+        "messages": [
+            {"role": "system", "content": sys_text},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+        "options": {"temperature": temperature, "num_predict": max_tokens},
+    }
+    return _call_ollama_chat(payload)
+
+def _ollama_content_from_openai_blocks(user_content):
+    """Traduce los bloques input_text/input_image de la Responses API de OpenAI al
+    formato de Ollama: un texto y una lista de imágenes en base64 (sin el prefijo data:)."""
+    texts = []
+    images = []
+    for block in user_content or []:
+        btype = block.get("type")
+        if btype in ("input_text", "text"):
+            texts.append(block.get("text", ""))
+        elif btype in ("input_image", "image_url"):
+            data_url = block.get("image_url")
+            if isinstance(data_url, dict):
+                data_url = data_url.get("url", "")
+            data_url = str(data_url or "")
+            if "," in data_url:
+                data_url = data_url.split(",", 1)[1]
+            if data_url:
+                images.append(data_url)
+    return "\n".join(t for t in texts if t), images
+
+def call_ollama_content(user_content, model=None, temperature=0.0, max_tokens=700):
+    text, images = _ollama_content_from_openai_blocks(user_content)
+    message = {"role": "user", "content": text}
+    if images:
+        message["images"] = images
+    payload = {
+        "model": model or (OLLAMA_VISION_MODEL if images else OLLAMA_MODEL),
+        "messages": [
+            {
+                "role": "system",
+                "content": "Eres un extractor de datos para un CRM de seguros. Responde en JSON válido cuando se solicite.",
+            },
+            message,
+        ],
+        "stream": False,
+        "options": {"temperature": temperature, "num_predict": max_tokens},
+    }
+    return _call_ollama_chat(payload)
 
 def normalize_openai_model_name(value, default="gpt-4o-mini"):
     raw = str(value or "").strip()
@@ -21432,6 +21522,8 @@ def extract_openai_output(resp):
     return ""
 
 def call_openai(prompt, model=None, temperature=0.2, max_tokens=600, system_text=None):
+    if AI_PROVIDER == "ollama":
+        return call_ollama(prompt, model=model, temperature=temperature, max_tokens=max_tokens, system_text=system_text)
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return "", "OPENAI_API_KEY no configurada"
@@ -21481,6 +21573,8 @@ def call_openai(prompt, model=None, temperature=0.2, max_tokens=600, system_text
 
 
 def call_openai_content(user_content, model=None, temperature=0.0, max_tokens=700):
+    if AI_PROVIDER == "ollama":
+        return call_ollama_content(user_content, model=model, temperature=temperature, max_tokens=max_tokens)
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         return "", "OPENAI_API_KEY no configurada"
@@ -23957,7 +24051,7 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         elif "FIATC" in upper or "FIACT" in upper:
             out["compania"] = "Fiatc"
         elif "IPTIQ" in upper or "GALLEN" in upper:
-            out["compania"] = "iptiQ EMEA P"
+            out["compania"] = "iptiQ EMEA P&C"
         elif "ARAG" in upper:
             out["compania"] = "ARAG"
         elif "OCASO" in upper:
@@ -24137,7 +24231,14 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         # vacíos); ninguno de los patrones de más abajo reconocía la barra en
         # "Nombre/Razon Social", así que el tomador salía siempre vacío. Se
         # ancla explícitamente a la sección "Tomador del Seguro/Asegurado".
-        r"Tomador\s+del\s+Seguro/Asegurado.{0,80}?Nombre/Raz[oó]n\s+Social\s*:?\s*([^\n]+)",
+        # El grupo captura como mucho 100 caracteres: contra `cleaned` (sin
+        # saltos de línea, todo el documento en una sola "línea") un
+        # `[^\n]+` sin tope se comía el resto del documento entero -- y en
+        # cuanto esa cadena gigante llegaba a la palabra "aseguradora" (que en
+        # una póliza real siempre aparece más adelante), `clean_tomador_value`
+        # la rechazaba entera y el tomador de una póliza de 30 páginas salía
+        # vacío pese a que el dato bueno estaba ahí, al principio.
+        r"Tomador\s+del\s+Seguro/Asegurado.{0,80}?Nombre/Raz[oó]n\s+Social\s*:?\s*([^\n]{1,100})",
         r"DATOS\s+DEL\s+TOMADOR\s+Y\s+PROPIETARIO\s+Nombre\s+([A-ZÁÉÍÓÚÑ ,.'\-]{5,})\s+Documento\s+ID",
         r"P[oó]liza/Spto\s+[0-9]{8,14}\s*/\s*[0-9]{1,3}\s*\n+\s*([A-ZÁÉÍÓÚÑ ,.'\-]{5,})",
         r"TOMADOR\s+([A-ZÁÉÍÓÚÑ ,.'\-]{5,}?)\s+NIF\b",
@@ -24166,7 +24267,12 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         # 2 caracteres no era válido y el fallback más suelto de más abajo
         # acababa cogiendo OTRO NIF del documento (p.ej. el de la propia
         # aseguradora, que también aparece en la letra pequeña de la póliza).
-        r"(?:TOMADOR|ASEGURADO)[\s\S]{0,160}?NIF\s*[:\-]?\s*([A-Z0-9.\-]{8,11})",
+        # "DNI/CIF" (iptiQ/Gallen) además de "NIF" a secas: sin esa alternativa,
+        # en un documento de 30 páginas el patrón genérico de "NIF" de más abajo
+        # encontraba antes el NIF de la propia agencia («Gallen Insurance
+        # Underwriting S.L. ... con NIF B92833490», en la letra pequeña del
+        # final) que el DNI/CIF real del tomador, que va en la página 1.
+        r"(?:TOMADOR|ASEGURADO)[\s\S]{0,160}?(?:NIF|DNI/CIF)\s*[:\-]?\s*([A-Z0-9.\-]{8,11})",
         r"DOC\.?\s*ID\.?\s*[:\-]?\s*([A-Z0-9.\-]+)",
         r"Doc\.?\s*Identificaci[oó]n\s*[:\-]?\s*([A-Z0-9.\-]+)",
         r"NIF/CIF\s*[:\-]?\s*([A-Z0-9.\-]+)",
@@ -24372,6 +24478,14 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
                 fields["ramo"] = keyword
                 break
     fields["prima_neta"] = pick([
+        # iptiQ/Gallen: la tabla trae la etiqueta ("Prima Neta   I.P.S.   L.E.A")
+        # en una fila y los importes en la SIGUIENTE ("346.66 €   27.73 €   1.25
+        # €"), así que el patrón de arriba (importe pegado a la etiqueta) nunca
+        # machea. Sin esto, el genérico de más abajo que busca € después de
+        # "Anual" cogía "800,00" de "Renta mensual máxima garantizada" -- un
+        # dato de cobertura, no de prima -- porque "Anual" aparece antes en el
+        # documento (en "Duración: Anual") que la fila de importes real.
+        r"Prima\s+Neta\s+I\.P\.S\.\s+L\.E\.A[\s\S]{0,80}?([0-9]+[.,][0-9]{2})\s*€",
         r"Prima neta\s*[:€]?\s*([0-9\.,]+)",
         r"Prima\s+neta.*?Total\s+Recibo.*?\bAnual\b[^\d]*([0-9]{1,3}(?:\.[0-9]{3})*,[0-9]{2})\s*€",
         r"Importe\s*prima\s*neta\s*[:€]?\s*([0-9\.,]+)",
@@ -120328,6 +120442,14 @@ class Handler(BaseHTTPRequestHandler):
                         uploaded_clause=uploaded_policy_filter(),
                     )
                 )
+            # Buscar una póliza por el nombre del cliente sólo miraba la columna de
+            # texto libre `tomador`, que el OCR o un alta manual pueden dejar con un
+            # nombre más largo/corto que el registrado en su ficha ("Comunidad de
+            # Propietarios Barceló 4" en la póliza, "CP Barceló 4" en el cliente): la
+            # búsqueda de la lista de pólizas no encontraba al cliente aunque el alta
+            # por OCR sí (esa sí usa `_cliente_nombre_search_clause`). Se une aquí la
+            # misma lógica, contra la ficha del cliente enlazado por `cliente_id`.
+            join_clientes = tabla == "seguros" and "cliente_id" in columns
 
             if year_filter and tabla == "movimientos":
                 where.append("t.anio = ?")
@@ -120343,10 +120465,21 @@ class Handler(BaseHTTPRequestHandler):
                     where.append(f"{_sql_sin_acentos(f'CAST(t.{quote_ident(field_filter)} AS TEXT)')} LIKE ?")
                     values.append(f"%{q_norm}%")
                 else:
+                    clauses = []
+                    col_values = []
                     if text_columns:
                         likes = " OR ".join([f"{_sql_sin_acentos(f'CAST(t.{quote_ident(col)} AS TEXT)')} LIKE ?" for col in text_columns])
-                        where.append(f"({likes})")
-                        values.extend([f"%{q_norm}%"] * len(text_columns))
+                        clauses.append(f"({likes})")
+                        col_values.extend([f"%{q_norm}%"] * len(text_columns))
+                    if join_clientes:
+                        nombre_clause, nombre_values = _cliente_nombre_search_clause(q, alias="c")
+                        if nombre_clause:
+                            clauses.append(f"({nombre_clause} OR {_sql_sin_acentos('c.nif')} LIKE ?)")
+                            col_values.extend(nombre_values)
+                            col_values.append(f"%{q_norm}%")
+                    if clauses:
+                        where.append(f"({' OR '.join(clauses)})")
+                        values.extend(col_values)
 
             if estado_filter and "estado" in visible_columns:
                 where.append(f"t.{quote_ident('estado')} = ?")
@@ -120381,10 +120514,12 @@ class Handler(BaseHTTPRequestHandler):
             select_prefix = "e.nombre AS empresa"
             if select_cols:
                 select_prefix = f"{select_prefix}, {select_cols}"
+            join_clientes_clause = "LEFT JOIN clientes c ON c.id = t.cliente_id " if join_clientes else ""
             query = (
                 f"SELECT {select_prefix} "
                 f"FROM {quote_ident(tabla)} t "
                 "LEFT JOIN empresas e ON e.id = t.empresa_id "
+                f"{join_clientes_clause}"
                 f"{where_clause} "
                 f"{order_clause} "
                 f"{limit_clause}"

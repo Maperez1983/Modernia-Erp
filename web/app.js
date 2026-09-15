@@ -37775,6 +37775,14 @@ const COMPANY_ALIASES = {
   "CATALANA OCCIDENTE": "CATALANA OCCIDENTE",
   "CATALANA OCCIDENT": "CATALANA OCCIDENTE",
   "CATALANA": "CATALANA OCCIDENTE",
+  // El lector de pólizas (parse_poliza_text, web/server.py) guarda "iptiQ EMEA
+  // P&C" como compañía de las pólizas Gallen -- es el asegurador real detrás
+  // de la agencia de suscripción Gallen Seguros. Sin este alias, el logo y el
+  // desplegable de compañías no reconocían el texto que el propio OCR guarda.
+  "IPTIQ EMEA P C": "GALLEN",
+  IPTIQ: "GALLEN",
+  "GALLEN SEGUROS": "GALLEN",
+  "GALLEN INSURANCE": "GALLEN",
   "BANCO SANTANDER": "SANTANDER",
   SANTANDER: "SANTANDER",
   "BANCO BBVA": "BBVA",

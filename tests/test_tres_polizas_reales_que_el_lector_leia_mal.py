@@ -134,6 +134,90 @@ Nombre/Razon Social:
         self.assertNotIn("FINCAS VELAZQUEZ", (fields.get("tomador") or "").upper())
 
 
+class GallenGarantiaAlquilerEnTablaTests(unittest.TestCase):
+    """Misma aseguradora que GallenImpagoTests, pero el PDF real es una TABLA:
+    nombre y DNI/CIF van en la MISMA línea, no en líneas separadas como en el
+    condensado de arriba -- y la póliza trae 30 páginas de condiciones
+    generales detrás, no unas pocas líneas.
+
+    Caso real: POLIZA_GALLEN_-_JOSE_BISSO_7__3B.pdf. Con el condensado de
+    `GallenImpagoTests` los tres bugs de aquí pasaban desapercibidos porque no
+    hay bastante texto detrás para dispararlos:
+
+    1. El tomador salía VACÍO. El patrón que busca "Nombre/Razón Social:" tras
+       "Tomador del Seguro/Asegurado" capturaba con `[^\\n]+` sin tope; contra
+       el texto "aplanado" (sin saltos de línea) eso se comía el documento
+       ENTERO desde el nombre hasta el final -- y en cuanto esa cadena gigante
+       incluía la palabra "aseguradora" (que en cualquier póliza real aparece
+       más adelante, en la letra pequeña), la limpieza de tomadores la
+       rechazaba entera.
+    2. El DNI/NIF salía siendo el de LA PROPIA AGENCIA («Gallen Insurance
+       Underwriting S.L. ... con NIF B92833490»), no el del tomador: el
+       patrón genérico que busca "NIF" no reconocía la etiqueta real del
+       documento, "DNI/CIF", así que caía al primer "NIF" suelto que
+       encontraba páginas más abajo.
+    3. La prima neta salía siendo "800,00" -- la renta mensual garantizada,
+       un dato de cobertura -- porque la tabla real trae la etiqueta ("Prima
+       Neta   I.P.S.   L.E.A") en una fila y los importes en la SIGUIENTE, y
+       el único candidato que encontraba el lector era el fallback genérico
+       que busca € después de la palabra "Anual" (que aparece antes, en
+       "Duración: Anual", que la fila de importes real).
+    """
+
+    TEXTO = (
+        "CONDICIONES PARTICULARES\n\n"
+        "Póliza Nº: GAG13338                    Fecha de emisión: 07/09/2026\n\n"
+        "Mediador\n"
+        "Nombre/Razón Social: FINCAS VELAZQUEZ.SL\n"
+        "Tfno.: 651-075-059              Email: info@fincasvelazquez.es\n\n"
+        "Tomador del Seguro/Asegurado\n"
+        "Nombre/Razón Social: VAZQUEZ CABRERA, DOLORES           DNI/CIF: 02693015-Z\n"
+        "Domicilio: CALLE Ezequiel Solana 37 BO B, Madrid CP. 28017\n"
+        "Población: MADRID\n\n"
+        "Situación del Riesgo\n"
+        "Dirección      CALLE JOSE BISSO 7 3 B\n"
+        "Población      MÁLAGA\n"
+        "CP/Provincia   29003 /Málaga\n\n"
+        "Detalle de la prima\n"
+        "Importe total de la prima anual:                                       375.64 €\n"
+        "Desglose del recibo de prima anual\n"
+        "Prima Neta                       I.P.S.             L.E.A                    CCS\n"
+        " 346.66 €                      27.73 €                         1.25 €\n\n"
+        "Duración y fechas de efecto y fin de vigencia del contrato\n"
+        "Duración                Anual\n\n"
+        "Pérdida de alquileres\n"
+        "Renta mensual máxima garantizada (euros)                              800,00 €\n"
+        "Suma máxima asegurada                                                 9600,00 €\n\n"
+        # 30 páginas de condiciones generales reducidas a lo mínimo que hace
+        # falta para disparar los dos bugs de arriba si vuelven: la palabra
+        # "aseguradora" y el NIF de la propia agencia, ambos bien por debajo
+        # del tomador real.
+        "Gallen Insurance Underwriting S.L., con domicilio en Calle María de Molina 37, 3º, "
+        "28006 Madrid - con NIF B92833490, entidad autorizada por la DGSFP, actuando como "
+        "agencia de suscripción por cuenta de la compañía aseguradora iptiQ EMEA P&C, S.A., "
+        "Sucursal en España.\n"
+    )
+
+    def test_el_tomador_no_sale_vacio_por_el_documento_de_30_paginas_detras(self):
+        fields = parse_poliza_text(self.TEXTO)
+        self.assertEqual(fields.get("tomador"), "VAZQUEZ CABRERA, DOLORES")
+
+    def test_el_dni_es_el_del_tomador_no_el_de_la_agencia(self):
+        fields = parse_poliza_text(self.TEXTO)
+        self.assertEqual(fields.get("dni"), "02693015Z")
+        self.assertEqual(fields.get("nif"), "02693015Z")
+        self.assertNotIn("B92833490", (fields.get("dni") or "") + (fields.get("nif") or ""))
+
+    def test_la_prima_neta_es_la_de_la_tabla_no_la_renta_garantizada(self):
+        fields = parse_poliza_text(self.TEXTO)
+        self.assertEqual(fields.get("prima_neta"), "346.66")
+        self.assertEqual(fields.get("prima_total"), "375.64")
+
+    def test_la_compania_no_sale_truncada(self):
+        fields = parse_poliza_text(self.TEXTO, source_hint="POLIZA_GALLEN_-_JOSE_BISSO.pdf")
+        self.assertEqual(fields.get("compania"), "iptiQ EMEA P&C")
+
+
 class SantaLuciaSegurComunidadTests(unittest.TestCase):
     TEXTO = """
 Seguro de Comunidades
