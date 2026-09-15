@@ -220,6 +220,12 @@ class GallenGarantiaAlquilerEnTablaTests(unittest.TestCase):
         fields = parse_poliza_text(self.TEXTO, source_hint="POLIZA_GALLEN_-_JOSE_BISSO.pdf")
         self.assertEqual(fields.get("compania"), "Gallen")
 
+    def test_se_detecta_por_el_texto_aunque_el_archivo_no_se_llame_gallen(self):
+        """"GALLEN INSURANCE UNDERWRITING" sale en el pie de TODAS las páginas
+        del documento real -- no hace falta que el nombre del PDF lo diga."""
+        fields = parse_poliza_text(self.TEXTO, source_hint="documento_escaneado_23.pdf")
+        self.assertEqual(fields.get("compania"), "Gallen")
+
 
 class SantaLuciaSegurComunidadTests(unittest.TestCase):
     TEXTO = """

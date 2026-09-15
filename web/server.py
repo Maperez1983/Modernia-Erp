@@ -1946,6 +1946,12 @@ COMPANY_ALIAS_PATTERNS = [
     (r"\bPELAYO\b", "Pelayo"),
     (r"\bSANTA\s*LUCIA\b|\bSANTALUCIA\b", "Santa Lucia"),
     (r"\bFIATC\b", "Fiatc"),
+    # Gallen Seguros (agencia de suscripción) opera pólizas de iptiQ EMEA P&C
+    # (el asegurador técnico); ambos nombres aparecen en el pie de página de
+    # TODAS las páginas del documento, no sólo en el nombre del archivo -- así
+    # que detectarlo por texto (no sólo por el nombre del PDF) cubre cualquier
+    # póliza de Gallen, se llame como se llame el archivo subido.
+    (r"\bGALLEN\b|\bIPTIQ\b", "Gallen"),
     (r"\bLINEA\s*DIRECTA\b", "Línea Directa"),
     (r"\bLIBERTY\b", "Liberty"),
     (r"\bMUTUA\s*MADRILE[NÑ]A\b", "Mutua Madrileña"),
