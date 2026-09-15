@@ -213,9 +213,12 @@ class GallenGarantiaAlquilerEnTablaTests(unittest.TestCase):
         self.assertEqual(fields.get("prima_neta"), "346.66")
         self.assertEqual(fields.get("prima_total"), "375.64")
 
-    def test_la_compania_no_sale_truncada(self):
+    def test_la_compania_es_gallen_no_el_asegurador_tecnico(self):
+        """iptiQ EMEA P&C asume el riesgo, pero la correduría opera con Gallen
+        (la agencia de suscripción): es la que factura y gestiona siniestros,
+        así que es la que debe verse en el CRM."""
         fields = parse_poliza_text(self.TEXTO, source_hint="POLIZA_GALLEN_-_JOSE_BISSO.pdf")
-        self.assertEqual(fields.get("compania"), "iptiQ EMEA P&C")
+        self.assertEqual(fields.get("compania"), "Gallen")
 
 
 class SantaLuciaSegurComunidadTests(unittest.TestCase):

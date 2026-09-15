@@ -24051,7 +24051,13 @@ def parse_poliza_text(text, source_hint="", hinted_company=""):
         elif "FIATC" in upper or "FIACT" in upper:
             out["compania"] = "Fiatc"
         elif "IPTIQ" in upper or "GALLEN" in upper:
-            out["compania"] = "iptiQ EMEA P&C"
+            # iptiQ EMEA P&C es la aseguradora que asume el riesgo, pero la
+            # correduría opera con "Gallen" (Gallen Seguros / Gallen Insurance
+            # Underwriting, la agencia de suscripción): es la que factura, la
+            # que gestiona los siniestros y como la conoce el equipo -- así
+            # que es la que debe aparecer en el CRM, no el nombre técnico del
+            # asegurador final.
+            out["compania"] = "Gallen"
         elif "ARAG" in upper:
             out["compania"] = "ARAG"
         elif "OCASO" in upper:
