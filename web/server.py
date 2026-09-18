@@ -45816,7 +45816,9 @@ def ensure_workspace_product_tables(conn):
     except Exception as _fallo_tragado:
         apunta_escritura_tragada("ensure_workspace_product_tables/workspace_registro_personal", _fallo_tragado)
     # Limpieza: si por errores históricos hay más de una ficha vinculada al mismo usuario en un workspace,
-    # conservamos la más reciente y desvinculamos el resto.
+    # conservamos la que tiene el historial (ORDEN_FICHA_ESTABLE_SQL) y desvinculamos el resto.
+    # Antes se conservaba la de `updated_at` más reciente, que podía ser la vacía: el aviso
+    # diario de "no has fichado" toca esa fecha, y la ficha con los fichajes se desvinculaba.
     #
     # `HAVING COUNT(*) > 1` y no `HAVING n > 1`: el alias del SELECT no se puede usar en
     # el HAVING en Postgres —SQLite sí lo admite—, así que en producción esto reventaba
@@ -45837,11 +45839,11 @@ def ensure_workspace_product_tables(conn):
             ws_id = ws_row[0]
             user_id = ws_row[1]
             keep = conn.execute(
-                """
-                SELECT id
-                FROM workspace_registro_personal
-                WHERE workspace_id = ? AND usuario_id = ? AND COALESCE(usuario_manual, 0) = 1
-                ORDER BY COALESCE(updated_at, created_at) DESC
+                f"""
+                SELECT p.id
+                FROM workspace_registro_personal p
+                WHERE p.workspace_id = ? AND p.usuario_id = ? AND COALESCE(p.usuario_manual, 0) = 1
+                ORDER BY {ORDEN_FICHA_ESTABLE_SQL}
                 LIMIT 1
                 """,
                 (ws_id, user_id),
@@ -53782,15 +53784,31 @@ def resolve_empresa_id_for_request(conn, session, *, workspace_id="", empresa_id
         eid = resolved_eid
     return eid, wc_id, ""
 
+# Orden estable para elegir entre varias fichas de un mismo trabajador (alias `p` sobre
+# workspace_registro_personal): primero la que tiene el fichaje más reciente; si ninguna
+# tiene, la más antigua. Nunca `updated_at`: el aviso diario de "no has fichado" y
+# cualquier edición la mueven, y con ella saltaba el fichaje de una ficha a otra
+# (2026-09-18: el inicio mandaba a dos trabajadores a una ficha vacía de otro workspace).
+ORDEN_FICHA_ESTABLE_SQL = """
+    COALESCE((
+      SELECT MAX(h.fecha)
+      FROM workspace_registro_horario h
+      WHERE h.workspace_id = p.workspace_id AND h.persona_id = p.id
+    ), '') DESC,
+    COALESCE(p.created_at, '') ASC,
+    p.id ASC
+"""
+
+
 def workspace_persona_id_for_user(conn, workspace_id, user_id):
     if not workspace_id or not user_id:
         return ""
     row = conn.execute(
-        """
-        SELECT id
-        FROM workspace_registro_personal
-        WHERE workspace_id = ? AND usuario_id = ? AND COALESCE(activo, 1) = 1
-        ORDER BY COALESCE(usuario_manual, 0) DESC, COALESCE(updated_at, created_at) DESC
+        f"""
+        SELECT p.id
+        FROM workspace_registro_personal p
+        WHERE p.workspace_id = ? AND p.usuario_id = ? AND COALESCE(p.activo, 1) = 1
+        ORDER BY COALESCE(p.usuario_manual, 0) DESC, {ORDEN_FICHA_ESTABLE_SQL}
         LIMIT 1
         """,
         (workspace_id, user_id),
@@ -53828,14 +53846,7 @@ def workspace_de_fichaje_para_usuario(conn, user_id, workspace_ids):
         WHERE p.usuario_id = ?
           AND COALESCE(p.activo, 1) = 1
           AND p.workspace_id IN ({placeholders})
-        ORDER BY COALESCE(p.usuario_manual, 0) DESC,
-                 COALESCE((
-                   SELECT MAX(h.fecha)
-                   FROM workspace_registro_horario h
-                   WHERE h.workspace_id = p.workspace_id AND h.persona_id = p.id
-                 ), '') DESC,
-                 COALESCE(p.created_at, '') ASC,
-                 p.workspace_id ASC
+        ORDER BY COALESCE(p.usuario_manual, 0) DESC, {ORDEN_FICHA_ESTABLE_SQL}
         LIMIT 1
         """,
         (user_id, *ids),
@@ -53894,6 +53905,129 @@ def session_user_id(session):
     return ""
 
 
+def usuario_sigue_activo(conn, user_id):
+    """True si el usuario existe y no está desactivado.
+
+    Una ficha vinculada a un usuario que ya no existe (se borró y se volvió a crear con
+    otro id) o que está desactivado no es de nadie: hay que poder recuperarla. Fue el
+    caso de dos trabajadores de Modernia Centro, cuya ficha seguía apuntando a su
+    usuario antiguo y por eso nunca se les vinculaba sola.
+    """
+    uid = str(user_id or "").strip()
+    if not uid:
+        return False
+    row = conn.execute("SELECT COALESCE(activo, 1) AS activo FROM usuarios WHERE id = ? LIMIT 1", (uid,)).fetchone()
+    if not row:
+        return False
+    return int(row_value(row, "activo", 1) or 0) == 1
+
+
+def diagnostico_fichas_del_workspace(conn, workspace_id):
+    """
+    Lo que impide fichar a alguien en este workspace y nadie ve a simple vista.
+
+    Nace del 2026-09-18: cuatro trabajadores no veían su fichaje por fichas vinculadas a
+    usuarios borrados o repartidas entre workspaces, y solo se supo cuando uno se quejó.
+    Devuelve tres listas, todas acotadas al workspace:
+
+    - `fichas_huerfanas`: fichas activas vinculadas a un usuario que ya no existe o está
+      desactivado. Nadie puede fichar en ellas.
+    - `usuarios_sin_ficha`: miembros activos con registro horario activado que no tienen
+      ficha aquí. Si además tienen ficha en otro workspace se indica, porque entonces no
+      se les crea una sola.
+    - `fichas_en_varios_workspaces`: trabajadores con ficha aquí y también en otro sitio.
+    """
+    ws_id = str(workspace_id or "").strip()
+    vacio = {"fichas_huerfanas": [], "usuarios_sin_ficha": [], "fichas_en_varios_workspaces": []}
+    if not ws_id:
+        return vacio
+    fichas = conn.execute(
+        """
+        SELECT p.id, p.nombre, COALESCE(p.usuario_id, '') AS usuario_id,
+               u.id AS u_id, COALESCE(u.activo, 1) AS u_activo,
+               (SELECT COUNT(*) FROM workspace_registro_horario h
+                 WHERE h.workspace_id = p.workspace_id AND h.persona_id = p.id) AS fichajes,
+               (SELECT MAX(h.fecha) FROM workspace_registro_horario h
+                 WHERE h.workspace_id = p.workspace_id AND h.persona_id = p.id) AS ultimo_fichaje
+        FROM workspace_registro_personal p
+        LEFT JOIN usuarios u ON u.id = p.usuario_id
+        WHERE p.workspace_id = ? AND COALESCE(p.activo, 1) = 1
+        ORDER BY p.nombre
+        """,
+        (ws_id,),
+    ).fetchall() or []
+    huerfanas = []
+    vinculados = set()
+    for f in fichas:
+        uid = str(row_value(f, "usuario_id") or "").strip()
+        if not uid:
+            continue
+        vivo = bool(row_value(f, "u_id")) and int(row_value(f, "u_activo", 1) or 0) == 1
+        if vivo:
+            vinculados.add(uid)
+            continue
+        huerfanas.append({
+            "persona_id": str(row_value(f, "id") or ""),
+            "nombre": str(row_value(f, "nombre") or ""),
+            "motivo": "usuario_desactivado" if row_value(f, "u_id") else "usuario_no_existe",
+            "fichajes": int(row_value(f, "fichajes", 0) or 0),
+            "ultimo_fichaje": str(row_value(f, "ultimo_fichaje") or ""),
+        })
+
+    miembros = conn.execute(
+        """
+        SELECT u.id, u.nombre, u.apellido, u.usuario
+        FROM workspace_miembros m
+        JOIN usuarios u ON u.id = m.usuario_id
+        WHERE m.workspace_id = ?
+          AND COALESCE(u.activo, 1) = 1
+          AND COALESCE(u.registro_horario_activo, 0) = 1
+        ORDER BY u.nombre
+        """,
+        (ws_id,),
+    ).fetchall() or []
+
+    def _otros_workspaces(uid):
+        rows = conn.execute(
+            """
+            SELECT DISTINCT w.nombre
+            FROM workspace_registro_personal p
+            JOIN workspaces w ON w.id = p.workspace_id
+            WHERE p.usuario_id = ? AND p.workspace_id <> ? AND COALESCE(p.activo, 1) = 1
+            ORDER BY w.nombre
+            """,
+            (uid, ws_id),
+        ).fetchall() or []
+        return [str(row_value(r, "nombre") or row_value(r, 0) or "") for r in rows]
+
+    sin_ficha = []
+    for m in miembros:
+        uid = str(row_value(m, "id") or "").strip()
+        if not uid or uid in vinculados:
+            continue
+        nombre = " ".join(
+            x for x in [str(row_value(m, "nombre") or "").strip(), str(row_value(m, "apellido") or "").strip()] if x
+        ) or str(row_value(m, "usuario") or "")
+        sin_ficha.append({
+            "usuario_id": uid,
+            "nombre": nombre,
+            "usuario": str(row_value(m, "usuario") or ""),
+            "ficha_en": _otros_workspaces(uid),
+        })
+
+    varios = []
+    for uid in sorted(vinculados):
+        otros = _otros_workspaces(uid)
+        if otros:
+            nombre = next(
+                (str(row_value(f, "nombre") or "") for f in fichas if str(row_value(f, "usuario_id") or "") == uid),
+                "",
+            )
+            varios.append({"usuario_id": uid, "nombre": nombre, "tambien_en": otros})
+
+    return {"fichas_huerfanas": huerfanas, "usuarios_sin_ficha": sin_ficha, "fichas_en_varios_workspaces": varios}
+
+
 def ensure_workspace_persona_for_self(conn, workspace_id, session):
     """
     Garantiza que un usuario no privilegiado con `registro_horario_activo=1` tenga una ficha
@@ -53943,11 +54077,11 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
 
         # 0) Si ya tiene ficha con usuario_id (aunque usuario_manual=0), la promovemos.
         persona = conn.execute(
-            """
-            SELECT id, empresa_id, COALESCE(usuario_manual, 0) AS usuario_manual, COALESCE(source, '') AS source
-            FROM workspace_registro_personal
-            WHERE workspace_id = ? AND usuario_id = ? AND COALESCE(activo, 1) = 1
-            ORDER BY COALESCE(usuario_manual, 0) DESC, COALESCE(updated_at, created_at) DESC
+            f"""
+            SELECT p.id, p.empresa_id, COALESCE(p.usuario_manual, 0) AS usuario_manual, COALESCE(p.source, '') AS source
+            FROM workspace_registro_personal p
+            WHERE p.workspace_id = ? AND p.usuario_id = ? AND COALESCE(p.activo, 1) = 1
+            ORDER BY COALESCE(p.usuario_manual, 0) DESC, {ORDEN_FICHA_ESTABLE_SQL}
             LIMIT 1
             """,
             (ws_id, user_id),
@@ -54006,7 +54140,9 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
                 existing_uid = str(row_value(row, "usuario_id") or "").strip()
                 if not cid:
                     continue
-                if existing_uid and existing_uid != user_id:
+                # Ocupada solo si su usuario sigue vivo; si apunta a uno borrado o
+                # desactivado, la ficha está huérfana y se recupera.
+                if existing_uid and existing_uid != user_id and usuario_sigue_activo(conn, existing_uid):
                     continue
                 candidates.append(row)
             if len(candidates) == 1:
@@ -54057,7 +54193,9 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
                 existing_uid = str(row_value(row, "usuario_id") or "").strip()
                 if not cid:
                     continue
-                if existing_uid and existing_uid != user_id:
+                # Ocupada solo si su usuario sigue vivo; si apunta a uno borrado o
+                # desactivado, la ficha está huérfana y se recupera.
+                if existing_uid and existing_uid != user_id and usuario_sigue_activo(conn, existing_uid):
                     continue
                 candidates.append(row)
             if len(candidates) == 1:
@@ -54162,6 +54300,22 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
             if any(token in service_raw for token in ("gestor", "inmobili", "seguro", "finca", "financia", "obra", "reforma", "rrhh", "laboral")):
                 time_enabled = True
         if not time_enabled:
+            return ""
+
+        # Si ya tiene su ficha en otro workspace, no le fabricamos una vacía aquí: bastaba
+        # con entrar a mirar otro workspace para estrenar una ficha sin historial, y luego
+        # el inicio podía mandarle a ella (así nacieron las de Verifika² del 27-ago y 4-sep).
+        # Quien trabaje de verdad en dos sitios necesita que RRHH le dé de alta la segunda.
+        otra_ficha = conn.execute(
+            """
+            SELECT 1
+            FROM workspace_registro_personal
+            WHERE usuario_id = ? AND workspace_id <> ? AND COALESCE(activo, 1) = 1
+            LIMIT 1
+            """,
+            (user_id, ws_id),
+        ).fetchone()
+        if otra_ficha:
             return ""
 
         # Sin ficha: creamos una mínima para permitir fichaje self.
@@ -54816,7 +54970,6 @@ def _parse_alert_last_sent(value):
 
 
 def _update_alert_last_sent(conn, workspace_id, persona_id, updates, now=None):
-    now_ts = now or app_now().isoformat()
     existing = conn.execute(
         """
         SELECT alert_last_sent
@@ -54828,13 +54981,15 @@ def _update_alert_last_sent(conn, workspace_id, persona_id, updates, now=None):
     ).fetchone()
     current = _parse_alert_last_sent(existing["alert_last_sent"] if existing else "")
     current.update({k: v for k, v in (updates or {}).items() if v})
+    # Sin tocar `updated_at`: enviar un aviso no es editar la ficha. Cuando la tocaba,
+    # cada mañana todas las fichas parecían recién editadas en el orden del barrido.
     conn.execute(
         """
         UPDATE workspace_registro_personal
-        SET alert_last_sent = ?, updated_at = datetime(?)
+        SET alert_last_sent = ?
         WHERE workspace_id = ? AND id = ?
         """,
-        (json.dumps(current, ensure_ascii=False), now_ts, workspace_id, persona_id),
+        (json.dumps(current, ensure_ascii=False), workspace_id, persona_id),
     )
 
 
@@ -104377,6 +104532,18 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             json_response(self, fetch_workspace_registro_periodos(conn, workspace_id, empresa_id=empresa_id))
+            return
+
+        if path == "/api/workspace_registro_diagnostico":
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            if not workspace_id:
+                json_response(self, {"error": "workspace_id requerido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            json_response(self, {"ok": True, **diagnostico_fichas_del_workspace(conn, workspace_id)})
             return
 
         if path == "/api/workspace_registro_usuarios":

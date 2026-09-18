@@ -16086,6 +16086,66 @@ const upsertWorkspaceEmployeeLocal = (patch = {}) => {
   renderWorkspaceRrhhHub();
 };
 
+// Aviso de fichas que impiden fichar a alguien (vinculadas a usuarios que ya no existen,
+// miembros sin ficha, fichas repartidas entre workspaces). Nace del 2026-09-18, cuando
+// cuatro trabajadores no veían su fichaje y nadie lo supo hasta que uno se quejó.
+// Se pide aparte y se cachea un minuto por workspace para no frenar el pintado.
+const RRHH_DIAGNOSTICO_TTL_MS = 60 * 1000;
+const _rrhhDiagnostico = { byWs: {}, loading: {} };
+
+const loadWorkspaceRrhhDiagnostico = async (workspaceId) => {
+  const ws = String(workspaceId || "").trim();
+  if (!ws || _rrhhDiagnostico.loading[ws]) return;
+  _rrhhDiagnostico.loading[ws] = true;
+  try {
+    const data = await api(`/api/workspace_registro_diagnostico?workspace_id=${encodeURIComponent(ws)}`);
+    _rrhhDiagnostico.byWs[ws] = { at: Date.now(), data: data && data.ok ? data : null };
+  } catch (e) {
+    _rrhhDiagnostico.byWs[ws] = { at: Date.now(), data: null };
+  } finally {
+    _rrhhDiagnostico.loading[ws] = false;
+  }
+  if (String(state.currentWorkspaceId || "").trim() === ws) renderWorkspaceRrhhHub();
+};
+
+const renderWorkspaceRrhhDiagnostico = () => {
+  const ws = String(state.currentWorkspaceId || "").trim();
+  if (!ws) return "";
+  const cached = _rrhhDiagnostico.byWs[ws];
+  if (!cached || Date.now() - cached.at > RRHH_DIAGNOSTICO_TTL_MS) {
+    loadWorkspaceRrhhDiagnostico(ws);
+  }
+  const data = cached?.data;
+  if (!data) return "";
+  const huerfanas = Array.isArray(data.fichas_huerfanas) ? data.fichas_huerfanas : [];
+  const sinFicha = Array.isArray(data.usuarios_sin_ficha) ? data.usuarios_sin_ficha : [];
+  const varios = Array.isArray(data.fichas_en_varios_workspaces) ? data.fichas_en_varios_workspaces : [];
+  if (!huerfanas.length && !sinFicha.length && !varios.length) return "";
+  const items = [];
+  huerfanas.forEach((row) => {
+    const motivo = row.motivo === "usuario_desactivado" ? "su usuario está desactivado" : "su usuario ya no existe";
+    const historial = Number(row.fichajes || 0) > 0
+      ? ` Guarda ${numberFormatter.format(Number(row.fichajes))} fichajes (último ${escapeHtml(row.ultimo_fichaje || "-")}): no la borres, vincúlala o desactívala.`
+      : "";
+    items.push(`<li><strong>${escapeHtml(row.nombre || "-")}</strong>: nadie puede fichar en esta ficha porque ${motivo}.${historial}</li>`);
+  });
+  sinFicha.forEach((row) => {
+    const fuera = Array.isArray(row.ficha_en) && row.ficha_en.length
+      ? ` Tiene ficha en ${escapeHtml(row.ficha_en.join(", "))}; si también trabaja aquí, dale de alta.`
+      : " Añádelo a la plantilla desde Usuarios del sistema.";
+    items.push(`<li><strong>${escapeHtml(row.nombre || row.usuario || "-")}</strong> tiene el fichaje activado pero no tiene ficha aquí.${fuera}</li>`);
+  });
+  varios.forEach((row) => {
+    items.push(`<li><strong>${escapeHtml(row.nombre || "-")}</strong> tiene ficha aquí y también en ${escapeHtml((row.tambien_en || []).join(", "))}. Su inicio usa la que tenga el fichaje más reciente.</li>`);
+  });
+  return `
+    <details class="workspace-rrhh-diagnostico" open>
+      <summary><strong>Revisa ${numberFormatter.format(items.length)} ${items.length === 1 ? "ficha" : "fichas"} del registro horario</strong></summary>
+      <ul>${items.join("")}</ul>
+    </details>
+  `;
+};
+
 const renderWorkspaceRrhhHub = () => {
   if (!workspaceRrhhHub) return;
   const rrhhEntry = String(state.workspaceRrhhEntry || "").trim().toLowerCase();
@@ -16154,6 +16214,7 @@ const renderWorkspaceRrhhHub = () => {
         <strong>Plantilla</strong>
         <span class="muted">${numberFormatter.format(activeCount)} activos · ${numberFormatter.format(normalized.length)} total</span>
       </div>
+      ${manager ? renderWorkspaceRrhhDiagnostico() : ""}
       <div class="workspace-rrhh-sidebar-actions">
         <button type="button" class="secondary ghost" data-rrhh-employee-new>Crear empleado</button>
         <button type="button" class="secondary ghost" data-rrhh-open-time>Registro horario</button>
@@ -22221,7 +22282,11 @@ const hydrateWorkspaceCompanySelects = () => {
     workspaceRemittancesForm,
     workspaceFincasProviderForm,
     workspaceFincasBudgetQuickForm,
-    workspacePericialForm,
+    // Aquí estaba `workspacePericialForm`. Su declaración se perdió al resolver la fusión
+    // 453042d (2026-09-04), pero la referencia se quedó: un ReferenceError al montar esta
+    // lista, antes de recorrerla, que dejaba sin empresas todos los formularios y cortaba
+    // a medias facturas, presupuestos, series, remesas, bandeja, registro horario y la
+    // ficha de empresa. El formulario ya no existe: cada expediente tiene su ficha.
   ].forEach((form) => {
     const select = form?.querySelector('[name="empresa_id"]');
     if (select) {

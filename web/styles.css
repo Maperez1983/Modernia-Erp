@@ -3221,6 +3221,24 @@ body.theme-operativa .workspace-home-count {
   margin-top: 14px;
 }
 
+.workspace-rrhh-diagnostico {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(180, 120, 0, 0.35);
+  background: rgba(255, 190, 60, 0.12);
+  font-size: 0.9em;
+}
+
+.workspace-rrhh-diagnostico ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+}
+
+.workspace-rrhh-diagnostico li + li {
+  margin-top: 6px;
+}
+
 .workspace-rrhh-sidebar-actions {
   display: flex;
   flex-wrap: wrap;
