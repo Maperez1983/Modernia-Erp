@@ -256,33 +256,98 @@ def main():
             conn.rollback()
             return 1
 
-    conn.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {LOG} (
-          id BIGSERIAL PRIMARY KEY, lote TEXT NOT NULL, tabla TEXT NOT NULL, fila_id TEXT NOT NULL,
-          antes TEXT, despues TEXT, motivo TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        )
-        """
-    )
-    for tabla in columnas_nuevas:
-        conn.execute(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS workspace_id TEXT")  # nosec B608
-    for tabla in tablas:
-        if tabla in sin_id:
-            continue
-        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{tabla}_workspace_id ON {tabla} (workspace_id)")  # nosec B608
-    for tabla, fid, antes, ws, motivo in plan:
-        conn.execute(f"UPDATE {tabla} SET workspace_id = %s WHERE id::text = %s", (ws, fid))  # nosec B608
-        conn.execute(
-            f"INSERT INTO {LOG} (lote, tabla, fila_id, antes, despues, motivo) VALUES (%s, %s, %s, %s, %s, %s)",
-            (lote, tabla, fid, antes, ws, motivo),
-        )
-    instala_disparadores(conn, [t for t in tablas if t not in sin_id], plataforma)
-    conn.commit()
+    # Todo lo anterior fue lectura: se cierra esa transacción antes de escribir.
+    conn.rollback()
+    aplica(conn, lote, plan, columnas_nuevas, [t for t in tablas if t not in sin_id], plataforma)
     print(f"\nAplicado. Lote: {lote}. Para deshacer los valores: --deshacer {lote}")
     return 0
 
 
 FUNCION = "ambito_workspace_desde_empresa"
+
+# La primera versión lo hacía todo en una transacción: los ALTER TABLE del principio
+# dejaban las 47 tablas bloqueadas (AccessExclusive) mientras corrían 33.602 UPDATE de uno
+# en uno hasta Frankfurt, y cualquier pantalla de gestoría o pólizas se habría quedado
+# colgada. Se paró a tiempo (no llegó a bloquear a nadie) y se rehízo así: cada paso en su
+# propia transacción corta, sin esperar a un bloqueo más de LOCK_TIMEOUT.
+LOCK_TIMEOUT = "3s"
+REINTENTOS = 5
+
+
+def _paso(conn, sentencias, descripcion):
+    """Ejecuta unas sentencias en una transacción corta; reintenta si choca con un bloqueo."""
+    import time
+
+    import psycopg
+
+    for intento in range(1, REINTENTOS + 1):
+        try:
+            conn.execute(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'")
+            for sql, params in sentencias:
+                conn.execute(sql, params)
+            conn.commit()
+            return
+        except psycopg.errors.LockNotAvailable:
+            conn.rollback()
+            print(f"  {descripcion}: tabla ocupada, reintento {intento}/{REINTENTOS}")
+            time.sleep(2 * intento)
+    raise RuntimeError(f"No se pudo completar: {descripcion}")
+
+
+def aplica(conn, lote, plan, columnas_nuevas, tablas, plataforma):
+    _paso(conn, [(
+        f"""
+        CREATE TABLE IF NOT EXISTS {LOG} (
+          id BIGSERIAL PRIMARY KEY, lote TEXT NOT NULL, tabla TEXT NOT NULL, fila_id TEXT NOT NULL,
+          antes TEXT, despues TEXT, motivo TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        )
+        """, None)], "tabla de registro")
+
+    # 1. Columnas: añadir una columna nula es instantáneo; el bloqueo dura lo que el commit.
+    for tabla in columnas_nuevas:
+        _paso(conn, [(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS workspace_id TEXT", None)],  # nosec B608
+              f"columna en {tabla}")
+    print(f"Columnas añadidas: {len(columnas_nuevas)}")
+
+    # 2. Relleno: una sentencia por tabla, con las filas en arrays, y su registro en la
+    #    misma transacción. Solo toca filas que siguen como se leyeron (sin workspace, o
+    #    con el mismo valor de antes): si alguien la ha cambiado entretanto, se respeta.
+    por_tabla = defaultdict(list)
+    for tabla, fid, antes, ws, motivo in plan:
+        por_tabla[tabla].append((fid, antes, ws, motivo))
+    for tabla, filas in por_tabla.items():
+        ids = [f[0] for f in filas]
+        antes = [f[1] for f in filas]
+        despues = [f[2] for f in filas]
+        motivos = [f[3] for f in filas]
+        _paso(conn, [
+            (f"""
+             WITH u AS (
+               SELECT * FROM unnest(%s::text[], %s::text[], %s::text[], %s::text[]) AS u(id, antes, ws, motivo)
+             ), hecho AS (
+               UPDATE {tabla} t SET workspace_id = u.ws
+               FROM u
+               WHERE t.id::text = u.id AND COALESCE(t.workspace_id, '') = COALESCE(u.antes, '')
+               RETURNING t.id::text AS id
+             )
+             INSERT INTO {LOG} (lote, tabla, fila_id, antes, despues, motivo)
+             SELECT %s, %s, u.id, u.antes, u.ws, u.motivo FROM u JOIN hecho ON hecho.id = u.id
+             """, (ids, antes, despues, motivos, lote, tabla)),  # nosec B608
+        ], f"relleno de {tabla}")
+        print(f"  {tabla}: {len(filas)} filas")
+
+    # 3. Índices sin bloquear escrituras (CONCURRENTLY no admite transacción).
+    conn.autocommit = True
+    try:
+        for tabla in tablas:
+            conn.execute(f"CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_{tabla}_workspace_id ON {tabla} (workspace_id)")  # nosec B608
+    finally:
+        conn.autocommit = False
+    print(f"Índices: {len(tablas)}")
+
+    # 4. Disparadores, tabla a tabla.
+    instala_disparadores(conn, tablas, plataforma)
+    print(f"Disparadores: {len(tablas)}")
 
 
 def instala_disparadores(conn, tablas, plataforma):
@@ -291,7 +356,7 @@ def instala_disparadores(conn, tablas, plataforma):
     Solo si la empresa cuelga de un único workspace fuera de la plataforma: si hay
     duda, no estampa nada, igual que el relleno.
     """
-    conn.execute(
+    _paso(conn, [(
         f"""
         CREATE OR REPLACE FUNCTION {FUNCION}() RETURNS trigger AS $$
         DECLARE
@@ -308,14 +373,13 @@ def instala_disparadores(conn, tablas, plataforma):
           RETURN NEW;
         END;
         $$ LANGUAGE plpgsql
-        """
-    )
+        """, None)], "función del disparador")
     for tabla in tablas:
-        conn.execute(f"DROP TRIGGER IF EXISTS trg_{tabla}_workspace ON {tabla}")  # nosec B608
-        conn.execute(
-            f"CREATE TRIGGER trg_{tabla}_workspace BEFORE INSERT ON {tabla} "  # nosec B608
-            f"FOR EACH ROW EXECUTE FUNCTION {FUNCION}()"
-        )
+        _paso(conn, [
+            (f"DROP TRIGGER IF EXISTS trg_{tabla}_workspace ON {tabla}", None),  # nosec B608
+            (f"CREATE TRIGGER trg_{tabla}_workspace BEFORE INSERT ON {tabla} "  # nosec B608
+             f"FOR EACH ROW EXECUTE FUNCTION {FUNCION}()", None),
+        ], f"disparador de {tabla}")
 
 
 def deshacer(conn, lote, sin_preguntar):
