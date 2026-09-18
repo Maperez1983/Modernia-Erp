@@ -53803,6 +53803,46 @@ def workspace_persona_id_for_user(conn, workspace_id, user_id):
         return str(row[0] or "")
 
 
+def workspace_de_fichaje_para_usuario(conn, user_id, workspace_ids):
+    """
+    Entre los workspaces donde el usuario tiene ficha vinculada, el que usa su fichaje.
+
+    Un mismo trabajador puede tener ficha en varios workspaces: la de siempre, con todo
+    su historial, y otra vacía que se creó sola al entrar en otro workspace. Antes se
+    elegía por `updated_at`, pero el aviso diario de "no has fichado" toca esa fecha en
+    todas las fichas cada mañana, así que ganaba la que el aviso procesara la última y
+    un día el fichaje "desaparecía" (encontrado el 2026-09-18 con dos trabajadores de
+    Modernia a los que se les mandaba a una ficha vacía de Verifika²).
+
+    Criterio estable: la ficha con el fichaje más reciente; si ninguna tiene, la más
+    antigua. Ninguno de los dos cambia porque alguien edite o avise a la ficha.
+    """
+    ids = [str(w or "").strip() for w in (workspace_ids or []) if str(w or "").strip()]
+    if not user_id or not ids:
+        return ""
+    placeholders = ",".join(["?"] * len(ids))
+    row = conn.execute(
+        f"""
+        SELECT p.workspace_id
+        FROM workspace_registro_personal p
+        WHERE p.usuario_id = ?
+          AND COALESCE(p.activo, 1) = 1
+          AND p.workspace_id IN ({placeholders})
+        ORDER BY COALESCE(p.usuario_manual, 0) DESC,
+                 COALESCE((
+                   SELECT MAX(h.fecha)
+                   FROM workspace_registro_horario h
+                   WHERE h.workspace_id = p.workspace_id AND h.persona_id = p.id
+                 ), '') DESC,
+                 COALESCE(p.created_at, '') ASC,
+                 p.workspace_id ASC
+        LIMIT 1
+        """,
+        (user_id, *ids),
+    ).fetchone()
+    return str(row_value(row, "workspace_id") or row_value(row, 0) or "").strip() if row else ""
+
+
 def resolve_workspace_time_toggle_persona_id(conn, session, workspace_id, requested_persona_id=""):
     """
     Resuelve la ficha de registro horario que debe usar un fichaje.
@@ -103449,22 +103489,9 @@ class Handler(BaseHTTPRequestHandler):
                         # Preferir el workspace donde ya existe ficha (usuario_id -> persona).
                         if user_id and workspace_ids:
                             try:
-                                placeholders = ",".join(["?"] * len(workspace_ids))
-                                row = conn.execute(
-                                    f"""
-                                    SELECT workspace_id
-                                    FROM workspace_registro_personal
-                                    WHERE usuario_id = ?
-                                      AND COALESCE(activo, 1) = 1
-                                      AND workspace_id IN ({placeholders})
-                                    ORDER BY COALESCE(usuario_manual, 0) DESC, COALESCE(updated_at, created_at) DESC
-                                    LIMIT 1
-                                    """,
-                                    (user_id, *workspace_ids),
-                                ).fetchone()
+                                ws_pick = workspace_de_fichaje_para_usuario(conn, user_id, workspace_ids)
                             except Exception:
-                                row = None
-                            ws_pick = str(row_value(row, "workspace_id") or row_value(row, 0) or "").strip() if row else ""
+                                ws_pick = ""
                             if ws_pick:
                                 chosen = next((it for it in ws_rows if str(it.get("id") or "").strip() == ws_pick), None)
                         # Si no hay vínculo directo, intentamos localizar el workspace por email/nombre en fichas (unlinked).
