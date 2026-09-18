@@ -54292,13 +54292,12 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
                         return candidate_id
 
         # Si no existe ficha, solo auto-creamos si el usuario está habilitado para fichar.
+        # Solo quien tiene el registro horario activado. Aquí había un atajo que lo daba
+        # por activado si el servicio "parecía operativo" (inmobiliaria, gestoría...), pero
+        # el alta de usuario ya pregunta si ficha, así que el atajo pasaba por encima de
+        # lo que había decidido el administrador: desactivar el fichaje no servía de nada.
+        # Así acabaron con ficha los asistentes automáticos (2026-09-18).
         time_enabled = int(row_value(user_row, "registro_horario_activo", 0) or 0) == 1
-        if not time_enabled:
-            # Fallback: para evitar que nuevos usuarios se queden sin fichar, habilitamos
-            # el auto-vínculo si su servicio parece "operativo" (inmobiliaria/gestoría/seguros/etc.).
-            service_raw = str(row_value(user_row, "servicio", "") or "").strip().lower()
-            if any(token in service_raw for token in ("gestor", "inmobili", "seguro", "finca", "financia", "obra", "reforma", "rrhh", "laboral")):
-                time_enabled = True
         if not time_enabled:
             return ""
 

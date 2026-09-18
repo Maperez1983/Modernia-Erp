@@ -166,6 +166,15 @@ class NoSeFabricanFichasVaciasTests(_Base):
         n = self.c.execute("SELECT COUNT(*) FROM workspace_registro_personal WHERE workspace_id=?", (self.otro,)).fetchone()[0]
         self.assertEqual(n, 0)
 
+    def test_con_el_fichaje_desactivado_no_se_crea_ficha_aunque_el_servicio_sea_operativo(self):
+        # Los asistentes automáticos tienen todos los servicios; el atajo por servicio les
+        # creaba ficha aunque el administrador hubiera desactivado su fichaje.
+        self.usuario("bot", "Asistente", "IA", rh=0)
+        pid = S.ensure_workspace_persona_for_self(self.c, self.ws, self.sesion("bot", "Asistente", "IA"))
+        self.assertEqual(pid, "")
+        n = self.c.execute("SELECT COUNT(*) FROM workspace_registro_personal").fetchone()[0]
+        self.assertEqual(n, 0)
+
     def test_quien_no_tiene_ficha_en_ningun_sitio_si_la_estrena(self):
         self.usuario("u2", "Nuevo", "Empleado")
         pid = S.ensure_workspace_persona_for_self(self.c, self.ws, self.sesion("u2", "Nuevo", "Empleado"))
