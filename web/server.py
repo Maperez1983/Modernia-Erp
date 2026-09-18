@@ -109203,7 +109203,13 @@ class Handler(BaseHTTPRequestHandler):
                 empresa_id=params.get("empresa_id", [""])[0],
                 workspace_id=params.get("workspace_id", [""])[0],
             )
-            if not _of_privileged and not _of_scope_ids:
+            _of_ws = str(params.get("workspace_id", [""])[0] or "").strip()
+            if _of_ws:
+                _of_ok, _of_err = enforce_workspace_membership(conn, _of_session, _of_ws)
+                if not _of_ok:
+                    json_response(self, {"error": _of_err or "No autorizado"}, status=403)
+                    return
+            elif not _of_privileged and not _of_scope_ids:
                 json_response(self, {"error": "empresa_id o workspace_id requerido"}, status=400)
                 return
             where = []
@@ -109211,7 +109217,13 @@ class Handler(BaseHTTPRequestHandler):
             if cliente_id:
                 where.append("o.cliente_id = ?")
                 values.append(cliente_id)
-            if not _of_privileged:
+            if _of_ws:
+                # Por workspace (fase 6), también para la plataforma: las ofertas de los
+                # clientes de ese workspace. Antes iba por clientes.empresa_id, vacía en
+                # 1.163 clientes, y la plataforma veía las de todos aunque pidiera uno.
+                where.append("COALESCE(c.workspace_id, '') = ?")
+                values.append(_of_ws)
+            elif not _of_privileged:
                 where.append(f"c.empresa_id IN ({','.join('?' * len(_of_scope_ids))})")
                 values.extend(_of_scope_ids)
             where_clause = f"WHERE {' AND '.join(where)}" if where else ""
@@ -109365,12 +109377,22 @@ class Handler(BaseHTTPRequestHandler):
                 empresa_id=params.get("empresa_id", [""])[0],
                 workspace_id=params.get("workspace_id", [""])[0],
             )
-            if not _ref_privileged and not _ref_scope_ids:
+            _ref_ws = str(params.get("workspace_id", [""])[0] or "").strip()
+            if _ref_ws:
+                _ref_ok, _ref_err = enforce_workspace_membership(conn, _ref_session, _ref_ws)
+                if not _ref_ok:
+                    json_response(self, {"error": _ref_err or "No autorizado"}, status=403)
+                    return
+            elif not _ref_privileged and not _ref_scope_ids:
                 json_response(self, {"error": "empresa_id o workspace_id requerido"}, status=400)
                 return
             where_clause = ""
             values = []
-            if not _ref_privileged:
+            if _ref_ws:
+                # Por workspace (fase 6), igual que las ofertas.
+                where_clause = "WHERE COALESCE(c.workspace_id, '') = ?"
+                values = [_ref_ws]
+            elif not _ref_privileged:
                 where_clause = f"WHERE c.empresa_id IN ({','.join('?' * len(_ref_scope_ids))})"
                 values = list(_ref_scope_ids)
             rows = conn.execute(
@@ -110538,16 +110560,15 @@ class Handler(BaseHTTPRequestHandler):
             estado = (params.get("estado", [""])[0] or "").strip().lower()
             date_from = (params.get("from", [""])[0] or "").strip()
             date_to = (params.get("to", [""])[0] or "").strip()
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
-            if not empresa_ids:
+            # Por workspace (fase 6): la empresa, si se pide, filtra dentro.
+            ambito_sql, ambito_valores = ambito_filas_sql(
+                conn, "seguros_recibos", "r", workspace_id=workspace_id, empresa_id=empresa_id
+            )
+            if not ambito_sql:
                 json_response(self, {"ok": True, "rows": [], "export": ""})
                 return
-            if len(empresa_ids) == 1:
-                where = ["r.empresa_id = ?"]
-                values = [empresa_ids[0]]
-            else:
-                where = [f"r.empresa_id IN ({','.join(['?'] * len(empresa_ids))})"]
-                values = list(empresa_ids)
+            where = [ambito_sql]
+            values = list(ambito_valores)
             if seguro_id:
                 where.append("r.seguro_id = ?")
                 values.append(seguro_id)

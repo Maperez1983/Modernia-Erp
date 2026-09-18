@@ -71684,9 +71684,22 @@ const loadSegurosChecklist = (polizaId) => {
     });
 };
 
+// Ámbito de los listados de seguros que antes no enviaban ninguno: `api()` no lo añade
+// en los GET, así que quien no era de plataforma recibía un 400 y la tabla salía vacía.
+const segurosScopeParams = (params) => {
+  const ws = String(resolveActiveTenantWorkspaceId() || "").trim();
+  if (ws) {
+    params.set("workspace_id", ws);
+  } else {
+    const empresaId = resolveLegacyEmpresaId(resolveCrmSegurosEmpresa());
+    if (empresaId) params.set("empresa_id", empresaId);
+  }
+  return params;
+};
+
 const loadSegurosOfertas = (clienteId = "") => {
   if (!segurosOfertasTable || !segurosOfertasInfo) return;
-  const params = new URLSearchParams();
+  const params = segurosScopeParams(new URLSearchParams());
   if (clienteId) params.set("cliente_id", clienteId);
   api(`/api/seguros_ofertas?${params.toString()}`).then((data) => {
     const rawRows = data.rows || [];
@@ -71758,7 +71771,7 @@ const loadSegurosPreferencias = (clienteId) => {
 
 const loadSegurosReferidos = () => {
   if (!segurosReferidosTable || !segurosReferidosInfo) return;
-  api("/api/seguros_referidos").then((data) => {
+  api(`/api/seguros_referidos?${segurosScopeParams(new URLSearchParams()).toString()}`).then((data) => {
     const rawRows = data.rows || [];
     const rows = filterRowsByQuery(
       rawRows,
