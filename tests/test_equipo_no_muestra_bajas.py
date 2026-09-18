@@ -39,7 +39,7 @@ class LaCuadriculaDeEquipoTests(unittest.TestCase):
         self.assertIn("workspaceRrhhRosterIncluirBajas: false,", APP)
 
     def test_la_etiqueta_no_dice_que_sigue_en_plantilla(self):
-        self.assertIn('const status = m.hasFicha ? (m.activo ? "En plantilla" : "Baja") : "Sin ficha";', APP)
+        self.assertIn('const status = m.hasFicha ? (m.activo ? "En plantilla" : "Baja") : sinFichaLabel;', APP)
 
     def test_una_busqueda_sin_resultados_no_resucita_a_las_bajas(self):
         # El respaldo `filtered.length ? filtered : members` enseñaba la lista entera

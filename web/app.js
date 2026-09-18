@@ -11323,6 +11323,19 @@ const renderRrhhKpis = (host, datos) => {
 //
 // `activos=0` trae también las bajas, que hacen falta para "Ver bajas".
 let peticionRosterRrhh = null;
+// Workspaces cuya plantilla ya se pidió al menos una vez, llegara con filas, vacía o
+// fallida. Hasta entonces Equipo dice "Cargando…" en vez de "Sin ficha": la primera
+// pintura sale con la lista filtrada por empresa y, durante ese instante, alguien sin
+// empresa (Daniel García, 2026-09-18) aparecía como "Sin ficha" teniéndola.
+const rosterRrhhIntentado = new Set();
+const isWorkspaceRrhhRosterPending = () => {
+  const wsId = String(state.currentWorkspaceId || "").trim();
+  if (!wsId) return false;
+  const cargada = state.workspaceRrhhRosterWorkspaceId === wsId
+    && Array.isArray(state.workspaceRrhhRosterRows)
+    && state.workspaceRrhhRosterRows.length;
+  return !cargada && !rosterRrhhIntentado.has(wsId);
+};
 const loadWorkspaceRrhhRoster = async () => {
   const wsId = String(state.currentWorkspaceId || "").trim();
   // El hub de RRHH se pinta aunque la vista activa sea otra, así que sin esto la
@@ -11344,7 +11357,14 @@ const loadWorkspaceRrhhRoster = async () => {
   } finally {
     peticionRosterRrhh = null;
   }
-  if (!filas.length) return;
+  const primerIntento = !rosterRrhhIntentado.has(wsId);
+  rosterRrhhIntentado.add(wsId);
+  if (!filas.length) {
+    // Vacía o fallida: se repinta una sola vez para quitar el "Cargando…". Sin el
+    // `primerIntento` cada repintado volvería a pedirla y a repintar, en bucle.
+    if (primerIntento) renderWorkspaceRrhhHub();
+    return;
+  }
   state.workspaceRrhhRosterRows = filas;
   state.workspaceRrhhRosterWorkspaceId = wsId;
   renderWorkspaceRrhhHub();
@@ -16888,6 +16908,10 @@ const renderWorkspaceRrhhHub = () => {
     };
 
     const members = buildMembers();
+    // Mientras no llega la plantilla completa, quien no aparece en la lista filtrada
+    // por empresa no es "Sin ficha": todavía no lo sabemos.
+    const plantillaPendiente = isWorkspaceRrhhRosterPending();
+    const sinFichaLabel = plantillaPendiente ? "Cargando…" : "Sin ficha";
     const view = String(state.workspaceRrhhEquipoView || "list");
     const memberKey = String(state.workspaceRrhhEquipoMemberKey || "").trim();
     const selected = members.find((m) => String(m.key || "") === memberKey) || null;
@@ -17018,8 +17042,8 @@ const renderWorkspaceRrhhHub = () => {
               const list = filtered;
               return list.map((m) => {
                 const company = String(m.empresa_nombre || "").trim();
-                const status = m.hasFicha ? (m.activo ? "En plantilla" : "Baja") : "Sin ficha";
-                const pill = m.hasFicha ? "rrhh-pill" : "rrhh-pill rrhh-pill-warn";
+                const status = m.hasFicha ? (m.activo ? "En plantilla" : "Baja") : sinFichaLabel;
+                const pill = m.hasFicha || plantillaPendiente ? "rrhh-pill" : "rrhh-pill rrhh-pill-warn";
                 const cardStateClass = m.hasFicha ? "has-ficha" : "no-ficha";
                 const personaId = String(m.personaId || m.employee?.id || "").trim();
                 const agg = personaId ? (aggByPersona.get(personaId) || null) : null;
@@ -17064,7 +17088,7 @@ const renderWorkspaceRrhhHub = () => {
                         </div>
                         <div class="rrhh-member-card-title">
                           <strong>${escapeHtml(m.nombre || "Miembro")}</strong>
-                          <div class="muted">${escapeHtml(company || (m.hasFicha ? "Sin empresa" : "Sin ficha"))}</div>
+                          <div class="muted">${escapeHtml(company || (m.hasFicha ? "Sin empresa" : sinFichaLabel))}</div>
                         </div>
                       </div>
                       <span class="${pill}">${escapeHtml(status)}</span>
@@ -17420,7 +17444,7 @@ const renderWorkspaceRrhhHub = () => {
 
 		      const headerSubtitle = [
 		        employee?.empresa_nombre ? employee.empresa_nombre : "",
-		        employee?.id ? "En plantilla" : "Sin ficha",
+		        employee?.id ? "En plantilla" : sinFichaLabel,
             mismatch ? `Usuario: ${userFullName}` : "",
 		      ].filter(Boolean).join(" · ");
 
