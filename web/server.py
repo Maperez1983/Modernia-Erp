@@ -48274,15 +48274,30 @@ def ensure_ambito_workspace(conn):
         for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
     ]
     for tabla in tablas:
-        if not ambito_ws_es_tabla_de_negocio(tabla):
-            continue
-        cols = {str(row_value(c, "name") or row_value(c, 1) or "") for c in conn.execute(f"PRAGMA table_info({tabla})").fetchall()}  # nosec B608 - nombre de sqlite_master
-        if "empresa_id" not in cols:
-            continue
-        if "workspace_id" not in cols:
-            conn.execute(f"ALTER TABLE {tabla} ADD COLUMN workspace_id TEXT")  # nosec B608
-        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{tabla}_workspace_id ON {tabla} (workspace_id)")  # nosec B608
-        conn.execute(
+        _ambito_ws_prepara_tabla_sqlite(conn, tabla)
+    try:
+        conn.commit()
+    except Exception:
+        pass
+    _AMBITO_WS_LISTO.add(clave)
+
+
+def _ambito_ws_prepara_tabla_sqlite(conn, tabla):
+    """Columna, índice y disparador de ámbito en una tabla de negocio de SQLite.
+
+    Aparte porque muchas tablas (gestoría, sobre todo) se crean la primera vez que se
+    usan, después del arranque: `ambito_filas_sql` la llama al encontrarse una sin la
+    columna, para que desarrollo y pruebas se comporten como producción.
+    """
+    if not ambito_ws_es_tabla_de_negocio(tabla):
+        return False
+    cols = {str(row_value(c, "name") or row_value(c, 1) or "") for c in conn.execute(f"PRAGMA table_info({tabla})").fetchall()}  # nosec B608 - nombre de tabla del propio esquema
+    if "empresa_id" not in cols:
+        return False
+    if "workspace_id" not in cols:
+        conn.execute(f"ALTER TABLE {tabla} ADD COLUMN workspace_id TEXT")  # nosec B608
+    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{tabla}_workspace_id ON {tabla} (workspace_id)")  # nosec B608
+    conn.execute(
             f"""
             CREATE TRIGGER IF NOT EXISTS trg_{tabla}_workspace AFTER INSERT ON {tabla}
             WHEN COALESCE(NEW.workspace_id, '') = '' AND COALESCE(NEW.empresa_id, '') <> ''
@@ -48302,13 +48317,9 @@ def ensure_ambito_workspace(conn):
               )
               WHERE rowid = NEW.rowid;
             END
-            """  # nosec B608 - nombre de sqlite_master
+            """  # nosec B608 - nombre de tabla del propio esquema
         )
-    try:
-        conn.commit()
-    except Exception:
-        pass
-    _AMBITO_WS_LISTO.add(clave)
+    return True
 
 
 def ambito_workspace_salud(conn):
@@ -49473,6 +49484,39 @@ def resolve_clientes_by_nif_rows(conn, nif, *, limit=6, services=None, workspace
         if len(combined) >= limit_val:
             break
     return combined
+
+
+def ambito_filas_sql(conn, tabla, alias, *, workspace_id="", empresa_id=""):
+    """Filtro de ámbito para una tabla de negocio: (sql, valores), o (None, []) si no hay ámbito.
+
+    Fase 6 del ámbito por workspace (2026-09-18). Muchos endpoints antiguos acotaban
+    con "las empresas del workspace" (`resolve_empresa_ids_for_request`). Con workspace,
+    ahora se acota por el `workspace_id` de la fila —lo llevan todas desde la fase 1— y
+    la empresa, si se pide, solo filtra dentro. Sin workspace se conserva lo antiguo
+    por empresa. `alias` puede ser "" para consultas sin alias.
+    """
+    ws = str(workspace_id or "").strip()
+    eid = str(empresa_id or "").strip()
+    pre = f"{alias}." if alias else ""
+    columnas = table_columns(conn, tabla) or set()
+    if ws and "workspace_id" not in columnas and "empresa_id" in columnas and _db_backend_name(conn) != "postgres":
+        try:
+            if _ambito_ws_prepara_tabla_sqlite(conn, tabla):
+                _invalidate_table_columns_cache(conn, tabla)
+                columnas = table_columns(conn, tabla) or set()
+        except Exception:
+            _rollback_best_effort(conn)
+    if ws and "workspace_id" in columnas:
+        partes = [f"COALESCE({pre}workspace_id, '') = ?"]
+        valores = [ws]
+        if eid and "empresa_id" in columnas:
+            partes.append(f"{pre}empresa_id = ?")
+            valores.append(eid)
+        return " AND ".join(partes), valores
+    empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=eid, workspace_id=ws)
+    if not empresa_ids:
+        return None, []
+    return f"{pre}empresa_id IN ({','.join(['?'] * len(empresa_ids))})", list(empresa_ids)
 
 
 def build_service_scope_filter(conn, table_name: str, alias: str, workspace_id: str, empresa_id: str):
@@ -110825,8 +110869,11 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 limit = 300
             limit = max(1, min(limit, 1000))
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
-            if not empresa_ids:
+            # Por workspace (fase 6): la empresa, si se pide, filtra dentro.
+            ambito_sql, ambito_valores = ambito_filas_sql(
+                conn, "gestoria_sociedades", "", workspace_id=workspace_id, empresa_id=empresa_id
+            )
+            if not ambito_sql:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             # `resolve_empresa_ids_for_request` es un resolutor puro: no mira la sesión.
@@ -110838,9 +110885,8 @@ class Handler(BaseHTTPRequestHandler):
             if not ok_amb:
                 json_response(self, {"error": err_amb}, status=403)
                 return
-            placeholders = ",".join(["?"] * len(empresa_ids))
-            where = [f"empresa_id IN ({placeholders})"]
-            values = list(empresa_ids)
+            where = [ambito_sql]
+            values = list(ambito_valores)
             if sociedad_id:
                 where.append("id = ?")
                 values.append(sociedad_id)
@@ -110872,8 +110918,11 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 limit = 300
             limit = max(1, min(limit, 1000))
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
-            if not empresa_ids:
+            # Por workspace (fase 6): la empresa, si se pide, filtra dentro.
+            ambito_sql, ambito_valores = ambito_filas_sql(
+                conn, "gestoria_socios", "s", workspace_id=workspace_id, empresa_id=empresa_id
+            )
+            if not ambito_sql:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             ok_amb, err_amb = enforce_workspace_or_empresa_scope(
@@ -110882,9 +110931,8 @@ class Handler(BaseHTTPRequestHandler):
             if not ok_amb:
                 json_response(self, {"error": err_amb}, status=403)
                 return
-            placeholders = ",".join(["?"] * len(empresa_ids))
-            where = [f"s.empresa_id IN ({placeholders})"]
-            values = list(empresa_ids)
+            where = [ambito_sql]
+            values = list(ambito_valores)
             if sociedad_id:
                 where.append("s.sociedad_id = ?")
                 values.append(sociedad_id)
@@ -110915,8 +110963,11 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 limit = 300
             limit = max(1, min(limit, 1000))
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
-            if not empresa_ids:
+            # Por workspace (fase 6): la empresa, si se pide, filtra dentro.
+            ambito_sql, ambito_valores = ambito_filas_sql(
+                conn, "gestoria_socios_cambios", "sc", workspace_id=workspace_id, empresa_id=empresa_id
+            )
+            if not ambito_sql:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             ok_amb, err_amb = enforce_workspace_or_empresa_scope(
@@ -110925,9 +110976,8 @@ class Handler(BaseHTTPRequestHandler):
             if not ok_amb:
                 json_response(self, {"error": err_amb}, status=403)
                 return
-            placeholders = ",".join(["?"] * len(empresa_ids))
-            where = [f"sc.empresa_id IN ({placeholders})"]
-            values = list(empresa_ids)
+            where = [ambito_sql]
+            values = list(ambito_valores)
             if sociedad_id:
                 where.append("sc.sociedad_id = ?")
                 values.append(sociedad_id)
@@ -110966,8 +111016,11 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 limit = 300
             limit = max(1, min(limit, 1000))
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
-            if not empresa_ids:
+            # Por workspace (fase 6): la empresa, si se pide, filtra dentro.
+            ambito_sql, ambito_valores = ambito_filas_sql(
+                conn, "gestoria_actas", "a", workspace_id=workspace_id, empresa_id=empresa_id
+            )
+            if not ambito_sql:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             ok_amb, err_amb = enforce_workspace_or_empresa_scope(
@@ -110976,9 +111029,8 @@ class Handler(BaseHTTPRequestHandler):
             if not ok_amb:
                 json_response(self, {"error": err_amb}, status=403)
                 return
-            placeholders = ",".join(["?"] * len(empresa_ids))
-            where = [f"a.empresa_id IN ({placeholders})"]
-            values = list(empresa_ids)
+            where = [ambito_sql]
+            values = list(ambito_valores)
             if sociedad_id:
                 where.append("a.sociedad_id = ?")
                 values.append(sociedad_id)
@@ -111011,8 +111063,11 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 limit = 300
             limit = max(1, min(limit, 1000))
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
-            if not empresa_ids:
+            # Por workspace (fase 6): la empresa, si se pide, filtra dentro.
+            ambito_sql, ambito_valores = ambito_filas_sql(
+                conn, "gestoria_acta_firmas", "f", workspace_id=workspace_id, empresa_id=empresa_id
+            )
+            if not ambito_sql:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             ok_amb, err_amb = enforce_workspace_or_empresa_scope(
@@ -111021,9 +111076,8 @@ class Handler(BaseHTTPRequestHandler):
             if not ok_amb:
                 json_response(self, {"error": err_amb}, status=403)
                 return
-            placeholders = ",".join(["?"] * len(empresa_ids))
-            where = [f"f.empresa_id IN ({placeholders})"]
-            values = list(empresa_ids)
+            where = [ambito_sql]
+            values = list(ambito_valores)
             if acta_id:
                 where.append("f.acta_id = ?")
                 values.append(acta_id)
@@ -111066,7 +111120,7 @@ class Handler(BaseHTTPRequestHandler):
                     empresa_ids = []
             elif str(empresa_id or "").strip():
                 empresa_ids = [str(empresa_id or "").strip()]
-            if not cliente_id and not empresa_ids:
+            if not cliente_id and not empresa_ids and not workspace_id:
                 json_response(self, {"error": "cliente_id, empresa_id o workspace_id requerido"}, status=400)
                 return
             try:
@@ -111097,7 +111151,13 @@ class Handler(BaseHTTPRequestHandler):
             # clientes en Fincas Velazquez). El JOIN que había antes multiplicaba
             # cada modelo por cada fila duplicada — 376 modelos reales devolvían
             # 25.010 aquí, y el dashboard mostraba "Modelos pendientes: 26.161".
-            if len(empresa_ids) == 1:
+            if workspace_id:
+                # Por workspace (fase 6): los modelos de los clientes del workspace. Antes,
+                # los de los clientes vinculados a sus empresas, que con empresas
+                # compartidas traía los de otro workspace.
+                where.append("COALESCE(c.workspace_id, '') = ?")
+                values.append(workspace_id)
+            elif len(empresa_ids) == 1:
                 where.append("EXISTS (SELECT 1 FROM clientes_empresas ce WHERE ce.cliente_id = c.id AND ce.empresa_id = ?)")
                 values.append(empresa_ids[0])
             else:
@@ -111749,8 +111809,11 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = params.get("empresa_id", [""])[0]
             workspace_id = params.get("workspace_id", [""])[0]
             cliente_id = params.get("cliente_id", [""])[0]
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
-            if not empresa_ids:
+            # Por workspace (fase 6): la empresa, si se pide, filtra dentro.
+            ambito_sql, ambito_valores = ambito_filas_sql(
+                conn, "gestoria_import_lotes", "l", workspace_id=workspace_id, empresa_id=empresa_id
+            )
+            if not ambito_sql:
                 json_response(self, {"error": "workspace_id o empresa_id requerido"}, status=400)
                 return
             ok_amb, err_amb = enforce_workspace_or_empresa_scope(
@@ -111759,7 +111822,6 @@ class Handler(BaseHTTPRequestHandler):
             if not ok_amb:
                 json_response(self, {"error": err_amb}, status=403)
                 return
-            placeholders = ",".join(["?"] * len(empresa_ids))
             rows = conn.execute(
                 f"""
                 SELECT l.id, l.empresa_id, l.cliente_id, l.origen, l.estado, l.periodo,
@@ -111772,12 +111834,12 @@ class Handler(BaseHTTPRequestHandler):
                        l.notas, l.created_at, l.updated_at, COALESCE(c.nombre, '') AS cliente
                 FROM gestoria_import_lotes l
                 LEFT JOIN clientes c ON c.id = l.cliente_id
-                WHERE l.empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   AND (? = '' OR COALESCE(l.cliente_id, '') = ?)
                 ORDER BY l.created_at DESC
                 LIMIT 200
                 """,
-                tuple([*empresa_ids, cliente_id, cliente_id]),
+                tuple([*ambito_valores, cliente_id, cliente_id]),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
@@ -112195,8 +112257,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/gestoria_cuentas_bancarias":
             empresa_id = params.get("empresa_id", [""])[0]
             workspace_id = params.get("workspace_id", [""])[0]
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
-            if not empresa_ids:
+            # Por workspace (fase 6): la empresa, si se pide, filtra dentro.
+            ambito_sql, ambito_valores = ambito_filas_sql(
+                conn, "gestoria_cuentas_bancarias", "b", workspace_id=workspace_id, empresa_id=empresa_id
+            )
+            if not ambito_sql:
                 json_response(self, {"rows": []})
                 return
             # IBAN y titular de la cuenta: sin esto, un empresa_id/workspace_id ajeno
@@ -112207,7 +112272,6 @@ class Handler(BaseHTTPRequestHandler):
             if not ok_amb:
                 json_response(self, {"error": err_amb}, status=403)
                 return
-            placeholders = ",".join(["?"] * len(empresa_ids))
             rows = conn.execute(
                 f"""
                 SELECT
@@ -112223,10 +112287,10 @@ class Handler(BaseHTTPRequestHandler):
                   b.updated_at
                 FROM gestoria_cuentas_bancarias b
                 LEFT JOIN empresas e ON e.id = b.empresa_id
-                WHERE b.empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                 ORDER BY COALESCE(b.es_principal, 0) DESC, COALESCE(b.banco_nombre, '') ASC, COALESCE(b.iban, '') ASC
                 """,
-                tuple(empresa_ids),
+                tuple(ambito_valores),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
@@ -112234,8 +112298,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/gestoria_movimientos_bancarios":
             empresa_id = params.get("empresa_id", [""])[0]
             workspace_id = params.get("workspace_id", [""])[0]
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
-            if not empresa_ids:
+            # Por workspace (fase 6): la empresa, si se pide, filtra dentro.
+            ambito_sql, ambito_valores = ambito_filas_sql(
+                conn, "gestoria_movimientos_bancarios", "m", workspace_id=workspace_id, empresa_id=empresa_id
+            )
+            if not ambito_sql:
                 json_response(self, {"rows": []})
                 return
             ok_amb, err_amb = enforce_workspace_or_empresa_scope(
@@ -112244,7 +112311,6 @@ class Handler(BaseHTTPRequestHandler):
             if not ok_amb:
                 json_response(self, {"error": err_amb}, status=403)
                 return
-            placeholders = ",".join(["?"] * len(empresa_ids))
             rows = conn.execute(
                 f"""
                 SELECT
@@ -112283,11 +112349,11 @@ class Handler(BaseHTTPRequestHandler):
                 FROM gestoria_movimientos_bancarios m
                 LEFT JOIN gestoria_cuentas_bancarias c ON c.id = m.cuenta_bancaria_id
                 LEFT JOIN gestoria_asientos a ON a.id = m.asiento_id
-                WHERE m.empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                 ORDER BY COALESCE(m.fecha_operacion, m.fecha_valor, m.created_at) DESC, m.created_at DESC
                 LIMIT 500
                 """,
-                tuple(empresa_ids),
+                tuple(ambito_valores),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
@@ -112918,7 +112984,7 @@ class Handler(BaseHTTPRequestHandler):
                 empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
             elif str(empresa_id or "").strip():
                 empresa_ids = [str(empresa_id or "").strip()]
-            if not cliente_id and not empresa_ids:
+            if not cliente_id and not empresa_ids and not workspace_id:
                 json_response(self, {"error": "cliente_id, empresa_id o workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -112927,7 +112993,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not ok_amb:
                     json_response(self, {"error": err_amb}, status=403)
                     return
-            elif empresa_ids:
+            elif empresa_ids or workspace_id:
                 ok_amb, err_amb = enforce_workspace_or_empresa_scope(conn, session, workspace_id, empresa_id)
                 if not ok_amb:
                     json_response(self, {"error": err_amb}, status=403)
@@ -112943,7 +113009,13 @@ class Handler(BaseHTTPRequestHandler):
             if estado:
                 where.append("LOWER(t.estado) = ?")
                 values.append(estado.lower())
-            if empresa_ids:
+            if workspace_id:
+                # Por workspace (fase 6): las tareas de los clientes del workspace. Antes
+                # iba por `clientes.empresa_id`, vacía en 1.163 clientes: sus tareas no
+                # salían nunca en el listado del workspace.
+                where.append("COALESCE(c.workspace_id, '') = ?")
+                values.append(workspace_id)
+            elif empresa_ids:
                 if len(empresa_ids) == 1:
                     where.append("c.empresa_id = ?")
                     values.append(empresa_ids[0])
@@ -113043,8 +113115,11 @@ class Handler(BaseHTTPRequestHandler):
             )
             usuario = (params.get("usuario", [""])[0] if params else "").strip()
             limit_raw = params.get("limit", [""])[0]
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
-            if not empresa_ids:
+            # Por workspace (fase 6): la empresa, si se pide, filtra dentro.
+            ambito_sql, ambito_valores = ambito_filas_sql(
+                conn, "gestoria_docs", "d", workspace_id=workspace_id, empresa_id=empresa_id
+            )
+            if not ambito_sql:
                 json_response(self, {"rows": [], "limit": 0})
                 return
             try:
@@ -113053,12 +113128,12 @@ class Handler(BaseHTTPRequestHandler):
                 limit_val = 30
             limit_val = max(1, min(limit_val, 200))
             where = [
-                f"d.empresa_id IN ({','.join(['?'] * len(empresa_ids))})",
+                ambito_sql,
                 "d.referencia_tipo = 'renta'",
                 "(d.cliente_id IS NULL OR TRIM(COALESCE(d.cliente_id,'')) = '')",
                 "LOWER(COALESCE(d.referencia_id,'')) LIKE 'renta-pendiente-%'",
             ]
-            values = list(empresa_ids)
+            values = list(ambito_valores)
             if usuario:
                 where.append("a.usuario = ?")
                 values.append(usuario)
