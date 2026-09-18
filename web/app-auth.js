@@ -577,6 +577,27 @@
     }
   }
 
+  // Todo lo que el CRM guarda en el navegador cuelga de quién ha entrado: el workspace
+  // y la empresa activos, filtros, borradores. Al cerrar sesión se quedaba, y como el
+  // siguiente login no reinicia la app, en un ordenador compartido el segundo usuario
+  // heredaba el workspace del primero (y sus peticiones iban a él). Solo se conserva
+  // la versión del Service Worker, que no es de nadie.
+  const CLAVES_QUE_SOBREVIVEN_AL_LOGOUT = new Set(["crm.swVersion"]);
+
+  function olvidarEstadoDelUsuario() {
+    try {
+      const claves = [];
+      for (let i = 0; i < window.localStorage.length; i += 1) {
+        const clave = window.localStorage.key(i);
+        if (clave && clave.startsWith("crm.") && !CLAVES_QUE_SOBREVIVEN_AL_LOGOUT.has(clave)) claves.push(clave);
+      }
+      claves.forEach((clave) => window.localStorage.removeItem(clave));
+    } catch {}
+    try {
+      window.sessionStorage.clear();
+    } catch {}
+  }
+
   async function logoutAuthSession(deps) {
     try {
       await fetch("/api/logout", {
@@ -586,7 +607,13 @@
         body: "{}",
       });
     } catch {}
+    olvidarEstadoDelUsuario();
     deps.showAuthOverlay("Sesión cerrada.");
+    // Además del navegador, el estado en memoria (`state`) también es del usuario que
+    // sale. Recargar en la raíz arranca limpio; sin sesión, la recarga muestra el login.
+    try {
+      window.location.replace("/");
+    } catch {}
   }
 
   window.CRMAppAuth = {
@@ -597,6 +624,7 @@
     submitActivationPassword,
     submitAuthLogin,
     logoutAuthSession,
+    olvidarEstadoDelUsuario,
     startAccessRecovery,
   };
 })();

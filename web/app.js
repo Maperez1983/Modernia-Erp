@@ -51358,6 +51358,9 @@ const vincularHipotecaSeleccionada = async () => {
   hipotecaBdtVincularBtn?.setAttribute("disabled", "disabled");
   hipotecaBdtVincularStatus.textContent = "Vinculando hipoteca con cliente...";
   try {
+    // `empresaId` se declaraba después de usarse aquí: fuera del modo workspace,
+    // vincular una hipoteca reventaba con un ReferenceError antes de hacer nada.
+    const empresaId = resolveLegacyEmpresaId(empresa);
     const lookupScope = isTenantWorkspaceMode() && state.currentWorkspaceId
       ? { workspace_id: state.currentWorkspaceId }
       : { empresa_id: empresaId };
@@ -51368,7 +51371,6 @@ const vincularHipotecaSeleccionada = async () => {
       clienteId = await createClienteForHipoteca(nombreCliente, row, columns);
       wasNew = true;
     }
-    const empresaId = resolveLegacyEmpresaId(empresa);
     await linkFinanciacionServiceToCliente(clienteId, empresaId);
     const clienteNombrePersistido = String(existing?.nombre || nombreCliente || "").trim();
     await postJsonWithDbRetry(

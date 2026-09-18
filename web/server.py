@@ -51603,11 +51603,20 @@ def fetch_workspace_time_users(conn, workspace_id, empresa_id=None, only_enabled
 
 
 def fetch_workspace_time_entries(conn, workspace_id, empresa_id=None, limit=40, month=None, persona_id=None):
-    empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
-    if not empresa_ids:
+    # El fichaje es del workspace. Antes solo salían los de una empresa vinculada al
+    # workspace: los de quien no tiene sociedad no aparecían ni en la pantalla ni en las
+    # exportaciones legales del registro (XML, PDF, Excel). La empresa ahora solo filtra
+    # cuando alguien la elige, y si no es del workspace no devuelve nada.
+    if not str(workspace_id or "").strip():
         return {"rows": []}
-    where = ["t.workspace_id = ?", f"t.empresa_id IN ({','.join('?' for _ in empresa_ids)})"]
-    params = [workspace_id, *empresa_ids]
+    where = ["t.workspace_id = ?"]
+    params = [workspace_id]
+    empresa_elegida = str(empresa_id or "").strip()
+    if empresa_elegida:
+        if not resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_elegida):
+            return {"rows": []}
+        where.append("t.empresa_id = ?")
+        params.append(empresa_elegida)
     month_text = str(month or "").strip()
     if month_text:
         where.append("substr(t.fecha, 1, 7) = ?")
@@ -51680,16 +51689,19 @@ def find_duplicate_open_time_entry(conn, workspace_id, empresa_id, fecha, person
     day = str(fecha or "").strip()
     pid = str(persona_id or "").strip()
     excluded = str(exclude_id or "").strip()
-    if not ws_id or not eid or not day:
+    # Dos entradas abiertas de la misma persona el mismo día son un duplicado sea cual
+    # sea la empresa, y sin empresa también: antes, sin ella, no se comprobaba nada.
+    # `empresa_id` se conserva en la firma por compatibilidad con quien la llama.
+    del eid
+    if not ws_id or not day:
         return None
     where = [
         "workspace_id = ?",
-        "empresa_id = ?",
         "fecha = ?",
         "COALESCE(persona_id, '') = ?",
         "COALESCE(hora_fin, '') = ''",
     ]
-    params = [ws_id, eid, day, pid]
+    params = [ws_id, day, pid]
     if excluded:
         where.append("id != ?")
         params.append(excluded)
@@ -52567,14 +52579,16 @@ def is_workspace_time_month_locked(conn, workspace_id, month, empresa_id=None):
     if not workspace_id or not month_key:
         return False
     empresa_key = str(empresa_id or "").strip()
+    # Un cierre sin empresa es el del workspace entero y bloquea todos sus fichajes;
+    # antes solo bloqueaba los que tampoco tenían empresa. Un cierre de una empresa
+    # sigue bloqueando solo los suyos.
     row = conn.execute(
         """
-        SELECT locked
+        SELECT MAX(COALESCE(locked, 0)) AS locked
         FROM workspace_registro_periodos
-        WHERE workspace_id = ? AND COALESCE(empresa_id, '') = ? AND month = ?
-        LIMIT 1
+        WHERE workspace_id = ? AND month = ? AND COALESCE(empresa_id, '') IN ('', ?)
         """,
-        (workspace_id, empresa_key, month_key),
+        (workspace_id, month_key, empresa_key),
     ).fetchone()
     if not row:
         return False
@@ -54068,10 +54082,11 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
             if part
         ).strip()
 
-        # Empresa por defecto: usamos la primera empresa vinculada al workspace.
-        # Importante: fetch_workspace_company_ids() hace backfill cuando workspace_empresas está vacío.
-        empresa_ids = fetch_workspace_company_ids(conn, ws_id)
-        empresa_default = str(empresa_ids[0] if empresa_ids else "").strip()
+        # Sin empresa por defecto. Antes se tomaba la primera del workspace por orden
+        # alfabético y se escribía en la ficha al vincularla o crearla: una sociedad
+        # inventada. La ficha es del workspace; la empresa, si la tiene, la pone RRHH.
+        # Se deja la variable vacía para no tocar los cuatro sitios que la consultan.
+        empresa_default = ""
 
         now = datetime.now(timezone.utc).isoformat()
 
@@ -54317,9 +54332,7 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
         if otra_ficha:
             return ""
 
-        # Sin ficha: creamos una mínima para permitir fichaje self.
-        if not empresa_default:
-            return ""
+        # Sin ficha: creamos una mínima para permitir fichaje self, sin empresa.
         full_name = user_full_name
         if not full_name:
             full_name = str(row_value(user_row, "usuario") or row_value(user_row, "email") or "Empleado").strip() or "Empleado"
@@ -54334,7 +54347,7 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
               fecha_alta, fecha_baja, activo, notas,
               created_at, updated_at
             ) VALUES (
-              ?, ?, ?, 1,
+              ?, ?, NULL, 0,
               ?, 1, 'manual',
               ?, NULL, ?, NULL,
               NULL, 'Completa', NULL, NULL,
@@ -54345,7 +54358,6 @@ def ensure_workspace_persona_for_self(conn, workspace_id, session):
             (
                 persona_id,
                 ws_id,
-                empresa_default,
                 user_id,
                 full_name,
                 str(row_value(user_row, "email") or "").strip() or None,
@@ -83273,30 +83285,37 @@ class Handler(BaseHTTPRequestHandler):
             if not session or not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
-            if not workspace_id or not empresa_id or not persona_nombre or not fecha or not hora_inicio:
-                json_response(self, {"error": "workspace_id, empresa_id, persona_nombre, fecha y hora_inicio requeridos"}, status=400)
+            # La empresa es un dato del fichaje, no quien decide de quién es: el fichaje es
+            # del workspace. Exigirla dejaba sin poder registrar a mano la jornada de quien
+            # no tiene sociedad (Daniel García, 2026-09-18). Si llega, tiene que ser del
+            # workspace; si no llega, se toma la de la ficha, y si tampoco tiene, va sin ella.
+            if not workspace_id or not persona_nombre or not fecha or not hora_inicio:
+                json_response(self, {"error": "workspace_id, persona_nombre, fecha y hora_inicio requeridos"}, status=400)
                 return
-            if not workspace_time_company_allowed(conn, workspace_id, empresa_id):
+            if empresa_id and not workspace_time_company_allowed(conn, workspace_id, empresa_id):
                 json_response(self, {"error": "empresa_id no pertenece a este workspace"}, status=400)
-                return
-            if is_workspace_time_month_locked(conn, workspace_id, fecha, empresa_id=empresa_id):
-                json_response(self, {"error": "Mes bloqueado: desbloquea el periodo para editar fichajes."}, status=409)
                 return
             persona_row = None
             if persona_id:
                 persona_row = conn.execute(
                     """
-                    SELECT id, nombre, usuario_id, tipo_jornada, horas_pactadas_dia, activo
+                    SELECT id, nombre, usuario_id, tipo_jornada, horas_pactadas_dia, activo,
+                           COALESCE(empresa_id, '') AS empresa_id
                     FROM workspace_registro_personal
-                    WHERE id = ? AND workspace_id = ? AND empresa_id = ?
+                    WHERE id = ? AND workspace_id = ?
                     LIMIT 1
                     """,
-                    (persona_id, workspace_id, empresa_id),
+                    (persona_id, workspace_id),
                 ).fetchone()
                 if not persona_row:
                     json_response(self, {"error": "persona_id no válido"}, status=400)
                     return
                 persona_nombre = str(persona_row["nombre"] or "").strip() or persona_nombre
+                if not empresa_id:
+                    empresa_id = str(persona_row["empresa_id"] or "").strip()
+            if is_workspace_time_month_locked(conn, workspace_id, fecha, empresa_id=empresa_id):
+                json_response(self, {"error": "Mes bloqueado: desbloquea el periodo para editar fichajes."}, status=409)
+                return
             hora_fin = str(payload.get("hora_fin") or "").strip()
             pausa_min = max(0, int(parse_money_value(payload.get("pausa_min")) or 0))
             prev_row = None
@@ -83353,7 +83372,7 @@ class Handler(BaseHTTPRequestHandler):
             estado = normalize_time_entry_state(payload.get("estado"), hora_fin)
             values = (
                 workspace_id,
-                empresa_id,
+                empresa_id or None,
                 persona_id or None,
                 (payload.get("usuario_id") or (persona_row["usuario_id"] if persona_row else "") or "").strip() or None,
                 persona_nombre,
@@ -83771,30 +83790,10 @@ class Handler(BaseHTTPRequestHandler):
                 )
                 return
             empresa_id = str(persona_row["empresa_id"] or "").strip()
-            if not empresa_id:
-                # Compat/self: si la ficha no tenía empresa, intentamos asignarla desde el tenant.
-                now_fix = app_now().strftime("%Y-%m-%d %H:%M:%S")
-                try:
-                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
-                except Exception:
-                    empresa_ids = []
-                empresa_id = str(empresa_ids[0] if empresa_ids else "").strip()
-                if empresa_id:
-                    try:
-                        conn.execute(
-                            """
-                            UPDATE workspace_registro_personal
-                            SET empresa_id = ?, empresa_manual = 1, updated_at = datetime(?)
-                            WHERE workspace_id = ? AND id = ?
-                            """,
-                            (empresa_id, now_fix, workspace_id, persona_id),
-                        )
-                        conn.commit()
-                    except Exception as _fallo_tragado:
-                        apunta_escritura_tragada("_do_POST/workspace_registro_personal", _fallo_tragado)
-                if not empresa_id:
-                    json_response(self, {"error": "empresa_id requerido"}, status=400)
-                    return
+            # Sin empresa se ficha igual: el fichaje es del workspace. Antes aquí se le
+            # escribía a la ficha la primera empresa del workspace por orden alfabético
+            # (una sociedad inventada que quedaba para siempre) o, si no había ninguna,
+            # no se podía fichar.
             now_dt = app_now()
             fecha = now_dt.date().isoformat()
             if is_workspace_time_month_locked(conn, workspace_id, fecha, empresa_id=empresa_id):
@@ -83942,7 +83941,7 @@ class Handler(BaseHTTPRequestHandler):
                 (
                     record_id,
                     workspace_id,
-                    empresa_id,
+                    empresa_id or None,
                     persona_id,
                     str(persona_row["usuario_id"] or "").strip() or None,
                     persona_nombre,
@@ -104417,12 +104416,12 @@ class Handler(BaseHTTPRequestHandler):
             if not str(empresa_id or "").strip():
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
-                year = str(ejercicio or "").strip()
-                if not re.match(r"^20[0-9]{2}$", year or ""):
-                    year = str(datetime.now().year)
-                dash = compute_workspace_rrhh_economicos_dashboard(conn, workspace_id, empresa_id, persona_id, ejercicio=year)
-                nominas = _fetch_rrhh_nominas_ocr(conn, workspace_id, persona_id, ejercicio=year)
-                by_month = {m: {"nomina_bruto": 0.0, "nomina_neto": 0.0, "nomina_ss_empresa": 0.0, "comision_cobrada": 0.0, "comision_total": 0.0} for m in range(1, 13)}
+            year = str(ejercicio or "").strip()
+            if not re.match(r"^20[0-9]{2}$", year or ""):
+                year = str(datetime.now().year)
+            dash = compute_workspace_rrhh_economicos_dashboard(conn, workspace_id, empresa_id, persona_id, ejercicio=year)
+            nominas = _fetch_rrhh_nominas_ocr(conn, workspace_id, persona_id, ejercicio=year)
+            by_month = {m: {"nomina_bruto": 0.0, "nomina_neto": 0.0, "nomina_ss_empresa": 0.0, "comision_cobrada": 0.0, "comision_total": 0.0} for m in range(1, 13)}
             for n in nominas:
                 f = n.get("nomina_fields") or {}
                 try:
