@@ -26492,6 +26492,21 @@ def cliente_workspace_id_for_write(conn, *, workspace_id="", empresa_id=""):
     return resolve_workspace_id_for_empresa(conn, empresa_id)
 
 
+def workspace_de_plataforma_id(conn):
+    """El workspace de plataforma: donde cuelga la empresa técnica «Verifika2». '' si no hay."""
+    try:
+        pid = str(get_platform_empresa_id(conn) or "").strip()
+        if not pid:
+            return ""
+        fila = conn.execute(
+            "SELECT workspace_id FROM workspace_empresas WHERE empresa_id = ? LIMIT 1", (pid,)
+        ).fetchone()
+        return str(row_value(fila, "workspace_id", "") or "").strip() if fila else ""
+    except Exception:
+        _rollback_best_effort(conn)
+        return ""
+
+
 def workspaces_propios_de_empresa(conn, empresa_id):
     """Los workspaces de una empresa **sin contar el de plataforma**.
 
@@ -48219,6 +48234,45 @@ def ensure_ambito_workspace(conn):
     except Exception:
         pass
     _AMBITO_WS_LISTO.add(clave)
+
+
+def ambito_workspace_salud(conn):
+    """Filas de negocio sin `workspace_id`, tabla por tabla (vigilancia de la fase 5).
+
+    Desde la fase 1 todas deberían llevarlo y un disparador se lo pone a las nuevas si
+    tienen empresa. Una fila sin él no la ve ningún workspace: si este recuento sube,
+    alguna vía de alta la está creando sin workspace ni empresa.
+    """
+    if _db_backend_name(conn) == "postgres":
+        tablas = [
+            str(row_value(r, "table_name") or row_value(r, 0) or "")
+            for r in conn.execute(
+                """
+                SELECT table_name FROM information_schema.columns
+                WHERE table_schema = 'public' AND column_name = 'workspace_id'
+                """
+            ).fetchall()
+        ]
+    else:
+        tablas = []
+        for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall():
+            nombre = str(row_value(r, "name") or row_value(r, 0) or "")
+            cols = {str(row_value(c, "name") or row_value(c, 1) or "") for c in conn.execute(f"PRAGMA table_info({nombre})").fetchall()}  # nosec B608
+            if "workspace_id" in cols:
+                tablas.append(nombre)
+    filas = []
+    for tabla in sorted(t for t in tablas if ambito_ws_es_tabla_de_negocio(t)):
+        try:
+            fila = conn.execute(
+                f"SELECT COUNT(*) AS total, SUM(CASE WHEN COALESCE(workspace_id, '') = '' THEN 1 ELSE 0 END) AS sin_ws FROM {tabla}"  # nosec B608 - nombre del catálogo
+            ).fetchone()
+        except Exception:
+            _rollback_best_effort(conn)
+            continue
+        sin_ws = int(row_value(fila, "sin_ws", 0) or 0)
+        if sin_ws:
+            filas.append({"tabla": tabla, "sin_workspace": sin_ws, "total": int(row_value(fila, "total", 0) or 0)})
+    return {"tablas_con_huecos": filas, "filas_sin_workspace": sum(f["sin_workspace"] for f in filas)}
 
 
 def _m5_migration_done(conn, key: str) -> bool:
@@ -103766,23 +103820,15 @@ class Handler(BaseHTTPRequestHandler):
                                     picks = [p for p in picks if p]
                                     if len(picks) == 1:
                                         chosen = next((it for it in ws_rows if str(it.get("id") or "").strip() == picks[0]), None)
-                        # Heurística por slug/nombre (soft default).
+                        # Sin ficha en ninguno: el primero que no sea el de plataforma (fase 3,
+                        # 2026-09-18). Antes se probaban slugs escritos a mano, y el primero
+                        # llevaba al workspace de plataforma, donde no se trabaja.
                         if not chosen:
-                            slug_targets = [
-                                "verifika2",
-                                normalize_workspace_slug(DEFAULT_WORKSPACE_NAME),
-                                "modernia",
-                            ]
-                            for target in slug_targets:
-                                for row in ws_rows:
-                                    raw = str(row.get("slug") or row.get("nombre") or "").strip()
-                                    if normalize_workspace_slug(raw) == normalize_workspace_slug(target):
-                                        chosen = row
-                                        break
-                                if chosen:
-                                    break
-                        if not chosen:
-                            chosen = ws_rows[0]
+                            plataforma = workspace_de_plataforma_id(conn)
+                            chosen = next(
+                                (row for row in ws_rows if str(row.get("id") or "").strip() != plataforma),
+                                ws_rows[0],
+                            )
             except Exception:
                 chosen = ws_rows[0] if ws_rows else None
             workspace_id = str((chosen or {}).get("id") or "").strip()
@@ -104596,6 +104642,14 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
             json_response(self, fetch_workspace_registro_periodos(conn, workspace_id, empresa_id=empresa_id))
+            return
+
+        if path == "/api/ambito_workspace_salud":
+            session = getattr(self, "auth_session", None) or self._current_session()
+            if not session or not is_superadmin_actor(conn, session):
+                json_response(self, {"error": "No autorizado"}, status=403)
+                return
+            json_response(self, {"ok": True, **ambito_workspace_salud(conn)})
             return
 
         if path == "/api/workspace_registro_diagnostico":

@@ -5582,6 +5582,27 @@ const resolveRestrictedCompanyAccess = (empresaName) => {
   return "";
 };
 
+// Qué workspace abrir cuando nadie lo ha elegido (fase 3 del ámbito por workspace,
+// 2026-09-18). Antes se cogía el primero de la lista por orden alfabético, o se caía al
+// slug escrito a mano "verifika2" —que ni existe (el de verdad es "verifika") y además es
+// el workspace de plataforma, donde no se trabaja—. Ahora, por este orden:
+//   1) el de la ficha de fichaje del usuario, que el servidor elige de forma estable;
+//   2) el primero que no sea el de plataforma;
+//   3) el primero de la lista, solo si no hay otro.
+const PLATFORM_WORKSPACE_SLUGS = new Set(["verifika", "verifika2", "verifika²"]);
+const isPlatformWorkspaceRow = (row) =>
+  PLATFORM_WORKSPACE_SLUGS.has(String(row?.slug || "").trim().toLowerCase());
+const pickPreferredWorkspaceRow = (rows) => {
+  const items = Array.isArray(rows) ? rows.filter((row) => row && row.id) : [];
+  if (!items.length) return null;
+  const fromStatus = String(state?.homeTimeStatus?.workspace_id || "").trim();
+  if (fromStatus) {
+    const own = items.find((row) => String(row.id || "") === fromStatus);
+    if (own) return own;
+  }
+  return items.find((row) => !isPlatformWorkspaceRow(row)) || items[0];
+};
+
 const resolveDefaultTenantWorkspaceSlug = () => {
   try {
     const fromStatus = String(state?.homeTimeStatus?.workspace_slug || "").trim();
@@ -5592,11 +5613,9 @@ const resolveDefaultTenantWorkspaceSlug = () => {
     if (fromCurrent) return normalizeTenantWorkspaceSlug(fromCurrent, DEFAULT_TENANT_WORKSPACE_SLUG);
   } catch (e) {}
   try {
-    const rows = Array.isArray(state?.workspaces) ? state.workspaces : [];
-    if (rows.length === 1) {
-      const value = String(rows[0]?.slug || rows[0]?.nombre || rows[0]?.id || "").trim();
-      if (value) return normalizeTenantWorkspaceSlug(value, DEFAULT_TENANT_WORKSPACE_SLUG);
-    }
+    const preferred = pickPreferredWorkspaceRow(state?.workspaces);
+    const value = String(preferred?.slug || preferred?.nombre || preferred?.id || "").trim();
+    if (value) return normalizeTenantWorkspaceSlug(value, DEFAULT_TENANT_WORKSPACE_SLUG);
   } catch (e) {}
   return DEFAULT_TENANT_WORKSPACE_SLUG;
 };
@@ -5613,9 +5632,11 @@ const getTenantWorkspaceIdFromUrl = () => {
 
 const resolveActiveTenantWorkspaceId = () => {
   try {
+    // La URL manda (fase 3): con otro workspace guardado, abrir un enlace de B mandaba
+    // las primeras peticiones a A hasta que cargaba el detalle.
     const ws =
-      String(state.currentWorkspaceId || "").trim()
-      || String(getTenantWorkspaceIdFromUrl() || "").trim()
+      String(getTenantWorkspaceIdFromUrl() || "").trim()
+      || String(state.currentWorkspaceId || "").trim()
       || String(state.homeTimeStatus?.workspace_id || "").trim()
       || (() => {
         try { return String(localStorage.getItem("crm.currentWorkspaceId") || "").trim(); } catch { return ""; }
@@ -12308,7 +12329,7 @@ const renderWorkspaceList = (rows = []) => {
   const selectedId =
     items.some((row) => String(row.id || "") === String(state.currentWorkspaceId || ""))
       ? state.currentWorkspaceId
-      : items[0]?.id || "";
+      : pickPreferredWorkspaceRow(items)?.id || "";
   if (selectedId) {
     state.currentWorkspaceId = selectedId;
     try {
@@ -30354,7 +30375,7 @@ const loadWorkspaceCentralAhora = async () => {
     targetedWorkspace?.id
       || (state.workspaces.some((row) => String(row.id || "") === String(state.currentWorkspaceId || ""))
       ? state.currentWorkspaceId
-      : (state.workspaces[0] && state.workspaces[0].id) || "");
+      : pickPreferredWorkspaceRow(state.workspaces)?.id || "");
 	  if (selectedId) {
 	    await loadWorkspaceDetail(selectedId);
   } else {
@@ -75048,9 +75069,11 @@ const buildAgendaActionParams = (servicio, extra = {}) => {
     if (raw) params.set(key, raw);
   });
   if (isTenantWorkspaceMode()) {
+    // La URL manda (fase 3): con otro workspace guardado, abrir un enlace de B mandaba
+    // las primeras peticiones a A hasta que cargaba el detalle.
     const ws =
-      String(state.currentWorkspaceId || "").trim()
-      || String(getTenantWorkspaceIdFromUrl() || "").trim()
+      String(getTenantWorkspaceIdFromUrl() || "").trim()
+      || String(state.currentWorkspaceId || "").trim()
       || String(state.homeTimeStatus?.workspace_id || "").trim()
       || (() => {
         try { return String(localStorage.getItem("crm.currentWorkspaceId") || "").trim(); } catch { return ""; }
@@ -75075,9 +75098,11 @@ const loadAcciones = (servicio, empresaId, container, infoEl) => {
   if (isTenantWorkspaceMode()) {
     // En tenant, la agenda siempre debe ir acotada por workspace. En algunos flujos
     // (deep-link / no admin) `state.currentWorkspaceId` puede no estar aún hidratado.
+    // La URL manda (fase 3): con otro workspace guardado, abrir un enlace de B mandaba
+    // las primeras peticiones a A hasta que cargaba el detalle.
     const ws =
-      String(state.currentWorkspaceId || "").trim()
-      || String(getTenantWorkspaceIdFromUrl() || "").trim()
+      String(getTenantWorkspaceIdFromUrl() || "").trim()
+      || String(state.currentWorkspaceId || "").trim()
       || String(state.homeTimeStatus?.workspace_id || "").trim()
       || (() => {
         try { return String(localStorage.getItem("crm.currentWorkspaceId") || "").trim(); } catch { return ""; }
