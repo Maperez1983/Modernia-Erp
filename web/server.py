@@ -48179,13 +48179,88 @@ def ambito_ws_es_tabla_de_negocio(nombre):
     return "backup" not in nombre and "_bak" not in nombre
 
 
-def ensure_ambito_workspace(conn):
-    """Columna `workspace_id` y disparador de relleno en las tablas de negocio (SQLite).
+_AMBITO_WS_PG_LISTO = False
 
-    En Postgres no hace nada: allí lo hizo la migración de la fase 1, y no se quiere DDL
-    en caliente contra producción. Se ejecuta una vez por base y proceso.
+
+def _ensure_ambito_workspace_postgres(conn):
+    global _AMBITO_WS_PG_LISTO
+    if _AMBITO_WS_PG_LISTO:
+        return
+    try:
+        filas = conn.execute(
+            """
+            SELECT c.table_name,
+                   BOOL_OR(c.column_name = 'workspace_id') AS tiene_ws,
+                   EXISTS (
+                     SELECT 1 FROM pg_trigger tg JOIN pg_class cl ON cl.oid = tg.tgrelid
+                     WHERE cl.relname = c.table_name AND tg.tgname = 'trg_' || c.table_name || '_workspace'
+                   ) AS tiene_trg
+            FROM information_schema.columns c
+            JOIN information_schema.tables t
+              ON t.table_schema = c.table_schema AND t.table_name = c.table_name AND t.table_type = 'BASE TABLE'
+            WHERE c.table_schema = 'public'
+            GROUP BY c.table_name
+            HAVING BOOL_OR(c.column_name = 'empresa_id')
+            """
+        ).fetchall()
+        pendientes = [
+            (str(row_value(f, "table_name") or ""), bool(row_value(f, "tiene_ws")), bool(row_value(f, "tiene_trg")))
+            for f in filas
+            if ambito_ws_es_tabla_de_negocio(row_value(f, "table_name"))
+        ]
+        pendientes = [p for p in pendientes if not (p[1] and p[2])]
+        if pendientes:
+            conn.execute(
+                """
+                CREATE OR REPLACE FUNCTION ambito_workspace_desde_empresa() RETURNS trigger AS $$
+                DECLARE
+                  candidatos TEXT[];
+                BEGIN
+                  IF COALESCE(NEW.workspace_id, '') = '' AND COALESCE(NEW.empresa_id::text, '') <> '' THEN
+                    SELECT array_agg(DISTINCT we.workspace_id) INTO candidatos
+                    FROM workspace_empresas we
+                    WHERE we.empresa_id::text = NEW.empresa_id::text
+                      AND we.workspace_id NOT IN (
+                        SELECT we2.workspace_id FROM workspace_empresas we2
+                        JOIN empresas e ON e.id::text = we2.empresa_id::text
+                        WHERE LOWER(TRIM(e.nombre)) IN ('verifika2', 'verifika²')
+                      );
+                    IF array_length(candidatos, 1) = 1 THEN
+                      NEW.workspace_id := candidatos[1];
+                    END IF;
+                  END IF;
+                  RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+                """
+            )
+            for tabla, tiene_ws, tiene_trg in pendientes:
+                if not tiene_ws:
+                    conn.execute(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS workspace_id TEXT")  # nosec B608 - catálogo
+                    conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{tabla}_workspace_id ON {tabla} (workspace_id)")  # nosec B608
+                if not tiene_trg:
+                    conn.execute(
+                        f"CREATE TRIGGER trg_{tabla}_workspace BEFORE INSERT ON {tabla} "  # nosec B608
+                        "FOR EACH ROW EXECUTE FUNCTION ambito_workspace_desde_empresa()"
+                    )
+            conn.commit()
+        _AMBITO_WS_PG_LISTO = True
+    except Exception as _fallo_tragado:
+        _rollback_best_effort(conn)
+        apunta_escritura_tragada("ensure_ambito_workspace/postgres", _fallo_tragado)
+
+
+def ensure_ambito_workspace(conn):
+    """Columna `workspace_id` y disparador de relleno en las tablas de negocio.
+
+    En Postgres solo toca lo que falte, mirando antes el catálogo: en producción ya lo
+    puso la migración de la fase 1 y aquí no hace nada (ni un bloqueo). Hace falta para
+    una base Postgres nueva, donde sin esto el resumen de facturación y otras consultas
+    por workspace fallaban por falta de columna (2026-09-18, visto en un Postgres local).
+    Se ejecuta una vez por base y proceso.
     """
     if _db_backend_name(conn) == "postgres":
+        _ensure_ambito_workspace_postgres(conn)
         return
     try:
         base = str((conn.execute("PRAGMA database_list").fetchone() or [None, None, ""])[2] or ":memory:")
@@ -55671,9 +55746,12 @@ def fetch_workspace_fincas_tarifas(conn, workspace_id, *, sembrar=True):
     ).fetchall()
     if not filas and sembrar:
         ahora = datetime.now().isoformat(timespec="seconds")
+        # OR IGNORE: la primera visita a un workspace lanza varias peticiones a la vez y
+        # más de una llegaba aquí; la segunda chocaba con el índice único (workspace,
+        # clave) y la petición se caía (2026-09-18, reproducido contra Postgres).
         for item in FINCAS_TARIFAS_DEFECTO:
             conn.execute(
-                "INSERT INTO workspace_fincas_tarifas "
+                "INSERT OR IGNORE INTO workspace_fincas_tarifas "
                 "(id, workspace_id, clave, etiqueta, tipo, unidad, precio, activo, orden, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)",
                 (
@@ -62570,17 +62648,26 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
             processed_rows.append(item)
         candidate_rows = []
         if needs_candidate_rows:
-            candidates = conn.execute(
-                f"""
-                SELECT DISTINCT c.id, c.nombre, COALESCE(c.nif, '') AS nif
-                FROM clientes c
-                JOIN clientes_empresas ce ON ce.cliente_id = c.id
-                WHERE ce.empresa_id IN ({placeholders})
-                ORDER BY LENGTH(COALESCE(c.nombre, '')) DESC, c.nombre COLLATE NOCASE ASC
-                LIMIT 500
-                """,
-                empresa_ids,
-            ).fetchall()
+            # Clientes del workspace (fase 2). Antes era `SELECT DISTINCT` sobre la unión
+            # con las empresas, ordenando por LENGTH(nombre): Postgres rechaza ese orden
+            # con DISTINCT, así que en producción no se sugería nunca un cliente para los
+            # documentos sueltos (2026-09-18, visto en el registro de un Postgres local).
+            # Las sugerencias son una ayuda: si fallan, el hub sigue enseñando los
+            # documentos sin sugerencia en vez de salir vacío entero.
+            try:
+                candidates = conn.execute(
+                    """
+                    SELECT c.id, c.nombre, COALESCE(c.nif, '') AS nif
+                    FROM clientes c
+                    WHERE COALESCE(c.workspace_id, '') = ?
+                    ORDER BY LENGTH(COALESCE(c.nombre, '')) DESC, c.nombre COLLATE NOCASE ASC
+                    LIMIT 500
+                    """,
+                    (workspace_id,),
+                ).fetchall()
+            except Exception:
+                _rollback_best_effort(conn)
+                candidates = []
             query_count += 1
             candidate_rows = [dict(row) for row in candidates]
             if candidate_rows:
@@ -103772,6 +103859,10 @@ class Handler(BaseHTTPRequestHandler):
                             if ws_pick:
                                 chosen = next((it for it in ws_rows if str(it.get("id") or "").strip() == ws_pick), None)
                         # Si no hay vínculo directo, intentamos localizar el workspace por email/nombre en fichas (unlinked).
+                        # Solo sirve si sale uno: por eso basta con agrupar y no hace falta orden.
+                        # Llevaba `SELECT DISTINCT ... ORDER BY updated_at`, que Postgres rechaza
+                        # siempre ("ORDER BY expressions must appear in select list"): en
+                        # producción este respaldo no había funcionado nunca (2026-09-18).
                         if not chosen and workspace_ids:
                             user_email = normalize_email(session.get("email") or "")
                             if user_email:
@@ -103779,12 +103870,12 @@ class Handler(BaseHTTPRequestHandler):
                                     placeholders = ",".join(["?"] * len(workspace_ids))
                                     rows = conn.execute(
                                         f"""
-                                        SELECT DISTINCT workspace_id
+                                        SELECT workspace_id
                                         FROM workspace_registro_personal
                                         WHERE COALESCE(activo, 1) = 1
                                           AND LOWER(TRIM(COALESCE(email, ''))) = LOWER(TRIM(?))
                                           AND workspace_id IN ({placeholders})
-                                        ORDER BY COALESCE(updated_at, created_at) DESC
+                                        GROUP BY workspace_id
                                         LIMIT 2
                                         """,
                                         (user_email, *workspace_ids),
@@ -103804,12 +103895,12 @@ class Handler(BaseHTTPRequestHandler):
                                         placeholders = ",".join(["?"] * len(workspace_ids))
                                         rows = conn.execute(
                                             f"""
-                                            SELECT DISTINCT workspace_id
+                                            SELECT workspace_id
                                             FROM workspace_registro_personal
                                             WHERE COALESCE(activo, 1) = 1
                                               AND LOWER(TRIM(COALESCE(nombre, ''))) = LOWER(TRIM(?))
                                               AND workspace_id IN ({placeholders})
-                                            ORDER BY COALESCE(updated_at, created_at) DESC
+                                            GROUP BY workspace_id
                                             LIMIT 2
                                             """,
                                             (full_name, *workspace_ids),

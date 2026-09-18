@@ -26,7 +26,7 @@ TECHO = {
     "resolve_workspace_company_ids(conn": 18,
     "resolve_workspace_scope_empresa_ids(conn": 12,
     "resolve_empresa_ids_for_request(conn": 20,
-    "ce.empresa_id IN (": 29,
+    "ce.empresa_id IN (": 28,
 }
 
 

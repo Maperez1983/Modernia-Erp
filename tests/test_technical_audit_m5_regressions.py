@@ -84,6 +84,7 @@ class TechnicalAuditM5RegressionTests(unittest.TestCase):
             );
             CREATE TABLE IF NOT EXISTS clientes (
               id TEXT PRIMARY KEY,
+              workspace_id TEXT,
               nombre TEXT,
               nif TEXT,
               email TEXT,
@@ -275,7 +276,8 @@ class TechnicalAuditM5RegressionTests(unittest.TestCase):
             ],
         )
         conn.execute(
-            "INSERT INTO clientes (id, nombre, nif, email, telefono, estado, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            # Con workspace, como todo cliente desde la fase 1 del ámbito (2026-09-18).
+            "INSERT INTO clientes (id, workspace_id, nombre, nif, email, telefono, estado, created_at, updated_at) VALUES (?, 'ws-main', ?, ?, ?, ?, ?, ?, ?)",
             (
                 "cli-1",
                 "Cliente Uno",
