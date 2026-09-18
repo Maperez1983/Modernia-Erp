@@ -155,6 +155,11 @@ class LeadsDelPortalTests(unittest.TestCase):
         self._insert("workspace_empresas", {"id": "extra", "workspace_id": "wsCentro",
                                             "empresa_id": "empVel", "created_at": NOW,
                                             "updated_at": NOW})
+        # El disparador de ámbito (fase 1) le puso workspace a la ficha al crearla,
+        # cuando la empresa aún tenía uno solo. Para el caso "ficha sin workspace" hay
+        # que quitárselo, como en las fichas anteriores a la fase 1.
+        self.conn.execute("UPDATE inmuebles SET workspace_id = NULL WHERE id = 'inmVel'")
+        self.conn.commit()
         resultado, estado = self._lead("inmVel", "Nadie Sabe")
         self.assertEqual(estado, 409, resultado)
         self.assertIsNone(self._workspace_del_cliente("Nadie Sabe"))

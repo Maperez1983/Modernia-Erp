@@ -38339,8 +38339,7 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
                 NULLIF((
                   SELECT ce_link.captado_por_user_id
                   FROM clientes_empresas ce_link
-                  WHERE ce_link.empresa_id = ?
-                    AND ce_link.cliente_id = c.id
+                  WHERE ce_link.cliente_id = c.id
                     AND {service_filter.replace("ce.", "ce_link.")}
                   LIMIT 1
                 ), ''),
@@ -38351,8 +38350,7 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
                 NULLIF((
                   SELECT ce_link2.procedencia_canal
                   FROM clientes_empresas ce_link2
-                  WHERE ce_link2.empresa_id = ?
-                    AND ce_link2.cliente_id = c.id
+                  WHERE ce_link2.cliente_id = c.id
                     AND {service_filter.replace("ce.", "ce_link2.")}
                   LIMIT 1
                 ), ''),
@@ -38362,15 +38360,17 @@ def compute_workspace_rrhh_productividad_renta(conn, workspace_id, empresa_id, p
             FROM cliente_gestoria cg
             JOIN clientes c ON c.id = cg.cliente_id
             WHERE COALESCE(cg.mod_renta, 0) = 1
+          -- Por workspace (fase 2): antes solo los clientes de la empresa de la ficha del
+          -- trabajador, que con empresas compartidas incluía los de otro workspace.
+          AND COALESCE(c.workspace_id, '') = ?
           AND EXISTS (
             SELECT 1
             FROM clientes_empresas ce
-            WHERE ce.empresa_id = ?
-              AND ce.cliente_id = c.id
+            WHERE ce.cliente_id = c.id
               AND {service_filter}
           )
         """,
-        (empresa_id, empresa_id, empresa_id),
+        (workspace_id,),
     ).fetchall()
 
     items = []
@@ -38509,8 +38509,10 @@ def compute_workspace_rrhh_productividad_seguros(conn, workspace_id, empresa_id,
 
     fecha_efecto_date = seguro_date_sql("fecha_efecto", "s")
     year_expr = f"COALESCE(STRFTIME('%Y', {fecha_efecto_date}), STRFTIME('%Y', s.created_at))"
-    where = ["s.empresa_id = ?"]
-    values = [empresa_id]
+    # Por workspace (fase 2): las pólizas cuelgan de la sociedad de seguros, no de la
+    # empresa de la ficha del trabajador, y la empresa se comparte entre workspaces.
+    where = ["COALESCE(s.workspace_id, '') = ?"]
+    values = [workspace_id]
     if ejercicio_val:
         where.append(f"{year_expr} = ?")
         values.append(ejercicio_val)
@@ -38656,8 +38658,9 @@ def compute_workspace_rrhh_productividad_hipotecas(conn, workspace_id, empresa_i
     if not matchers:
         return {"kpis": {}, "items": []}
 
-    where = ["h.empresa_id = ?"]
-    values = [empresa_id]
+    # Por workspace (fase 2), igual que las pólizas.
+    where = ["COALESCE(h.workspace_id, '') = ?"]
+    values = [workspace_id]
     if ejercicio_val:
         where.append("COALESCE(CAST(h.anio AS TEXT), SUBSTR(NULLIF(h.fecha_firma,''),1,4), '') = ?")
         values.append(ejercicio_val)
@@ -42911,6 +42914,7 @@ def _ensure_tables_sin_red(db_path, _abiertas):
     ensure_workspace_core_tables(conn)
     ensure_workspace_facturacion_table(conn)
     ensure_workspace_product_tables(conn)
+    ensure_ambito_workspace(conn)
     try:
         _ensure_m5_perf_indexes(conn)
     except Exception:
@@ -48136,6 +48140,87 @@ def _db_backend_name(conn) -> str:
     return backend or "sqlite"
 
 
+# Ámbito por workspace (fase 1, 2026-09-18). Todo dato de negocio lleva `workspace_id`,
+# y una fila que entre sin él lo recibe de su empresa, descartando el workspace de
+# plataforma (el de la empresa técnica «Verifika2», que las contiene todas): fuera de él
+# cada empresa cuelga de uno solo. En producción lo instaló scripts/fase1_workspace_id.py;
+# aquí se instala lo mismo en SQLite para que desarrollo y pruebas se comporten igual.
+AMBITO_WS_TABLAS_EXCLUIDAS = {
+    "workspace_empresas",
+    "workspace_companies",
+    "workspace_servicio_empresas",
+    "empresa_aliases",
+    "clientes_empresas",
+    "ambito_workspace_backfill_log",
+}
+AMBITO_WS_PREFIJOS_EXCLUIDOS = ("workspace_registro_",)
+_AMBITO_WS_LISTO = set()
+
+
+def ambito_ws_es_tabla_de_negocio(nombre):
+    nombre = str(nombre or "")
+    if nombre in AMBITO_WS_TABLAS_EXCLUIDAS or nombre.startswith(AMBITO_WS_PREFIJOS_EXCLUIDOS):
+        return False
+    return "backup" not in nombre and "_bak" not in nombre
+
+
+def ensure_ambito_workspace(conn):
+    """Columna `workspace_id` y disparador de relleno en las tablas de negocio (SQLite).
+
+    En Postgres no hace nada: allí lo hizo la migración de la fase 1, y no se quiere DDL
+    en caliente contra producción. Se ejecuta una vez por base y proceso.
+    """
+    if _db_backend_name(conn) == "postgres":
+        return
+    try:
+        base = str((conn.execute("PRAGMA database_list").fetchone() or [None, None, ""])[2] or ":memory:")
+    except Exception:
+        base = ":memory:"
+    clave = (base, id(conn)) if base in ("", ":memory:") else base
+    if clave in _AMBITO_WS_LISTO:
+        return
+    tablas = [
+        str(row_value(r, "name") or row_value(r, 0) or "")
+        for r in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'").fetchall()
+    ]
+    for tabla in tablas:
+        if not ambito_ws_es_tabla_de_negocio(tabla):
+            continue
+        cols = {str(row_value(c, "name") or row_value(c, 1) or "") for c in conn.execute(f"PRAGMA table_info({tabla})").fetchall()}  # nosec B608 - nombre de sqlite_master
+        if "empresa_id" not in cols:
+            continue
+        if "workspace_id" not in cols:
+            conn.execute(f"ALTER TABLE {tabla} ADD COLUMN workspace_id TEXT")  # nosec B608
+        conn.execute(f"CREATE INDEX IF NOT EXISTS idx_{tabla}_workspace_id ON {tabla} (workspace_id)")  # nosec B608
+        conn.execute(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS trg_{tabla}_workspace AFTER INSERT ON {tabla}
+            WHEN COALESCE(NEW.workspace_id, '') = '' AND COALESCE(NEW.empresa_id, '') <> ''
+            BEGIN
+              UPDATE {tabla}
+              SET workspace_id = (
+                SELECT MIN(we.workspace_id)
+                FROM workspace_empresas we
+                WHERE we.empresa_id = NEW.empresa_id
+                  AND we.workspace_id NOT IN (
+                    SELECT we2.workspace_id
+                    FROM workspace_empresas we2
+                    JOIN empresas e ON e.id = we2.empresa_id
+                    WHERE LOWER(TRIM(e.nombre)) IN ('verifika2', 'verifika²')
+                  )
+                HAVING COUNT(DISTINCT we.workspace_id) = 1
+              )
+              WHERE rowid = NEW.rowid;
+            END
+            """  # nosec B608 - nombre de sqlite_master
+        )
+    try:
+        conn.commit()
+    except Exception:
+        pass
+    _AMBITO_WS_LISTO.add(clave)
+
+
 def _m5_migration_done(conn, key: str) -> bool:
     try:
         conn.execute(
@@ -48868,39 +48953,20 @@ def resolve_workspace_id_for_empresa(conn, empresa_id):
 def clientes_workspace_scope_sql(conn, workspace_id, *, alias="c", empresa_id=""):
     """Condición SQL para acotar `clientes` a un workspace, y sus valores.
 
-    Un cliente es del workspace si lo lleva estampado, o si no lleva ninguno pero
-    cuelga de una empresa suya. Y "colgar de una empresa" son dos cosas distintas:
-    la columna `clientes.empresa_id` y la tabla de relación `clientes_empresas`.
+    Un cliente es del workspace si lleva su `workspace_id`. Hasta la fase 1 (2026-09-18)
+    se aceptaba también al cliente sin workspace que colgaba de una empresa del
+    workspace, porque muchos clientes aún no lo llevaban; pero las empresas se comparten
+    entre workspaces, así que ese "o" veía clientes de otro workspace. Hoy todos los
+    clientes lo llevan (y un disparador se lo pone a los nuevos), así que sobra.
 
-    Mirar solo la columna descartaba 1180 de 2014 clientes en producción, porque el
-    vínculo de verdad casi siempre está en la tabla de relación. Se comprueban las
-    dos.
-
+    `empresa_id` se conserva en la firma por compatibilidad: no amplía el ámbito.
     Devuelve ("", []) cuando no hay workspace, para que quien llame decida si eso
     significa "sin filtro" o "sin resultados".
     """
     ws = str(workspace_id or "").strip()
     if not ws:
         return "", []
-    columnas = table_columns(conn, "clientes") or set()
-    empresa_ids = resolve_workspace_scope_empresa_ids(conn, ws, empresa_id=empresa_id) or []
-    if not empresa_ids:
-        if "workspace_id" in columnas:
-            return f"COALESCE({alias}.workspace_id, '') = ?", [ws]
-        return "1 = 0", []
-    marcadores = ",".join(["?"] * len(empresa_ids))
-    por_empresa = (
-        f"(COALESCE({alias}.empresa_id, '') IN ({marcadores})"
-        f" OR EXISTS (SELECT 1 FROM clientes_empresas ce WHERE ce.cliente_id = {alias}.id"
-        f" AND ce.empresa_id IN ({marcadores})))"
-    )
-    valores_empresa = [*empresa_ids, *empresa_ids]
-    if "workspace_id" not in columnas:
-        return por_empresa, valores_empresa
-    return (
-        f"(COALESCE({alias}.workspace_id, '') = ? OR (COALESCE({alias}.workspace_id, '') = '' AND {por_empresa}))",
-        [ws, *valores_empresa],
-    )
+    return f"COALESCE({alias}.workspace_id, '') = ?", [ws]
 
 def resolve_workspace_scope_empresa_ids(conn, workspace_id, *, empresa_id="", solo_operativas=False):
     """
@@ -49293,16 +49359,11 @@ def build_service_scope_filter(conn, table_name: str, alias: str, workspace_id: 
     cols = table_columns(conn, table_name) or set()
     if ws_id:
         if "workspace_id" in cols:
-            # Compat: en muchos datos legacy workspace_id está vacío. En tenant no queremos
-            # “perder” esos registros si pertenecen a una empresa del workspace.
-            if "empresa_id" in cols:
-                empresa_ids = resolve_workspace_scope_empresa_ids(conn, ws_id, empresa_id=empresa_id)
-                if empresa_ids:
-                    placeholders = ",".join(["?"] * len(empresa_ids))
-                    return (
-                        f"(COALESCE({alias}.workspace_id, '') = ? OR (COALESCE({alias}.workspace_id, '') = '' AND {alias}.empresa_id IN ({placeholders})))",
-                        [ws_id, *list(empresa_ids)],
-                    )
+            # Solo por workspace (fase 2, 2026-09-18). Antes se aceptaba también la fila
+            # sin workspace de una empresa del workspace, porque mucho dato antiguo no lo
+            # llevaba; como las empresas se comparten, eso enseñaba filas de otro
+            # workspace. Desde la fase 1 todas lo llevan y un disparador se lo pone a
+            # las nuevas.
             return (f"COALESCE({alias}.workspace_id, '') = ?", [ws_id])
         if "empresa_id" in cols:
             empresa_ids = resolve_workspace_scope_empresa_ids(conn, ws_id, empresa_id=empresa_id)
@@ -49328,14 +49389,15 @@ def resolve_workspace_company_ids(conn, workspace_id, empresa_id=None):
 
 
 def fetch_workspace_clientes(conn, workspace_id, q="", limit=60):
-    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
-    if not empresa_ids:
+    # Por workspace (fase 2): antes eran los clientes vinculados a una empresa del
+    # workspace, que con empresas compartidas incluía los de otro workspace y dejaba
+    # fuera a los que no tienen vínculo con ninguna empresa.
+    if not str(workspace_id or "").strip():
         return {"rows": []}
     try:
         tope = max(1, min(int(limit or 60), 150))
-        placeholders = ",".join(["?"] * len(empresa_ids))
-        where = [f"ce.empresa_id IN ({placeholders})"]
-        values = list(empresa_ids)
+        where = ["COALESCE(c.workspace_id, '') = ?"]
+        values = [workspace_id]
         if q:
             where.append("(c.nombre LIKE ? OR c.nif LIKE ? OR c.telefono LIKE ? OR c.email LIKE ?)")
             values.extend([f"%{q}%"] * 4)
@@ -49350,7 +49412,7 @@ def fetch_workspace_clientes(conn, workspace_id, q="", limit=60):
               GROUP_CONCAT(DISTINCT e.nombre) AS empresas,
               GROUP_CONCAT(DISTINCT ce.servicio) AS servicios
             FROM clientes c
-            JOIN clientes_empresas ce ON ce.cliente_id = c.id
+            LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id
             LEFT JOIN empresas e ON e.id = ce.empresa_id
             WHERE {' AND '.join(where)}
             GROUP BY c.id
@@ -49370,7 +49432,7 @@ def fetch_workspace_clientes(conn, workspace_id, q="", limit=60):
                     f"""
                     SELECT COUNT(DISTINCT c.id) AS n
                     FROM clientes c
-                    JOIN clientes_empresas ce ON ce.cliente_id = c.id
+                    LEFT JOIN clientes_empresas ce ON ce.cliente_id = c.id
                     WHERE {' AND '.join(where)}
                     """,
                     values,
@@ -49384,22 +49446,17 @@ def fetch_workspace_clientes(conn, workspace_id, q="", limit=60):
 
 
 def fetch_workspace_cliente_360(conn, workspace_id, cliente_id):
-    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
-    if not empresa_ids:
-        return {"error": "Tenant sin empresas activas"}
-    placeholders = ",".join(["?"] * len(empresa_ids))
+    # El acceso se decide por el workspace del cliente (fase 2). Antes bastaba con que
+    # el cliente tuviera vínculo con una empresa del workspace: con empresas compartidas
+    # se abría la ficha de un cliente de otro workspace, y un cliente sin vínculo con
+    # ninguna empresa no se podía abrir en el suyo.
     allowed = conn.execute(
-        f"""
-        SELECT 1
-        FROM clientes_empresas
-        WHERE cliente_id = ?
-          AND empresa_id IN ({placeholders})
-        LIMIT 1
-        """,
-        [cliente_id, *empresa_ids],
+        "SELECT 1 FROM clientes WHERE id = ? AND COALESCE(workspace_id, '') = ? LIMIT 1",
+        (cliente_id, str(workspace_id or "").strip()),
     ).fetchone()
     if not allowed:
         return {"error": "Cliente no disponible en este tenant"}
+    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
 
     payload = build_cliente_ficha_payload(conn, cliente_id)
     if not payload:
@@ -53430,7 +53487,7 @@ def enforce_gestoria_row_access(conn, session, tabla, row_id, *, write=False):
                      "gestoria_conta_tasks", "gestoria"}:
         return False, "Tabla no permitida"
     columnas = table_columns(conn, tabla)
-    campos = [c for c in ("empresa_id", "cliente_id") if c in columnas]
+    campos = [c for c in ("workspace_id", "empresa_id", "cliente_id") if c in columnas]
     if not campos:
         return False, "Tabla sin ámbito"
     try:
@@ -53441,6 +53498,12 @@ def enforce_gestoria_row_access(conn, session, tabla, row_id, *, write=False):
         return False, "No encontrado"
     if not fila:
         return False, "No encontrado"
+    # Primero el workspace de la fila (fase 2, 2026-09-18): pertenecer a cualquier
+    # workspace que compartiera la empresa bastaba para tocar la fila de otro.
+    workspace_fila = str(row_value(fila, "workspace_id", "") or "").strip() if "workspace_id" in campos else ""
+    if workspace_fila:
+        ok, err = enforce_workspace_membership(conn, session, workspace_fila, write=write)
+        return (True, "") if ok else (False, err or "No autorizado")
     empresa_id = str(row_value(fila, "empresa_id", "") or "").strip() if "empresa_id" in campos else ""
     if empresa_id:
         ok, err = enforce_empresa_membership(conn, session, empresa_id, write=write)
@@ -56008,7 +56071,7 @@ def fetch_workspace_presupuestos(conn, workspace_id, limit=40):
     return {"rows": items}
 
 
-def fetch_empresa_presupuestos(conn, empresa_id, servicio=None, estado=None, limit=120):
+def fetch_empresa_presupuestos(conn, empresa_id, servicio=None, estado=None, limit=120, workspace_id=None):
     empresa_id = str(empresa_id or "").strip()
     if not empresa_id:
         return {"rows": []}
@@ -56016,6 +56079,12 @@ def fetch_empresa_presupuestos(conn, empresa_id, servicio=None, estado=None, lim
     estado_key = normalize_lookup_text(estado or "").lower().strip()
     where = ["p.empresa_id = ?"]
     params = [empresa_id]
+    # Con workspace, solo los suyos (fase 2): la empresa es compartida y por sí sola
+    # traía también los presupuestos que otro workspace hizo con ella.
+    ws = str(workspace_id or "").strip()
+    if ws:
+        where.append("COALESCE(p.workspace_id, '') = ?")
+        params.append(ws)
     if servicio_key and servicio_key not in {"all", "*"}:
         if servicio_key == "fincas":
             where.append(
@@ -61902,8 +61971,11 @@ def get_platform_empresa_id(conn) -> str:
 
 
 def fetch_workspace_billing_summary(conn, workspace_id):
-    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
-    if not empresa_ids:
+    # Todo por workspace (fase 2, 2026-09-18). Antes el "potencial operativo" sumaba las
+    # comisiones y honorarios de las empresas del workspace sin mirar el workspace: con
+    # empresas compartidas, entraba el dinero de otro workspace. Y las facturas sin
+    # empresa no contaban.
+    if not str(workspace_id or "").strip():
         return {
             "facturas_emitidas": 0,
             "facturacion_total": 0.0,
@@ -61914,7 +61986,6 @@ def fetch_workspace_billing_summary(conn, workspace_id):
             "remesas_total": 0.0,
             "servicios": [],
         }
-    placeholders = ",".join(["?"] * len(empresa_ids))
     fact_rows = conn.execute(
         f"""
         SELECT
@@ -61924,11 +61995,10 @@ def fetch_workspace_billing_summary(conn, workspace_id):
           SUM(CASE WHEN COALESCE(cobrada, 0) = 1 THEN COALESCE(total, 0) ELSE 0 END) AS total_cobrado
         FROM workspace_facturacion
         WHERE workspace_id = ?
-          AND empresa_id IN ({placeholders})
         GROUP BY COALESCE(servicio, 'sin_servicio')
         ORDER BY total_facturado DESC
         """,
-        [workspace_id, *empresa_ids],
+        [workspace_id],
     ).fetchall()
     facturas_emitidas = sum(int(row["total_facturas"] or 0) for row in fact_rows)
     facturacion_total = round(sum(float(row["total_facturado"] or 0.0) for row in fact_rows), 2)
@@ -61940,9 +62010,9 @@ def fetch_workspace_billing_summary(conn, workspace_id):
         f"""
         SELECT 'seguros' AS servicio, SUM(COALESCE(comision, 0)) AS total
         FROM seguros
-        WHERE empresa_id IN ({placeholders})
+        WHERE COALESCE(workspace_id, '') = ?
         """,
-        empresa_ids,
+        (workspace_id,),
     ).fetchone()
     if seguros and seguros["total"] is not None:
         potential_rows.append({"servicio": "seguros", "total": float(seguros["total"] or 0.0)})
@@ -61950,9 +62020,9 @@ def fetch_workspace_billing_summary(conn, workspace_id):
         f"""
         SELECT 'inmobiliaria' AS servicio, SUM(COALESCE(honorarios, 0)) AS total
         FROM operaciones_inmobiliarias
-        WHERE empresa_id IN ({placeholders})
+        WHERE COALESCE(workspace_id, '') = ?
         """,
-        empresa_ids,
+        (workspace_id,),
     ).fetchone()
     if inmo and inmo["total"] is not None:
         potential_rows.append({"servicio": "inmobiliaria", "total": float(inmo["total"] or 0.0)})
@@ -61960,9 +62030,9 @@ def fetch_workspace_billing_summary(conn, workspace_id):
         f"""
         SELECT 'financiacion' AS servicio, SUM(COALESCE(comision, 0)) AS total
         FROM hipotecas
-        WHERE empresa_id IN ({placeholders})
+        WHERE COALESCE(workspace_id, '') = ?
         """,
-        empresa_ids,
+        (workspace_id,),
     ).fetchone()
     if fin and fin["total"] is not None:
         potential_rows.append({"servicio": "financiacion", "total": float(fin["total"] or 0.0)})
@@ -61970,9 +62040,9 @@ def fetch_workspace_billing_summary(conn, workspace_id):
         f"""
         SELECT 'gestoria' AS servicio, SUM(COALESCE(importe, 0)) AS total
         FROM gestoria_trabajos
-        WHERE empresa_id IN ({placeholders})
+        WHERE COALESCE(workspace_id, '') = ?
         """,
-        empresa_ids,
+        (workspace_id,),
     ).fetchone()
     if gest and gest["total"] is not None:
         potential_rows.append({"servicio": "gestoria", "total": float(gest["total"] or 0.0)})
@@ -62023,11 +62093,12 @@ def fetch_workspace_billing_summary(conn, workspace_id):
 
 
 def fetch_workspace_billing_rows(conn, workspace_id, limit=25):
-    empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
-    if not empresa_ids:
+    # Por workspace (fase 2). Antes exigía además una empresa vinculada al workspace en
+    # la tabla nueva de vínculos, mientras el guardado miraba la antigua: una factura
+    # podía guardarse y no aparecer nunca. Y las facturas sin empresa no salían.
+    if not str(workspace_id or "").strip():
         return {"rows": []}
     try:
-        placeholders = ",".join(["?"] * len(empresa_ids))
         rows = conn.execute(
             f"""
             SELECT
@@ -62069,11 +62140,10 @@ def fetch_workspace_billing_rows(conn, workspace_id, limit=25):
             LEFT JOIN empresas e ON e.id = wf.empresa_id
             LEFT JOIN clientes c ON c.id = wf.cliente_id
             WHERE wf.workspace_id = ?
-              AND wf.empresa_id IN ({placeholders})
             ORDER BY COALESCE(wf.fecha_emision, wf.created_at) DESC, wf.updated_at DESC
             LIMIT ?
             """,
-            [workspace_id, *empresa_ids, max(1, min(int(limit or 25), 100))],
+            [workspace_id, max(1, min(int(limit or 25), 100))],
         ).fetchall()
         return {"rows": [dict(row) for row in rows]}
     except Exception:
@@ -104238,9 +104308,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if not str(empresa_id or "").strip():
                 empresa_id = str(persona_row["empresa_id"] or "").strip()
-            if not str(empresa_id or "").strip():
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
-                return
+            # Sin empresa se sigue: el ámbito es el workspace (fase 2, 2026-09-18). Antes
+            # quien no tiene sociedad (Daniel García) recibía un 400 por falta de empresa.
             try:
                 payload = compute_workspace_rrhh_productividad_renta(
                     conn,
@@ -104292,9 +104361,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if not str(empresa_id or "").strip():
                 empresa_id = str(persona_row["empresa_id"] or "").strip()
-            if not str(empresa_id or "").strip():
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
-                return
+            # Sin empresa se sigue: el ámbito es el workspace (fase 2, 2026-09-18). Antes
+            # quien no tiene sociedad (Daniel García) recibía un 400 por falta de empresa.
             try:
                 payload = compute_workspace_rrhh_productividad(
                     conn,
@@ -104372,9 +104440,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if not str(empresa_id or "").strip():
                 empresa_id = str(persona_row["empresa_id"] or "").strip()
-            if not str(empresa_id or "").strip():
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
-                return
+            # Sin empresa se sigue: el ámbito es el workspace (fase 2, 2026-09-18). Antes
+            # quien no tiene sociedad (Daniel García) recibía un 400 por falta de empresa.
             try:
                 payload = compute_workspace_rrhh_economicos_dashboard(conn, workspace_id, empresa_id, persona_id, ejercicio=ejercicio)
             except Exception:
@@ -104413,9 +104480,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if not str(empresa_id or "").strip():
                 empresa_id = str(persona_row["empresa_id"] or "").strip()
-            if not str(empresa_id or "").strip():
-                json_response(self, {"error": "empresa_id requerido"}, status=400)
-                return
+            # Sin empresa se sigue: el ámbito es el workspace (fase 2, 2026-09-18). Antes
+            # quien no tiene sociedad (Daniel García) recibía un 400 por falta de empresa.
             year = str(ejercicio or "").strip()
             if not re.match(r"^20[0-9]{2}$", year or ""):
                 year = str(datetime.now().year)
@@ -105183,7 +105249,19 @@ class Handler(BaseHTTPRequestHandler):
             if not empresa_id:
                 json_response(self, {"error": "empresa_id requerido"}, status=400)
                 return
-            json_response(self, fetch_empresa_presupuestos(conn, empresa_id, servicio=servicio, estado=estado, limit=limit))
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            if workspace_id:
+                _ep_session = getattr(self, "auth_session", None) or self._current_session()
+                _ep_ok, _ep_err = enforce_workspace_membership(conn, _ep_session, workspace_id)
+                if not _ep_ok:
+                    json_response(self, {"error": _ep_err or "No autorizado"}, status=403)
+                    return
+            json_response(
+                self,
+                fetch_empresa_presupuestos(
+                    conn, empresa_id, servicio=servicio, estado=estado, limit=limit, workspace_id=workspace_id
+                ),
+            )
             return
 
         if path == "/api/workspace_contrato_catalog":
@@ -107907,20 +107985,14 @@ class Handler(BaseHTTPRequestHandler):
                 values = []
                 seguros_cols = table_columns(conn, "seguros") or set()
                 if workspace_id:
-                    # Mismo caso que en la lista genérica: `seguros.workspace_id` existe pero
-                    # está vacío en lo anterior a la migración, y el `elif` de abajo nunca se
-                    # alcanzaba precisamente porque la columna sí existe. Se combinan los dos
-                    # vínculos con el workspace en vez de excluirse.
-                    scope_parts = []
+                    # Solo por workspace (fase 2, 2026-09-18): todas las pólizas lo llevan
+                    # desde la fase 1. El "o por empresa" de antes veía las de otro
+                    # workspace que compartiera la empresa.
                     if "workspace_id" in seguros_cols:
-                        scope_parts.append("COALESCE(s.workspace_id, '') = ?")
+                        where.append("COALESCE(s.workspace_id, '') = ?")
                         values.append(workspace_id)
-                    empresa_ids = fetch_workspace_operational_company_ids(conn, workspace_id) or []
-                    if empresa_ids:
-                        placeholders = ",".join(["?"] * len(empresa_ids))
-                        scope_parts.append(f"s.empresa_id IN ({placeholders})")
-                        values.extend(empresa_ids)
-                    where.append("(" + " OR ".join(scope_parts) + ")" if scope_parts else "1 = 0")
+                    else:
+                        where.append("1 = 0")
                 elif empresa_id:
                     where.append("s.empresa_id = ?")
                     values.append(empresa_id)
@@ -107951,26 +108023,12 @@ class Handler(BaseHTTPRequestHandler):
                 service_clause, service_values = service_sql_match_clause("ce", ["gestoria", "fincas"])
                 where_parts = []
                 values = []
-                scope_parts = []
-                if "workspace_id" in ce_cols:
-                    scope_parts.append("COALESCE(ce.workspace_id, '') = ?")
-                    values.append(workspace_id)
-                if "workspace_id" in c_cols:
-                    scope_parts.append("COALESCE(c.workspace_id, '') = ?")
-                    values.append(workspace_id)
-                empresa_ids = fetch_workspace_operational_company_ids(conn, workspace_id) or []
-                if empresa_ids:
-                    placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                    scope_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
-                    values.extend(empresa_ids)
-                    if "empresa_id" in c_cols:
-                        scope_parts.append(f"c.empresa_id IN ({placeholders_ws})")
-                        values.extend(empresa_ids)
-                if scope_parts:
-                    where_parts.append(f"({' OR '.join(scope_parts)})")
-                else:
+                # Solo por workspace (fase 2): el cliente lo lleva siempre desde la fase 1.
+                if "workspace_id" not in c_cols:
                     json_response(self, [])
                     return
+                where_parts.append("COALESCE(c.workspace_id, '') = ?")
+                values.append(workspace_id)
                 if service_clause:
                     where_parts.append(f"(({service_clause}) OR cg.cliente_id IS NOT NULL)")
                     values.extend(service_values)
@@ -108001,29 +108059,13 @@ class Handler(BaseHTTPRequestHandler):
                 where_parts = [service_clause] if service_clause else []
                 values = list(service_values)
                 if workspace_id:
-                    # Mismo caso que en la rama genérica y en la de seguros: la columna
-                    # existe pero está vacía en todo lo anterior a la migración, así que
-                    # filtrar solo por ella dejaba la lista a cero. Y el respaldo por
-                    # empresa estaba en un `elif` inalcanzable, precisamente porque la
-                    # columna sí existe. Se combinan los tres vínculos en vez de excluirse.
-                    scope_parts = []
-                    if "workspace_id" in ce_cols:
-                        scope_parts.append("COALESCE(ce.workspace_id, '') = ?")
-                        values.append(workspace_id)
-                    if "workspace_id" in c_cols:
-                        scope_parts.append("COALESCE(c.workspace_id, '') = ?")
-                        values.append(workspace_id)
-                    empresa_ids = fetch_workspace_operational_company_ids(conn, workspace_id) or []
-                    if empresa_ids:
-                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                        scope_parts.append(f"ce.empresa_id IN ({placeholders_ws})")
-                        values.extend(empresa_ids)
-                    if not scope_parts:
-                        # Sin forma de acotar por workspace no devolvemos nada: antes se
-                        # caía aquí sin filtro de ámbito y salían clientes de otros tenants.
+                    # Solo por workspace (fase 2): el cliente lo lleva siempre desde la
+                    # fase 1. Sin la columna no hay forma de acotar y no se devuelve nada.
+                    if "workspace_id" not in c_cols:
                         json_response(self, [])
                         return
-                    where_parts.append("(" + " OR ".join(scope_parts) + ")")
+                    where_parts.append("COALESCE(c.workspace_id, '') = ?")
+                    values.append(workspace_id)
                 rows = conn.execute(
                     f"""
                     SELECT DISTINCT {cliente_list_cols}
@@ -108043,19 +108085,13 @@ class Handler(BaseHTTPRequestHandler):
                     # mientras los clientes seguían en la tabla. Aceptamos también al cliente
                     # que cuelga de una empresa del workspace, que es el mismo vínculo que ya
                     # usa la rama de gestoría y no cruza tenants.
+                    # Fase 2: solo por workspace; el "o cuelga de una empresa del
+                    # workspace" veía clientes de otro workspace con la empresa compartida.
                     scope_parts = []
                     values = []
                     if "workspace_id" in c_cols:
                         scope_parts.append("COALESCE(c.workspace_id, '') = ?")
                         values.append(workspace_id)
-                    empresa_ids = fetch_workspace_operational_company_ids(conn, workspace_id) or []
-                    if empresa_ids:
-                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                        scope_parts.append(
-                            "EXISTS (SELECT 1 FROM clientes_empresas ce"
-                            f" WHERE ce.cliente_id = c.id AND ce.empresa_id IN ({placeholders_ws}))"
-                        )
-                        values.extend(empresa_ids)
                     if scope_parts:
                         rows = conn.execute(
                             f"SELECT {cliente_list_cols} FROM clientes c"
@@ -110962,7 +110998,7 @@ class Handler(BaseHTTPRequestHandler):
                     empresa_ids = []
             elif str(empresa_id or "").strip():
                 empresa_ids = [str(empresa_id or "").strip()]
-            if not cliente_id and not empresa_ids:
+            if not cliente_id and not empresa_ids and not workspace_id:
                 json_response(self, {"error": "cliente_id, empresa_id o workspace_id requerido"}, status=400)
                 return
             session = getattr(self, "auth_session", None) or self._current_session()
@@ -110971,7 +111007,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not ok_amb:
                     json_response(self, {"error": err_amb}, status=403)
                     return
-            elif empresa_ids:
+            elif empresa_ids or workspace_id:
                 ok_amb, err_amb = enforce_workspace_or_empresa_scope(conn, session, workspace_id, empresa_id)
                 if not ok_amb:
                     json_response(self, {"error": err_amb}, status=403)
@@ -110990,7 +111026,17 @@ class Handler(BaseHTTPRequestHandler):
             if cliente_id:
                 where.append("gt.cliente_id = ?")
                 values.append(cliente_id)
-            if empresa_ids:
+            if workspace_id:
+                # Por workspace (fase 2, 2026-09-18): antes eran los trabajos de las
+                # empresas del workspace, que con empresas compartidas traía los de otro
+                # workspace y dejaba fuera los que no tienen empresa. La empresa, si se
+                # pide, filtra dentro del workspace.
+                where.append("COALESCE(gt.workspace_id, '') = ?")
+                values.append(workspace_id)
+                if str(empresa_id or "").strip():
+                    where.append("gt.empresa_id = ?")
+                    values.append(str(empresa_id).strip())
+            elif empresa_ids:
                 if len(empresa_ids) == 1:
                     where.append("gt.empresa_id = ?")
                     values.append(empresa_ids[0])

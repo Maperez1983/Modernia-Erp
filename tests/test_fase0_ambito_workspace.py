@@ -167,10 +167,12 @@ class FallosSueltosTests(unittest.TestCase):
     def test_memoria_economica_no_tiene_codigo_debajo_de_un_return(self):
         i = SERVER.index('if path == "/api/workspace_rrhh_memoria_economica":')
         bloque = SERVER[i : SERVER.index("for n in nominas:", i)]
-        # Tras el `return` del "empresa_id requerido", lo siguiente vuelve al nivel del if.
-        m = re.search(r'\n( +)return\n( +)year = ', bloque)
+        # El cálculo va al mismo nivel que el resto del handler, no debajo de un return.
+        nivel_handler = len(re.search(r'\n( +)workspace_id = params', bloque).group(1))
+        m = re.search(r'\n( +)year = str\(ejercicio', bloque)
         self.assertIsNotNone(m)
-        self.assertLess(len(m.group(2)), len(m.group(1)), "year = sigue debajo del return: nunca se ejecuta")
+        self.assertEqual(len(m.group(1)), nivel_handler, "year = está indentado de más: nunca se ejecuta")
+        self.assertNotRegex(bloque, r'\n( +)return\n\1    year = ')
 
     def test_hipoteca_declara_empresa_id_antes_de_usarlo(self):
         i = APP.index("const vincularHipotecaSeleccionada = async () => {")

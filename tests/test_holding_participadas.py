@@ -104,11 +104,13 @@ class LasListasDeClientesUsanElAmbitoOperativoTests(unittest.TestCase):
         inicio = SERVER.index('if path == "/api/clientes_list":')
         return SERVER[inicio : SERVER.index('if path == "/api/fin_inmobiliarias":', inicio)]
 
-    def test_las_cuatro_ramas_usan_el_resolutor_operativo(self):
+    def test_las_ramas_acotan_por_workspace_y_no_por_empresas(self):
+        # Fase 2 (2026-09-18): ya no se amplía el ámbito por las empresas del workspace,
+        # ni operativas ni participadas; el cliente es del workspace que lleva.
         bloque = self._bloque_clientes_list()
-        self.assertEqual(bloque.count("fetch_workspace_operational_company_ids(conn, workspace_id)"), 4)
-        # Y ninguna se quedó con el que incluye participadas.
+        self.assertNotIn("fetch_workspace_operational_company_ids(conn, workspace_id)", bloque)
         self.assertNotIn("fetch_workspace_company_ids(conn, workspace_id)", bloque)
+        self.assertGreaterEqual(bloque.count("workspace_id, '') = ?"), 4)
 
     def test_la_busqueda_de_duplicados_tambien(self):
         inicio = SERVER.index("def resolve_clientes_by_nif_rows(")

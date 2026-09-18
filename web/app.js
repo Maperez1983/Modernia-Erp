@@ -80683,6 +80683,8 @@ const loadGestoriaFact = () => {
   });
   if (servicio && servicio !== "all") params.set("servicio", servicio);
   if (estado && estado !== "all") params.set("estado", estado);
+  // Dentro de un workspace, solo sus presupuestos: la empresa se comparte entre workspaces.
+  if (isTenantWorkspaceMode() && state.currentWorkspaceId) params.set("workspace_id", state.currentWorkspaceId);
   api(`/api/empresa_presupuestos?${params.toString()}`)
     .then((data) => {
       const rows = Array.isArray(data?.rows) ? data.rows : [];

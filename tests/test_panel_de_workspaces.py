@@ -59,19 +59,15 @@ class ElAyudanteDeAmbitoTests(unittest.TestCase):
     def test_sin_workspace_no_inventa_filtro(self):
         self.assertIn('return "", []', self._funcion())
 
-    def test_rescata_a_los_clientes_sin_workspace_estampado(self):
-        f = self._funcion()
-        self.assertIn("COALESCE({alias}.workspace_id, '') = ''", f)
+    def test_acota_solo_por_el_workspace_del_cliente(self):
+        """Fase 2 (2026-09-18): ya no rescata clientes sin workspace por su empresa.
 
-    def test_mira_tambien_la_tabla_de_relacion(self):
-        """Mirar solo `clientes.empresa_id` descartaba 1180 de 2014 en producción.
-
-        El vínculo de verdad casi siempre vive en `clientes_empresas`; comprobar solo
-        la columna dejó el contador en 834.
+        Aquel rescate existía porque 2014 clientes no llevaban workspace; hoy lo llevan
+        todos. Con empresas compartidas, el rescate veía clientes de otro workspace.
         """
         f = self._funcion()
-        self.assertIn("EXISTS (SELECT 1 FROM clientes_empresas ce", f)
-        self.assertIn("ce.cliente_id = {alias}.id", f)
+        self.assertIn("return f\"COALESCE({alias}.workspace_id, '') = ?\", [ws]", f)
+        self.assertNotIn("clientes_empresas", f.split('"""')[-1])
 
     def test_no_se_limita_a_las_empresas_operativas(self):
         # `solo_operativas=True` recortaba el conjunto de empresas y con él la cartera.
