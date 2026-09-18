@@ -18584,7 +18584,8 @@ const renderWorkspaceRrhhHub = () => {
 			  };
 
 		  const panelHtml =
-		    tab === "equipo" ? renderEquipo()
+		    // En Equipo no se pinta la barra lateral: el aviso de fichas va encima.
+		    tab === "equipo" ? `${manager ? renderWorkspaceRrhhDiagnostico() : ""}${renderEquipo()}`
 		    : tab === "dashboard" ? renderDashboard()
 		    : tab === "plantilla" ? renderPlantilla()
 		    : tab === "horario" ? renderHorario()

@@ -220,6 +220,11 @@ class RutaDelDiagnosticoTests(unittest.TestCase):
     def test_el_aviso_se_pinta_solo_para_el_gestor(self):
         self.assertIn('${manager ? renderWorkspaceRrhhDiagnostico() : ""}', self.APP)
 
+    def test_el_aviso_sale_tambien_en_la_pestana_equipo(self):
+        # Equipo usa diseño a pantalla completa y oculta la barra lateral: en su primera
+        # versión el aviso solo vivía allí y en Equipo, donde más falta hace, no salía.
+        self.assertIn('tab === "equipo" ? `${manager ? renderWorkspaceRrhhDiagnostico() : ""}${renderEquipo()}`', self.APP)
+
 
 if __name__ == "__main__":
     unittest.main()
