@@ -74139,10 +74139,19 @@ const loadFinChecklist = (asesoramientoId) => {
   });
 };
 
+// Añade el workspace activo a una consulta que ya lleva empresa: con él, el servidor
+// acota por el workspace de cada fila y la empresa solo filtra dentro (fase 6 del
+// ámbito por workspace). Sin workspace se queda como estaba.
+const conWorkspaceActivo = (params) => {
+  const ws = String(resolveActiveTenantWorkspaceId() || "").trim();
+  if (ws) params.set("workspace_id", ws);
+  return params;
+};
+
 const loadFinAsesoramientos = (empresaId) => {
   if (!finAsesoramientosTable || !finAsesoramientosInfo || !empresaId) return;
   const q = finAsesoramientosSearch ? finAsesoramientosSearch.value.trim() : "";
-  const params = new URLSearchParams({ empresa_id: empresaId, q });
+  const params = conWorkspaceActivo(new URLSearchParams({ empresa_id: empresaId, q }));
   api(`/api/fin_asesoramientos?${params.toString()}`).then((data) => {
     const rows = data.rows || [];
     state.finAsesoramientosRows = rows;
@@ -74477,7 +74486,7 @@ const loadFinHipotecaActions = (empresaId) => {
 
 const loadFinHipotecasEstudio = async (empresaId) => {
   if (!finHipotecasEstudioTable || !finHipotecasEstudioInfo || !empresaId) return;
-  const params = new URLSearchParams({ empresa_id: empresaId });
+  const params = conWorkspaceActivo(new URLSearchParams({ empresa_id: empresaId }));
   const data = await api(`/api/fin_hipotecas_estudio?${params.toString()}`).catch(() => ({ rows: [] }));
   const rows = data.rows || [];
   state.finHipotecasEstudioRows = rows;

@@ -109103,19 +109103,27 @@ class Handler(BaseHTTPRequestHandler):
             empresa_id = params.get("empresa_id", [""])[0]
             workspace_id = params.get("workspace_id", [""])[0]
             q = params.get("q", [""])[0].strip().lower()
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
-            if not empresa_ids:
+            # Por workspace (fase 6): la empresa, si se pide, filtra dentro.
+            ambito_sql, ambito_valores = ambito_filas_sql(
+                conn, "asesoramientos_financiacion", "", workspace_id=workspace_id, empresa_id=empresa_id
+            )
+            if not ambito_sql:
                 json_response(self, {"rows": []})
                 return
-            placeholders = ",".join(["?"] * len(empresa_ids))
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             rows = conn.execute(
                 f"""
                 SELECT *
                 FROM asesoramientos_financiacion
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                 ORDER BY created_at DESC
                 """,
-                tuple(empresa_ids),
+                tuple(ambito_valores),
             ).fetchall()
             data = []
             for row in rows:
@@ -109146,11 +109154,19 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/fin_hipotecas_estudio":
             empresa_id = params.get("empresa_id", [""])[0]
             workspace_id = params.get("workspace_id", [""])[0]
-            empresa_ids = resolve_empresa_ids_for_request(conn, empresa_id=empresa_id, workspace_id=workspace_id)
-            if not empresa_ids:
+            # Por workspace (fase 6): la empresa, si se pide, filtra dentro.
+            ambito_sql, ambito_valores = ambito_filas_sql(
+                conn, "hipotecas", "h", workspace_id=workspace_id, empresa_id=empresa_id
+            )
+            if not ambito_sql:
                 json_response(self, {"rows": []})
                 return
-            placeholders = ",".join(["?"] * len(empresa_ids))
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(),
+                workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
             rows = conn.execute(
                 f"""
                 SELECT
@@ -109170,7 +109186,7 @@ class Handler(BaseHTTPRequestHandler):
                   h.created_at
                 FROM hipotecas h
                 LEFT JOIN clientes c ON c.id = h.cliente_id
-                WHERE h.empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   -- Operaciones ABIERTAS (pre-firma): encargo/estudio/pendiente/presentada.
                   -- Antes solo 'encargo*', por lo que las convertidas (nacen 'Pendiente') y
                   -- las 'Estudio' no aparecían en el board del asesor.
@@ -109183,7 +109199,7 @@ class Handler(BaseHTTPRequestHandler):
                 ORDER BY COALESCE(NULLIF(TRIM(COALESCE(h.fecha_encargo, '')), ''), h.updated_at, h.created_at) DESC
                 LIMIT 500
                 """,
-                tuple(empresa_ids),
+                tuple(ambito_valores),
             ).fetchall()
             json_response(self, {"rows": [dict(r) for r in rows]})
             return
