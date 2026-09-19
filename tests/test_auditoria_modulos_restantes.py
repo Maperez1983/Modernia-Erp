@@ -162,9 +162,14 @@ class LosTransversalesTampocoRevientanTests(Casa):
         # perdieron 54 respuestas buenas y quedó tapado un 500 en el primer intento—.
         # Y reintentar el acceso tampoco vale: el login tiene límite de intentos (429),
         # así que el remedio bloqueaba la cuenta. Se entra una vez y no se sale.
+        # Las de ingesta (`/api/ingest_*`) y la de leads del portal (`/api/leads`, que usa
+        # esa misma clave de respaldo) van con clave de máquina, no con sesión: si el
+        # entorno tiene APP_INGEST_API_KEY, contestan 401 a quien no la trae, y eso es lo
+        # correcto, no una sesión perdida.
         return sorted({r for r in re.findall(r'"(/api/[a-z_0-9]+)"', SERVER)
                        if not any(m in r for m in MOD) and not r.startswith("/api/fin_")
-                       and r not in ("/api/logout", "/api/login")})
+                       and not r.startswith("/api/ingest_")
+                       and r not in ("/api/logout", "/api/login", "/api/leads")})
 
     def test_ni_con_get_ni_con_post(self):
         import urllib.parse

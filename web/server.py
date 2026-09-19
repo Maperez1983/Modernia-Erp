@@ -15471,10 +15471,30 @@ def infer_expense_account(concepto):
     mapping = [
         ("ALQUILER", "621"),
         ("ARRENDAMIENTO", "621"),
+        # Combustible y material antes que "reparación"/"suministro": "Suministro y
+        # sustitución de cerraduras" es material; "gasóleo" es suministro (628).
+        ("GASOIL", "628"),
+        ("GASOLEO", "628"),
+        ("GASOLINA", "628"),
+        ("DIESEL", "628"),
+        ("COMBUSTIBLE", "628"),
+        ("CARBURANTE", "628"),
+        ("REPOSTAJE", "628"),
+        ("MATERIAL", "602"),
+        ("HERRAMIENTA", "602"),
+        ("FERRETERIA", "602"),
+        ("RECAMBIO", "602"),
+        ("NEUMATICO", "622"),
+        ("TALLER", "622"),
+        ("REVISION", "622"),
         ("REPARACION", "622"),
         ("CONSERVACION", "622"),
         ("PROFESIONAL", "623"),
         ("HONORARIO", "623"),
+        ("PREVENCION", "623"),
+        ("PRL", "623"),
+        ("GESTIONES COMERCIALES", "623"),
+        ("NOTARI", "623"),
         ("TRANSPORTE", "624"),
         ("SEGURO", "625"),
         ("BANC", "626"),
@@ -18999,7 +19019,11 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_file:
             tmp_file.write(doc_bytes)
             tmp_path = tmp_file.name
-        if mime.startswith("image/"):
+        if datos_completos and payload.get("sin_ocr"):
+            # Los datos ya vienen leídos y revisados (carga de carpetas): pasar el OCR,
+            # externo y de pago, por cientos de tiques no aporta nada.
+            method = "datos_aportados"
+        elif mime.startswith("image/"):
             if external_ocr_available():
                 text, err_detail = ocr_image_external(doc_bytes)
                 method = "vision" if text else "tesseract"
@@ -78918,7 +78942,7 @@ class Handler(BaseHTTPRequestHandler):
             }
             # Datos ya leídos de la factura (p. ej. de su Excel): mandan sobre el OCR.
             for campo in ("numero", "fecha", "nif", "tercero", "descripcion", "base_imponible",
-                          "cuota_iva", "cuota_irpf", "total", "iva_pct"):
+                          "cuota_iva", "cuota_irpf", "total", "iva_pct", "sin_ocr"):
                 if payload.get(campo) not in (None, ""):
                     ocr_payload[campo] = payload.get(campo)
             # La contabilidad de quién es. Sin esto se deducía del NIF del tercero, y en

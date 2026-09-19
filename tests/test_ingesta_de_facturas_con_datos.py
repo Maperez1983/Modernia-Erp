@@ -60,7 +60,8 @@ class IngestaConDatosTests(unittest.TestCase):
         S.Handler.db_path = str(db)
         S.INGEST_API_KEY = CLAVE
         # Un "PDF" que no se puede leer: los datos tienen que venir del Excel.
-        S.s3_get_object_bytes = lambda key: (b"no es un pdf legible", "")
+        # (distinto por fichero: el CRM descarta con razón un mismo fichero subido dos veces).
+        S.s3_get_object_bytes = lambda key: (b"no es un pdf legible " + key.encode(), "")
         cls.httpd = S.ThreadingHTTPServer(("127.0.0.1", 0), S.Handler)
         cls.base = f"http://127.0.0.1:{cls.httpd.server_address[1]}"
         threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
@@ -100,6 +101,17 @@ class IngestaConDatosTests(unittest.TestCase):
         self.assertEqual(lineas["705"], (0.0, 3000.0))
         self.assertEqual(lineas["477"], (0.0, 630.0))
         self.assertEqual(lineas["430"], (3630.0, 0.0))
+
+    def test_con_sin_ocr_no_se_llama_al_ocr(self):
+        llamadas = []
+        previo = (S.extract_pdf_text, S.ocr_pdf_all_pages)
+        S.extract_pdf_text = lambda *a, **k: llamadas.append("pdf") or ("", "", "x")
+        S.ocr_pdf_all_pages = lambda *a, **k: llamadas.append("ocr") or ("", "")
+        self.addCleanup(lambda: setattr(S, "extract_pdf_text", previo[0]) or setattr(S, "ocr_pdf_all_pages", previo[1]))
+        status, data = self._ingesta(fichero="t.pdf", numero="T-1", fecha="2026-02-01", tercero="Gasolinera",
+                                     base_imponible=40, cuota_iva=0, total=40, cliente_id="cliMHI", sin_ocr=True)
+        self.assertEqual(status, 200, data)
+        self.assertEqual(llamadas, [])
 
     def test_un_cliente_de_otro_workspace_se_rechaza(self):
         status, data = self._ingesta(fichero="x.pdf", numero="99/2025", fecha="2025-02-01", total=121,

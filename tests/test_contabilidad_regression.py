@@ -209,6 +209,10 @@ class AccountInferenceTests(unittest.TestCase):
         self.assertEqual(infer_expense_account("Alquiler local"), "621")
         self.assertEqual(infer_expense_account("Honorarios asesor profesional"), "623")
         self.assertEqual(infer_expense_account("Factura de luz"), "628")
+        self.assertEqual(infer_expense_account("Gasóleo vehículo"), "628")
+        self.assertEqual(infer_expense_account("Material eléctrico ascensor"), "602")
+        self.assertEqual(infer_expense_account("Neumáticos Peugeot Partner"), "622")
+        self.assertEqual(infer_expense_account("PRL instalación de ascensores"), "623")
         self.assertEqual(infer_expense_account("Compra genérica"), "629")  # default
 
     def test_infer_revenue_account_mapping(self):
