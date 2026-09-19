@@ -26507,6 +26507,59 @@ def workspace_de_plataforma_id(conn):
         return ""
 
 
+def otros_workspaces_de_empresa(conn, empresa_id, workspace_id):
+    """Nombres de los workspaces, distintos de `workspace_id`, que ya tienen esta empresa.
+
+    Regla del ámbito por workspace (2026-09-19): **una empresa pertenece a un solo
+    workspace**. Quedan consultas antiguas que acotan por "las empresas del workspace";
+    dan lo mismo que acotar por workspace solo mientras ninguna empresa esté en dos. Si
+    se vuelve a compartir una, esas consultas cruzan datos entre workspaces, que es el
+    fallo que se arrastró durante meses. No cuenta el workspace de plataforma, que tiene
+    su empresa técnica y no trabaja con datos.
+    """
+    eid = str(empresa_id or "").strip()
+    ws = str(workspace_id or "").strip()
+    if not eid or not ws:
+        return []
+    plataforma = workspace_de_plataforma_id(conn)
+    if ws == plataforma:
+        return []
+    try:
+        filas = conn.execute(
+            """
+            SELECT DISTINCT w.id, w.nombre
+            FROM workspaces w
+            WHERE w.id IN (
+              SELECT we.workspace_id FROM workspace_empresas we WHERE we.empresa_id = ?
+              UNION
+              SELECT wc.workspace_id FROM workspace_companies wc
+              WHERE wc.legacy_empresa_id = ? AND COALESCE(wc.activo, 1) = 1
+            )
+            """,
+            (eid, eid),
+        ).fetchall()
+    except Exception:
+        _rollback_best_effort(conn)
+        return []
+    return [
+        str(row_value(f, "nombre") or row_value(f, "id") or "").strip()
+        for f in filas
+        if str(row_value(f, "id") or "").strip() not in (ws, plataforma)
+    ]
+
+
+def respuesta_empresa_en_otro_workspace(otros):
+    return {
+        "error": (
+            f"Esta empresa ya está en el workspace {', '.join(otros)}. Una empresa solo puede "
+            "estar en un workspace: compartirla mezclaría los datos de ambos. Si ha cambiado de "
+            "workspace, desvincúlala antes del anterior."
+        ),
+        "detail": "empresa_en_otro_workspace",
+        "workspaces": otros,
+    }
+
+
 def workspaces_propios_de_empresa(conn, empresa_id):
     """Los workspaces de una empresa **sin contar el de plataforma**.
 
@@ -80842,6 +80895,10 @@ class Handler(BaseHTTPRequestHandler):
             if not workspace_actor_can_manage_workspace(conn, session, workspace_id):
                 json_response(self, {"error": "No autorizado"}, status=403)
                 return
+            otros = otros_workspaces_de_empresa(conn, empresa_id, workspace_id)
+            if otros:
+                json_response(self, respuesta_empresa_en_otro_workspace(otros), status=409)
+                return
             rol = str(payload.get("rol") or "operativa").strip() or "operativa"
             conn.execute(
                 """
@@ -80998,6 +81055,13 @@ class Handler(BaseHTTPRequestHandler):
                         legacy_empresa_id = str(row_value(row2, "id") or row_value(row2, 0) or "").strip() if row2 else ""
                     except Exception:
                         legacy_empresa_id = ""
+            # Si el nombre coincide con una empresa que ya está en otro workspace, se
+            # reutilizaba y quedaba compartida sin que nadie lo pretendiera.
+            otros = otros_workspaces_de_empresa(conn, legacy_empresa_id, workspace_id) if legacy_empresa_id else []
+            if otros:
+                _rollback_best_effort(conn)
+                json_response(self, respuesta_empresa_en_otro_workspace(otros), status=409)
+                return
             if legacy_empresa_id:
                 try:
                     conn.execute(
@@ -81628,7 +81692,13 @@ class Handler(BaseHTTPRequestHandler):
                         now,
                     ),
                 )
-            # 3) Vincula empresa al workspace.
+            # 3) Vincula empresa al workspace. Si la empresa se reutilizó por nombre y ya
+            # está en otro workspace, quedaría compartida: se para antes.
+            otros = otros_workspaces_de_empresa(conn, empresa_id, workspace_id)
+            if otros:
+                _rollback_best_effort(conn)
+                json_response(self, respuesta_empresa_en_otro_workspace(otros), status=409)
+                return
             conn.execute(
                 """
                 INSERT OR IGNORE INTO workspace_empresas (
