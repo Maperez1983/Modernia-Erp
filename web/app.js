@@ -23262,33 +23262,138 @@ const renderWorkspaceSeriesList = (rows = []) => {
   });
 };
 
+const WORKSPACE_PORTAL_SECCIONES = [
+  ["modelos", "Modelos fiscales"],
+  ["rentas", "Rentas"],
+  ["documentos_gestoria", "Documentos de la gestoría"],
+  ["contabilidad", "Resumen contable"],
+  ["facturas_emitidas", "Facturas emitidas"],
+];
+
+// El enlace del portal solo se enseña una vez, al generarlo: en la base se guarda cifrado.
+const mostrarEnlacePortalUnaVez = (data) => {
+  if (!workspacePortalStatus || !data?.enlace) return;
+  const url = `${location.origin}${data.enlace}`;
+  workspacePortalStatus.innerHTML = `
+    <span>Enlace nuevo (caduca ${escapeHtml(String(data.expira_at || "").slice(0, 10))}). Cópialo ahora: no se volverá a mostrar.</span>
+    <input type="text" readonly value="${escapeHtml(url)}" data-portal-enlace style="width:100%;margin-top:4px" />
+    <button type="button" class="secondary ghost" data-portal-copiar>Copiar enlace</button>
+  `;
+  const input = workspacePortalStatus.querySelector("[data-portal-enlace]");
+  input?.addEventListener("focus", () => input.select());
+  workspacePortalStatus.querySelector("[data-portal-copiar]")?.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch (_error) {
+      input?.select();
+      document.execCommand?.("copy");
+    }
+  });
+};
+
+const guardarAccesoPortal = async (payload) => {
+  const data = await fetch("/api/workspace_portal", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ workspace_id: state.currentWorkspaceId, ...payload }),
+  }).then((res) => res.json());
+  if (data?.error) throw new Error(data.error);
+  return data;
+};
+
 const renderWorkspacePortalList = (rows = []) => {
   if (!workspacePortalList) return;
   if (!rows.length) {
     workspacePortalList.innerHTML = "<p class='muted'>Sin clientes con portal activado.</p>";
     return;
   }
+  const hoy = new Date().toISOString().slice(0, 10);
   workspacePortalList.innerHTML = `
     <div class="workspace-billing-list">
       ${rows
-        .map(
-          (row) => `
-            <div class="workspace-billing-row">
+        .map((row) => {
+          const estado = String(row.estado || "Invitado");
+          const revocado = estado.toLowerCase() === "revocado";
+          const pausado = estado.toLowerCase() === "pausado";
+          const caduca = String(row.expira_at || "").slice(0, 10);
+          const caducado = Boolean(caduca && caduca < hoy);
+          const enlace = revocado
+            ? "Enlace revocado"
+            : !Number(row.enlace_activo)
+              ? "Sin enlace"
+              : caducado
+                ? `Enlace caducado el ${escapeHtml(caduca)}`
+                : caduca
+                  ? `Enlace válido hasta ${escapeHtml(caduca)}`
+                  : "Enlace sin caducidad (antiguo): genera uno nuevo";
+          const secciones = row.secciones || {};
+          return `
+            <div class="workspace-billing-row" data-portal-row="${escapeHtml(row.id || "")}">
               <div>
                 <strong>${escapeHtml(row.cliente_nombre || "-")}</strong>
-                <div class="muted">${escapeHtml(row.email_acceso || "Sin email")} · ${escapeHtml(row.estado || "Invitado")}</div>
-                <div class="muted">Portal: /#portal_token=${escapeHtml(row.token || "")}</div>
+                <div class="muted">${escapeHtml(row.email_acceso || "Sin email")} · ${escapeHtml(estado)}</div>
+                <div class="muted">${enlace} · Último acceso: ${escapeHtml(row.ultimo_acceso_at || "nunca")}</div>
+                <div class="muted" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+                  ${WORKSPACE_PORTAL_SECCIONES.map(
+                    ([clave, nombre]) => `
+                      <label class="inline-check">
+                        <input type="checkbox" data-portal-seccion="${clave}" ${secciones[clave] ? "checked" : ""} ${revocado ? "disabled" : ""} />
+                        ${escapeHtml(nombre)}
+                      </label>`
+                  ).join("")}
+                </div>
               </div>
               <div class="workspace-billing-meta">
-                <span>Token ${escapeHtml(String(row.token || "").slice(0, 8) || "-")}</span>
-                <span>${escapeHtml(row.ultimo_acceso_at || "Sin acceso")}</span>
+                <button type="button" class="secondary ghost" data-portal-accion="regenerar">${revocado || !Number(row.enlace_activo) || caducado ? "Generar enlace" : "Nuevo enlace"}</button>
+                ${revocado ? "" : `<button type="button" class="secondary ghost" data-portal-accion="${pausado ? "activar" : "pausar"}">${pausado ? "Activar" : "Pausar"}</button>`}
+                ${revocado ? "" : `<button type="button" class="secondary ghost" data-portal-accion="revocar">Revocar</button>`}
               </div>
             </div>
-          `
-        )
+          `;
+        })
         .join("")}
     </div>
   `;
+  workspacePortalList.querySelectorAll("[data-portal-row]").forEach((el) => {
+    const row = rows.find((r) => String(r.id || "") === String(el.dataset.portalRow || ""));
+    if (!row) return;
+    const base = { cliente_id: row.cliente_id };
+    const ejecutar = async (payload, mensaje) => {
+      try {
+        const data = await guardarAccesoPortal({ ...base, ...payload });
+        if (data?.enlace) mostrarEnlacePortalUnaVez(data);
+        else if (workspacePortalStatus) workspacePortalStatus.textContent = mensaje;
+        await loadWorkspaceDetail(state.currentWorkspaceId);
+      } catch (error) {
+        if (workspacePortalStatus) workspacePortalStatus.textContent = error.message || "No se pudo guardar.";
+      }
+    };
+    el.querySelectorAll("[data-portal-accion]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const accion = button.dataset.portalAccion;
+        if (accion === "revocar") {
+          if (!window.confirm(`¿Revocar el portal de ${row.cliente_nombre || "este cliente"}? El enlace dejará de funcionar.`)) return;
+          ejecutar({ accion: "revocar" }, "Portal revocado.");
+        } else if (accion === "regenerar") {
+          const estado = String(row.estado || "").toLowerCase() === "revocado" ? "Invitado" : row.estado;
+          ejecutar({ accion: "regenerar", estado }, "Enlace generado.");
+        } else if (accion === "pausar") {
+          ejecutar({ estado: "Pausado" }, "Portal pausado: el cliente no puede entrar.");
+        } else {
+          ejecutar({ estado: "Activo" }, "Portal activado.");
+        }
+      });
+    });
+    el.querySelectorAll("[data-portal-seccion]").forEach((input) => {
+      input.addEventListener("change", () => {
+        const secciones = {};
+        el.querySelectorAll("[data-portal-seccion]").forEach((c) => {
+          secciones[c.dataset.portalSeccion] = c.checked;
+        });
+        ejecutar({ estado: row.estado, secciones }, "Secciones guardadas.");
+      });
+    });
+  });
 };
 
 const hydrateWorkspacePortalRequestTargets = (rows = []) => {
@@ -35349,6 +35454,97 @@ const openAgenda = () => {
   window.scrollTo({ top: 0, behavior: state.booting ? "auto" : "smooth" });
 };
 
+// Secciones de gestoría del portal del cliente: solo llegan las que la gestoría le ha
+// encendido (todas apagadas por defecto).
+const renderPortalClienteGestoria = (data, token) => {
+  const secciones = data?.secciones || {};
+  const archivo = (tipo, id, texto = "PDF") =>
+    `<a class="secondary ghost button-inline" target="_blank" rel="noopener" href="/api/workspace_portal_gestoria_archivo?token=${encodeURIComponent(token)}&tipo=${tipo}&id=${encodeURIComponent(id)}">${texto}</a>`;
+  const tarjeta = (titulo, filas, vacio) => `
+    <div class="form-card">
+      <h3>${titulo}</h3>
+      <div class="workspace-billing-list">${filas.length ? filas.join("") : `<p class='muted'>${vacio}</p>`}</div>
+    </div>`;
+  const fila = (principal, secundaria, meta) => `
+    <div class="workspace-billing-row">
+      <div>
+        <strong>${principal}</strong>
+        ${secundaria ? `<div class="muted">${secundaria}</div>` : ""}
+      </div>
+      <div class="workspace-billing-meta">${meta}</div>
+    </div>`;
+  const euros = (v) => (v === null || v === undefined || v === "" ? "" : euroFormatter.format(Number(v || 0)));
+  const partes = [];
+  if (secciones.modelos) {
+    partes.push(
+      tarjeta(
+        "Modelos fiscales",
+        (data.gestoria_modelos || []).map((m) =>
+          fila(`Modelo ${escapeHtml(m.modelo || "-")}`, escapeHtml(m.periodicidad || ""), `<span>${escapeHtml(m.proxima_fecha || "Sin fecha")}</span><span>${escapeHtml(m.estado || "")}</span>`)
+        ),
+        "No hay modelos fiscales."
+      )
+    );
+  }
+  if (secciones.rentas) {
+    partes.push(
+      tarjeta(
+        "Declaraciones de la renta",
+        (data.gestoria_rentas || []).map((r) =>
+          fila(
+            `Renta ${escapeHtml(r.ejercicio)}`,
+            [r.estado, r.presentacion_fecha ? `presentada el ${r.presentacion_fecha}` : ""].filter(Boolean).map(escapeHtml).join(" · "),
+            `${r.resultado === null || r.resultado === undefined ? "" : `<span>${Number(r.resultado) < 0 ? "A devolver" : "A pagar"} ${euros(Math.abs(Number(r.resultado)))}</span>`}${r.tiene_documento ? archivo("renta", r.ejercicio) : ""}`
+          )
+        ),
+        "No hay declaraciones registradas."
+      )
+    );
+  }
+  if (secciones.documentos_gestoria) {
+    partes.push(
+      tarjeta(
+        "Documentos de la gestoría",
+        (data.gestoria_documentos || []).map((d) =>
+          fila(escapeHtml(d.nombre || "Documento"), [d.tipo, d.fecha].filter(Boolean).map(escapeHtml).join(" · "), d.tiene_archivo ? archivo("documento", d.id, "Ver") : "")
+        ),
+        "No hay documentos."
+      )
+    );
+  }
+  if (secciones.contabilidad) {
+    partes.push(
+      tarjeta(
+        "Resumen contable",
+        (data.gestoria_contabilidad || []).map((c) =>
+          fila(
+            `Ejercicio ${escapeHtml(c.ejercicio)}`,
+            `${numberFormatter.format(Number(c.apuntes || 0))} apuntes`,
+            `<span>Ingresos ${euros(c.ingresos)}</span><span>Gastos ${euros(c.gastos)}</span><span><strong>Resultado ${euros(c.resultado)}</strong></span>`
+          )
+        ),
+        "No hay apuntes contables."
+      )
+    );
+  }
+  if (secciones.facturas_emitidas) {
+    partes.push(
+      tarjeta(
+        "Facturas emitidas",
+        (data.gestoria_facturas_emitidas || []).map((f) =>
+          fila(
+            escapeHtml(f.numero || "Factura"),
+            [f.fecha_emision, f.descripcion].filter(Boolean).map(escapeHtml).join(" · "),
+            `<span>${euros(f.total)}</span>${f.tiene_pdf ? archivo("factura", f.id) : ""}`
+          )
+        ),
+        "No hay facturas emitidas."
+      )
+    );
+  }
+  return partes.join("");
+};
+
 const openWorkspacePortalPublic = async (token) => {
   setCrmMode("");
   setModule("empresas");
@@ -35370,6 +35566,7 @@ const openWorkspacePortalPublic = async (token) => {
     });
     const importadorActivo = Number(data?.importador_facturas || 0) === 1;
     const facturasRecibidas = Array.isArray(data?.facturas_recibidas) ? data.facturas_recibidas : [];
+    const gestoriaHtml = renderPortalClienteGestoria(data, cleanToken);
     if (workspacePortalPublicContent) {
       workspacePortalPublicContent.innerHTML = `
         <div class="form-card">
@@ -35410,6 +35607,7 @@ const openWorkspacePortalPublic = async (token) => {
 	          </div>
 	        </div>
         </div>
+        ${gestoriaHtml}
         ${
           importadorActivo
             ? `
@@ -90791,13 +90989,9 @@ if (workspacePortalForm) {
     payload.workspace_id = state.currentWorkspaceId;
     payload.importador_facturas = workspacePortalForm.querySelector('[name="importador_facturas"]')?.checked ? 1 : 0;
     try {
-      const data = await fetch("/api/workspace_portal", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }).then((res) => res.json());
-      if (data?.error) throw new Error(data.error);
-      if (workspacePortalStatus) workspacePortalStatus.textContent = `Portal activado. Token ${String(data.token || "").slice(0, 8)}${data.automation_actions ? ` · Automatizaciones ${data.automation_actions}` : ""}`;
+      const data = await guardarAccesoPortal(payload);
+      if (data.enlace) mostrarEnlacePortalUnaVez(data);
+      else if (workspacePortalStatus) workspacePortalStatus.textContent = `Portal guardado. El enlace no cambia.${data.automation_actions ? ` · Automatizaciones ${data.automation_actions}` : ""}`;
       await loadWorkspaceDetail(state.currentWorkspaceId);
     } catch (error) {
       if (workspacePortalStatus) workspacePortalStatus.textContent = error.message || "No se pudo activar.";

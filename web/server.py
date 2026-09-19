@@ -1208,6 +1208,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/api/portal_busqueda_consentimiento_pdf",
     "/portal-busqueda",
     "/api/workspace_portal_s3_url",
+    "/api/workspace_portal_gestoria_archivo",
     "/api/workspace_factura_pdf_public",
     "/api/workspace_portal_facturas_excel",
     "/api/workspace_kiosk_status",
@@ -45509,6 +45510,17 @@ def ensure_workspace_product_tables(conn):
         "importador_facturas",
         "importador_facturas INTEGER NOT NULL DEFAULT 0",
     )
+    # Seguridad del portal (2026-09-19): el enlace se guarda cifrado (`token_hash`),
+    # caduca (`expira_at`) y se puede revocar; `secciones_json` guarda qué secciones de
+    # gestoría ve cada cliente.
+    for _col, _ddl in (
+        ("token_hash", "token_hash TEXT"),
+        ("expira_at", "expira_at TEXT"),
+        ("revocado_at", "revocado_at TEXT"),
+        ("secciones_json", "secciones_json TEXT"),
+    ):
+        ensure_column(conn, "workspace_portal_clientes", _col, _ddl)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_workspace_portal_token_hash ON workspace_portal_clientes (token_hash)")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS workspace_automatizaciones (
@@ -51364,7 +51376,11 @@ def fetch_workspace_portal_clients(conn, workspace_id, limit=40):
           COALESCE(p.email_acceso, c.email, '') AS email_acceso,
           p.estado,
           COALESCE(p.importador_facturas, 0) AS importador_facturas,
-          p.token,
+          -- El enlace ya no se envía: se guarda cifrado y solo se ve al generarlo.
+          CASE WHEN COALESCE(p.token_hash, '') <> '' OR COALESCE(p.token, '') <> '' THEN 1 ELSE 0 END AS enlace_activo,
+          p.expira_at,
+          p.revocado_at,
+          p.secciones_json,
           p.ultimo_acceso_at,
           p.created_at,
           p.updated_at
@@ -51376,7 +51392,12 @@ def fetch_workspace_portal_clients(conn, workspace_id, limit=40):
         """,
         (workspace_id, max(1, min(int(limit or 40), 100))),
     ).fetchall()
-    return {"rows": [dict(row) for row in rows]}
+    filas = []
+    for row in rows:
+        fila = dict(row)
+        fila["secciones"] = portal_cliente_secciones(fila.pop("secciones_json", None))
+        filas.append(fila)
+    return {"rows": filas, "secciones_disponibles": [{"clave": k, "nombre": n} for k, n in PORTAL_CLIENTE_SECCIONES]}
 
 
 def fetch_workspace_billing_collections(conn, workspace_id, limit=40):
@@ -61526,7 +61547,303 @@ def run_workspace_automations(conn, workspace_id, trigger_key, context, now):
     return created
 
 
+# Secciones de gestoría que un cliente puede ver en su portal. Todas apagadas por
+# defecto: enseñar la contabilidad o los modelos de un cliente es una decisión
+# expresa de quien le lleva la gestoría, cliente a cliente.
+PORTAL_CLIENTE_SECCIONES = (
+    ("modelos", "Modelos fiscales"),
+    ("rentas", "Declaraciones de la renta"),
+    ("documentos_gestoria", "Documentos de la gestoría"),
+    ("contabilidad", "Resumen contable"),
+    ("facturas_emitidas", "Facturas emitidas"),
+)
+PORTAL_CLIENTE_SECCION_CLAVES = tuple(k for k, _ in PORTAL_CLIENTE_SECCIONES)
+
+
+def portal_cliente_secciones(raw):
+    """{seccion: bool} a partir de lo guardado; lo desconocido o ausente, apagado."""
+    datos = raw
+    if isinstance(raw, str):
+        try:
+            datos = json.loads(raw) if raw.strip() else {}
+        except Exception:
+            datos = {}
+    if isinstance(datos, (list, tuple, set)):
+        datos = {str(k): True for k in datos}
+    if not isinstance(datos, dict):
+        datos = {}
+    return {k: bool(datos.get(k)) for k in PORTAL_CLIENTE_SECCION_CLAVES}
+
+
+def portal_cliente_secciones_normalizadas_json(raw):
+    """JSON para guardar, o None si no se envió nada (para no tocar lo guardado)."""
+    if raw is None:
+        return None
+    return json.dumps(portal_cliente_secciones(raw), ensure_ascii=False, sort_keys=True)
+
+
+PORTAL_CLIENTE_ESTADOS_SIN_ACCESO = {"pausado", "revocado", "inactivo", "baja"}
+PORTAL_CLIENTE_DIAS_VALIDEZ = 365
+
+
+def portal_cliente_por_token(conn, token):
+    """El acceso al portal de cliente de ese enlace, solo si vale; si no, None.
+
+    Único punto de entrada de las rutas públicas del portal (2026-09-19). Antes cada una
+    buscaba el enlace por su cuenta y solo dos miraban el estado: un acceso "Pausado"
+    seguía viendo sus datos y subiendo documentos. Ahora vale solo si existe, no está
+    pausado ni revocado y no ha caducado. El enlace se guarda cifrado; los antiguos, en
+    claro, se aceptan una vez y se cifran en ese momento.
+    """
+    t = str(token or "").strip()
+    if not t:
+        return None
+    columnas = """
+        SELECT id, workspace_id, cliente_id, estado, COALESCE(importador_facturas, 0) AS importador_facturas,
+               email_acceso, ultimo_acceso_at, expira_at, secciones_json
+        FROM workspace_portal_clientes
+    """
+    h = hash_portal_token(t)
+    row = conn.execute(columnas + " WHERE token_hash = ? LIMIT 1", (h,)).fetchone()  # nosec B608 - texto fijo
+    if not row:
+        row = conn.execute(
+            columnas + " WHERE token = ? AND COALESCE(token_hash, '') = '' LIMIT 1", (t,)  # nosec B608
+        ).fetchone()
+        if row:
+            try:
+                conn.execute(
+                    "UPDATE workspace_portal_clientes SET token_hash = ?, token = NULL WHERE id = ?",
+                    (h, row_value(row, "id")),
+                )
+                conn.commit()
+            except Exception:
+                _rollback_best_effort(conn)
+    if not row:
+        return None
+    acceso = {k: row_value(row, k) for k in (
+        "id", "workspace_id", "cliente_id", "estado", "importador_facturas",
+        "email_acceso", "ultimo_acceso_at", "expira_at", "secciones_json",
+    )}
+    if str(acceso.get("estado") or "").strip().lower() in PORTAL_CLIENTE_ESTADOS_SIN_ACCESO:
+        return None
+    # Fechas en UTC como "AAAA-MM-DD HH:MM:SS"; se admite también la "T" de ISO.
+    expira = str(acceso.get("expira_at") or "").strip().replace("T", " ")[:19]
+    if expira and expira < datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"):
+        return None
+    return acceso
+
+
+# Documentos de gestoria_docs que no son de la gestoría sino de otros módulos: no salen
+# en la sección "Documentos de la gestoría" del portal.
+PORTAL_DOCS_DE_OTROS_MODULOS = ("seguros", "hipoteca", "inmobiliaria")
+
+
+def _portal_cliente_es_del_workspace(conn, acceso):
+    try:
+        return bool(conn.execute(
+            "SELECT 1 FROM clientes WHERE id = ? AND COALESCE(workspace_id, '') = ? LIMIT 1",
+            (acceso.get("cliente_id"), acceso.get("workspace_id")),
+        ).fetchone())
+    except Exception:
+        _rollback_best_effort(conn)
+        return False
+
+
+def _portal_rentas_del_cliente(conn, cliente_id):
+    try:
+        row = conn.execute(
+            "SELECT renta_detalles FROM cliente_gestoria WHERE cliente_id = ? LIMIT 1", (cliente_id,)
+        ).fetchone()
+    except Exception:
+        _rollback_best_effort(conn)
+        return []
+    try:
+        datos = json.loads(str(row_value(row, "renta_detalles") or "") or "{}") if row else {}
+    except Exception:
+        datos = {}
+    entradas = datos.get("entries") if isinstance(datos, dict) else datos
+    return [e for e in (entradas or []) if isinstance(e, dict)] if isinstance(entradas, list) else []
+
+
+def _portal_numero(valor):
+    try:
+        return round(float(str(valor).replace(",", ".")), 2)
+    except Exception:
+        return None
+
+
+def portal_cliente_gestoria(conn, acceso):
+    """Las secciones de gestoría que este cliente tiene encendidas en su portal.
+
+    Solo campos pensados para el cliente: de la renta, ejercicio, estado, fecha y
+    resultado (nunca casillas, precio del servicio ni notas internas); de los modelos,
+    sin notas ni responsable. Todo acotado por el cliente del enlace y, donde la tabla
+    lo tiene, por su workspace.
+    """
+    secciones = portal_cliente_secciones(acceso.get("secciones_json"))
+    salida = {"secciones": secciones}
+    if not any(secciones.values()):
+        return salida
+    if not _portal_cliente_es_del_workspace(conn, acceso):
+        return {"secciones": {k: False for k in secciones}}
+    ws, cid = acceso["workspace_id"], acceso["cliente_id"]
+
+    def _filas(sql, args):
+        try:
+            return [dict(r) for r in conn.execute(sql, args).fetchall()]
+        except Exception:
+            _rollback_best_effort(conn)
+            return []
+
+    if secciones["modelos"]:
+        salida["gestoria_modelos"] = _filas(
+            """
+            SELECT id, modelo, periodicidad, proxima_fecha, estado
+            FROM gestoria_modelos
+            WHERE cliente_id = ?
+            ORDER BY COALESCE(NULLIF(TRIM(COALESCE(proxima_fecha, '')), ''), '9999') ASC, modelo
+            LIMIT 60
+            """,
+            (cid,),
+        )
+    if secciones["rentas"]:
+        rentas = []
+        for e in _portal_rentas_del_cliente(conn, cid):
+            ejercicio = str(e.get("ejercicio") or "").strip()
+            if not ejercicio:
+                continue
+            rentas.append({
+                "ejercicio": ejercicio,
+                "estado": str(e.get("estado_presentacion") or "").strip(),
+                "presentacion_fecha": str(e.get("presentacion_fecha") or "").strip(),
+                "resultado": _portal_numero(e.get("resultado_declaracion")) if str(e.get("resultado_declaracion") or "").strip() else None,
+                "tiene_documento": bool(e.get("doc_presentada_id") or e.get("doc_key") or e.get("doc_url")),
+            })
+        salida["gestoria_rentas"] = sorted(rentas, key=lambda r: r["ejercicio"], reverse=True)
+    if secciones["documentos_gestoria"]:
+        marcas = ",".join(["?"] * len(PORTAL_DOCS_DE_OTROS_MODULOS))
+        docs = _filas(
+            f"""
+            SELECT id, nombre, tipo, fecha, estado, doc_key, doc_url, repo_key, created_at
+            FROM gestoria_docs
+            WHERE workspace_id = ? AND cliente_id = ?
+              AND LOWER(COALESCE(referencia_tipo, '')) NOT IN ({marcas})
+              AND LOWER(COALESCE(estado, '')) <> 'pendiente asignar'
+            ORDER BY COALESCE(NULLIF(TRIM(COALESCE(fecha, '')), ''), created_at) DESC
+            LIMIT 100
+            """,
+            (ws, cid, *PORTAL_DOCS_DE_OTROS_MODULOS),
+        )
+        salida["gestoria_documentos"] = [
+            {
+                "id": d["id"], "nombre": d.get("nombre") or "", "tipo": d.get("tipo") or "",
+                "fecha": d.get("fecha") or str(d.get("created_at") or "")[:10], "estado": d.get("estado") or "",
+                "tiene_archivo": any(_doc_link_from_gestoria_doc_row(d)),
+            }
+            for d in docs
+        ]
+    if secciones["contabilidad"]:
+        por_anio = {}
+        for m in _filas(
+            "SELECT fecha, tipo, importe FROM gestoria_contabilidad WHERE workspace_id = ? AND cliente_id = ?",
+            (ws, cid),
+        ):
+            anio = str(m.get("fecha") or "")[:4]
+            if not anio.isdigit():
+                continue
+            fila = por_anio.setdefault(anio, {"ejercicio": anio, "ingresos": 0.0, "gastos": 0.0, "apuntes": 0})
+            importe = _portal_numero(m.get("importe")) or 0.0
+            if str(m.get("tipo") or "").strip().lower().startswith("ingreso"):
+                fila["ingresos"] += importe
+            else:
+                fila["gastos"] += importe
+            fila["apuntes"] += 1
+        resumen = []
+        for anio in sorted(por_anio, reverse=True):
+            fila = por_anio[anio]
+            fila["ingresos"] = round(fila["ingresos"], 2)
+            fila["gastos"] = round(fila["gastos"], 2)
+            fila["resultado"] = round(fila["ingresos"] - fila["gastos"], 2)
+            resumen.append(fila)
+        salida["gestoria_contabilidad"] = resumen
+    if secciones["facturas_emitidas"]:
+        facturas = _filas(
+            """
+            SELECT id, numero, fecha_emision, descripcion, base_imponible, cuota_iva, cuota_irpf, total, doc_key
+            FROM gestoria_facturas
+            WHERE workspace_id = ? AND cliente_id = ? AND LOWER(COALESCE(tipo, '')) = 'venta'
+            ORDER BY COALESCE(NULLIF(TRIM(COALESCE(fecha_emision, '')), ''), created_at) DESC
+            LIMIT 100
+            """,
+            (ws, cid),
+        )
+        for f in facturas:
+            f["tiene_pdf"] = bool(str(f.pop("doc_key", "") or "").strip())
+        salida["gestoria_facturas_emitidas"] = facturas
+    return salida
+
+
+def portal_cliente_archivo_gestoria(conn, acceso, tipo, ref):
+    """(doc_key, doc_url, nombre) de un archivo de gestoría que este cliente puede bajar.
+
+    None si la sección está apagada o el archivo no es suyo.
+    """
+    secciones = portal_cliente_secciones(acceso.get("secciones_json"))
+    seccion = {"documento": "documentos_gestoria", "factura": "facturas_emitidas", "renta": "rentas"}.get(tipo)
+    ref = str(ref or "").strip()
+    if not seccion or not secciones.get(seccion) or not ref or not _portal_cliente_es_del_workspace(conn, acceso):
+        return None
+    ws, cid = acceso["workspace_id"], acceso["cliente_id"]
+
+    def _doc(doc_id):
+        marcas = ",".join(["?"] * len(PORTAL_DOCS_DE_OTROS_MODULOS))
+        row = conn.execute(
+            f"""
+            SELECT id, nombre, doc_key, doc_url, repo_key FROM gestoria_docs
+            WHERE id = ? AND workspace_id = ? AND cliente_id = ?
+              AND LOWER(COALESCE(referencia_tipo, '')) NOT IN ({marcas})
+            LIMIT 1
+            """,
+            (doc_id, ws, cid, *PORTAL_DOCS_DE_OTROS_MODULOS),
+        ).fetchone()
+        if not row:
+            return None
+        key, url = _doc_link_from_gestoria_doc_row(row)
+        return (key, url, str(row_value(row, "nombre") or "documento")) if (key or url) else None
+
+    try:
+        if tipo == "documento":
+            return _doc(ref)
+        if tipo == "factura":
+            row = conn.execute(
+                """
+                SELECT numero, doc_key FROM gestoria_facturas
+                WHERE id = ? AND workspace_id = ? AND cliente_id = ? AND LOWER(COALESCE(tipo, '')) = 'venta'
+                LIMIT 1
+                """,
+                (ref, ws, cid),
+            ).fetchone()
+            key = _normalize_doc_key_for_ui(str(row_value(row, "doc_key") or "")) if row else ""
+            return (key, "", f"factura_{row_value(row, 'numero') or ref}.pdf") if key else None
+        for e in _portal_rentas_del_cliente(conn, cid):
+            if str(e.get("ejercicio") or "").strip() != ref:
+                continue
+            if e.get("doc_presentada_id"):
+                encontrado = _doc(str(e.get("doc_presentada_id")))
+                if encontrado:
+                    return encontrado
+            key, url = _doc_link_from_gestoria_doc_row({"doc_key": e.get("doc_key"), "doc_url": e.get("doc_url")})
+            if key or url:
+                return key, url, f"renta_{ref}.pdf"
+    except Exception:
+        _rollback_best_effort(conn)
+    return None
+
+
 def fetch_workspace_portal_public(conn, token):
+    acceso = portal_cliente_por_token(conn, token)
+    if not acceso:
+        return None
     row = conn.execute(
         """
         SELECT
@@ -61541,23 +61858,26 @@ def fetch_workspace_portal_public(conn, token):
         FROM workspace_portal_clientes p
         JOIN clientes c ON c.id = p.cliente_id
         JOIN workspaces w ON w.id = p.workspace_id
-        WHERE p.token = ?
+        WHERE p.id = ?
         LIMIT 1
         """,
-        (token,),
+        (acceso["id"],),
     ).fetchone()
     if not row:
         return None
     conn.execute(
-        "UPDATE workspace_portal_clientes SET ultimo_acceso_at = datetime(?) WHERE token = ?",
-        (datetime.now(timezone.utc).isoformat(), token),
+        "UPDATE workspace_portal_clientes SET ultimo_acceso_at = datetime(?) WHERE id = ?",
+        (datetime.now(timezone.utc).isoformat(), acceso["id"]),
     )
     conn.commit()
     docs = conn.execute(
         """
         SELECT nombre, clasificacion, estado, created_at
         FROM workspace_documentos_inbox
-        WHERE workspace_id = ? AND COALESCE(cliente_id, suggested_cliente_id) = ?
+        -- Solo lo asignado de verdad al cliente: con COALESCE(cliente_id,
+        -- suggested_cliente_id) un documento que la lectura automática solo había
+        -- sugerido para él le aparecía antes de que nadie lo revisara.
+        WHERE workspace_id = ? AND cliente_id = ?
         ORDER BY updated_at DESC, created_at DESC
         LIMIT 10
         """,
@@ -61709,6 +62029,7 @@ def fetch_workspace_portal_public(conn, token):
         "seguros_recibos": [dict(item) for item in seguros_recibos],
         "seguros_siniestros": [dict(item) for item in seguros_siniestros],
         "seguros_renovaciones": [dict(item) for item in seguros_renovaciones],
+        **portal_cliente_gestoria(conn, acceso),
     }
 
 
@@ -61760,15 +62081,7 @@ def build_gestoria_facturas_excel(template_path: Path, facturas_rows):
 def fetch_workspace_invoice_pdf_payload(conn, invoice_id, workspace_id=None, token=None):
     portal_scope = None
     if token:
-        portal_scope = conn.execute(
-            """
-            SELECT workspace_id, cliente_id
-            FROM workspace_portal_clientes
-            WHERE token = ?
-            LIMIT 1
-            """,
-            (token,),
-        ).fetchone()
+        portal_scope = portal_cliente_por_token(conn, token)
         if not portal_scope:
             return None
         workspace_id = portal_scope["workspace_id"]
@@ -83134,36 +83447,90 @@ class Handler(BaseHTTPRequestHandler):
             if not ok:
                 json_response(self, {"error": err or "No autorizado"}, status=403)
                 return
+            # El cliente tiene que ser de este workspace: antes se aceptaba cualquier
+            # cliente_id y el portal enseñaba su nombre y su email.
+            if not conn.execute(
+                "SELECT 1 FROM clientes WHERE id = ? AND COALESCE(workspace_id, '') = ? LIMIT 1",
+                (cliente_id, workspace_id),
+            ).fetchone():
+                json_response(self, {"error": "El cliente no es de este workspace."}, status=400)
+                return
+            accion = str(payload.get("accion") or "").strip().lower()
             importador_facturas = 1 if str(payload.get("importador_facturas") or "").strip().lower() in {"1", "true", "yes", "si", "sí", "on"} else 0
             existing = conn.execute(
-                "SELECT id FROM workspace_portal_clientes WHERE workspace_id = ? AND cliente_id = ? LIMIT 1",
+                "SELECT id, estado, COALESCE(token_hash, '') AS token_hash, COALESCE(token, '') AS token_antiguo FROM workspace_portal_clientes WHERE workspace_id = ? AND cliente_id = ? LIMIT 1",
                 (workspace_id, cliente_id),
             ).fetchone()
-            token = os.urandom(12).hex()
+            try:
+                dias_validez = int(payload.get("dias_validez") or PORTAL_CLIENTE_DIAS_VALIDEZ)
+            except Exception:
+                dias_validez = PORTAL_CLIENTE_DIAS_VALIDEZ
+            dias_validez = max(1, min(dias_validez, 3 * 365))
+            secciones_json = portal_cliente_secciones_normalizadas_json(payload.get("secciones"))
+            # El enlace se genera solo al crear el acceso o si se pide expresamente. Antes
+            # cualquier guardado —también pausar— creaba uno nuevo y anulaba el anterior sin
+            # avisar. Se guarda cifrado y solo se devuelve una vez, en esta respuesta.
+            token = ""
+            sin_enlace = bool(existing) and not row_value(existing, "token_hash") and not row_value(existing, "token_antiguo")
+            if not existing or accion == "regenerar" or (sin_enlace and accion != "revocar"):
+                token = make_portal_token()
+            ahora_utc = datetime.now(timezone.utc)
+            expira_at = (ahora_utc + timedelta(days=dias_validez)).strftime("%Y-%m-%d %H:%M:%S") if token else None
             if existing:
+                record_id = row_value(existing, "id")
+                if accion == "revocar":
+                    conn.execute(
+                        """
+                        UPDATE workspace_portal_clientes
+                        SET estado = 'Revocado', token = NULL, token_hash = NULL, revocado_at = ?, updated_at = datetime(?)
+                        WHERE id = ?
+                        """,
+                        (ahora_utc.strftime("%Y-%m-%d %H:%M:%S"), now, record_id),
+                    )
+                    conn.commit()
+                    json_response(self, {"ok": True, "id": record_id, "estado": "Revocado"})
+                    return
+                estado_nuevo = (payload.get("estado") or "").strip() or str(row_value(existing, "estado") or "Invitado")
+                if token and estado_nuevo.lower() == "revocado":
+                    estado_nuevo = "Invitado"
                 conn.execute(
                     """
                     UPDATE workspace_portal_clientes
-                    SET email_acceso = ?, estado = ?, importador_facturas = ?, token = ?, updated_at = datetime(?)
+                    SET email_acceso = CASE WHEN ? = 1 THEN ? ELSE email_acceso END, estado = ?,
+                        importador_facturas = CASE WHEN ? = 1 THEN ? ELSE importador_facturas END,
+                        secciones_json = COALESCE(?, secciones_json), updated_at = datetime(?)
                     WHERE id = ?
                     """,
                     (
+                        # Lo que no se envía se conserva: los botones de la lista (pausar,
+                        # secciones) solo mandan lo suyo.
+                        1 if "email_acceso" in payload else 0,
                         (payload.get("email_acceso") or "").strip() or None,
-                        (payload.get("estado") or "").strip() or "Invitado",
+                        estado_nuevo,
+                        1 if "importador_facturas" in payload else 0,
                         importador_facturas,
-                        token,
+                        secciones_json,
                         now,
-                        existing[0],
+                        record_id,
                     ),
                 )
-                record_id = existing[0]
+                if token:
+                    conn.execute(
+                        """
+                        UPDATE workspace_portal_clientes
+                        SET token = NULL, token_hash = ?, expira_at = ?, revocado_at = NULL
+                        WHERE id = ?
+                        """,
+                        (hash_portal_token(token), expira_at, record_id),
+                    )
             else:
                 record_id = os.urandom(16).hex()
                 conn.execute(
                     """
                     INSERT INTO workspace_portal_clientes (
-                      id, workspace_id, cliente_id, email_acceso, estado, importador_facturas, token, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?))
+                      id, workspace_id, cliente_id, email_acceso, estado, importador_facturas,
+                      token, token_hash, expira_at, secciones_json, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, datetime(?), datetime(?))
                     """,
                     (
                         record_id,
@@ -83172,7 +83539,9 @@ class Handler(BaseHTTPRequestHandler):
                         (payload.get("email_acceso") or "").strip() or None,
                         (payload.get("estado") or "").strip() or "Invitado",
                         importador_facturas,
-                        token,
+                        hash_portal_token(token),
+                        expira_at,
+                        secciones_json,
                         now,
                         now,
                     ),
@@ -83191,7 +83560,10 @@ class Handler(BaseHTTPRequestHandler):
                 now,
             )
             conn.commit()
-            json_response(self, {"ok": True, "id": record_id, "token": token, "importador_facturas": importador_facturas, "automation_actions": auto_created})
+            respuesta = {"ok": True, "id": record_id, "importador_facturas": importador_facturas, "automation_actions": auto_created}
+            if token:
+                respuesta.update({"token": token, "enlace": f"/#portal_token={token}", "expira_at": expira_at})
+            json_response(self, respuesta)
             return
         elif parsed.path == "/api/workspace_portal_requerimientos":
             workspace_id = str(payload.get("workspace_id") or "").strip()
@@ -83259,15 +83631,7 @@ class Handler(BaseHTTPRequestHandler):
             if not token:
                 json_response(self, {"error": "token requerido"}, status=400)
                 return
-            portal = conn.execute(
-                """
-                SELECT id, workspace_id, cliente_id, estado, COALESCE(importador_facturas, 0) AS importador_facturas
-                FROM workspace_portal_clientes
-                WHERE token = ?
-                LIMIT 1
-                """,
-                (token,),
-            ).fetchone()
+            portal = portal_cliente_por_token(conn, token)
             if not portal:
                 json_response(self, {"error": "portal no encontrado"}, status=404)
                 return
@@ -83309,15 +83673,7 @@ class Handler(BaseHTTPRequestHandler):
             if not token:
                 json_response(self, {"error": "token requerido"}, status=400)
                 return
-            portal = conn.execute(
-                """
-                SELECT id, workspace_id, cliente_id, estado
-                FROM workspace_portal_clientes
-                WHERE token = ?
-                LIMIT 1
-                """,
-                (token,),
-            ).fetchone()
+            portal = portal_cliente_por_token(conn, token)
             if not portal:
                 json_response(self, {"error": "portal no encontrado"}, status=404)
                 return
@@ -83406,15 +83762,7 @@ class Handler(BaseHTTPRequestHandler):
             if not token or not nombre:
                 json_response(self, {"error": "token y nombre requeridos"}, status=400)
                 return
-            portal = conn.execute(
-                """
-                SELECT id, workspace_id, cliente_id, COALESCE(importador_facturas, 0) AS importador_facturas
-                FROM workspace_portal_clientes
-                WHERE token = ?
-                LIMIT 1
-                """,
-                (token,),
-            ).fetchone()
+            portal = portal_cliente_por_token(conn, token)
             if not portal:
                 json_response(self, {"error": "portal no encontrado"}, status=404)
                 return
@@ -107220,15 +107568,7 @@ class Handler(BaseHTTPRequestHandler):
             if not token:
                 json_response(self, {"error": "token requerido"}, status=400)
                 return
-            portal = conn.execute(
-                """
-                SELECT id, workspace_id, cliente_id, COALESCE(importador_facturas, 0) AS importador_facturas
-                FROM workspace_portal_clientes
-                WHERE token = ?
-                LIMIT 1
-                """,
-                (token,),
-            ).fetchone()
+            portal = portal_cliente_por_token(conn, token)
             if not portal:
                 json_response(self, {"error": "portal no encontrado"}, status=404)
                 return
@@ -107315,6 +107655,59 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
+        if path == "/api/workspace_portal_gestoria_archivo":
+            # Descarga de un documento, factura emitida o renta de gestoría desde el portal
+            # del cliente. Sin sesión: la llave es el enlace, y el archivo tiene que ser de
+            # ese cliente y de una sección que la gestoría le haya encendido.
+            token = _request_token_param(self, params, "token")
+            portal = portal_cliente_por_token(conn, token) if token else None
+            if not portal:
+                json_response(self, {"error": "portal no encontrado"}, status=404)
+                return
+            archivo = portal_cliente_archivo_gestoria(
+                conn, portal, (params.get("tipo", [""])[0] or "").strip(), params.get("id", [""])[0]
+            )
+            if not archivo:
+                json_response(self, {"error": "archivo no encontrado"}, status=404)
+                return
+            doc_key, doc_url, _nombre = archivo
+            destino = ""
+            if doc_key:
+                key = _normalize_s3_key(doc_key)
+                client = s3_client()
+                if client:
+                    bucket, _region = s3_config()
+                    try:
+                        destino = client.generate_presigned_url(
+                            "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=600
+                        )
+                    except Exception:
+                        json_response(self, {"error": "No se pudo firmar el archivo"}, status=500)
+                        return
+                else:
+                    doc_url = "/uploads/s3_local/" + re.sub(r"[^0-9A-Za-z._\\-\\/]+", "_", key).lstrip("/").replace("..", "_")
+            if not destino and doc_url.startswith("/uploads/"):
+                # /uploads pide sesión del CRM y el cliente no la tiene: se le sirve aquí.
+                ruta = safe_resolve_under(UPLOADS, doc_url.replace("/uploads/", "", 1))
+                if not ruta or not ruta.exists():
+                    json_response(self, {"error": "archivo no encontrado"}, status=404)
+                    return
+                if ruta.suffix.lower() in {".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp"}:
+                    send_file(self, ruta)
+                else:
+                    send_file(self, ruta, force_download=True)
+                return
+            if not destino and doc_url.startswith(("http://", "https://")):
+                destino = doc_url
+            if not destino:
+                json_response(self, {"error": "archivo no encontrado"}, status=404)
+                return
+            self.send_response(302)
+            self.send_header("Location", destino)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+
         if path == "/api/workspace_portal_s3_url":
             token = _request_token_param(self, params, "token")
             key = (params.get("key", [""])[0] or "").strip()
@@ -107322,15 +107715,7 @@ class Handler(BaseHTTPRequestHandler):
                 json_response(self, {"error": "token y key requeridos"}, status=400)
                 return
             key = _normalize_s3_key(key)
-            portal = conn.execute(
-                """
-                SELECT id, workspace_id
-                FROM workspace_portal_clientes
-                WHERE token = ?
-                LIMIT 1
-                """,
-                (token,),
-            ).fetchone()
+            portal = portal_cliente_por_token(conn, token)
             if not portal:
                 json_response(self, {"error": "portal no encontrado"}, status=404)
                 return
