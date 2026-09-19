@@ -19013,6 +19013,167 @@ def resolve_gestoria_factura_cliente_id(conn, empresa_id, nif="", nombre=""):
     return None
 
 
+# --- Lector de facturas con IA (2026-09-19) ---------------------------------------
+# El OCR de siempre (Tesseract / Document AI + reglas) no distingue una factura de un
+# tique, no saca el proveedor ni su NIF y deja el IVA a 0: con los 384 gastos de GAPP
+# hubo que leerlos a mano. Este lector hace lo mismo que aquella lectura: mira la imagen,
+# devuelve los datos y dice con qué seguridad, y la regla factura/tique decide qué IVA se
+# deduce. Se apaga con GESTORIA_FACTURAS_IA=0.
+FACTURA_IA_TIPOS = ("factura", "ticket", "proforma", "abono", "no_es_factura")
+
+
+def factura_ia_disponible():
+    return str(os.environ.get("GESTORIA_FACTURAS_IA", "1")).strip().lower() not in ("0", "false", "no", "off") and openai_available()
+
+
+def _nif_normalizado(valor):
+    return re.sub(r"[^A-Z0-9]", "", str(valor or "").upper())
+
+
+def call_openai_extract_factura_vision(image_data_urls, *, text="", empresa_nombre="", empresa_nif="", tipo_factura="compra"):
+    if not image_data_urls:
+        return {}, "Sin imágenes para visión"
+    rol = ("un GASTO: la ha recibido la empresa" if tipo_factura == "compra"
+           else "un INGRESO: la ha emitido la empresa a su cliente")
+    prompt = (
+        "Eres un contable español. Lee este documento y responde SOLO con JSON válido, sin markdown.\n"
+        f"La contabilidad es de la empresa «{empresa_nombre or '-'}» (NIF {empresa_nif or '-'}). Se espera que el documento sea {rol}.\n"
+        "Claves: tipo, fecha, numero, emisor_nombre, emisor_nif, destinatario_nombre, destinatario_nif, "
+        "base_imponible, cuota_iva, iva_pct, cuota_irpf, total, concepto, confianza, notas.\n"
+        "- tipo: 'factura' (factura completa con NIF del emisor y datos fiscales del destinatario), "
+        "'ticket' (factura simplificada o tique de caja, gasolinera, parking, peaje, restaurante, sin datos del destinatario; "
+        "también el justificante de datáfono), 'proforma' (proforma, pretique, 'no válido como factura', presupuesto), "
+        "'abono' (factura rectificativa en negativo) o 'no_es_factura' (extracto, multa, albarán sin importes, ilegible).\n"
+        "- fecha AAAA-MM-DD de la factura. Importes como números con punto decimal; en un abono, en negativo.\n"
+        "- Si solo figura el total con IVA incluido y el tipo, calcula base y cuota y dilo en notas.\n"
+        "- cuota_irpf es la retención (positiva) o 0. concepto: 3 a 8 palabras.\n"
+        "- confianza: 'alta', 'media' o 'baja' según lo bien que se lee. No inventes: lo que no se lea, null.\n"
+        "Comprueba que base_imponible + cuota_iva - cuota_irpf = total.\n\n"
+        f"Texto extraído del documento (puede estar vacío o mal):\n{(text or '')[:8000] or '(vacío)'}"
+    )
+    content = [{"type": "input_text", "text": prompt}]
+    for data_url in image_data_urls[: max(1, OCR_OPENAI_VISION_PAGES)]:
+        content.append({"type": "input_image", "image_url": data_url})
+    output, err = call_openai_content(content, temperature=0.0, max_tokens=900)
+    if err:
+        return {}, err
+    limpio = re.sub(r"^```(?:json)?\s*|\s*```$", "", str(output or "").strip())
+    try:
+        data = json.loads(limpio)
+    except Exception:
+        return {}, "La IA no devolvió JSON válido"
+    return (data, "") if isinstance(data, dict) else ({}, "La IA no devolvió un objeto")
+
+
+def interpretar_lectura_factura_ia(data, *, tipo_factura, empresa_nif, empresa_nombre=""):
+    """(parsed, motivos) a partir de lo que devuelve la IA, con la regla factura/tique.
+
+    Solo la factura completa a nombre de la empresa permite deducir el IVA; un tique, un
+    justificante o una factura a nombre de otro van enteros al gasto (base = total).
+    """
+    def num(clave):
+        valor = data.get(clave)
+        if valor in (None, ""):
+            return None
+        try:
+            return round(float(str(valor).replace(",", ".")), 2)
+        except Exception:
+            return None
+
+    tipo_doc = str(data.get("tipo") or "").strip().lower()
+    if tipo_doc not in FACTURA_IA_TIPOS:
+        tipo_doc = "factura"
+    total = num("total")
+    base = num("base_imponible")
+    iva = num("cuota_iva")
+    irpf = num("cuota_irpf") or 0.0
+    if tipo_doc == "abono":
+        total, base, iva = [(-abs(x) if x is not None else None) for x in (total, base, iva)]
+    if total is not None and base is None:
+        base = round(total - (iva or 0.0) + irpf, 2)
+    if tipo_factura == "compra":
+        tercero, nif = data.get("emisor_nombre"), data.get("emisor_nif")
+    else:
+        tercero, nif = data.get("destinatario_nombre"), data.get("destinatario_nif")
+    parsed = {
+        "numero": str(data.get("numero") or "").strip() or None,
+        "fecha": str(data.get("fecha") or "").strip()[:10] or None,
+        "tercero": str(tercero or "").strip()[:120] or None,
+        "nif": _nif_normalizado(nif) or None,
+        "descripcion": str(data.get("concepto") or "").strip()[:200] or None,
+        "base_imponible": base,
+        "cuota_iva": iva,
+        "cuota_irpf": irpf,
+        "total": total,
+        "iva_pct": num("iva_pct"),
+        "tipo_documento": tipo_doc,
+    }
+    motivos = []
+    nif_empresa = _nif_normalizado(empresa_nif)
+    if tipo_factura == "compra":
+        destinatario = _nif_normalizado(data.get("destinatario_nif"))
+        a_su_nombre = bool(nif_empresa) and destinatario == nif_empresa
+        if tipo_doc == "ticket":
+            motivos.append("tique: IVA no deducible, comprobar que es gasto de la empresa")
+        elif tipo_doc in ("factura", "abono") and destinatario and not a_su_nombre:
+            motivos.append("factura a nombre de otra persona: IVA no deducible")
+        elif tipo_doc in ("factura", "abono") and not destinatario:
+            motivos.append("factura sin destinatario: se trata como tique")
+        deducible = tipo_doc in ("factura", "abono") and a_su_nombre
+        if not deducible and total is not None:
+            parsed.update({"base_imponible": total, "cuota_iva": 0.0, "cuota_irpf": 0.0, "iva_pct": 0.0})
+    if tipo_doc == "proforma":
+        motivos.append("proforma o pretique: no es factura, no debería contabilizarse")
+    elif tipo_doc == "no_es_factura":
+        motivos.append("no parece una factura: revisar si es un gasto")
+    elif tipo_doc == "abono":
+        motivos.append("abono o rectificativa")
+    confianza = str(data.get("confianza") or "").strip().lower()
+    if confianza == "baja":
+        motivos.append("lectura dudosa: documento poco legible, pedir copia")
+    elif confianza == "media":
+        motivos.append("lectura con dudas: revisar datos")
+    notas = str(data.get("notas") or "").strip()
+    if notas and confianza in ("media", "baja"):
+        motivos.append(f"nota del lector: {notas[:160]}")
+    return parsed, motivos
+
+
+def leer_factura_con_ia(conn, *, doc_bytes, mime, tmp_path, text, empresa_id, tipo_factura, session=None):
+    """{parsed, motivos, crudo} o {error}. Deja constancia del envío a la IA (hash, no el documento)."""
+    try:
+        row = conn.execute("SELECT nombre, nif FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+    except Exception:
+        _rollback_best_effort(conn)
+        row = None
+    empresa_nombre = str(row_value(row, "nombre") or "") if row else ""
+    empresa_nif = str(row_value(row, "nif") or "") if row else ""
+    if str(mime or "").startswith("image/"):
+        imagenes = [f"data:{mime};base64,{base64.b64encode(doc_bytes).decode('ascii')}"]
+    else:
+        imagenes, img_err = pdf_to_png_data_urls(tmp_path, max_pages=OCR_OPENAI_VISION_PAGES, dpi=OCR_OPENAI_VISION_DPI)
+        if not imagenes:
+            return {"error": img_err or "No se pudo convertir el PDF a imagen"}
+    try:
+        audit_event(
+            conn, str(empresa_id or ""), "gestoria_factura_ocr", hashlib.sha256(doc_bytes or b"").hexdigest()[:32],
+            "transferencia_a_proveedor_ia",
+            usuario=_session_user_label(session) if session else None,
+            detalles={"proveedor": "ollama" if AI_PROVIDER == "ollama" else "openai", "bytes": len(doc_bytes or b""),
+                      "sha256": hashlib.sha256(doc_bytes or b"").hexdigest(), "tipo": tipo_factura},
+        )
+    except Exception:
+        pass
+    data, err = call_openai_extract_factura_vision(
+        imagenes, text=text, empresa_nombre=empresa_nombre, empresa_nif=empresa_nif, tipo_factura=tipo_factura,
+    )
+    if err or not data:
+        return {"error": err or "La IA no devolvió datos"}
+    parsed, motivos = interpretar_lectura_factura_ia(data, tipo_factura=tipo_factura, empresa_nif=empresa_nif,
+                                                     empresa_nombre=empresa_nombre)
+    return {"parsed": parsed, "motivos": motivos, "crudo": data}
+
+
 def motivos_revision_factura(conn, *, payload, parsed, tipo_factura, method, text, empresa_id):
     """Por qué esta factura necesita que alguien la revise antes de darla por buena.
 
@@ -19042,7 +19203,7 @@ def motivos_revision_factura(conn, *, payload, parsed, tipo_factura, method, tex
     if tipo_factura == "compra":
         if not str(parsed.get("nif") or "").strip():
             motivos.append("sin NIF del proveedor")
-        if leida_por_ocr and str(text or "").strip():
+        if leida_por_ocr and method != "ia_vision" and str(text or "").strip():
             try:
                 row = conn.execute("SELECT nif FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
                 nif_empresa = re.sub(r"[^A-Z0-9]", "", str(row_value(row, "nif") or "").upper()) if row else ""
@@ -19107,14 +19268,33 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
                     method = "ocr_all_pages"
                 elif page_err and not err_detail:
                     err_detail = page_err
-        if not text and not datos_completos:
-            raise ValueError(err_detail or "No se pudo extraer texto de la factura")
-        parsed_factura = parse_invoice_text(text) if text else {}
-        if not parsed_factura:
-            if not datos_completos:
-                raise ValueError("No se pudieron extraer datos de factura")
-            # Vienen ya leídos (p. ej. del Excel de la factura): el OCR no hace falta.
-            parsed_factura = {}
+        motivos_lector = []
+        lectura_ia = None
+        if not (datos_completos and payload.get("sin_ocr")) and factura_ia_disponible():
+            try:
+                lectura_ia = leer_factura_con_ia(
+                    conn, doc_bytes=doc_bytes, mime=mime, tmp_path=tmp_path, text=text,
+                    empresa_id=empresa_id, tipo_factura=tipo_factura, session=session,
+                )
+            except Exception as exc:
+                lectura_ia = {"error": str(exc)}
+        if lectura_ia and lectura_ia.get("parsed") and lectura_ia["parsed"].get("total") is not None:
+            method = "ia_vision"
+            # Lo que no dé la IA, de las reglas de siempre; lo que dé, manda.
+            base_regex = parse_invoice_text(text) if text else {}
+            parsed_factura = {**(base_regex or {}), **{k: v for k, v in lectura_ia["parsed"].items() if v is not None}}
+            motivos_lector = list(lectura_ia.get("motivos") or [])
+        else:
+            if lectura_ia and lectura_ia.get("error"):
+                motivos_lector.append("el lector con IA falló: revisar los datos leídos por OCR")
+            if not text and not datos_completos:
+                raise ValueError(err_detail or "No se pudo extraer texto de la factura")
+            parsed_factura = parse_invoice_text(text) if text else {}
+            if not parsed_factura:
+                if not datos_completos:
+                    raise ValueError("No se pudieron extraer datos de factura")
+                # Vienen ya leídos (p. ej. del Excel de la factura): el OCR no hace falta.
+                parsed_factura = {}
         parsed_factura["tipo"] = tipo_factura
         for key_src, key_dst in (
             ("numero", "numero"),
@@ -19357,7 +19537,9 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
             ),
         )
         motivos = motivos_revision_factura(
-            conn, payload=payload, parsed=parsed_factura, tipo_factura=tipo_factura,
+            conn,
+            payload={**payload, "revision_motivos": list(payload.get("revision_motivos") or []) + motivos_lector},
+            parsed=parsed_factura, tipo_factura=tipo_factura,
             method=method, text=text, empresa_id=empresa_id,
         )
         if motivos:
@@ -74426,6 +74608,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_asiento",
             "/api/gestoria_asiento_update",
             "/api/gestoria_factura_revision",
+            "/api/gestoria_factura_leer",
             "/api/gestoria_facturas_reparse",
             "/api/gestoria_import_lote_valoracion",
             "/api/cliente_profesional",
@@ -74988,6 +75171,7 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/gestoria_contabilidad_delete": "gestoria",
                         "/api/gestoria_factura_ocr": "gestoria",
                         "/api/gestoria_factura_revision": "gestoria",
+                        "/api/gestoria_factura_leer": "gestoria",
                         "/api/gestoria_facturas_reparse": "gestoria",
                         "/api/renta_quick_ocr": "gestoria",
                         "/api/renta_quick_attach": "gestoria",
@@ -103875,6 +104059,43 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "row": dict(updated) if updated else {}})
             return
 
+        elif parsed.path == "/api/gestoria_factura_leer":
+            # Solo leer (no crea nada): para probar el lector con IA con un documento ya
+            # subido, p. ej. comparar su lectura con gastos ya revisados.
+            empresa_id = str(payload.get("empresa_id") or "").strip()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(conn, session, workspace_id, empresa_id)
+            if not ok_amb or not empresa_id:
+                json_response(self, {"error": err_amb or "empresa_id requerido"}, status=403 if not ok_amb else 400)
+                return
+            if not factura_ia_disponible():
+                json_response(self, {"error": "Lector con IA no disponible"}, status=400)
+                return
+            tipo_leer = "venta" if str(payload.get("tipo") or "").strip().lower() in ("venta", "emitida", "emitidas") else "compra"
+            tmp_leer = None
+            try:
+                doc_bytes, mime, _hint = decode_document_payload(payload, conn=conn, session=session)
+                with tempfile.NamedTemporaryFile(suffix=".pdf" if not str(mime).startswith("image/") else ".img", delete=False) as fh:
+                    fh.write(doc_bytes)
+                    tmp_leer = fh.name
+                texto = ""
+                if not str(mime).startswith("image/"):
+                    texto, _e, _m = extract_pdf_text(tmp_leer)
+                lectura = leer_factura_con_ia(conn, doc_bytes=doc_bytes, mime=mime, tmp_path=tmp_leer, text=texto,
+                                              empresa_id=empresa_id, tipo_factura=tipo_leer, session=session)
+                conn.commit()
+            except ValueError as exc:
+                json_response(self, {"error": str(exc)}, status=400)
+                return
+            finally:
+                if tmp_leer and os.path.exists(tmp_leer):
+                    try:
+                        os.unlink(tmp_leer)
+                    except Exception:
+                        pass
+            json_response(self, lectura, status=200 if not lectura.get("error") else 502)
+            return
         elif parsed.path == "/api/gestoria_factura_revision":
             # Revisión de una factura con alerta: se anota el apunte manual y se marca.
             factura_id = str(payload.get("factura_id") or "").strip()

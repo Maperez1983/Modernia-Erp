@@ -55,6 +55,10 @@ GUARDIANES = (
     # dependen de que el cliente mande `workspace_id`.
     "enforce_inmueble_access",
     "enforce_registro_de_inmueble",
+    # Añadido el 2026-09-19 (lector de facturas con IA): llama a
+    # `enforce_workspace_membership` o a `enforce_empresa_membership` según venga el
+    # workspace o la empresa; sin ninguno de los dos, rechaza.
+    "enforce_workspace_or_empresa_scope",
 )
 
 SE_GUARDAN_DE_OTRA_FORMA = {
