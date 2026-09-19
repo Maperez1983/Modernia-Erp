@@ -35628,7 +35628,10 @@ const portalDonut = (items) => {
 };
 
 const portalReparto = (titulo, items, euros) => {
-  if (!items || !items.length) return `<div><h4>${titulo}</h4><p class="muted">Sin datos.</p></div>`;
+  if (!items || !items.length) {
+    // Mismo ancho que el bloque de al lado: si no, sin gastos quedaba estrecho a la derecha.
+    return `<div style="flex:1 1 320px;min-width:0"><h4 style="margin:4px 0 8px">${titulo}</h4><p class="muted">Aún no hay ${titulo.toLowerCase().startsWith("gastos") ? "gastos" : "ingresos"} registrados.</p></div>`;
+  }
   const max = Math.max(...items.map((x) => Math.abs(Number(x.importe || 0))), 1);
   const filas = items
     .map(

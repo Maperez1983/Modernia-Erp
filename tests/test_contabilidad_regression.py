@@ -218,6 +218,10 @@ class AccountInferenceTests(unittest.TestCase):
         self.assertEqual(infer_revenue_account("Cuota asociación mayo"), "705")
         self.assertEqual(infer_revenue_account("Royalty octubre"), "705")
         self.assertEqual(infer_revenue_account("Comisión compra venta calle Gallardo 18"), "705")
+        self.assertEqual(infer_revenue_account("Compraventas"), "705")
+        self.assertEqual(infer_revenue_account("Captación (autofactura Fuxiona)"), "705")
+        self.assertEqual(infer_revenue_account("Sustitución de maniobra de ascensor suministrada por el cliente"), "705")
+        self.assertEqual(infer_revenue_account("UD. Instalación de cortina fotoeléctrica en ascensor"), "705")
         self.assertEqual(infer_revenue_account("Venta PC"), "700")  # default
 
 

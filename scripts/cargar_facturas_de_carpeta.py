@@ -64,6 +64,10 @@ def leer_excel(ruta):
                 datos["cuota_iva"] = _r2(iva)
                 # El total, como suma de lo redondeado: el Excel arrastra decimales (7.999,9997).
                 datos["total"] = _r2(datos["base_imponible"] + datos["cuota_iva"])
+        # Sin descripción en el Excel (la 17/2025 traía solo "1900"), la del nombre del
+        # fichero: "17 Estudio Ciudad Jardin Sur - Cuota asociacion agosto".
+        if not re.search(r"[A-Za-zÁÉÍÓÚáéíóúñÑ]", str(datos.get("descripcion") or "")):
+            datos["descripcion"] = re.sub(r"^\d+\s*", "", Path(ruta).stem).strip()
         if all(datos.get(k) for k in ("numero", "fecha", "total")):
             if datos["base_imponible"]:
                 datos["iva_pct"] = round(datos["cuota_iva"] * 100 / datos["base_imponible"])
@@ -92,6 +96,74 @@ def leer_autofactura_fuxiona(ruta):
     }
 
 
+def _texto_documento(ruta):
+    """Texto de un PDF o de un Word (.docx: las emitidas 16–24/2026 de GAPP solo están así)."""
+    ruta = Path(ruta)
+    if ruta.suffix.lower() == ".docx":
+        import zipfile
+
+        with zipfile.ZipFile(ruta) as z:
+            xml = z.read("word/document.xml").decode("utf-8", errors="replace")
+        xml = re.sub(r"</w:p>", "\n", xml)
+        xml = re.sub(r"<w:tab/>", " ", xml)
+        return re.sub(r"<[^>]+>", "", xml)
+    from pypdf import PdfReader
+
+    return "\n".join(p.extract_text() or "" for p in PdfReader(str(ruta)).pages)
+
+
+def leer_factura_gapp(ruta):
+    """Factura emitida por GAPP (Word o su PDF): 'FACTURA Nº 01_2026', 'Cliente : X', 'CIF', totales."""
+    texto = _texto_documento(ruta)
+    plano = re.sub(r"[ \t]+", " ", texto)
+    num = re.search(r"FACTURA\s+N[ºo°]\s*(\d+)_(\d{4})", plano)
+    fecha = re.search(r"Fecha:?[\s|]*(\d{1,2}/\d{1,2}/\d{4})", plano.replace("\n", " | "))
+    cliente = re.search(r"Cliente\s*:\s*(.+?)(?:\s+CIF:|\n)", plano)
+    cif = re.search(r"CIF:\s*([A-Z]\d{8}|[A-Z]\d{7}[A-Z0-9])", plano)
+    base = re.search(r"Base\s+imponible\s+([\d.]+,\d{2})", plano)
+    iva = re.search(r"IVA\s+21\s*%\s+([\d.]+,\d{2})", plano)
+    total = re.search(r"Total\s+([\d.]+,\d{2})", plano)
+    desc = re.search(r"DESCRIPCI[ÓO]N\s+IMPORTE\s*\n(.+)", plano)
+    if not (num and fecha and base and iva):
+        return None
+    eu = lambda s: float(s.replace(".", "").replace(",", "."))  # noqa: E731
+    b, i = eu(base.group(1)), eu(iva.group(1))
+    aviso = ""
+    if total and abs(eu(total.group(1)) - (b + i)) > 0.005:
+        # La factura se contradice: manda la cifra que cuadra con el 21 % de la base.
+        # 64/2026: IVA impreso 695,13 (mal) y total 4.008,73 (bien) → se toma el total.
+        # 32/2026: IVA 100,80 (bien) y total 580,00 (mal) → se toma el IVA.
+        iva_21 = round(b * 0.21, 2)
+        t = eu(total.group(1))
+        if abs(i - iva_21) > 0.01 and abs((t - b) - iva_21) <= 0.01:
+            aviso = f"el IVA impreso ({i:.2f}) no es el 21 % de la base; se toma el total impreso {t:.2f}"
+            i = t - b
+        else:
+            aviso = f"el total impreso ({t:.2f}) no es base + IVA ({b + i:.2f}); se toma base + IVA"
+    return {
+        "aviso": aviso,
+        "numero": f"{int(num.group(1)):02d}/{num.group(2)}", "fecha": _fecha(fecha.group(1)),
+        "tercero": re.sub(r"\s+", " ", cliente.group(1)).strip() if cliente else "",
+        "nif": cif.group(1) if cif else "",
+        "descripcion": re.sub(r"\s+", " ", desc.group(1)).strip()[:200] if desc else "Trabajos de ascensores",
+        "base_imponible": _r2(b), "cuota_iva": _r2(i), "total": _r2(b + i), "iva_pct": 21,
+    }
+
+
+LECTORES_PDF = (leer_autofactura_fuxiona, leer_factura_gapp)
+
+
+def _leer_pdf(pdf):
+    for lector in LECTORES_PDF:
+        try:
+            datos = lector(pdf)
+        except Exception:
+            datos = None
+        if datos:
+            return datos
+    return None
+
+
 def facturas_de_la_carpeta(carpeta, tipo):
     """[(pdf, datos, origen)] de EMITIDAS o RECIBIDAS; las autofacturas repetidas, fuera."""
     raiz = Path(carpeta) / tipo
@@ -107,16 +179,23 @@ def facturas_de_la_carpeta(carpeta, tipo):
             continue
         salida.append((pdf, datos, xlsx.name))
     con_excel = {(d["fecha"], d["total"]) for _p, d, _o in salida}
-    for pdf in sorted(raiz.rglob("*.pdf")):
+    documentos = sorted([*raiz.rglob("*.pdf"), *raiz.rglob("*.PDF"), *raiz.rglob("*.docx")], key=lambda x: str(x))
+    for pdf in dict.fromkeys(documentos):
         if any(p == pdf for p, _d, _o in salida) or pdf.with_suffix(".xlsx").exists():
             continue
-        datos = leer_autofactura_fuxiona(pdf)
+        datos = _leer_pdf(pdf)
         if not datos:
             avisos.append(f"PDF sin Excel que no sé leer: {pdf.name}")
             continue
         if (datos["fecha"], datos["total"]) in con_excel:
             avisos.append(f"{pdf.name} ({datos['numero']}) es la misma operación que una factura del Excel: no se carga dos veces")
             continue
+        repetida = next((o for _p, d, o in salida if d["numero"] == datos["numero"]), None)
+        if repetida:
+            avisos.append(f"{pdf.name}: el nº {datos['numero']} ya está en {repetida}; no se carga dos veces")
+            continue
+        if datos.get("aviso"):
+            avisos.append(f"{pdf.name}: {datos['aviso']}")
         salida.append((pdf, datos, pdf.name))
     return salida, avisos
 
@@ -135,8 +214,13 @@ def cargar(pdf, datos, *, empresa_id, cliente_id, tipo, clave):
     firma = _post("/api/ingest_facturas_presign", {
         "empresa_id": empresa_id, "tipo": tipo, "year": anio, "filename": pdf.name, "content_type": "application/pdf",
     }, clave)
+    tipo_mime = ("application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                 if pdf.suffix.lower() == ".docx" else "application/pdf")
+    firma = firma if pdf.suffix.lower() != ".docx" else _post("/api/ingest_facturas_presign", {
+        "empresa_id": empresa_id, "tipo": tipo, "year": anio, "filename": pdf.name, "content_type": tipo_mime,
+    }, clave)
     subida = urllib.request.Request(firma["url"], data=pdf.read_bytes(), method="PUT",
-                                    headers={"Content-Type": "application/pdf"})
+                                    headers={"Content-Type": tipo_mime})
     with urllib.request.urlopen(subida, timeout=120) as r:
         if r.status not in (200, 204):
             raise RuntimeError(f"S3 respondió {r.status}")
