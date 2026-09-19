@@ -15493,9 +15493,19 @@ def infer_expense_account(concepto):
     return "629"
 
 
+# Palabras que delatan una prestación de servicios (PGC 705) y no una venta de
+# mercaderías (700): cuotas, royalties, comisiones, colaboraciones... Antes solo el
+# alquiler iba a la 705 y las facturas de una gestoría o una inmobiliaria salían como
+# "ventas de mercaderías" en su cuenta de resultados.
+REVENUE_SERVICIOS_PALABRAS = (
+    "ALQUILER", "ARRENDAMIENTO", "SERVICIO", "COMISION", "CUOTA", "ROYALT", "COLABORACION",
+    "HONORARIO", "ASESOR", "INTERMEDIACION", "GESTION", "CONSULTORIA", "MANTENIMIENTO", "FRANQUICIA",
+)
+
+
 def infer_revenue_account(concepto):
     text = normalize_lookup_text(concepto or "")
-    if "ALQUILER" in text:
+    if any(palabra in text for palabra in REVENUE_SERVICIOS_PALABRAS):
         return "705"
     return "700"
 
@@ -18971,6 +18981,8 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
     if tipo_factura not in ("compra", "venta"):
         tipo_factura = "compra"
     doc_bytes, mime, source_hint = decode_document_payload(payload, conn=conn, session=session)
+    # Con número, fecha y total ya dados, una factura cuyo PDF no se lee sigue adelante.
+    datos_completos = all(str(payload.get(k) or "").strip() for k in ("numero", "fecha", "total"))
     tmp_path = None
     text = ""
     err_detail = ""
@@ -19005,17 +19017,21 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
                     method = "ocr_all_pages"
                 elif page_err and not err_detail:
                     err_detail = page_err
-        if not text:
+        if not text and not datos_completos:
             raise ValueError(err_detail or "No se pudo extraer texto de la factura")
-        parsed_factura = parse_invoice_text(text)
+        parsed_factura = parse_invoice_text(text) if text else {}
         if not parsed_factura:
-            raise ValueError("No se pudieron extraer datos de factura")
+            if not datos_completos:
+                raise ValueError("No se pudieron extraer datos de factura")
+            # Vienen ya leídos (p. ej. del Excel de la factura): el OCR no hace falta.
+            parsed_factura = {}
         parsed_factura["tipo"] = tipo_factura
         for key_src, key_dst in (
             ("numero", "numero"),
             ("fecha", "fecha"),
             ("nif", "nif"),
             ("tercero", "tercero"),
+            ("descripcion", "descripcion"),
         ):
             incoming = str(payload.get(key_src) or "").strip()
             if incoming:
@@ -19127,7 +19143,9 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
               archivo_hash, dedupe_key,
               created_at, updated_at
             ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
+              -- 21 datos + las dos fechas. Tenía 23 + 2 desde el 6-jul-2026 y el alta de
+              -- facturas por OCR fallaba siempre ("25 values for 23 columns").
+              ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime(?), datetime(?)
             )
             """,
             (
@@ -78894,11 +78912,38 @@ class Handler(BaseHTTPRequestHandler):
                 "tipo_factura": tipo_factura,
                 "source_hint": str(payload.get("source_hint") or payload.get("source") or "ingest").strip(),
             }
+            # Datos ya leídos de la factura (p. ej. de su Excel): mandan sobre el OCR.
+            for campo in ("numero", "fecha", "nif", "tercero", "descripcion", "base_imponible",
+                          "cuota_iva", "cuota_irpf", "total", "iva_pct"):
+                if payload.get(campo) not in (None, ""):
+                    ocr_payload[campo] = payload.get(campo)
+            # La contabilidad de quién es. Sin esto se deducía del NIF del tercero, y en
+            # una venta el tercero es el comprador, no la sociedad a la que se le lleva.
+            cliente_ingesta = str(payload.get("cliente_id") or "").strip()
+            if cliente_ingesta:
+                ws_empresa = [
+                    str(row_value(r, "workspace_id") or "")
+                    for r in conn.execute(
+                        "SELECT workspace_id FROM workspace_empresas WHERE empresa_id = ?", (empresa_id,)
+                    ).fetchall()
+                ]
+                if not conn.execute(
+                    "SELECT 1 FROM clientes WHERE id = ? AND COALESCE(workspace_id, '') IN ({}) LIMIT 1".format(
+                        ",".join(["?"] * len(ws_empresa)) or "''"
+                    ),
+                    (cliente_ingesta, *ws_empresa),
+                ).fetchone():
+                    json_response(self, {"error": "El cliente no es del workspace de la empresa."}, status=400)
+                    return
+                ocr_payload["cliente_id"] = cliente_ingesta
             try:
                 result = process_gestoria_factura_ocr(ocr_payload, conn, empresa_id=empresa_id, now=now, session=None)
             except ValueError as exc:
                 json_response(self, {"error": str(exc)}, status=400)
                 return
+            # Sin esto la factura se creaba y se perdía al cerrar la conexión (la ruta
+            # con sesión, /api/gestoria_factura_ocr, sí lo hacía).
+            conn.commit()
             json_response(self, {"ok": True, **(result or {})})
             return
 

@@ -213,7 +213,12 @@ class AccountInferenceTests(unittest.TestCase):
 
     def test_infer_revenue_account_mapping(self):
         self.assertEqual(infer_revenue_account("Alquiler mensual"), "705")
-        self.assertEqual(infer_revenue_account("Venta de servicios"), "700")  # default
+        # Servicios a la 705 (prestaciones de servicios), no a la 700 de mercaderías.
+        self.assertEqual(infer_revenue_account("Venta de servicios"), "705")
+        self.assertEqual(infer_revenue_account("Cuota asociación mayo"), "705")
+        self.assertEqual(infer_revenue_account("Royalty octubre"), "705")
+        self.assertEqual(infer_revenue_account("Comisión compra venta calle Gallardo 18"), "705")
+        self.assertEqual(infer_revenue_account("Venta PC"), "700")  # default
 
 
 class ParseMoneyValueTests(unittest.TestCase):
