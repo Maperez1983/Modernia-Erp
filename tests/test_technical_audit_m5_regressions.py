@@ -210,6 +210,7 @@ class TechnicalAuditM5RegressionTests(unittest.TestCase):
             );
             CREATE TABLE IF NOT EXISTS gestoria_docs (
               id TEXT PRIMARY KEY,
+              workspace_id TEXT,
               empresa_id TEXT,
               cliente_id TEXT,
               referencia_tipo TEXT,
@@ -226,6 +227,7 @@ class TechnicalAuditM5RegressionTests(unittest.TestCase):
             );
             CREATE TABLE IF NOT EXISTS inmuebles (
               id TEXT PRIMARY KEY,
+              workspace_id TEXT,
               empresa_id TEXT,
               direccion TEXT,
               created_at TEXT,
@@ -490,7 +492,9 @@ class TechnicalAuditM5RegressionTests(unittest.TestCase):
             ),
         )
         conn.executemany(
-            "INSERT INTO gestoria_docs (id, empresa_id, cliente_id, referencia_tipo, referencia_id, nombre, tipo, fecha, estado, notas, doc_key, doc_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            # Con workspace, como todo dato de negocio desde la fase 1 del ámbito (2026-09-18):
+            # el hub de documentos acota por él desde la fase 6.
+            "INSERT INTO gestoria_docs (id, workspace_id, empresa_id, cliente_id, referencia_tipo, referencia_id, nombre, tipo, fecha, estado, notas, doc_key, doc_url, created_at, updated_at) VALUES (?, 'ws-main', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [
                 (
                     "gd-1",
@@ -511,7 +515,7 @@ class TechnicalAuditM5RegressionTests(unittest.TestCase):
             ],
         )
         conn.execute(
-            "INSERT INTO inmuebles (id, empresa_id, direccion, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO inmuebles (id, workspace_id, empresa_id, direccion, created_at, updated_at) VALUES (?, 'ws-main', ?, ?, ?, ?)",
             ("inm-1", "emp-1", "Calle Falsa 123", FIXED_NOW.isoformat(), FIXED_NOW.isoformat()),
         )
         conn.execute(

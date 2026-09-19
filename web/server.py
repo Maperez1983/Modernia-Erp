@@ -50392,8 +50392,12 @@ def fetch_workspace_fin_overview(conn, workspace_id, empresa_id=None):
 
 
 def fetch_workspace_inmo_overview(conn, workspace_id, empresa_id=None):
+    # Por workspace (fase 6, 2026-09-19): por las empresas del workspace entraban los datos
+    # de demostración de DEMOCASA hechos con una empresa de Modernia. La empresa, si se
+    # pide, filtra dentro del workspace (y tiene que ser suya).
     empresa_ids = resolve_workspace_company_ids(conn, workspace_id, empresa_id=empresa_id)
-    if not empresa_ids:
+    ws = str(workspace_id or "").strip()
+    if not ws or (str(empresa_id or "").strip() and not empresa_ids):
         return {
             "counts": {
                 "inmuebles": 0,
@@ -50408,11 +50412,18 @@ def fetch_workspace_inmo_overview(conn, workspace_id, empresa_id=None):
             "proximas_visitas": [],
             "top_zonas": [],
         }
-    placeholders = ",".join(["?"] * len(empresa_ids))
+    filtro_empresa = str(empresa_id or "").strip()
+
+    def _ambito(alias=""):
+        pre = f"{alias}." if alias else ""
+        sql = f"COALESCE({pre}workspace_id, '') = ?"
+        return f"{sql} AND {pre}empresa_id = ?" if filtro_empresa else sql
+
+    ambito_vals = [ws, filtro_empresa] if filtro_empresa else [ws]
     today = datetime.now().date().isoformat()
     inmuebles_total = conn.execute(
-        f"SELECT COUNT(*) AS total FROM inmuebles WHERE empresa_id IN ({placeholders})",
-        empresa_ids,
+        f"SELECT COUNT(*) AS total FROM inmuebles WHERE {_ambito()}",
+        ambito_vals,
     ).fetchone()
     captaciones_summary = conn.execute(
         f"""
@@ -50420,9 +50431,9 @@ def fetch_workspace_inmo_overview(conn, workspace_id, empresa_id=None):
           COUNT(*) AS total,
           SUM(CASE WHEN LOWER(COALESCE(etapa, '')) NOT IN ('cerrado negativamente', 'vendido', 'alquiler') THEN 1 ELSE 0 END) AS activas
         FROM captaciones
-        WHERE empresa_id IN ({placeholders})
+        WHERE {_ambito()}
         """,
-        empresa_ids,
+        ambito_vals,
     ).fetchone()
     operaciones_summary = conn.execute(
         f"""
@@ -50430,52 +50441,52 @@ def fetch_workspace_inmo_overview(conn, workspace_id, empresa_id=None):
           COUNT(*) AS total,
           SUM(COALESCE(precio_escritura, precio_contrato, precio_propuesta, 0)) AS volumen
         FROM operaciones_inmobiliarias
-        WHERE empresa_id IN ({placeholders})
+        WHERE {_ambito()}
           AND LOWER(COALESCE(tipo_operacion, '')) = 'venta'
         """,
-        empresa_ids,
+        ambito_vals,
     ).fetchone()
     visitas_programadas = conn.execute(
         f"""
         SELECT COUNT(*) AS total
         FROM visitas
-        WHERE empresa_id IN ({placeholders})
+        WHERE {_ambito()}
           AND fecha IS NOT NULL
           AND DATE(fecha) >= DATE(?)
           AND LOWER(COALESCE(estado, '')) NOT IN ('cancelada', 'cancelado', 'hecha', 'realizada')
         """,
-        [*empresa_ids, today],
+        [*ambito_vals, today],
     ).fetchone()
     demandas_activas = conn.execute(
         f"""
         SELECT COUNT(*) AS total
         FROM demandas
-        WHERE empresa_id IN ({placeholders})
+        WHERE {_ambito()}
           AND LOWER(COALESCE(estado, '')) NOT IN ('cerrada', 'cerrado', 'cancelada', 'cancelado')
         """,
-        empresa_ids,
+        ambito_vals,
     ).fetchone()
     captaciones_rows = conn.execute(
         f"""
         SELECT direccion, zona, propietario, precio_objetivo
         FROM captaciones
-        WHERE empresa_id IN ({placeholders})
+        WHERE {_ambito()}
           AND LOWER(COALESCE(etapa, '')) NOT IN ('cerrado negativamente', 'vendido', 'alquiler')
         ORDER BY COALESCE(updated_at, created_at) DESC
         LIMIT 12
         """,
-        empresa_ids,
+        ambito_vals,
     ).fetchall()
     operaciones_rows = conn.execute(
         f"""
         SELECT direccion, tipo_operacion, COALESCE(fecha_operacion, fecha_escritura, fecha_contrato, fecha_propuesta) AS fecha_operacion,
                precio_propuesta, precio_contrato, precio_escritura
         FROM operaciones_inmobiliarias
-        WHERE empresa_id IN ({placeholders})
+        WHERE {_ambito()}
         ORDER BY DATE(COALESCE(fecha_operacion, fecha_escritura, fecha_contrato, fecha_propuesta, created_at)) DESC
         LIMIT 12
         """,
-        empresa_ids,
+        ambito_vals,
     ).fetchall()
     visitas_rows = conn.execute(
         f"""
@@ -50489,14 +50500,14 @@ def fetch_workspace_inmo_overview(conn, workspace_id, empresa_id=None):
         LEFT JOIN inmuebles i ON i.id = v.inmueble_id
         LEFT JOIN demandas d ON d.id = v.demanda_id
         LEFT JOIN clientes c ON c.id = d.cliente_id
-        WHERE v.empresa_id IN ({placeholders})
+        WHERE {_ambito("v")}
           AND v.fecha IS NOT NULL
           AND DATE(v.fecha) >= DATE(?)
           AND LOWER(COALESCE(v.estado, '')) NOT IN ('cancelada', 'cancelado', 'hecha', 'realizada')
         ORDER BY DATE(v.fecha) ASC, TIME(COALESCE(v.hora, '23:59')) ASC
         LIMIT 12
         """,
-        [*empresa_ids, today],
+        [*ambito_vals, today],
     ).fetchall()
     zonas_rows = conn.execute(
         f"""
@@ -50505,12 +50516,12 @@ def fetch_workspace_inmo_overview(conn, workspace_id, empresa_id=None):
           COUNT(*) AS total,
           SUM(COALESCE(precio_objetivo, 0)) AS precio_total
         FROM captaciones
-        WHERE empresa_id IN ({placeholders})
+        WHERE {_ambito()}
         GROUP BY COALESCE(NULLIF(TRIM(zona), ''), 'Sin zona')
         ORDER BY COUNT(*) DESC, label COLLATE NOCASE ASC
         LIMIT 8
         """,
-        empresa_ids,
+        ambito_vals,
     ).fetchall()
     return {
         "counts": {
@@ -62632,10 +62643,12 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
     processed_rows = []
     pending_assignments = 0
     try:
-        empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
-        if not empresa_ids:
+        # Por workspace (fase 6, 2026-09-19): los documentos de gestoría por el suyo y los
+        # de inmuebles por el del inmueble. Antes era por las empresas del workspace: se
+        # quedaban fuera 788 documentos de gestoría (754 de renta sin empresa) y entraban
+        # los de un inmueble de demostración de DEMOCASA hecho con una empresa de Modernia.
+        if not str(workspace_id or "").strip():
             return {"rows": [], "summary": {"documentos_total": 0}}
-        placeholders = ",".join(["?"] * len(empresa_ids))
         limit_val = max(1, min(int(limit or 20), 100))
         rows = conn.execute(
             f"""
@@ -62661,7 +62674,7 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
               FROM gestoria_docs d
               LEFT JOIN clientes c ON c.id = d.cliente_id
               LEFT JOIN empresas e ON e.id = d.empresa_id
-              WHERE d.empresa_id IN ({placeholders})
+              WHERE COALESCE(d.workspace_id, '') = ?
               UNION ALL
               SELECT
                 idoc.id,
@@ -62683,12 +62696,12 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
               FROM inmueble_docs idoc
               JOIN inmuebles i ON i.id = idoc.inmueble_id
               LEFT JOIN empresas e ON e.id = i.empresa_id
-              WHERE i.empresa_id IN ({placeholders})
+              WHERE COALESCE(i.workspace_id, '') = ?
             )
             ORDER BY COALESCE(fecha, sort_date) DESC, sort_date DESC
             LIMIT ?
             """,
-            [*empresa_ids, *empresa_ids, limit_val],
+            [workspace_id, workspace_id, limit_val],
         ).fetchall()
         query_count += 1
         processed_rows = []
@@ -62750,12 +62763,12 @@ def fetch_workspace_document_hub(conn, workspace_id, limit=20):
         total_docs = conn.execute(
             f"""
             SELECT
-              (SELECT COUNT(*) FROM gestoria_docs WHERE empresa_id IN ({placeholders}))
+              (SELECT COUNT(*) FROM gestoria_docs WHERE COALESCE(workspace_id, '') = ?)
               +
-              (SELECT COUNT(*) FROM inmueble_docs idoc JOIN inmuebles i ON i.id = idoc.inmueble_id WHERE i.empresa_id IN ({placeholders}))
+              (SELECT COUNT(*) FROM inmueble_docs idoc JOIN inmuebles i ON i.id = idoc.inmueble_id WHERE COALESCE(i.workspace_id, '') = ?)
               AS total
             """,
-            [*empresa_ids, *empresa_ids],
+            [workspace_id, workspace_id],
         ).fetchone()
         query_count += 1
         return {
@@ -119975,11 +119988,20 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 empresa_ids = fetch_workspace_company_ids(conn, workspace_id)
             empresa_ids = [str(eid or "").strip() for eid in (empresa_ids or []) if str(eid or "").strip()]
-            if not empresa_ids:
+            if not empresa_ids and not workspace_id:
                 json_response(self, {"error": "No hay empresas en el scope"}, status=400)
                 return
 
             placeholders = ",".join(["?"] * len(empresa_ids))
+            # Por workspace (fase 6, 2026-09-19): por las empresas del workspace entraban los
+            # datos de demostración de DEMOCASA hechos con una empresa de Modernia. La
+            # empresa, si se pide, filtra dentro del workspace.
+            if workspace_id:
+                ambito_sql = "COALESCE(workspace_id, '') = ?" + (" AND empresa_id = ?" if empresa_id else "")
+                ambito_vals = [workspace_id] + ([empresa_id] if empresa_id else [])
+            else:
+                ambito_sql = f"empresa_id IN ({placeholders})"
+                ambito_vals = list(empresa_ids)
 
             def _q_all(sql, args):
                 try:
@@ -120000,11 +120022,11 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT COUNT(*) AS total
                 FROM operaciones_inmobiliarias
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
                   AND anio = ?
                 """,
-                empresa_ids + [year_int],
+                ambito_vals + [year_int],
             )
             ventas_total = int(row_value(ventas_total_row, "total") or 0) if ventas_total_row else 0
 
@@ -120012,13 +120034,13 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT {resp_expr_ops} AS responsable, COUNT(*) AS total
                 FROM operaciones_inmobiliarias
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
                   AND anio = ?
                 GROUP BY {resp_expr_ops}
                 ORDER BY total DESC, responsable COLLATE NOCASE ASC
                 """,
-                empresa_ids + [year_int],
+                ambito_vals + [year_int],
             )
 
             # Facturado = comisión real Inmobiliaria:
@@ -120028,7 +120050,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT ROUND(SUM(COALESCE(honorarios, 0)), 2) AS total
                 FROM operaciones_inmobiliarias
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
                   AND anio = ?
                   AND (
@@ -120036,7 +120058,7 @@ class Handler(BaseHTTPRequestHandler):
                     OR COALESCE(precio_escritura, 0) > 0
                   )
                 """,
-                empresa_ids + [year_int],
+                ambito_vals + [year_int],
             )
             facturado_ventas = float(row_value(facturado_ventas_row, "total") or 0) if facturado_ventas_row else 0.0
 
@@ -120044,7 +120066,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT {resp_expr_ops} AS responsable, ROUND(SUM(COALESCE(honorarios, 0)), 2) AS total
                 FROM operaciones_inmobiliarias
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
                   AND anio = ?
                   AND (
@@ -120054,7 +120076,7 @@ class Handler(BaseHTTPRequestHandler):
                 GROUP BY {resp_expr_ops}
                 ORDER BY total DESC, responsable COLLATE NOCASE ASC
                 """,
-                empresa_ids + [year_int],
+                ambito_vals + [year_int],
             )
 
             resp_expr_alq = "COALESCE(NULLIF(agente, ''), 'Sin responsable')"
@@ -120062,12 +120084,12 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT ROUND(SUM(COALESCE(importe_comision, 0)), 2) AS total
                 FROM alquileres
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   AND fecha IS NOT NULL
                   AND length(fecha) >= 4
                   AND substr(fecha, 1, 4) = ?
                 """,
-                empresa_ids + [year_str],
+                ambito_vals + [year_str],
             )
             facturado_alquileres = (
                 float(row_value(facturado_alquileres_row, "total") or 0) if facturado_alquileres_row else 0.0
@@ -120077,14 +120099,14 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT {resp_expr_alq} AS responsable, ROUND(SUM(COALESCE(importe_comision, 0)), 2) AS total
                 FROM alquileres
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   AND fecha IS NOT NULL
                   AND length(fecha) >= 4
                   AND substr(fecha, 1, 4) = ?
                 GROUP BY {resp_expr_alq}
                 ORDER BY total DESC, responsable COLLATE NOCASE ASC
                 """,
-                empresa_ids + [year_str],
+                ambito_vals + [year_str],
             )
 
             def _merge_series(rows_a, rows_b):
@@ -120108,11 +120130,11 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT ROUND(SUM(ABS(COALESCE(comision, 0))), 2) AS total
                 FROM movimientos
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   AND LOWER(COALESCE(tipo, '')) = 'gasto'
                   AND anio = ?
                 """,
-                empresa_ids + [year_int],
+                ambito_vals + [year_int],
             )
             gastos_total = float(row_value(gastos_total_row, "total") or 0) if gastos_total_row else 0.0
 
@@ -120120,10 +120142,10 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT COUNT(*) AS total
                 FROM captaciones
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   AND substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4) = ?
                 """,
-                empresa_ids + [year_str],
+                ambito_vals + [year_str],
             )
             adquisiciones_total = int(row_value(adquisiciones_row, "total") or 0) if adquisiciones_row else 0
 
@@ -120131,11 +120153,11 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT COUNT(*) AS total
                 FROM captaciones
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   AND substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4) = ?
                   AND LOWER(COALESCE(etapa, '')) = 'encargo'
                 """,
-                empresa_ids + [year_str],
+                ambito_vals + [year_str],
             )
             encargos_total = int(row_value(encargos_row, "total") or 0) if encargos_row else 0
 
@@ -120143,20 +120165,20 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT {resp_expr_caps} AS responsable, COUNT(*) AS total
                 FROM captaciones
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   AND substr(COALESCE(NULLIF(updated_at, ''), created_at), 1, 4) = ?
                   AND LOWER(COALESCE(etapa, '')) = 'encargo'
                 GROUP BY {resp_expr_caps}
                 ORDER BY total DESC, responsable COLLATE NOCASE ASC
                 """,
-                empresa_ids + [year_str],
+                ambito_vals + [year_str],
             )
 
             propuestas_row = _q_one(
                 f"""
                 SELECT COUNT(*) AS total
                 FROM operaciones_inmobiliarias
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
                   AND anio = ?
                   AND (
@@ -120164,7 +120186,7 @@ class Handler(BaseHTTPRequestHandler):
                     OR COALESCE(precio_propuesta, 0) > 0
                   )
                 """,
-                empresa_ids + [year_int],
+                ambito_vals + [year_int],
             )
             propuestas_total = int(row_value(propuestas_row, "total") or 0) if propuestas_row else 0
 
@@ -120173,7 +120195,7 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT COUNT(*) AS total
                 FROM acciones
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   AND LOWER(COALESCE(servicio, '')) = 'inmobiliaria'
                   AND fecha IS NOT NULL
                   AND length(fecha) >= 4
@@ -120183,7 +120205,7 @@ class Handler(BaseHTTPRequestHandler):
                     OR LOWER(COALESCE(tipo, '')) IN ('post-aceptación', 'post-aceptacion', 'estudio financiero', 'personal')
                   )
                 """,
-                empresa_ids + [year_str],
+                ambito_vals + [year_str],
             )
             citas_total = int(row_value(citas_row, "total") or 0) if citas_row else 0
 
@@ -120211,14 +120233,14 @@ class Handler(BaseHTTPRequestHandler):
                   fecha_encargo,
                   COALESCE(NULLIF(fecha_escritura, ''), NULLIF(fecha_operacion, ''), NULLIF(fecha_contrato, '')) AS fecha_cierre
                 FROM operaciones_inmobiliarias
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   AND LOWER(COALESCE(tipo_operacion, 'venta')) = 'venta'
                   AND anio IS NOT NULL
                   AND COALESCE(NULLIF(fecha_encargo, ''), '') <> ''
                   AND COALESCE(NULLIF(fecha_escritura, ''), NULLIF(fecha_operacion, ''), NULLIF(fecha_contrato, '')) IS NOT NULL
                   AND TRIM(COALESCE(NULLIF(fecha_escritura, ''), NULLIF(fecha_operacion, ''), NULLIF(fecha_contrato, ''))) <> ''
                 """,
-                empresa_ids,
+                ambito_vals,
             )
 
             def _parse_date(value):
@@ -120274,9 +120296,9 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT id, estado, portal_publicado
                 FROM inmuebles
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                 """,
-                empresa_ids,
+                ambito_vals,
             )
             quality_counts = {
                 "total": 0,
@@ -120335,12 +120357,12 @@ class Handler(BaseHTTPRequestHandler):
                 f"""
                 SELECT id, cliente_id, zona, tipo, estado
                 FROM demandas
-                WHERE empresa_id IN ({placeholders})
+                WHERE {ambito_sql}
                   AND LOWER(COALESCE(estado, '')) IN ('activa', 'activo', 'en gestión', 'en gestion', 'portal')
                 ORDER BY COALESCE(updated_at, created_at) DESC
                 LIMIT 50
                 """,
-                empresa_ids,
+                ambito_vals,
             )
             for demand in active_demands or []:
                 demanda_id = str(row_value(demand, "id") or "").strip()
