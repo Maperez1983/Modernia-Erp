@@ -33896,6 +33896,7 @@ const renderClienteContabilidadPanel = () => {
         <div id="clienteContaValidacionResumen"></div>
         <div class="footer" id="clienteContaValidacionInfo"></div>
         <div id="clienteContaValidacionAcciones" style="margin-top:10px;"></div>
+        <div id="clienteContaRevisionFacturas" style="margin-top:14px;"></div>
       </div>
     `;
     const mainPanes = Array.from(root.children).filter((node) => node?.classList?.contains("form-card"));
@@ -34107,6 +34108,7 @@ const renderClienteContabilidadPanel = () => {
       if (resumenEl) resumenEl.innerHTML = "<p class='muted'>Sin empresa activa para validar.</p>";
       return;
     }
+    renderGestoriaFacturasRevision(root.querySelector("#clienteContaRevisionFacturas"), { empresaId: companyScopeId });
     const qs = new URLSearchParams({ conciliar: "1", empresa_id: companyScopeId });
     Promise.all([
       api(`/api/gestoria_facturas?${qs.toString()}`).catch(() => ({ rows: [] })),
@@ -69292,6 +69294,7 @@ const loadGestoriaDashboardServicios = async ({ force = false, key = "" } = {}) 
 };
 
 const loadGestoriaDashboard = () => {
+  loadGestoriaAlertaFacturasRevision();
   const empresa = resolveCrmGestoriaEmpresa();
   if (!empresa) return;
   const scopeKey = getGestoriaWorkspaceScopeKey();
@@ -77817,6 +77820,127 @@ const renderGestoriaFacturasGrouped = (container, rows = []) => {
   container.querySelectorAll("[data-open-doc]").forEach((btn) => {
     btn.addEventListener("click", () => openS3File(btn.dataset.openDoc || "", ""));
   });
+};
+
+// Alertas de revisión de facturas (2026-09-19): tiques, lecturas dudosas, importes que
+// no cuadran... Cada una se revisa, se anota el apunte manual y se marca revisada.
+const renderGestoriaFacturasRevision = async (target, { empresaId = "", clienteId = "", estado = "pendiente" } = {}) => {
+  if (!target) return;
+  target.innerHTML = "<p class='muted'>Cargando facturas a revisar…</p>";
+  const qs = new URLSearchParams({ estado });
+  if (empresaId) qs.set("empresa_id", empresaId);
+  if (clienteId) qs.set("cliente_id", clienteId);
+  if (!empresaId && state.currentWorkspaceId) qs.set("workspace_id", state.currentWorkspaceId);
+  let data;
+  try {
+    data = await api(`/api/gestoria_facturas_revision?${qs.toString()}`);
+  } catch (error) {
+    target.innerHTML = `<p class='muted'>No se pudieron cargar las alertas: ${escapeHtml(error.message || "")}</p>`;
+    return;
+  }
+  const rows = Array.isArray(data?.rows) ? data.rows : [];
+  const euros = (v) => euroFormatter.format(Number(v || 0));
+  target.innerHTML = `
+    <div class="form-card">
+      <div class="section-head">
+        <div>
+          <h4>Facturas a revisar${estado === "pendiente" ? ` <span class="badge">${numberFormatter.format(data?.pendientes || 0)}</span>` : ""}</h4>
+          <p class="muted">Tiques, lecturas dudosas o importes que no cuadran. Revisa el documento, corrige el asiento si hace falta y anota qué has hecho.</p>
+        </div>
+        <div class="toolbar">
+          <select data-revision-estado aria-label="Estado">
+            <option value="pendiente" ${estado === "pendiente" ? "selected" : ""}>Pendientes</option>
+            <option value="revisada" ${estado === "revisada" ? "selected" : ""}>Revisadas</option>
+            <option value="todas" ${estado === "todas" ? "selected" : ""}>Todas</option>
+          </select>
+        </div>
+      </div>
+      ${
+        rows.length
+          ? rows
+              .map(
+                (r) => `
+          <div class="workspace-billing-row" data-revision-id="${escapeHtml(r.id)}" style="align-items:flex-start">
+            <div style="flex:1;min-width:0">
+              <strong>${escapeHtml(r.tercero || r.descripcion || "Factura")}</strong>
+              <div class="muted">${escapeHtml(r.fecha_emision || "")} · Nº ${escapeHtml(r.numero || "s/n")} · ${escapeHtml(r.tipo === "venta" ? "Emitida" : "Gasto")} · ${escapeHtml(r.descripcion || "")}</div>
+              <div class="muted">Base ${euros(r.base_imponible)} · IVA ${euros(r.cuota_iva)}${Number(r.cuota_irpf || 0) ? ` · Retención ${euros(r.cuota_irpf)}` : ""} · <strong>Total ${euros(r.total)}</strong></div>
+              <div style="display:flex;flex-wrap:wrap;gap:4px;margin:6px 0">
+                ${(r.revision_motivos || []).map((m) => `<span class="badge" style="background:#fff4e5;color:#8a5300;border:1px solid #f0c68a">${escapeHtml(m)}</span>`).join("")}
+              </div>
+              ${
+                r.revision_estado === "revisada"
+                  ? `<div class="muted">✔ Revisada por ${escapeHtml(r.revision_por || "-")} el ${escapeHtml(String(r.revision_at || "").slice(0, 16))}: ${escapeHtml(r.revision_nota || "")}</div>`
+                  : `<textarea rows="2" data-revision-nota placeholder="Apunte manual: qué has comprobado o corregido (p. ej. IVA corregido al 21 %, gasto personal no deducible, pedida copia al proveedor)" style="width:100%"></textarea>`
+              }
+            </div>
+            <div class="workspace-billing-meta" style="flex-direction:column;align-items:stretch;gap:6px">
+              ${r.doc_key ? `<button type="button" class="secondary ghost" data-revision-doc="${escapeHtml(r.doc_key)}">Ver documento</button>` : ""}
+              ${r.asiento_id ? `<button type="button" class="secondary ghost" data-revision-asiento="${escapeHtml(r.asiento_id)}">Abrir asiento</button>` : ""}
+              ${
+                r.revision_estado === "revisada"
+                  ? `<button type="button" class="secondary ghost" data-revision-marcar="pendiente">Reabrir</button>`
+                  : `<button type="button" data-revision-marcar="revisada">Marcar revisada</button>`
+              }
+            </div>
+          </div>`
+              )
+              .join("")
+          : `<p class="muted">${estado === "pendiente" ? "No hay facturas pendientes de revisar." : "No hay facturas en este estado."}</p>`
+      }
+      <span class="muted" data-revision-status></span>
+    </div>`;
+  const status = target.querySelector("[data-revision-status]");
+  target.querySelector("[data-revision-estado]")?.addEventListener("change", (event) =>
+    renderGestoriaFacturasRevision(target, { empresaId, clienteId, estado: event.target.value })
+  );
+  target.querySelectorAll("[data-revision-id]").forEach((el) => {
+    const row = rows.find((r) => String(r.id) === el.dataset.revisionId);
+    if (!row) return;
+    el.querySelector("[data-revision-doc]")?.addEventListener("click", () => openS3File(row.doc_key));
+    el.querySelector("[data-revision-asiento]")?.addEventListener("click", () => openGestoriaAsientoFichaAndScroll(row.asiento_id));
+    el.querySelector("[data-revision-marcar]")?.addEventListener("click", async (event) => {
+      const nuevo = event.currentTarget.dataset.revisionMarcar;
+      const nota = String(el.querySelector("[data-revision-nota]")?.value || row.revision_nota || "").trim();
+      if (nuevo === "revisada" && !nota) {
+        if (status) status.textContent = "Anota qué has comprobado o corregido antes de marcarla revisada.";
+        el.querySelector("[data-revision-nota]")?.focus();
+        return;
+      }
+      try {
+        await api("/api/gestoria_factura_revision", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ factura_id: row.id, workspace_id: row.workspace_id, estado: nuevo, nota }),
+        });
+        renderGestoriaFacturasRevision(target, { empresaId, clienteId, estado });
+        loadGestoriaAlertaFacturasRevision();
+      } catch (error) {
+        if (status) status.textContent = error.message || "No se pudo guardar.";
+      }
+    });
+  });
+};
+
+// Inicio de gestoría: cuántas facturas esperan revisión, cliente a cliente.
+const loadGestoriaAlertaFacturasRevision = async () => {
+  const target = document.getElementById("gestoriaAlertFacturasRevision");
+  if (!target || !state.currentWorkspaceId) return;
+  try {
+    const data = await api(`/api/gestoria_facturas_revision?${new URLSearchParams({ workspace_id: state.currentWorkspaceId, estado: "pendiente", ambito: "workspace" })}`);
+    const clientes = Array.isArray(data?.por_cliente) ? data.por_cliente : [];
+    target.innerHTML = clientes.length
+      ? `<div class="workspace-billing-list">${clientes
+          .map(
+            (c) => `<div class="workspace-billing-row"><div><strong>${escapeHtml(c.cliente_nombre || "Sin cliente")}</strong>
+              <div class="muted">Revísalas en su contabilidad → Validación.</div></div>
+              <div class="workspace-billing-meta"><span class="badge">${numberFormatter.format(c.pendientes)} pendientes</span></div></div>`
+          )
+          .join("")}</div>`
+      : "<p class='muted'>No hay facturas pendientes de revisar.</p>";
+  } catch (_error) {
+    target.innerHTML = "<p class='muted'>No se pudieron cargar las facturas a revisar.</p>";
+  }
 };
 
 const openGestoriaAsientoFichaAndScroll = (asientoId) => {

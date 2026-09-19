@@ -15585,6 +15585,22 @@ def ensure_gestoria_tercero(conn, empresa_id, nif, nombre, tipo, now):
 
 
 def build_invoice_asiento(parsed, counterpart_account):
+    # Abono o rectificativa (total en negativo): el asiento de la factura normal con el
+    # debe y el haber cambiados. Antes salía un asiento sin líneas (visto con el abono
+    # FM26 606 de Optimus a GAPP, -25,07 €).
+    try:
+        es_abono = float(parsed.get("total") or 0.0) < 0
+    except Exception:
+        es_abono = False
+    if es_abono:
+        positivo = dict(parsed)
+        for campo in ("base_imponible", "cuota_iva", "cuota_irpf", "exento", "base_exenta", "base_no_sujeta", "total"):
+            try:
+                positivo[campo] = abs(float(parsed.get(campo) or 0.0))
+            except Exception:
+                positivo[campo] = 0.0
+        lineas, debe, haber = build_invoice_asiento(positivo, counterpart_account)
+        return [{**linea, "debe": linea.get("haber") or 0.0, "haber": linea.get("debe") or 0.0} for linea in lineas], haber, debe
     tipo = (parsed.get("tipo") or "compra").strip().lower()
     base = float(parsed.get("base_imponible") or 0.0)
     iva = float(parsed.get("cuota_iva") or 0.0)
@@ -18997,6 +19013,52 @@ def resolve_gestoria_factura_cliente_id(conn, empresa_id, nif="", nombre=""):
     return None
 
 
+def motivos_revision_factura(conn, *, payload, parsed, tipo_factura, method, text, empresa_id):
+    """Por qué esta factura necesita que alguien la revise antes de darla por buena.
+
+    Vacío = se contabiliza sin más. Los motivos que trae la carga (p. ej. "tique: IVA no
+    deducible") se suman a los que se ven aquí: lo que el OCR no pudo leer, importes que
+    no cuadran, un gasto sin NIF del proveedor o en el que no figura el NIF de la empresa
+    (lo normal en un tique, cuyo IVA no se puede deducir).
+    """
+    motivos = [str(m).strip() for m in (payload.get("revision_motivos") or []) if str(m).strip()]
+    leida_por_ocr = method != "datos_aportados"
+    if leida_por_ocr:
+        faltan = [nombre for clave, nombre in (("numero", "número"), ("fecha", "fecha"), ("total", "total"))
+                  if not parsed.get(clave)]
+        if not str(text or "").strip():
+            motivos.append("lectura dudosa: el documento no tiene texto legible")
+        elif faltan:
+            motivos.append("lectura dudosa: no se pudo leer " + ", ".join(faltan))
+    try:
+        base = float(parsed.get("base_imponible") or 0) + float(parsed.get("base_exenta") or 0) + float(parsed.get("base_no_sujeta") or 0)
+        iva = float(parsed.get("cuota_iva") or 0)
+        irpf = float(parsed.get("cuota_irpf") or 0)
+        total = float(parsed.get("total") or 0)
+        if total and abs(base + iva - irpf - total) > 0.02:
+            motivos.append(f"importes que no cuadran: base + IVA - retención = {base + iva - irpf:.2f} y el total es {total:.2f}")
+    except Exception:
+        pass
+    if tipo_factura == "compra":
+        if not str(parsed.get("nif") or "").strip():
+            motivos.append("sin NIF del proveedor")
+        if leida_por_ocr and str(text or "").strip():
+            try:
+                row = conn.execute("SELECT nif FROM empresas WHERE id = ? LIMIT 1", (empresa_id,)).fetchone()
+                nif_empresa = re.sub(r"[^A-Z0-9]", "", str(row_value(row, "nif") or "").upper()) if row else ""
+            except Exception:
+                _rollback_best_effort(conn)
+                nif_empresa = ""
+            if nif_empresa and nif_empresa not in re.sub(r"[^A-Z0-9]", "", str(text).upper()):
+                motivos.append("no figura el NIF de la empresa: posible tique (IVA no deducible)")
+    vistos, salida = set(), []
+    for m in motivos:
+        if m not in vistos:
+            vistos.add(m)
+            salida.append(m)
+    return salida
+
+
 def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, session=None):
     if not empresa_id:
         raise ValueError("empresa_id requerido")
@@ -19294,10 +19356,20 @@ def process_gestoria_factura_ocr(payload, conn, empresa_id, now="now", *, sessio
                 now,
             ),
         )
+        motivos = motivos_revision_factura(
+            conn, payload=payload, parsed=parsed_factura, tipo_factura=tipo_factura,
+            method=method, text=text, empresa_id=empresa_id,
+        )
+        if motivos:
+            conn.execute(
+                "UPDATE gestoria_facturas SET revision_estado = 'pendiente', revision_motivos = ? WHERE id = ?",
+                (json.dumps(motivos, ensure_ascii=False), factura_id),
+            )
         return {
             "ok": True,
             "factura_id": factura_id,
             "asiento_id": asiento_id,
+            "revision_motivos": motivos,
             "ocr_method": method,
             "parsed": parsed_factura,
             "lineas": lines,
@@ -44963,6 +45035,11 @@ def _ensure_tables_sin_red(db_path, _abiertas):
     ensure_column(conn, "gestoria_facturas", "base_no_sujeta", "base_no_sujeta REAL")
     ensure_column(conn, "gestoria_facturas", "tipo_operacion", "tipo_operacion TEXT")
     ensure_column(conn, "gestoria_facturas", "estado_ocr", "estado_ocr TEXT")
+    # Alertas de revisión (2026-09-19): una factura que no se puede contabilizar a ciegas
+    # (tique, lectura dudosa, importes que no cuadran...) nace "pendiente" con sus motivos
+    # y alguien la revisa y anota el apunte.
+    for _col in ("revision_estado", "revision_motivos", "revision_nota", "revision_por", "revision_at"):
+        ensure_column(conn, "gestoria_facturas", _col, f"{_col} TEXT")
     ensure_column(conn, "gestoria_facturas", "doc_key", "doc_key TEXT")
     ensure_column(conn, "gestoria_facturas", "archivo_hash", "archivo_hash TEXT")
     ensure_column(conn, "gestoria_facturas", "dedupe_key", "dedupe_key TEXT")
@@ -74348,6 +74425,7 @@ class Handler(BaseHTTPRequestHandler):
             "/api/gestoria_modelos_delete",
             "/api/gestoria_asiento",
             "/api/gestoria_asiento_update",
+            "/api/gestoria_factura_revision",
             "/api/gestoria_facturas_reparse",
             "/api/gestoria_import_lote_valoracion",
             "/api/cliente_profesional",
@@ -74909,6 +74987,7 @@ class Handler(BaseHTTPRequestHandler):
                         "/api/gestoria_contabilidad_update": "gestoria",
                         "/api/gestoria_contabilidad_delete": "gestoria",
                         "/api/gestoria_factura_ocr": "gestoria",
+                        "/api/gestoria_factura_revision": "gestoria",
                         "/api/gestoria_facturas_reparse": "gestoria",
                         "/api/renta_quick_ocr": "gestoria",
                         "/api/renta_quick_attach": "gestoria",
@@ -78942,7 +79021,7 @@ class Handler(BaseHTTPRequestHandler):
             }
             # Datos ya leídos de la factura (p. ej. de su Excel): mandan sobre el OCR.
             for campo in ("numero", "fecha", "nif", "tercero", "descripcion", "base_imponible",
-                          "cuota_iva", "cuota_irpf", "total", "iva_pct", "sin_ocr"):
+                          "cuota_iva", "cuota_irpf", "total", "iva_pct", "sin_ocr", "revision_motivos"):
                 if payload.get(campo) not in (None, ""):
                     ocr_payload[campo] = payload.get(campo)
             # La contabilidad de quién es. Sin esto se deducía del NIF del tercero, y en
@@ -103796,6 +103875,45 @@ class Handler(BaseHTTPRequestHandler):
             json_response(self, {"ok": True, "row": dict(updated) if updated else {}})
             return
 
+        elif parsed.path == "/api/gestoria_factura_revision":
+            # Revisión de una factura con alerta: se anota el apunte manual y se marca.
+            factura_id = str(payload.get("factura_id") or "").strip()
+            workspace_id = str(payload.get("workspace_id") or "").strip()
+            estado = str(payload.get("estado") or "revisada").strip().lower()
+            nota = str(payload.get("nota") or "").strip()[:2000]
+            if not factura_id or not workspace_id:
+                json_response(self, {"error": "factura_id y workspace_id requeridos"}, status=400)
+                return
+            if estado not in ("revisada", "pendiente"):
+                json_response(self, {"error": "estado no válido"}, status=400)
+                return
+            session = getattr(self, "auth_session", None) or self._current_session()
+            ok_amb, err_amb = enforce_workspace_membership(conn, session, workspace_id, write=True)
+            if not ok_amb:
+                json_response(self, {"error": err_amb or "No autorizado"}, status=403)
+                return
+            fila = conn.execute(
+                "SELECT id FROM gestoria_facturas WHERE id = ? AND workspace_id = ? LIMIT 1", (factura_id, workspace_id)
+            ).fetchone()
+            if not fila:
+                json_response(self, {"error": "factura no encontrada"}, status=404)
+                return
+            if estado == "revisada" and not nota:
+                json_response(self, {"error": "Anota qué se ha comprobado o corregido."}, status=400)
+                return
+            conn.execute(
+                """
+                UPDATE gestoria_facturas
+                SET revision_estado = ?, revision_nota = ?, revision_por = ?, revision_at = ?,
+                    updated_at = datetime(?)
+                WHERE id = ?
+                """,
+                (estado, nota or None, _session_user_label(session) or None,
+                 datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"), now, factura_id),
+            )
+            conn.commit()
+            json_response(self, {"ok": True, "factura_id": factura_id, "revision_estado": estado})
+            return
         elif parsed.path == "/api/gestoria_asiento_update":
             asiento_id = str(payload.get("asiento_id") or "").strip()
             if not asiento_id:
@@ -113533,6 +113651,75 @@ class Handler(BaseHTTPRequestHandler):
                     "factura_id": factura_id,
                 },
             )
+            return
+
+        if path == "/api/gestoria_facturas_revision":
+            # Facturas con alerta de revisión: las que no se pueden dar por buenas a ciegas.
+            workspace_id = (params.get("workspace_id", [""])[0] or "").strip()
+            empresa_id = (params.get("empresa_id", [""])[0] or "").strip()
+            cliente_id = (params.get("cliente_id", [""])[0] or "").strip()
+            estado = (params.get("estado", ["pendiente"])[0] or "pendiente").strip().lower()
+            ok_amb, err_amb = enforce_workspace_or_empresa_scope(
+                conn, getattr(self, "auth_session", None) or self._current_session(), workspace_id, empresa_id)
+            if not ok_amb:
+                json_response(self, {"error": err_amb}, status=403)
+                return
+            where, values = ["COALESCE(f.revision_estado, '') <> ''"], []
+            if workspace_id:
+                where.append("f.workspace_id = ?")
+                values.append(workspace_id)
+            # `ambito=workspace` (el inicio de gestoría): todas las empresas del workspace,
+            # aunque el front adjunte la empresa activa a cualquier consulta.
+            if empresa_id and (params.get("ambito", [""])[0] or "") != "workspace":
+                where.append("f.empresa_id = ?")
+                values.append(empresa_id)
+            if cliente_id:
+                where.append("f.cliente_id = ?")
+                values.append(cliente_id)
+            if estado in ("pendiente", "revisada"):
+                where.append("f.revision_estado = ?")
+                values.append(estado)
+            try:
+                filas = conn.execute(
+                    f"""
+                    SELECT f.id, f.workspace_id, f.empresa_id, f.cliente_id, f.tipo, f.numero, f.fecha_emision, f.descripcion,
+                           f.base_imponible, f.cuota_iva, f.cuota_irpf, f.total, f.doc_key,
+                           f.revision_estado, f.revision_motivos, f.revision_nota, f.revision_por, f.revision_at,
+                           COALESCE(t.nombre, '') AS tercero, COALESCE(t.nif, '') AS tercero_nif,
+                           COALESCE(c.nombre, '') AS cliente_nombre,
+                           (SELECT a.id FROM gestoria_asientos a WHERE a.factura_id = f.id LIMIT 1) AS asiento_id
+                    FROM gestoria_facturas f
+                    LEFT JOIN gestoria_terceros t ON t.id = f.tercero_id
+                    LEFT JOIN clientes c ON c.id = f.cliente_id
+                    WHERE {" AND ".join(where)}
+                    ORDER BY CASE WHEN f.revision_estado = 'pendiente' THEN 0 ELSE 1 END,
+                             COALESCE(f.fecha_emision, '') DESC
+                    LIMIT 500
+                    """,  # nosec B608 - condiciones fijas, valores parametrizados
+                    values,
+                ).fetchall()
+            except Exception:
+                _rollback_best_effort(conn)
+                filas = []
+            rows = []
+            for r in filas:
+                d = dict(r)
+                try:
+                    d["revision_motivos"] = json.loads(d.get("revision_motivos") or "[]")
+                except Exception:
+                    d["revision_motivos"] = []
+                rows.append(d)
+            por_cliente = {}
+            for d in rows:
+                if d.get("revision_estado") == "pendiente":
+                    clave = d.get("cliente_id") or ""
+                    item = por_cliente.setdefault(clave, {"cliente_id": clave, "cliente_nombre": d.get("cliente_nombre") or "", "pendientes": 0})
+                    item["pendientes"] += 1
+            json_response(self, {
+                "rows": rows,
+                "pendientes": sum(1 for d in rows if d.get("revision_estado") == "pendiente"),
+                "por_cliente": sorted(por_cliente.values(), key=lambda x: -x["pendientes"]),
+            })
             return
 
         if path == "/api/gestoria_libros":

@@ -456,5 +456,23 @@ class DeleteGestoriaContabilidadRecordTests(unittest.TestCase):
         self.assertEqual(exclusion, 1)
 
 
+
+class AbonoTests(unittest.TestCase):
+    """Una rectificativa en negativo tenía asiento sin líneas (abono FM26 606 de GAPP)."""
+
+    def test_abono_de_compra_invierte_el_asiento(self):
+        from web.server import build_invoice_asiento
+
+        lineas, debe, haber = build_invoice_asiento(
+            {"tipo": "compra", "descripcion": "Abono anclajes", "base_imponible": -20.72, "cuota_iva": -4.35, "total": -25.07},
+            "400",
+        )
+        por_cuenta = {l["cuenta"]: (round(l["debe"], 2), round(l["haber"], 2)) for l in lineas}
+        self.assertEqual(por_cuenta["400"], (25.07, 0.0))
+        self.assertEqual(por_cuenta["472"], (0.0, 4.35))
+        self.assertEqual(round(debe, 2), round(haber, 2))
+        self.assertEqual(round(debe, 2), 25.07)
+
+
 if __name__ == "__main__":
     unittest.main()
