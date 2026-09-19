@@ -23268,6 +23268,7 @@ const WORKSPACE_PORTAL_SECCIONES = [
   ["documentos_gestoria", "Documentos de la gestoría"],
   ["contabilidad", "Resumen contable"],
   ["facturas_emitidas", "Facturas emitidas"],
+  ["libros", "Libros contables"],
 ];
 
 // El enlace del portal solo se enseña una vez, al generarlo: en la base se guarda cifrado.
@@ -35542,7 +35543,267 @@ const renderPortalClienteGestoria = (data, token) => {
       )
     );
   }
+  if (secciones.libros) {
+    partes.push(renderPortalLibrosContables(data.gestoria_libros || {}, token, euros));
+  }
   return partes.join("");
+};
+
+// Gráficos del dashboard contable del portal: SVG propio, sin librerías.
+const PORTAL_COLORES = {
+  facturado: "#1f6fb2",
+  ingresos: "#2e7d4f",
+  gastos: "#c0392b",
+  resultado: "#7b4bb3",
+};
+const PORTAL_PALETA = ["#1f6fb2", "#2e7d4f", "#e08e0b", "#c0392b", "#7b4bb3", "#16a0a0", "#8d6e63", "#9e9e9e"];
+const PORTAL_MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+const portalEuroCorto = (v) => {
+  const n = Number(v || 0);
+  if (Math.abs(n) >= 1000000) return `${(n / 1000000).toLocaleString("es-ES", { maximumFractionDigits: 1 })} M€`;
+  if (Math.abs(n) >= 1000) return `${(n / 1000).toLocaleString("es-ES", { maximumFractionDigits: 1 })} k€`;
+  return `${Math.round(n).toLocaleString("es-ES")} €`;
+};
+const portalPct = (v) => `${Number(v || 0).toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} %`;
+
+const portalKpis = (d, euros) => {
+  const tarjeta = (titulo, valor, color, pie = "") => `
+    <div style="flex:1 1 150px;border:1px solid var(--border, #e3e3e3);border-left:4px solid ${color};border-radius:10px;padding:10px 12px">
+      <div class="muted" style="font-size:0.85em">${titulo}</div>
+      <div style="font-size:1.35em;font-weight:700;color:${color}">${euros(valor)}</div>
+      ${pie ? `<div class="muted" style="font-size:0.8em">${pie}</div>` : ""}
+    </div>`;
+  return `<div style="display:flex;flex-wrap:wrap;gap:10px;margin:8px 0 14px">
+    ${tarjeta("Facturado", d.facturado, PORTAL_COLORES.facturado, `${numberFormatter.format(d.facturas || 0)} facturas emitidas (base)`)}
+    ${tarjeta("Ingresos", d.ingresos, PORTAL_COLORES.ingresos, "Todos los ingresos contables")}
+    ${tarjeta("Gastos", d.gastos, PORTAL_COLORES.gastos, "Todos los gastos contables")}
+    ${tarjeta("Resultado", d.resultado, PORTAL_COLORES.resultado, d.margen_pct === null || d.margen_pct === undefined ? "" : `Margen ${portalPct(d.margen_pct)} sobre ingresos`)}
+  </div>`;
+};
+
+const portalBarrasMes = (valores, color) => {
+  const max = Math.max(1, ...valores.map((v) => Math.abs(Number(v || 0))));
+  const ancho = 600, alto = 180, base = 150, paso = ancho / 12;
+  const barras = valores
+    .map((v, i) => {
+      const h = Math.round((Math.abs(Number(v || 0)) / max) * 120);
+      const x = i * paso + paso * 0.18;
+      return `<g><title>${PORTAL_MESES[i]}: ${portalEuroCorto(v)}</title>
+        <rect x="${x}" y="${base - h}" width="${paso * 0.64}" height="${h}" rx="3" fill="${color}"></rect>
+        ${v ? `<text x="${x + paso * 0.32}" y="${base - h - 4}" font-size="10" text-anchor="middle" fill="currentColor">${portalEuroCorto(v)}</text>` : ""}
+        <text x="${x + paso * 0.32}" y="${base + 16}" font-size="11" text-anchor="middle" fill="currentColor" opacity="0.7">${PORTAL_MESES[i]}</text></g>`;
+    })
+    .join("");
+  return `<svg viewBox="0 0 ${ancho} ${alto}" role="img" aria-label="Facturado por mes" style="width:100%;height:auto;max-height:240px">
+    <line x1="0" y1="${base}" x2="${ancho}" y2="${base}" stroke="currentColor" opacity="0.2"></line>${barras}</svg>`;
+};
+
+const portalDonut = (items) => {
+  const total = items.reduce((a, x) => a + Math.max(0, Number(x.importe || 0)), 0) || 1;
+  let angulo = -Math.PI / 2;
+  const r = 70, c = 90, grosor = 26;
+  const arcos = items
+    .map((x, i) => {
+      const frac = Math.max(0, Number(x.importe || 0)) / total;
+      if (frac <= 0) return "";
+      if (frac >= 0.9999) {
+        return `<circle cx="${c}" cy="${c}" r="${r}" fill="none" stroke="${PORTAL_PALETA[i % PORTAL_PALETA.length]}" stroke-width="${grosor}"><title>${escapeHtml(x.nombre)}: ${portalPct(x.pct)}</title></circle>`;
+      }
+      const a0 = angulo, a1 = angulo + frac * Math.PI * 2;
+      angulo = a1;
+      const p = (a) => `${(c + r * Math.cos(a)).toFixed(2)} ${(c + r * Math.sin(a)).toFixed(2)}`;
+      return `<path d="M ${p(a0)} A ${r} ${r} 0 ${frac > 0.5 ? 1 : 0} 1 ${p(a1)}" fill="none" stroke="${PORTAL_PALETA[i % PORTAL_PALETA.length]}" stroke-width="${grosor}"><title>${escapeHtml(x.nombre)}: ${portalPct(x.pct)}</title></path>`;
+    })
+    .join("");
+  return `<svg viewBox="0 0 180 180" role="img" style="width:160px;height:160px;flex:0 0 auto">${arcos}</svg>`;
+};
+
+const portalReparto = (titulo, items, euros) => {
+  if (!items || !items.length) return `<div><h4>${titulo}</h4><p class="muted">Sin datos.</p></div>`;
+  const max = Math.max(...items.map((x) => Math.abs(Number(x.importe || 0))), 1);
+  const filas = items
+    .map(
+      (x, i) => `
+      <div style="margin:6px 0">
+        <div style="display:flex;justify-content:space-between;gap:8px;font-size:0.9em">
+          <span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${PORTAL_PALETA[i % PORTAL_PALETA.length]};margin-right:6px"></span>${escapeHtml(x.nombre)}</span>
+          <span style="white-space:nowrap"><strong>${euros(x.importe)}</strong> · ${portalPct(x.pct)}</span>
+        </div>
+        <div style="height:8px;background:var(--border, #eee);border-radius:4px;overflow:hidden;margin-top:3px">
+          <div style="height:100%;width:${Math.max(1, (Math.abs(Number(x.importe || 0)) / max) * 100).toFixed(1)}%;background:${PORTAL_PALETA[i % PORTAL_PALETA.length]}"></div>
+        </div>
+      </div>`
+    )
+    .join("");
+  return `<div style="flex:1 1 320px;min-width:0">
+    <h4 style="margin:4px 0 8px">${titulo}</h4>
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+      ${portalDonut(items)}
+      <div style="flex:1 1 200px;min-width:0">${filas}</div>
+    </div>
+  </div>`;
+};
+
+const portalEvolucion = (evolucion) => {
+  if (!evolucion || evolucion.length < 2) {
+    return `<p class="muted">La comparativa entre años aparecerá cuando haya contabilidad de más de un ejercicio.</p>`;
+  }
+  const series = ["facturado", "ingresos", "gastos", "resultado"];
+  const nombres = { facturado: "Facturado", ingresos: "Ingresos", gastos: "Gastos", resultado: "Resultado" };
+  const max = Math.max(1, ...evolucion.flatMap((e) => series.map((k) => Math.abs(Number(e[k] || 0)))));
+  const ancho = 600, alto = 220, base = 180, grupo = ancho / evolucion.length, barra = (grupo * 0.8) / series.length;
+  const barras = evolucion
+    .map((e, i) =>
+      series
+        .map((k, j) => {
+          const v = Number(e[k] || 0);
+          const h = Math.round((Math.abs(v) / max) * 150);
+          const x = i * grupo + grupo * 0.1 + j * barra;
+          return `<g><title>${e.ejercicio} · ${nombres[k]}: ${portalEuroCorto(v)}</title>
+            <rect x="${x}" y="${base - h}" width="${barra * 0.9}" height="${h}" rx="2" fill="${PORTAL_COLORES[k]}" opacity="${v < 0 ? 0.45 : 1}"></rect>
+            <text x="${x + barra * 0.45}" y="${base - h - 3}" font-size="9" text-anchor="middle" fill="currentColor">${portalEuroCorto(v)}</text></g>`;
+        })
+        .join("") +
+      `<text x="${i * grupo + grupo / 2}" y="${base + 18}" font-size="12" text-anchor="middle" fill="currentColor">${escapeHtml(e.ejercicio)}</text>`
+    )
+    .join("");
+  const leyenda = series
+    .map((k) => `<span style="margin-right:12px;font-size:0.85em"><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${PORTAL_COLORES[k]};margin-right:4px"></span>${nombres[k]}</span>`)
+    .join("");
+  // Facturado mes a mes, una línea por año.
+  const maxMes = Math.max(1, ...evolucion.flatMap((e) => (e.facturado_por_mes || []).map((v) => Math.abs(Number(v || 0)))));
+  const lineas = evolucion
+    .map((e, i) => {
+      const color = PORTAL_PALETA[i % PORTAL_PALETA.length];
+      const puntos = (e.facturado_por_mes || []).map((v, m) => `${(m * (ancho / 11)).toFixed(1)},${(150 - (Number(v || 0) / maxMes) * 130).toFixed(1)}`);
+      return `<polyline points="${puntos.join(" ")}" fill="none" stroke="${color}" stroke-width="2.5"><title>${escapeHtml(e.ejercicio)}</title></polyline>`;
+    })
+    .join("");
+  const leyendaAnios = evolucion
+    .map((e, i) => `<span style="margin-right:12px;font-size:0.85em"><span style="display:inline-block;width:14px;height:3px;background:${PORTAL_PALETA[i % PORTAL_PALETA.length]};margin-right:4px;vertical-align:middle"></span>${escapeHtml(e.ejercicio)}</span>`)
+    .join("");
+  const cambio = (k) => {
+    const a = Number(evolucion[evolucion.length - 2][k] || 0), b = Number(evolucion[evolucion.length - 1][k] || 0);
+    if (!a) return "";
+    const pct = ((b - a) / Math.abs(a)) * 100;
+    return `<span style="margin-right:14px;font-size:0.9em">${nombres[k]}: <strong style="color:${(k === "gastos" ? -pct : pct) >= 0 ? PORTAL_COLORES.ingresos : PORTAL_COLORES.gastos}">${pct >= 0 ? "▲" : "▼"} ${portalPct(Math.abs(pct))}</strong></span>`;
+  };
+  return `
+    <div>${leyenda}</div>
+    <svg viewBox="0 0 ${ancho} ${alto}" role="img" aria-label="Evolución por ejercicio" style="width:100%;height:auto;max-height:280px">
+      <line x1="0" y1="${base}" x2="${ancho}" y2="${base}" stroke="currentColor" opacity="0.2"></line>${barras}
+    </svg>
+    <p style="margin:4px 0 12px">Último año frente al anterior: ${series.map(cambio).join("")}</p>
+    <h4 style="margin:8px 0 4px">Facturado mes a mes por año</h4>
+    <div>${leyendaAnios}</div>
+    <svg viewBox="-10 0 ${ancho + 20} 175" role="img" aria-label="Facturado mes a mes por año" style="width:100%;height:auto;max-height:220px">
+      <line x1="0" y1="150" x2="${ancho}" y2="150" stroke="currentColor" opacity="0.2"></line>
+      ${lineas}
+      ${PORTAL_MESES.map((m, i) => `<text x="${(i * (ancho / 11)).toFixed(1)}" y="167" font-size="11" text-anchor="middle" fill="currentColor" opacity="0.7">${m}</text>`).join("")}
+    </svg>`;
+};
+
+// Balance, PyG y libro registro de facturas por ejercicio. Todos los ejercicios vienen
+// en la misma respuesta; el selector solo muestra uno.
+const renderPortalLibrosContables = (libros, token, euros) => {
+  const ejercicios = libros.ejercicios || [];
+  if (!ejercicios.length) {
+    return `<div class="form-card"><h3>Libros contables</h3><p class="muted">Aún no hay contabilidad registrada.</p></div>`;
+  }
+  const tabla = (cabeceras, filas) => `
+    <div style="overflow-x:auto">
+      <table class="portal-libros-tabla" style="width:100%;border-collapse:collapse;font-size:0.9em">
+        <thead><tr>${cabeceras.map((c, i) => `<th style="text-align:${i >= cabeceras.length - 4 && i > 1 ? "right" : "left"};padding:4px 6px">${c}</th>`).join("")}</tr></thead>
+        <tbody>${filas.join("")}</tbody>
+      </table>
+    </div>`;
+  const linea = (nombre, importe, fuerte = false, sangria = 0) => `
+    <tr style="${fuerte ? "font-weight:600;border-top:1px solid var(--border, #ddd)" : ""}">
+      <td style="padding:4px 6px;padding-left:${6 + sangria * 16}px">${escapeHtml(nombre)}</td>
+      <td style="padding:4px 6px;text-align:right;white-space:nowrap">${euros(importe)}</td>
+    </tr>`;
+  const bloqueEjercicio = (anio) => {
+    const d = libros.por_ejercicio[anio] || {};
+    const b = d.balance || {};
+    const p = d.pyg || {};
+    const balanceLado = (lado, titulo) => [
+      linea(titulo, b[`total_${lado}`], true),
+      ...(b[lado] || []).flatMap((bloque) => [
+        linea(bloque.nombre, bloque.total, false, 1),
+        ...(bloque.partidas || []).map((partida) => linea(partida.nombre, partida.importe, false, 2)),
+      ]),
+    ];
+    const partidas = Object.fromEntries((p.partidas || []).map((x) => [x.clave, x]));
+    const pygFila = (clave) => (partidas[clave] ? [linea(partidas[clave].nombre, partidas[clave].importe, false, 1)] : []);
+    const pyg = [
+      ...["cifra_negocios", "variacion_existencias", "trabajos_activo", "aprovisionamientos", "otros_ingresos", "personal", "otros_gastos", "amortizacion", "otros_resultados"].flatMap(pygFila),
+      linea("A) Resultado de explotación", p.resultado_explotacion, true),
+      ...["ingresos_financieros", "gastos_financieros"].flatMap(pygFila),
+      linea("B) Resultado financiero", p.resultado_financiero, true),
+      linea("C) Resultado antes de impuestos", p.resultado_antes_impuestos, true),
+      ...pygFila("impuesto"),
+      linea("D) Resultado del ejercicio", p.resultado_ejercicio, true),
+    ];
+    const libro = (filas, totales, quien) =>
+      tabla(
+        ["Fecha", "Concepto", quien, "Base", "IVA", "Retención", "Total"],
+        [
+          ...(filas || []).map(
+            (r) => `<tr>
+              <td style="padding:3px 6px;white-space:nowrap">${escapeHtml(r.fecha)}</td>
+              <td style="padding:3px 6px">${escapeHtml(r.concepto)}</td>
+              <td style="padding:3px 6px">${escapeHtml(r.tercero)}</td>
+              ${["base", "iva", "retencion", "total"].map((k) => `<td style="padding:3px 6px;text-align:right;white-space:nowrap">${euros(r[k])}</td>`).join("")}
+            </tr>`
+          ),
+          `<tr style="font-weight:600;border-top:1px solid var(--border, #ddd)"><td></td><td style="padding:4px 6px">Total (${numberFormatter.format((filas || []).length)})</td><td></td>
+            ${["base", "iva", "retencion", "total"].map((k) => `<td style="padding:4px 6px;text-align:right;white-space:nowrap">${euros((totales || {})[k])}</td>`).join("")}</tr>`,
+        ]
+      );
+    return `
+      <div data-portal-libros-ejercicio="${escapeHtml(anio)}" ${anio === ejercicios[0] ? "" : "hidden"}>
+        <p class="muted">Origen: ${escapeHtml(d.origen || "")}${b.cuadra === false ? " · El balance no cuadra: consúltalo con tu gestoría." : ""}</p>
+        ${
+          d.dashboard
+            ? `<details open><summary><strong>Resumen ${escapeHtml(anio)}</strong></summary>
+                ${portalKpis(d.dashboard, euros)}
+                <h4 style="margin:4px 0">Facturado por mes</h4>
+                ${portalBarrasMes(d.dashboard.facturado_por_mes || [], PORTAL_COLORES.facturado)}
+                <div style="display:flex;flex-wrap:wrap;gap:24px;margin-top:10px">
+                  ${portalReparto("Ingresos por categoría", d.dashboard.ingresos_por_categoria, euros)}
+                  ${portalReparto("Gastos por tipo", d.dashboard.gastos_por_tipo, euros)}
+                </div>
+              </details>`
+            : ""
+        }
+        <details open><summary><strong>Balance de situación</strong></summary>
+          ${tabla(["", ""], [...balanceLado("activo", "Activo"), ...balanceLado("pasivo", "Patrimonio neto y pasivo")])}
+        </details>
+        <details open><summary><strong>Pérdidas y ganancias</strong></summary>${tabla(["", ""], pyg)}</details>
+        <details><summary><strong>Facturas emitidas</strong> (${numberFormatter.format((d.facturas_emitidas || []).length)})</summary>
+          ${libro(d.facturas_emitidas, d.totales_emitidas, "Cliente")}
+        </details>
+        <details><summary><strong>Facturas recibidas</strong> (${numberFormatter.format((d.facturas_recibidas || []).length)})</summary>
+          ${libro(d.facturas_recibidas, d.totales_recibidas, "Proveedor")}
+        </details>
+        <p><a class="secondary ghost button-inline" target="_blank" rel="noopener" href="/api/workspace_portal_libros_excel?token=${encodeURIComponent(token)}&ejercicio=${encodeURIComponent(anio)}">Descargar Excel ${escapeHtml(anio)}</a></p>
+      </div>`;
+  };
+  return `
+    <div class="form-card" data-portal-libros>
+      <div class="section-head">
+        <div><h3>Libros contables</h3></div>
+        <div class="toolbar">
+          <select data-portal-libros-selector aria-label="Ejercicio">
+            ${ejercicios.map((a) => `<option value="${escapeHtml(a)}">Ejercicio ${escapeHtml(a)}</option>`).join("")}
+          </select>
+        </div>
+      </div>
+      ${ejercicios.map(bloqueEjercicio).join("")}
+      <details open style="margin-top:12px"><summary><strong>Evolución por ejercicio</strong></summary>
+        ${portalEvolucion(libros.evolucion || [])}
+      </details>
+    </div>`;
 };
 
 const openWorkspacePortalPublic = async (token) => {
@@ -35567,6 +35828,16 @@ const openWorkspacePortalPublic = async (token) => {
     const importadorActivo = Number(data?.importador_facturas || 0) === 1;
     const facturasRecibidas = Array.isArray(data?.facturas_recibidas) ? data.facturas_recibidas : [];
     const gestoriaHtml = renderPortalClienteGestoria(data, cleanToken);
+    if (workspacePortalPublicContent && !workspacePortalPublicContent.dataset.librosSelector) {
+      workspacePortalPublicContent.dataset.librosSelector = "1";
+      workspacePortalPublicContent.addEventListener("change", (event) => {
+        const selector = event.target.closest?.("[data-portal-libros-selector]");
+        if (!selector) return;
+        workspacePortalPublicContent.querySelectorAll("[data-portal-libros-ejercicio]").forEach((el) => {
+          el.hidden = el.dataset.portalLibrosEjercicio !== selector.value;
+        });
+      });
+    }
     if (workspacePortalPublicContent) {
       workspacePortalPublicContent.innerHTML = `
         <div class="form-card">

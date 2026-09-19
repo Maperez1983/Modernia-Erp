@@ -126,6 +126,27 @@ class PortalDelClienteTests(unittest.TestCase):
                                           "doc_key": "facturas_inbox/x/emitidas/f1.pdf", **t})
         cls._insert("gestoria_facturas", {"id": "gf2", "empresa_id": "empA", "workspace_id": "wsA", "cliente_id": "cliA",
                                           "tipo": "compra", "numero": "C-1", "total": 50, **t})
+        # Contabilidad del cliente A. 2025: libro diario importado (LD) con apertura,
+        # una venta, una compra, la liquidación del IVA, un cobro, regularización y
+        # cierre; y un asiento que el CRM generó desde la factura (FACT), que duplica la
+        # venta. 2026: solo contabilidad del CRM, sin regularizar.
+        asientos = (
+            ("as1", "2025-01-01", "ASIENTO DE APERTURA", "LD2025", (("572", "BANCO", 1000, 0), ("100", "CAPITAL", 0, 1000))),
+            ("as2", "2025-02-01", "NTRA. FRA. Nº 1", "LD2025", (("4300001", "CLI UNO", 1210, 0), ("7050001", "SERVICIOS", 0, 1000), ("4770021", "IVA REP", 0, 210))),
+            ("as3", "2025-02-10", "SU FRA. Nº 9", "LD2025", (("6280001", "LUZ", 100, 0), ("4720021", "IVA SOP", 21, 0), ("4100001", "PROV", 0, 121))),
+            ("as4", "2025-03-31", "LIQUIDACIÓN IVA 1T", "LD2025", (("4770021", "IVA REP", 210, 0), ("4720021", "IVA SOP", 0, 21), ("4750001", "HP ACREEDORA", 0, 189))),
+            ("as5", "2025-04-01", "COBRO FRA 1", "LD2025", (("572", "BANCO", 1210, 0), ("4300001", "CLI UNO", 0, 1210))),
+            ("as6", "2025-12-31", "ASIENTO DE REGULARIZACIÓN", "LD2025", (("7050001", "SERVICIOS", 1000, 0), ("6280001", "LUZ", 0, 100), ("129", "RESULTADO", 0, 900))),
+            ("as7", "2025-12-31", "ASIENTO DE CIERRE", "LD2025", (("100", "CAPITAL", 1000, 0), ("129", "RESULTADO", 900, 0), ("4750001", "HP ACREEDORA", 189, 0), ("4100001", "PROV", 121, 0), ("572", "BANCO", 0, 2210))),
+            ("as8", "2025-02-01", "1/2025", "FACT", (("430", "CLI UNO", 1210, 0), ("700", "VENTAS", 0, 1000), ("477", "IVA", 0, 210))),
+            ("as9", "2026-03-01", "2/2026", "FACT", (("430", "CLI DOS", 605, 0), ("705", "SERVICIOS", 0, 500), ("477", "IVA", 0, 105))),
+        )
+        for aid, fecha, concepto, diario, lineas in asientos:
+            cls._insert("gestoria_asientos", {"id": aid, "empresa_id": "empA", "workspace_id": "wsA", "cliente_id": "cliA",
+                                              "fecha": fecha, "concepto": concepto, "diario": diario, "referencia": aid, **t})
+            for n, (cuenta, desc, debe, haber) in enumerate(lineas):
+                cls._insert("gestoria_asiento_lineas", {"id": f"{aid}-{n}", "asiento_id": aid, "cuenta": cuenta,
+                                                        "descripcion": desc, "debe": debe, "haber": haber, **t})
         # Ficheros reales para la descarga local.
         for rel in ("rentas/2025/cliA.pdf", "gestoria/escritura.pdf", "gestoria/poliza.pdf", "gestoria/otro.pdf"):
             ruta = S.UPLOADS / rel
@@ -307,6 +328,78 @@ class PortalDelClienteTests(unittest.TestCase):
         self.assertEqual(self._get(ruta + "&tipo=documento&id=gd3", cookie=False)[0], 404)
         self.assertEqual(self._get(ruta + "&tipo=factura&id=gf1", cookie=False)[0], 404)
         self.assertEqual(self._get(ruta + "&tipo=renta&id=2024", cookie=False)[0], 404)
+
+
+    # ---------- libros contables ----------
+
+    def test_libros_con_diario_importado(self):
+        libros = S.portal_cliente_libros(self.conn, "wsA", "cliA")
+        self.assertEqual(libros["ejercicios"], ["2026", "2025"])
+        d = libros["por_ejercicio"]["2025"]
+        self.assertEqual(d["origen"], "Libro diario importado")
+        # La venta cuenta una vez: el asiento FACT duplicado no entra.
+        self.assertEqual(d["pyg"]["partidas"], [
+            {"clave": "cifra_negocios", "nombre": "Importe neto de la cifra de negocios", "importe": 1000.0},
+            {"clave": "otros_gastos", "nombre": "Otros gastos de explotación", "importe": -100.0},
+        ])
+        self.assertEqual(d["pyg"]["resultado_ejercicio"], 900.0)
+        # El balance, sin el asiento de cierre (que lo dejaría todo a cero).
+        b = d["balance"]
+        self.assertTrue(b["cuadra"])
+        self.assertEqual((b["total_activo"], b["total_pasivo"]), (2210.0, 2210.0))
+        self.assertEqual(b["activo"][1]["partidas"], [{"nombre": "Tesorería", "importe": 2210.0}])
+        self.assertEqual(b["pasivo"][0]["partidas"], [{"nombre": "Fondos propios", "importe": 1900.0}])
+        # Libro registro: la liquidación del IVA y el cobro no son facturas.
+        self.assertEqual(d["facturas_emitidas"], [{"fecha": "2025-02-01", "concepto": "NTRA. FRA. Nº 1", "tercero": "CLI UNO",
+                                                   "base": 1000.0, "iva": 210.0, "retencion": 0.0, "total": 1210.0}])
+        self.assertEqual([(r["tercero"], r["base"], r["iva"], r["total"]) for r in d["facturas_recibidas"]],
+                         [("PROV", 100.0, 21.0, 121.0)])
+
+    def test_libros_sin_regularizar_suman_el_resultado_al_patrimonio(self):
+        d = S.portal_cliente_libros(self.conn, "wsA", "cliA")["por_ejercicio"]["2026"]
+        self.assertEqual(d["origen"], "Contabilidad del CRM")
+        self.assertEqual(d["pyg"]["resultado_ejercicio"], 500.0)
+        self.assertTrue(d["balance"]["cuadra"])
+        self.assertEqual(d["balance"]["pasivo"][0]["partidas"],
+                         [{"nombre": "Resultado del ejercicio (sin regularizar)", "importe": 500.0}])
+
+    def test_dashboard_con_importe_y_porcentaje(self):
+        libros = S.portal_cliente_libros(self.conn, "wsA", "cliA")
+        d = libros["por_ejercicio"]["2025"]["dashboard"]
+        self.assertEqual((d["facturado"], d["facturas"], d["ingresos"], d["gastos"], d["resultado"]),
+                         (1000.0, 1, 1000.0, 100.0, 900.0))
+        self.assertEqual(d["margen_pct"], 90.0)
+        self.assertEqual(d["facturado_por_mes"][1], 1000.0)
+        self.assertEqual(sum(d["facturado_por_mes"]), 1000.0)
+        self.assertEqual(d["ingresos_por_categoria"], [{"nombre": "Prestación de servicios", "importe": 1000.0, "pct": 100.0}])
+        self.assertEqual(d["gastos_por_tipo"], [{"nombre": "Suministros", "importe": 100.0, "pct": 100.0}])
+        # Evolución entre ejercicios, del más antiguo al más reciente.
+        self.assertEqual([(e["ejercicio"], e["facturado"], e["resultado"]) for e in libros["evolucion"]],
+                         [("2025", 1000.0, 900.0), ("2026", 500.0, 500.0)])
+
+    def test_reparto_agrupa_lo_pequenio_en_otros(self):
+        importes = {f"Tipo {i}": float(100 - i) for i in range(12)}
+        filas = S._portal_reparto(importes)
+        self.assertEqual(len(filas), S.PORTAL_DASHBOARD_MAX_CATEGORIAS)
+        self.assertEqual(filas[-1]["nombre"], "Otros")
+        self.assertAlmostEqual(sum(f["importe"] for f in filas), sum(importes.values()), places=2)
+        self.assertAlmostEqual(sum(f["pct"] for f in filas), 100.0, delta=0.2)
+        self.assertEqual(S._portal_nombre_por_prefijo("6230000000001", S.PORTAL_TIPOS_GASTO, "x"), "Asesoría y profesionales")
+        self.assertEqual(S._portal_nombre_por_prefijo("6080000000000", S.PORTAL_TIPOS_GASTO, "x"), "Compras de mercaderías")
+        self.assertEqual(S._portal_nombre_por_prefijo("7780000000000", S.PORTAL_CATEGORIAS_INGRESO, "x"), "Ingresos excepcionales")
+
+    def test_libros_solo_con_la_seccion_encendida(self):
+        token = self._alta(secciones={"facturas_emitidas": True})["token"]
+        self.assertNotIn("gestoria_libros", self._publico(token)[1])
+        excel = "/api/workspace_portal_libros_excel?ejercicio=2025&token=" + token
+        self.assertEqual(self._get(excel, cookie=False)[0], 404)
+        self._alta(secciones={"libros": True})
+        data = self._publico(token)[1]
+        self.assertEqual(data["gestoria_libros"]["ejercicios"], ["2026", "2025"])
+        status, cuerpo = self._get(excel, cookie=False)
+        self.assertEqual(status, 200)
+        self.assertTrue(cuerpo.startswith(b"PK"))
+        self.assertEqual(self._get(excel.replace("2025", "1999"), cookie=False)[0], 404)
 
 
 if __name__ == "__main__":

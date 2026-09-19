@@ -1209,6 +1209,7 @@ AUTH_PUBLIC_GET_ENDPOINTS = {
     "/portal-busqueda",
     "/api/workspace_portal_s3_url",
     "/api/workspace_portal_gestoria_archivo",
+    "/api/workspace_portal_libros_excel",
     "/api/workspace_factura_pdf_public",
     "/api/workspace_portal_facturas_excel",
     "/api/workspace_kiosk_status",
@@ -61556,6 +61557,7 @@ PORTAL_CLIENTE_SECCIONES = (
     ("documentos_gestoria", "Documentos de la gestoría"),
     ("contabilidad", "Resumen contable"),
     ("facturas_emitidas", "Facturas emitidas"),
+    ("libros", "Libros contables"),
 )
 PORTAL_CLIENTE_SECCION_CLAVES = tuple(k for k, _ in PORTAL_CLIENTE_SECCIONES)
 
@@ -61780,7 +61782,414 @@ def portal_cliente_gestoria(conn, acceso):
         for f in facturas:
             f["tiene_pdf"] = bool(str(f.pop("doc_key", "") or "").strip())
         salida["gestoria_facturas_emitidas"] = facturas
+    if secciones["libros"]:
+        salida["gestoria_libros"] = portal_cliente_libros(conn, ws, cid)
     return salida
+
+
+# --- Libros contables del portal (balance, PyG y libro registro de facturas) ---------
+# Partidas de la cuenta de pérdidas y ganancias (modelo abreviado del PGC). El importe de
+# cada partida es haber - debe: los ingresos salen en positivo y los gastos en negativo.
+PORTAL_PYG_PARTIDAS = (
+    ("cifra_negocios", "Importe neto de la cifra de negocios", ("70",)),
+    ("variacion_existencias", "Variación de existencias", ("71",)),
+    ("trabajos_activo", "Trabajos realizados para el activo", ("73",)),
+    ("aprovisionamientos", "Aprovisionamientos", ("60", "61")),
+    ("otros_ingresos", "Otros ingresos de explotación", ("74", "75")),
+    ("personal", "Gastos de personal", ("64",)),
+    ("otros_gastos", "Otros gastos de explotación", ("62", "63", "65", "69")),
+    ("amortizacion", "Amortización del inmovilizado", ("68",)),
+    ("otros_resultados", "Otros resultados", ("67", "72", "77", "78", "79")),
+    ("ingresos_financieros", "Ingresos financieros", ("76",)),
+    ("gastos_financieros", "Gastos financieros", ("66",)),
+    ("impuesto", "Impuesto sobre beneficios", ("630", "633", "638")),
+)
+PORTAL_PYG_EXPLOTACION = (
+    "cifra_negocios", "variacion_existencias", "trabajos_activo", "aprovisionamientos", "otros_ingresos",
+    "personal", "otros_gastos", "amortizacion", "otros_resultados",
+)
+
+
+def _portal_pyg_partida(cuenta):
+    c = str(cuenta or "").strip()
+    mejor, largo = None, 0
+    for clave, _nombre, prefijos in PORTAL_PYG_PARTIDAS:
+        for pref in prefijos:
+            if c.startswith(pref) and len(pref) > largo:
+                mejor, largo = clave, len(pref)
+    return mejor
+
+
+def _portal_balance_masa(cuenta, saldo):
+    """(lado, masa) de una cuenta del balance según su saldo (debe - haber)."""
+    c = str(cuenta or "").strip()
+    g, g2 = c[:1], c[:2]
+    if g == "1":
+        if g2 in ("10", "11", "12"):
+            return "pasivo", "Fondos propios"
+        if g2 == "13":
+            return "pasivo", "Subvenciones, donaciones y legados"
+        return "pasivo", "Deudas a largo plazo"
+    if g == "2":
+        return "activo", "Inmovilizado"
+    if g == "3":
+        return "activo", "Existencias"
+    if g == "5":
+        if g2 == "57" and saldo >= 0:
+            return "activo", "Tesorería"
+        if saldo >= 0:
+            return "activo", "Inversiones y otros activos a corto plazo"
+        return "pasivo", "Deudas a corto plazo"
+    if saldo >= 0:
+        return "activo", "Deudores comerciales y otras cuentas a cobrar"
+    return "pasivo", "Acreedores comerciales y otras cuentas a pagar"
+
+
+PORTAL_BALANCE_MASAS = {
+    "activo": (
+        ("Activo no corriente", ("Inmovilizado",)),
+        ("Activo corriente", ("Existencias", "Deudores comerciales y otras cuentas a cobrar",
+                              "Inversiones y otros activos a corto plazo", "Tesorería")),
+    ),
+    "pasivo": (
+        ("Patrimonio neto", ("Fondos propios", "Resultado del ejercicio (sin regularizar)",
+                             "Subvenciones, donaciones y legados")),
+        ("Pasivo no corriente", ("Deudas a largo plazo",)),
+        ("Pasivo corriente", ("Deudas a corto plazo", "Acreedores comerciales y otras cuentas a pagar")),
+    ),
+}
+
+
+# Nombres para el dashboard del portal: categoría de ingreso o tipo de gasto según la
+# cuenta (el prefijo más largo manda). Descuentos y devoluciones van con su partida para
+# que el importe sea el neto.
+PORTAL_CATEGORIAS_INGRESO = {
+    "700": "Ventas de mercaderías", "701": "Ventas de productos", "702": "Ventas de productos",
+    "703": "Ventas de productos", "704": "Ventas de envases", "705": "Prestación de servicios",
+    "706": "Ventas de mercaderías", "708": "Ventas de mercaderías", "709": "Ventas de mercaderías",
+    "71": "Variación de existencias", "73": "Trabajos para el propio activo",
+    "74": "Subvenciones", "75": "Otros ingresos de gestión", "752": "Arrendamientos cobrados",
+    "76": "Ingresos financieros", "77": "Beneficios del inmovilizado", "778": "Ingresos excepcionales",
+    "79": "Excesos de provisiones",
+}
+PORTAL_TIPOS_GASTO = {
+    "600": "Compras de mercaderías", "601": "Materias primas", "602": "Otros aprovisionamientos",
+    "606": "Compras de mercaderías", "607": "Trabajos de otras empresas", "608": "Compras de mercaderías",
+    "609": "Compras de mercaderías", "61": "Variación de existencias",
+    "621": "Alquileres", "622": "Reparaciones y conservación", "623": "Asesoría y profesionales",
+    "624": "Transportes", "625": "Seguros", "626": "Comisiones bancarias", "627": "Publicidad",
+    "628": "Suministros", "629": "Otros servicios", "62": "Otros servicios",
+    "630": "Impuesto sobre beneficios", "63": "Tributos",
+    "640": "Sueldos y salarios", "641": "Indemnizaciones", "642": "Seguridad social",
+    "64": "Otros gastos de personal", "65": "Otros gastos de gestión",
+    "66": "Intereses y gastos financieros", "67": "Pérdidas y gastos excepcionales",
+    "68": "Amortizaciones", "69": "Deterioros y provisiones",
+}
+PORTAL_DASHBOARD_MAX_CATEGORIAS = 8
+
+
+def _portal_nombre_por_prefijo(cuenta, tabla, por_defecto):
+    c = str(cuenta or "")
+    for largo in (3, 2):
+        if c[:largo] in tabla:
+            return tabla[c[:largo]]
+    return por_defecto
+
+
+def _portal_reparto(importes):
+    """[{nombre, importe, pct}] de mayor a menor; lo que pasa del máximo, en "Otros"."""
+    filas = sorted(((n, v) for n, v in importes.items() if abs(v) >= 0.005), key=lambda x: -x[1])
+    if len(filas) > PORTAL_DASHBOARD_MAX_CATEGORIAS:
+        resto = filas[PORTAL_DASHBOARD_MAX_CATEGORIAS - 1:]
+        filas = filas[:PORTAL_DASHBOARD_MAX_CATEGORIAS - 1] + [("Otros", sum(v for _n, v in resto))]
+    total = sum(v for _n, v in filas)
+    return [
+        {"nombre": n, "importe": _r2(v), "pct": round(v * 100.0 / total, 1) if total else 0.0}
+        for n, v in filas
+    ]
+
+
+def _portal_tipo_asiento(concepto):
+    t = normalize_lookup_text(concepto)
+    if t.startswith("ASIENTO DE CIERRE"):
+        return "cierre"
+    if t.startswith("ASIENTO DE REGULARIZACION"):
+        return "regularizacion"
+    if t.startswith("ASIENTO DE APERTURA"):
+        return "apertura"
+    return ""
+
+
+def _r2(v):
+    return round(float(v or 0) + 0.0, 2) + 0.0
+
+
+def portal_cliente_libros(conn, workspace_id, cliente_id):
+    """Balance, PyG y libro registro de facturas de un cliente, por ejercicio.
+
+    Reglas, sacadas de la contabilidad real de Estudio Velazquez 2012 (2024):
+    - Si el ejercicio tiene el libro diario oficial importado (diario "LD…"), ese es el
+      libro. Los asientos que el CRM genera desde facturas ("FACT") o banco lo duplicarían:
+      la factura 55/2024 estaba en los dos y la cifra de negocios salía el doble.
+    - El balance aparta el asiento de cierre (si no, todo sale a cero a 31-12); la PyG
+      aparta además la regularización (que lleva gastos e ingresos a la 129). Si el
+      ejercicio aún no está regularizado, el resultado se suma al patrimonio neto.
+    - El libro registro sale del diario: un asiento con cliente (43/44) e ingreso (7) o
+      IVA repercutido (477) es una factura emitida (así entra también la venta de un
+      bien del inmovilizado); con proveedor (40/41) y gasto, inmovilizado o IVA soportado
+      (6/2/472), recibida. Entran las exentas de IVA, y no la liquidación del IVA ni los
+      cobros y pagos, que no tienen ni ingreso, ni gasto, ni IVA.
+    """
+    try:
+        filas = [dict(r) for r in conn.execute(
+            """
+            SELECT a.id, a.fecha, a.concepto, COALESCE(a.diario, '') AS diario,
+                   l.cuenta, l.descripcion, COALESCE(l.debe, 0) AS debe, COALESCE(l.haber, 0) AS haber
+            FROM gestoria_asientos a
+            JOIN gestoria_asiento_lineas l ON l.asiento_id = a.id
+            WHERE a.workspace_id = ? AND a.cliente_id = ?
+            """,
+            (workspace_id, cliente_id),
+        ).fetchall()]
+    except Exception:
+        _rollback_best_effort(conn)
+        return {"ejercicios": [], "por_ejercicio": {}, "evolucion": []}
+    por_anio = {}
+    for f in filas:
+        anio = str(f.get("fecha") or "")[:4]
+        if anio.isdigit():
+            por_anio.setdefault(anio, []).append(f)
+    salida = {}
+    for anio, lineas in por_anio.items():
+        con_libro = any(str(f["diario"]).upper().startswith("LD") for f in lineas)
+        if con_libro:
+            lineas = [f for f in lineas if str(f["diario"]).upper().startswith("LD")]
+        for f in lineas:
+            f["tipo_asiento"] = _portal_tipo_asiento(f.get("concepto"))
+            f["cuenta"] = str(f.get("cuenta") or "").strip()
+            f["saldo"] = float(f["debe"] or 0) - float(f["haber"] or 0)
+
+        # PyG
+        partidas = {clave: 0.0 for clave, _n, _p in PORTAL_PYG_PARTIDAS}
+        for f in lineas:
+            if f["tipo_asiento"] in ("cierre", "regularizacion") or f["cuenta"][:1] not in ("6", "7"):
+                continue
+            clave = _portal_pyg_partida(f["cuenta"]) or ("otros_gastos" if f["cuenta"][:1] == "6" else "otros_resultados")
+            partidas[clave] -= f["saldo"]
+        explotacion = sum(partidas[k] for k in PORTAL_PYG_EXPLOTACION)
+        financiero = partidas["ingresos_financieros"] + partidas["gastos_financieros"]
+        antes_impuestos = explotacion + financiero
+        resultado = antes_impuestos + partidas["impuesto"]
+        pyg = {
+            "partidas": [
+                {"clave": clave, "nombre": nombre, "importe": _r2(partidas[clave])}
+                for clave, nombre, _p in PORTAL_PYG_PARTIDAS if abs(partidas[clave]) >= 0.005
+            ],
+            "resultado_explotacion": _r2(explotacion),
+            "resultado_financiero": _r2(financiero),
+            "resultado_antes_impuestos": _r2(antes_impuestos),
+            "resultado_ejercicio": _r2(resultado),
+        }
+
+        # Balance a cierre, sin el asiento de cierre.
+        saldos = {}
+        sin_regularizar = 0.0
+        for f in lineas:
+            if f["tipo_asiento"] == "cierre":
+                continue
+            if f["cuenta"][:1] in ("6", "7"):
+                sin_regularizar -= f["saldo"]
+            elif f["cuenta"][:1] in ("1", "2", "3", "4", "5"):
+                saldos[f["cuenta"]] = saldos.get(f["cuenta"], 0.0) + f["saldo"]
+        importes = {"activo": {}, "pasivo": {}}
+        for cuenta, saldo in saldos.items():
+            if abs(saldo) < 0.005:
+                continue
+            lado, masa = _portal_balance_masa(cuenta, saldo)
+            importes[lado][masa] = importes[lado].get(masa, 0.0) + (saldo if lado == "activo" else -saldo)
+        if abs(sin_regularizar) >= 0.005:
+            importes["pasivo"]["Resultado del ejercicio (sin regularizar)"] = sin_regularizar
+        balance = {}
+        for lado, bloques in PORTAL_BALANCE_MASAS.items():
+            balance[lado] = [
+                {
+                    "nombre": bloque,
+                    "total": _r2(sum(importes[lado].get(m, 0.0) for m in masas)),
+                    "partidas": [{"nombre": m, "importe": _r2(importes[lado][m])} for m in masas
+                                 if abs(importes[lado].get(m, 0.0)) >= 0.005],
+                }
+                for bloque, masas in bloques
+            ]
+            balance[f"total_{lado}"] = _r2(sum(importes[lado].values()))
+        balance["cuadra"] = abs(balance["total_activo"] - balance["total_pasivo"]) < 0.05
+
+        # Libro registro de facturas, desde el diario.
+        asientos = {}
+        for f in lineas:
+            if f["tipo_asiento"]:
+                continue
+            asientos.setdefault(f["id"], []).append(f)
+        emitidas, recibidas = [], []
+        for grupo in asientos.values():
+            cuentas = [f["cuenta"] for f in grupo]
+            emitida = any(c.startswith(("43", "44")) for c in cuentas) and any(c.startswith(("7", "477")) for c in cuentas)
+            recibida = any(c.startswith(("40", "41")) for c in cuentas) and any(c.startswith(("6", "2", "472")) for c in cuentas)
+            if not emitida and not recibida:
+                continue
+            signo = -1 if emitida else 1  # emitidas: haber - debe; recibidas: debe - haber
+            pref_tercero = ("43", "44") if emitida else ("40", "41")
+            pref_base = ("7",) if emitida else ("6", "2")
+            terceros = [f for f in grupo if f["cuenta"].startswith(pref_tercero)]
+            if not terceros:
+                # Sin cliente ni proveedor no es una factura: p. ej. la liquidación del IVA.
+                continue
+            nombres = {}
+            for f in terceros:
+                nombres[str(f.get("descripcion") or "").strip()] = nombres.get(str(f.get("descripcion") or "").strip(), 0.0) + abs(f["saldo"])
+            base = signo * sum(f["saldo"] for f in grupo if f["cuenta"].startswith(pref_base))
+            iva = signo * sum(f["saldo"] for f in grupo if f["cuenta"].startswith("477" if emitida else "472"))
+            retencion = (sum(f["saldo"] for f in grupo if f["cuenta"].startswith("473")) if emitida
+                         else -sum(f["saldo"] for f in grupo if f["cuenta"].startswith("4751")))
+            total = -signo * sum(f["saldo"] for f in terceros)
+            if not any(f["cuenta"].startswith(pref_base) for f in grupo):
+                # Venta de inmovilizado: no hay cuenta de ingreso; la base es lo facturado sin IVA.
+                base = total - iva + retencion
+            registro = {
+                "fecha": str(grupo[0].get("fecha") or "")[:10],
+                "concepto": str(grupo[0].get("concepto") or ""),
+                "tercero": max(nombres, key=nombres.get) if nombres else "",
+                "base": _r2(base), "iva": _r2(iva), "retencion": _r2(retencion), "total": _r2(total),
+            }
+            (emitidas if emitida else recibidas).append(registro)
+        for lista in (emitidas, recibidas):
+            lista.sort(key=lambda r: (r["fecha"], r["concepto"]))
+
+        def _totales(lista):
+            return {k: _r2(sum(r[k] for r in lista)) for k in ("base", "iva", "retencion", "total")}
+
+        # Dashboard: facturado por mes, ingresos por categoría y gastos por tipo.
+        ingresos, gastos = {}, {}
+        for f in lineas:
+            if f["tipo_asiento"] in ("cierre", "regularizacion"):
+                continue
+            if f["cuenta"][:1] == "7":
+                n = _portal_nombre_por_prefijo(f["cuenta"], PORTAL_CATEGORIAS_INGRESO, "Otros ingresos")
+                ingresos[n] = ingresos.get(n, 0.0) - f["saldo"]
+            elif f["cuenta"][:1] == "6":
+                n = _portal_nombre_por_prefijo(f["cuenta"], PORTAL_TIPOS_GASTO, "Otros gastos")
+                gastos[n] = gastos.get(n, 0.0) + f["saldo"]
+        meses = [0.0] * 12
+        for r in emitidas:
+            mes = r["fecha"][5:7]
+            if mes.isdigit() and 1 <= int(mes) <= 12:
+                meses[int(mes) - 1] += r["base"]
+        total_ingresos = sum(ingresos.values())
+        total_gastos = sum(gastos.values())
+        dashboard = {
+            "facturado": _r2(sum(r["base"] for r in emitidas)),
+            "facturas": len(emitidas),
+            "ingresos": _r2(total_ingresos),
+            "gastos": _r2(total_gastos),
+            "resultado": pyg["resultado_ejercicio"],
+            "margen_pct": round(pyg["resultado_ejercicio"] * 100.0 / total_ingresos, 1) if total_ingresos else None,
+            "facturado_por_mes": [_r2(v) for v in meses],
+            "ingresos_por_categoria": _portal_reparto(ingresos),
+            "gastos_por_tipo": _portal_reparto(gastos),
+        }
+
+        salida[anio] = {
+            "origen": "Libro diario importado" if con_libro else "Contabilidad del CRM",
+            "dashboard": dashboard,
+            "pyg": pyg,
+            "balance": balance,
+            "facturas_emitidas": emitidas,
+            "facturas_recibidas": recibidas,
+            "totales_emitidas": _totales(emitidas),
+            "totales_recibidas": _totales(recibidas),
+        }
+    # Evolución entre ejercicios, del más antiguo al más reciente, para las comparativas.
+    evolucion = [
+        {
+            "ejercicio": anio,
+            **{k: salida[anio]["dashboard"][k] for k in ("facturado", "ingresos", "gastos", "resultado")},
+            "facturado_por_mes": salida[anio]["dashboard"]["facturado_por_mes"],
+        }
+        for anio in sorted(salida)
+    ]
+    return {"ejercicios": sorted(salida, reverse=True), "por_ejercicio": salida, "evolucion": evolucion}
+
+
+def build_portal_libros_excel(libros, ejercicio, cliente_nombre=""):
+    from io import BytesIO
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+
+    datos = libros["por_ejercicio"][ejercicio]
+    wb = Workbook()
+    negrita = Font(bold=True)
+    euros = '#,##0.00 "€"'
+
+    ws = wb.active
+    ws.title = "Balance"
+    ws.append([f"Balance de situación {ejercicio}", cliente_nombre])
+    ws["A1"].font = negrita
+    for lado, titulo in (("activo", "ACTIVO"), ("pasivo", "PATRIMONIO NETO Y PASIVO")):
+        ws.append([])
+        ws.append([titulo, datos["balance"][f"total_{lado}"]])
+        ws.cell(ws.max_row, 1).font = negrita
+        for bloque in datos["balance"][lado]:
+            ws.append([f"  {bloque['nombre']}", bloque["total"]])
+            ws.cell(ws.max_row, 1).font = negrita
+            for p in bloque["partidas"]:
+                ws.append([f"    {p['nombre']}", p["importe"]])
+    for fila in ws.iter_rows(min_col=2, max_col=2):
+        fila[0].number_format = euros
+    ws.column_dimensions["A"].width = 52
+    ws.column_dimensions["B"].width = 18
+
+    ws = wb.create_sheet("PyG")
+    ws.append([f"Cuenta de pérdidas y ganancias {ejercicio}", cliente_nombre])
+    ws["A1"].font = negrita
+    pyg = datos["pyg"]
+    importes = {p["clave"]: p for p in pyg["partidas"]}
+    for clave, nombre, _p in PORTAL_PYG_PARTIDAS:
+        if clave == "ingresos_financieros":
+            ws.append(["A) RESULTADO DE EXPLOTACIÓN", pyg["resultado_explotacion"]])
+            ws.cell(ws.max_row, 1).font = negrita
+        if clave == "impuesto":
+            ws.append(["B) RESULTADO FINANCIERO", pyg["resultado_financiero"]])
+            ws.cell(ws.max_row, 1).font = negrita
+            ws.append(["C) RESULTADO ANTES DE IMPUESTOS", pyg["resultado_antes_impuestos"]])
+            ws.cell(ws.max_row, 1).font = negrita
+        if clave in importes:
+            ws.append([f"  {nombre}", importes[clave]["importe"]])
+    ws.append(["D) RESULTADO DEL EJERCICIO", pyg["resultado_ejercicio"]])
+    ws.cell(ws.max_row, 1).font = negrita
+    for fila in ws.iter_rows(min_col=2, max_col=2):
+        fila[0].number_format = euros
+    ws.column_dimensions["A"].width = 52
+    ws.column_dimensions["B"].width = 18
+
+    for clave, titulo in (("facturas_emitidas", "Facturas emitidas"), ("facturas_recibidas", "Facturas recibidas")):
+        ws = wb.create_sheet(titulo)
+        ws.append(["Fecha", "Concepto", "Cliente" if clave == "facturas_emitidas" else "Proveedor",
+                   "Base", "IVA", "Retención", "Total"])
+        for c in ws[1]:
+            c.font = negrita
+        for r in datos[clave]:
+            ws.append([r["fecha"], r["concepto"], r["tercero"], r["base"], r["iva"], r["retencion"], r["total"]])
+        tot = datos["totales_emitidas" if clave == "facturas_emitidas" else "totales_recibidas"]
+        ws.append(["", "TOTAL", "", tot["base"], tot["iva"], tot["retencion"], tot["total"]])
+        for c in ws[ws.max_row]:
+            c.font = negrita
+        for fila in ws.iter_rows(min_row=2, min_col=4, max_col=7):
+            for c in fila:
+                c.number_format = euros
+        for col, ancho in zip("ABCDEFG", (12, 44, 34, 14, 12, 12, 14)):
+            ws.column_dimensions[col].width = ancho
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 def portal_cliente_archivo_gestoria(conn, acceso, tipo, ref):
@@ -107652,6 +108061,36 @@ class Handler(BaseHTTPRequestHandler):
                 excel_bytes,
                 content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 filename=filename,
+            )
+            return
+
+        if path == "/api/workspace_portal_libros_excel":
+            # Libros contables del cliente en Excel, desde su portal (sección "libros").
+            token = _request_token_param(self, params, "token")
+            portal = portal_cliente_por_token(conn, token) if token else None
+            if (
+                not portal
+                or not portal_cliente_secciones(portal.get("secciones_json"))["libros"]
+                or not _portal_cliente_es_del_workspace(conn, portal)
+            ):
+                json_response(self, {"error": "portal no encontrado"}, status=404)
+                return
+            ejercicio = (params.get("ejercicio", [""])[0] or "").strip()
+            libros = portal_cliente_libros(conn, portal["workspace_id"], portal["cliente_id"])
+            if ejercicio not in libros["por_ejercicio"]:
+                json_response(self, {"error": "ejercicio sin contabilidad"}, status=404)
+                return
+            nombre = conn.execute("SELECT nombre FROM clientes WHERE id = ?", (portal["cliente_id"],)).fetchone()
+            try:
+                datos = build_portal_libros_excel(libros, ejercicio, str(row_value(nombre, "nombre") or "") if nombre else "")
+            except Exception as exc:
+                json_response(self, {"error": f"No se pudo generar el Excel: {exc}"}, status=500)
+                return
+            binary_response(
+                self,
+                datos,
+                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                filename=f"libros_contables_{ejercicio}.xlsx",
             )
             return
 
