@@ -115,6 +115,9 @@ class PortalDelClienteTests(unittest.TestCase):
         cls._insert("gestoria_docs", {"id": "gd2", "empresa_id": "empA", "workspace_id": "wsA", "cliente_id": "cliA",
                                       "nombre": "Poliza.pdf", "referencia_tipo": "seguros",
                                       "doc_url": "/uploads/gestoria/poliza.pdf", **t})
+        cls._insert("gestoria_docs", {"id": "gd4", "empresa_id": "empA", "workspace_id": "wsA", "cliente_id": "cliA",
+                                      "nombre": "F-1.pdf", "tipo": "Factura", "referencia_tipo": "facturas",
+                                      "referencia_id": "gf1", "doc_key": "facturas_inbox/x/emitidas/f1.pdf", **t})
         cls._insert("gestoria_docs", {"id": "gd3", "empresa_id": "empA", "workspace_id": "wsA", "cliente_id": "cliA2",
                                       "nombre": "DeOtroCliente.pdf", "doc_url": "/uploads/gestoria/otro.pdf", **t})
         for i, (fecha, tipo, importe) in enumerate((("2025-03-01", "Ingreso", 1000), ("2025-05-01", "Gasto", 300),
@@ -311,6 +314,16 @@ class PortalDelClienteTests(unittest.TestCase):
         self.assertEqual([f["numero"] for f in data["gestoria_facturas_emitidas"]], ["F-1"])
         self.assertTrue(data["gestoria_facturas_emitidas"][0]["tiene_pdf"])
 
+    def test_la_factura_emitida_no_sale_dos_veces(self):
+        token = self._alta(secciones={"documentos_gestoria": True, "facturas_emitidas": True})["token"]
+        data = self._publico(token)[1]
+        self.assertEqual([d["nombre"] for d in data["gestoria_documentos"]], ["Escritura.pdf"])
+        self.assertEqual([f["numero"] for f in data["gestoria_facturas_emitidas"]], ["F-1"])
+        # Sin la sección de facturas, su PDF sigue a mano en documentos.
+        self._alta(secciones={"documentos_gestoria": True})
+        nombres = sorted(d["nombre"] for d in self._publico(token)[1]["gestoria_documentos"])
+        self.assertEqual(nombres, ["Escritura.pdf", "F-1.pdf"])
+
     def test_guardar_sin_secciones_conserva_las_que_habia(self):
         self._alta(secciones={"modelos": True})
         self._alta(estado="Activo")
@@ -376,6 +389,25 @@ class PortalDelClienteTests(unittest.TestCase):
         # Evolución entre ejercicios, del más antiguo al más reciente.
         self.assertEqual([(e["ejercicio"], e["facturado"], e["resultado"]) for e in libros["evolucion"]],
                          [("2025", 1000.0, 900.0), ("2026", 500.0, 500.0)])
+
+    def test_factura_pagada_en_el_mismo_asiento_no_sale_a_cero(self):
+        # Visto en producción (Microsoft 9,99 €, AXA 214,14 €): la factura y su pago van
+        # en un asiento y la cuenta del proveedor se anula dentro; el total salía 0.
+        import sqlite3
+
+        c = sqlite3.connect(":memory:")
+        c.row_factory = sqlite3.Row
+        self.addCleanup(c.close)
+        c.execute("CREATE TABLE gestoria_asientos (id, fecha, concepto, diario, workspace_id, cliente_id)")
+        c.execute("CREATE TABLE gestoria_asiento_lineas (asiento_id, cuenta, descripcion, debe, haber)")
+        c.execute("INSERT INTO gestoria_asientos VALUES ('x', '2025-05-01', 'SU FRA. Nº 7 AXA', 'LD2025', 'w', 'c')")
+        for cuenta, desc, debe, haber in (("6250001", "SEGUROS", 214.14, 0), ("4100009", "AXA", 0, 214.14),
+                                          ("4100009", "AXA", 214.14, 0), ("5720001", "BANCO", 0, 214.14)):
+            c.execute("INSERT INTO gestoria_asiento_lineas VALUES ('x', ?, ?, ?, ?)", (cuenta, desc, debe, haber))
+        d = S.portal_cliente_libros(c, "w", "c")["por_ejercicio"]["2025"]
+        self.assertEqual([(r["tercero"], r["base"], r["iva"], r["total"]) for r in d["facturas_recibidas"]],
+                         [("AXA", 214.14, 0.0, 214.14)])
+        self.assertEqual(d["dashboard"]["gastos_por_tipo"], [{"nombre": "Seguros", "importe": 214.14, "pct": 100.0}])
 
     def test_reparto_agrupa_lo_pequenio_en_otros(self):
         importes = {f"Tipo {i}": float(100 - i) for i in range(12)}

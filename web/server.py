@@ -61726,15 +61726,21 @@ def portal_cliente_gestoria(conn, acceso):
         marcas = ",".join(["?"] * len(PORTAL_DOCS_DE_OTROS_MODULOS))
         docs = _filas(
             f"""
-            SELECT id, nombre, tipo, fecha, estado, doc_key, doc_url, repo_key, created_at
-            FROM gestoria_docs
-            WHERE workspace_id = ? AND cliente_id = ?
-              AND LOWER(COALESCE(referencia_tipo, '')) NOT IN ({marcas})
-              AND LOWER(COALESCE(estado, '')) <> 'pendiente asignar'
-            ORDER BY COALESCE(NULLIF(TRIM(COALESCE(fecha, '')), ''), created_at) DESC
+            SELECT d.id, d.nombre, d.tipo, d.fecha, d.estado, d.doc_key, d.doc_url, d.repo_key, d.created_at
+            FROM gestoria_docs d
+            WHERE d.workspace_id = ? AND d.cliente_id = ?
+              AND LOWER(COALESCE(d.referencia_tipo, '')) NOT IN ({marcas})
+              AND LOWER(COALESCE(d.estado, '')) <> 'pendiente asignar'
+              -- La ficha de archivo de una factura emitida ya sale, con su PDF, en
+              -- "Facturas emitidas": con esa sección encendida no se repite aquí.
+              AND NOT (? = 1 AND EXISTS (
+                SELECT 1 FROM gestoria_facturas f
+                WHERE f.id = d.referencia_id AND f.cliente_id = d.cliente_id AND LOWER(COALESCE(f.tipo, '')) = 'venta'
+              ))
+            ORDER BY COALESCE(NULLIF(TRIM(COALESCE(d.fecha, '')), ''), d.created_at) DESC
             LIMIT 100
             """,
-            (ws, cid, *PORTAL_DOCS_DE_OTROS_MODULOS),
+            (ws, cid, *PORTAL_DOCS_DE_OTROS_MODULOS, 1 if secciones["facturas_emitidas"] else 0),
         )
         salida["gestoria_documentos"] = [
             {
@@ -62050,9 +62056,15 @@ def portal_cliente_libros(conn, workspace_id, cliente_id):
             iva = signo * sum(f["saldo"] for f in grupo if f["cuenta"].startswith("477" if emitida else "472"))
             retencion = (sum(f["saldo"] for f in grupo if f["cuenta"].startswith("473")) if emitida
                          else -sum(f["saldo"] for f in grupo if f["cuenta"].startswith("4751")))
-            total = -signo * sum(f["saldo"] for f in terceros)
-            if not any(f["cuenta"].startswith(pref_base) for f in grupo):
-                # Venta de inmovilizado: no hay cuenta de ingreso; la base es lo facturado sin IVA.
+            if any(f["cuenta"].startswith(pref_base) for f in grupo):
+                # El total sale de la base: si la factura se pagó en el mismo asiento, la
+                # cuenta del proveedor se anula dentro de él y su saldo daría 0.
+                total = base + iva - retencion
+            else:
+                # Venta de inmovilizado: no hay cuenta de ingreso; se toma lo cargado al
+                # cliente (su columna, no el neto) y la base es eso sin IVA.
+                total = (sum(float(f["debe"] or 0) for f in terceros) if emitida
+                         else sum(float(f["haber"] or 0) for f in terceros))
                 base = total - iva + retencion
             registro = {
                 "fecha": str(grupo[0].get("fecha") or "")[:10],

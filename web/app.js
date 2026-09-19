@@ -35461,10 +35461,17 @@ const renderPortalClienteGestoria = (data, token) => {
   const secciones = data?.secciones || {};
   const archivo = (tipo, id, texto = "PDF") =>
     `<a class="secondary ghost button-inline" target="_blank" rel="noopener" href="/api/workspace_portal_gestoria_archivo?token=${encodeURIComponent(token)}&tipo=${tipo}&id=${encodeURIComponent(id)}">${texto}</a>`;
+  // Las listas largas enseñan las primeras 8 y el resto al desplegar.
   const tarjeta = (titulo, filas, vacio) => `
     <div class="form-card">
       <h3>${titulo}</h3>
-      <div class="workspace-billing-list">${filas.length ? filas.join("") : `<p class='muted'>${vacio}</p>`}</div>
+      <div class="workspace-billing-list">${
+        !filas.length
+          ? `<p class='muted'>${vacio}</p>`
+          : filas.length <= 8
+            ? filas.join("")
+            : `${filas.slice(0, 8).join("")}<details><summary style="cursor:pointer;margin:6px 0">Ver todas (${numberFormatter.format(filas.length)})</summary>${filas.slice(8).join("")}</details>`
+      }</div>
     </div>`;
   const fila = (principal, secundaria, meta) => `
     <div class="workspace-billing-row">
@@ -35513,7 +35520,9 @@ const renderPortalClienteGestoria = (data, token) => {
       )
     );
   }
-  if (secciones.contabilidad) {
+  // Con libros contables, el resumen de apuntes sueltos daría otras cifras: no se enseña.
+  const hayLibros = Boolean(secciones.libros && (data.gestoria_libros?.ejercicios || []).length);
+  if (secciones.contabilidad && !hayLibros) {
     partes.push(
       tarjeta(
         "Resumen contable",
@@ -35712,8 +35721,8 @@ const renderPortalLibrosContables = (libros, token, euros) => {
   }
   const tabla = (cabeceras, filas) => `
     <div style="overflow-x:auto">
-      <table class="portal-libros-tabla" style="width:100%;border-collapse:collapse;font-size:0.9em">
-        <thead><tr>${cabeceras.map((c, i) => `<th style="text-align:${i >= cabeceras.length - 4 && i > 1 ? "right" : "left"};padding:4px 6px">${c}</th>`).join("")}</tr></thead>
+      <table class="portal-libros-tabla" data-ui-managed="1" style="width:100%;border-collapse:collapse;font-size:0.9em">
+        ${cabeceras.every((c) => !c) ? "" : `<thead><tr>${cabeceras.map((c, i) => `<th style="text-align:${i >= cabeceras.length - 4 && i > 1 ? "right" : "left"};padding:4px 6px">${c}</th>`).join("")}</tr></thead>`}
         <tbody>${filas.join("")}</tbody>
       </table>
     </div>`;
@@ -35786,7 +35795,7 @@ const renderPortalLibrosContables = (libros, token, euros) => {
         <details><summary><strong>Facturas recibidas</strong> (${numberFormatter.format((d.facturas_recibidas || []).length)})</summary>
           ${libro(d.facturas_recibidas, d.totales_recibidas, "Proveedor")}
         </details>
-        <p><a class="secondary ghost button-inline" target="_blank" rel="noopener" href="/api/workspace_portal_libros_excel?token=${encodeURIComponent(token)}&ejercicio=${encodeURIComponent(anio)}">Descargar Excel ${escapeHtml(anio)}</a></p>
+        <p><a class="button secondary" style="display:inline-block;padding:6px 14px;border-radius:8px;border:1px solid currentColor;text-decoration:none" target="_blank" rel="noopener" href="/api/workspace_portal_libros_excel?token=${encodeURIComponent(token)}&ejercicio=${encodeURIComponent(anio)}">Descargar Excel ${escapeHtml(anio)}</a></p>
       </div>`;
   };
   return `
