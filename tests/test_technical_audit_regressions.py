@@ -2727,9 +2727,11 @@ class GestoriaServerRouteRegressionTests(unittest.TestCase):
         self.assertEqual(member_payload["counts"]["total"], 1)
         self.assertEqual(admin_payload["counts"]["clientes_renta_global"], 4)
         self.assertEqual(member_payload["counts"]["clientes_renta_global"], 4)
+        # Desde la fase 6 del ámbito por workspace (2026-09-19) la clave lleva también el
+        # workspace: documentos y presupuestos del panel van por él.
         self.assertEqual(
             set(server.Handler._gestoria_dashboard_cache.keys()),
-            {"emp-1::full", "emp-1::limited"},
+            {"ws-1::emp-1::full", "ws-1::emp-1::limited"},
         )
 
     def test_workspace_company_logo_upload_allows_workspace_admins(self):

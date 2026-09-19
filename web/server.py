@@ -40658,7 +40658,7 @@ def compute_gestoria_renta_pending_summary(conn, empresa_id, ejercicio="", *, li
     }
 
 
-def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio=""):
+def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio="", workspace_id=""):
     empresa_ids = empresa_id if isinstance(empresa_id, (list, tuple, set)) else [empresa_id]
     empresa_ids = [str(eid or "").strip() for eid in empresa_ids]
     empresa_ids = [eid for eid in empresa_ids if eid]
@@ -40683,6 +40683,28 @@ def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio=""):
         except Exception:
             ejercicio_val = ""
     placeholders_emp = ",".join(["?"] * len(empresa_ids))
+    # Con workspace, los documentos de ese workspace (fase 6, 2026-09-19). Sin él, lo de
+    # antes: los de sus empresas o de cualquier cliente con renta. Esa segunda parte no
+    # miraba el workspace, así que contaba documentos de clientes de renta de cualquier
+    # workspace; y los 754 documentos de renta sin empresa solo entraban por ella.
+    ws_docs = str(workspace_id or "").strip()
+    if ws_docs:
+        ambito_docs = "COALESCE(d.workspace_id, '') = ?"
+        ambito_valores = [ws_docs]
+    else:
+        ambito_docs = f"""(
+              d.empresa_id IN ({placeholders_emp})
+              OR EXISTS (
+                SELECT 1
+                FROM cliente_gestoria cg
+                WHERE cg.cliente_id = d.cliente_id
+                  AND (
+                    COALESCE(cg.mod_renta, 0) = 1
+                    OR COALESCE(TRIM(cg.renta_detalles), '') NOT IN ('', '{{}}', '[]')
+                  )
+              )
+            )"""
+        ambito_valores = list(empresa_ids)
     renta_filter = gestoria_renta_doc_sql_condition("d")
     modelo100_filter = gestoria_modelo100_doc_sql_condition("d")
     year_filter = gestoria_renta_doc_year_sql_condition("d")
@@ -40700,18 +40722,7 @@ def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio=""):
             CASE WHEN {modelo100_filter} THEN 1 ELSE 0 END AS es_modelo100
           FROM gestoria_docs d
           LEFT JOIN clientes c ON c.id = d.cliente_id
-          WHERE (
-              d.empresa_id IN ({placeholders_emp})
-              OR EXISTS (
-                SELECT 1
-                FROM cliente_gestoria cg
-                WHERE cg.cliente_id = d.cliente_id
-                  AND (
-                    COALESCE(cg.mod_renta, 0) = 1
-                    OR COALESCE(TRIM(cg.renta_detalles), '') NOT IN ('', '{{}}', '[]')
-                  )
-              )
-            )
+          WHERE {ambito_docs}
             AND {renta_filter}
             AND {year_filter}
         ),
@@ -40739,7 +40750,7 @@ def compute_gestoria_renta_docs_summary(conn, empresa_id, ejercicio=""):
         FROM renta_docs
         """,
         tuple([
-            *empresa_ids,
+            *ambito_valores,
             *gestoria_renta_doc_year_values(ejercicio_val),
         ]),
     ).fetchone()
@@ -113373,6 +113384,9 @@ class Handler(BaseHTTPRequestHandler):
                 # Cache corta para evitar que el front (retries 502) y los usuarios disparen queries pesadas a la vez.
                 now_ts = time.time()
                 cache_key_base = ",".join(sorted(set(str(eid or "").strip() for eid in empresa_ids if str(eid or "").strip())))
+                # El resultado depende también del workspace (documentos y presupuestos van por él).
+                if cache_key_base and workspace_id:
+                    cache_key_base = f"{workspace_id}::{cache_key_base}"
                 cache_key = f"{cache_key_base}::{'limited' if limited_mode else 'full'}" if cache_key_base else ""
                 if cache_key:
                     try:
@@ -113390,6 +113404,13 @@ class Handler(BaseHTTPRequestHandler):
                 service_filter = gestoria_service_sql_condition("ce")
                 service_filter_join = gestoria_service_sql_condition("ce_join")
                 placeholders_emp = ",".join(["?"] * len(empresa_ids))
+                # Documentos y presupuestos llevan su workspace: con él se acotan por el de la
+                # fila (fase 6). Los clientes de gestoría siguen por su vínculo con el servicio
+                # de la sociedad, que es lo que los hace clientes de gestoría.
+                def _ambito_panel(alias):
+                    if workspace_id:
+                        return f"COALESCE({alias}.workspace_id, '') = ?", (workspace_id,)
+                    return f"{alias}.empresa_id IN ({placeholders_emp})", tuple(empresa_ids)
 
                 payload = {
                         "counts": {
@@ -113588,11 +113609,11 @@ class Handler(BaseHTTPRequestHandler):
                     f"""
                     SELECT COUNT(*) AS total
                     FROM gestoria_docs d
-                    WHERE d.empresa_id IN ({placeholders_emp})
+                    WHERE {_ambito_panel("d")[0]}
                       AND COALESCE(TRIM(d.doc_key), '') = ''
                       AND COALESCE(TRIM(d.doc_url), '') = ''
                     """,
-                    tuple(empresa_ids),
+                    _ambito_panel("d")[1],
                 ).fetchone()
                 payload["counts"]["docs_sin_archivo"] = int(row_value(docs_sin_archivo, "total", 0) or 0)
             except Exception as exc:
@@ -113672,6 +113693,7 @@ class Handler(BaseHTTPRequestHandler):
                     conn,
                     empresa_ids,
                     ejercicio=str(renta_summary.get("ejercicio") or "").strip(),
+                    workspace_id=workspace_id,
                 )
                 campañas_total = int(renta_summary.get("total") or 0)
                 campañas_presentadas = int(renta_summary.get("presentadas") or 0)
@@ -113753,13 +113775,13 @@ class Handler(BaseHTTPRequestHandler):
                     SELECT p.fecha, p.fecha_seguimiento, p.titulo, p.motivo_estado, COALESCE(c.nombre, '') AS cliente
                     FROM workspace_presupuestos p
                     LEFT JOIN clientes c ON c.id = p.cliente_id
-                    WHERE p.empresa_id IN ({placeholders_emp})
+                    WHERE {_ambito_panel("p")[0]}
                       AND {gestoria_service_sql_condition("p")}
                       AND LOWER(COALESCE(p.estado, '')) = 'estudio'
                     ORDER BY COALESCE(p.fecha_seguimiento, p.fecha, p.updated_at) ASC
                     LIMIT 12
                     """,
-                    tuple(empresa_ids),
+                    _ambito_panel("p")[1],
                 ).fetchall()
                 payload["presupuestos_estudio"] = [dict(r) for r in presupuestos_estudio]
                 payload["counts"]["presupuestos_estudio"] = len(presupuestos_estudio)
@@ -113775,13 +113797,13 @@ class Handler(BaseHTTPRequestHandler):
                     SELECT p.fecha, p.fecha_seguimiento, p.titulo, p.motivo_estado, COALESCE(c.nombre, '') AS cliente
                     FROM workspace_presupuestos p
                     LEFT JOIN clientes c ON c.id = p.cliente_id
-                    WHERE p.empresa_id IN ({placeholders_emp})
+                    WHERE {_ambito_panel("p")[0]}
                       AND {gestoria_service_sql_condition("p")}
                       AND LOWER(COALESCE(p.estado, '')) = 'rechazado'
                     ORDER BY COALESCE(p.fecha_seguimiento, p.updated_at) ASC
                     LIMIT 12
                     """,
-                    tuple(empresa_ids),
+                    _ambito_panel("p")[1],
                 ).fetchall()
                 payload["presupuestos_rechazados"] = [dict(r) for r in presupuestos_rechazados]
             except Exception as exc:
@@ -113796,14 +113818,14 @@ class Handler(BaseHTTPRequestHandler):
                     SELECT p.fecha, p.fecha_encargo, p.titulo, p.encargo_estado, COALESCE(c.nombre, '') AS cliente
                     FROM workspace_presupuestos p
                     LEFT JOIN clientes c ON c.id = p.cliente_id
-                    WHERE p.empresa_id IN ({placeholders_emp})
+                    WHERE {_ambito_panel("p")[0]}
                       AND {gestoria_service_sql_condition("p")}
                       AND LOWER(COALESCE(p.estado, '')) = 'aceptado'
                       AND LOWER(COALESCE(p.encargo_estado, 'pendiente')) != 'firmada'
                     ORDER BY COALESCE(p.fecha_encargo, p.fecha, p.updated_at) ASC
                     LIMIT 12
                     """,
-                    tuple(empresa_ids),
+                    _ambito_panel("p")[1],
                 ).fetchall()
                 payload["encargos_pendientes"] = [dict(r) for r in encargos_pendientes]
                 payload["counts"]["encargos_pendientes"] = len(encargos_pendientes)
@@ -114731,16 +114753,11 @@ class Handler(BaseHTTPRequestHandler):
                 if "workspace_id" in inm_cols:
                     # Compat: muchos registros legacy aún no tienen workspace_id. En modo tenant
                     # incluimos también los que pertenecen a empresas del workspace.
-                    if empresa_ids and "empresa_id" in inm_cols:
-                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                        where.append(
-                            f"(COALESCE(i.workspace_id, '') = ? OR (COALESCE(i.workspace_id, '') = '' AND i.empresa_id IN ({placeholders_ws})))"
-                        )
-                        values.append(workspace_id)
-                        values.extend(empresa_ids)
-                    else:
-                        where.append("COALESCE(i.workspace_id, '') = ?")
-                        values.append(workspace_id)
+                    # Solo por workspace (fase 6): todas las filas lo llevan desde la fase 1; el
+                    # "o sin workspace de una empresa del workspace" veía las de otro con la
+                    # empresa compartida.
+                    where.append("COALESCE(i.workspace_id, '') = ?")
+                    values.append(workspace_id)
                 else:
                     if not empresa_ids:
                         json_response(self, {"rows": []})
@@ -114870,31 +114887,11 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if record_id:
                 if workspace_id and "workspace_id" in op_cols:
-                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
-                    if not empresa_ids:
-                        platform_eid = get_platform_empresa_id(conn)
-                        if platform_eid:
-                            empresa_ids = [platform_eid]
-                    if empresa_ids:
-                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                        row = conn.execute(
-                            f"""
-                            SELECT *
-                            FROM operaciones_inmobiliarias
-                            WHERE id = ?
-                              AND (
-                                COALESCE(workspace_id, '') = ?
-                                OR (COALESCE(workspace_id, '') = '' AND empresa_id IN ({placeholders_ws}))
-                              )
-                            LIMIT 1
-                            """,
-                            [record_id, workspace_id, *empresa_ids],
-                        ).fetchone()
-                    else:
-                        row = conn.execute(
-                            "SELECT * FROM operaciones_inmobiliarias WHERE id = ? AND COALESCE(workspace_id, '') = ? LIMIT 1",
-                            (record_id, workspace_id),
-                        ).fetchone()
+                    # Solo por workspace (fase 6): todas las operaciones lo llevan desde la fase 1.
+                    row = conn.execute(
+                        "SELECT * FROM operaciones_inmobiliarias WHERE id = ? AND COALESCE(workspace_id, '') = ? LIMIT 1",
+                        (record_id, workspace_id),
+                    ).fetchone()
                 elif workspace_id:
                     empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
                     if not empresa_ids:
@@ -114919,21 +114916,9 @@ class Handler(BaseHTTPRequestHandler):
             values = []
             if workspace_id:
                 if "workspace_id" in op_cols:
-                    empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
-                    if not empresa_ids:
-                        platform_eid = get_platform_empresa_id(conn)
-                        if platform_eid:
-                            empresa_ids = [platform_eid]
-                    if empresa_ids:
-                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                        where.insert(
-                            0,
-                            f"(COALESCE(workspace_id, '') = ? OR (COALESCE(workspace_id, '') = '' AND empresa_id IN ({placeholders_ws})))",
-                        )
-                        values = [workspace_id, *empresa_ids, *values]
-                    else:
-                        where.insert(0, "COALESCE(workspace_id, '') = ?")
-                        values.insert(0, workspace_id)
+                    # Solo por workspace (fase 6), igual que la ficha de arriba.
+                    where.insert(0, "COALESCE(workspace_id, '') = ?")
+                    values.insert(0, workspace_id)
                 else:
                     empresa_ids = fetch_workspace_company_ids(conn, workspace_id) or []
                     if not empresa_ids:
@@ -116367,16 +116352,11 @@ class Handler(BaseHTTPRequestHandler):
                     if platform_eid:
                         empresa_ids = [platform_eid]
                 if "workspace_id" in d_cols:
-                    if empresa_ids and "empresa_id" in d_cols:
-                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                        where.append(
-                            f"(COALESCE(d.workspace_id, '') = ? OR (COALESCE(d.workspace_id, '') = '' AND d.empresa_id IN ({placeholders_ws})))"
-                        )
-                        values.append(workspace_id)
-                        values.extend(empresa_ids)
-                    else:
-                        where.append("COALESCE(d.workspace_id, '') = ?")
-                        values.append(workspace_id)
+                    # Solo por workspace (fase 6): todas las filas lo llevan desde la fase 1; el
+                    # "o sin workspace de una empresa del workspace" veía las de otro con la
+                    # empresa compartida.
+                    where.append("COALESCE(d.workspace_id, '') = ?")
+                    values.append(workspace_id)
                 else:
                     if not empresa_ids:
                         json_response(self, {"rows": [], "limit": 0, "offset": 0, "returned": 0, "truncated": False})
@@ -116458,16 +116438,11 @@ class Handler(BaseHTTPRequestHandler):
                     if platform_eid:
                         empresa_ids = [platform_eid]
                 if "workspace_id" in v_cols:
-                    if empresa_ids and "empresa_id" in v_cols:
-                        placeholders_ws = ",".join(["?"] * len(empresa_ids))
-                        where.append(
-                            f"(COALESCE(v.workspace_id, '') = ? OR (COALESCE(v.workspace_id, '') = '' AND v.empresa_id IN ({placeholders_ws})))"
-                        )
-                        values.append(workspace_id)
-                        values.extend(empresa_ids)
-                    else:
-                        where.append("COALESCE(v.workspace_id, '') = ?")
-                        values.append(workspace_id)
+                    # Solo por workspace (fase 6): todas las filas lo llevan desde la fase 1; el
+                    # "o sin workspace de una empresa del workspace" veía las de otro con la
+                    # empresa compartida.
+                    where.append("COALESCE(v.workspace_id, '') = ?")
+                    values.append(workspace_id)
                 else:
                     if not empresa_ids:
                         json_response(self, {"rows": []})

@@ -21,7 +21,7 @@ SERVER = (Path(__file__).resolve().parents[1] / "web" / "server.py").read_text(e
 
 # Recuento a 2026-09-18, tras la fase 2. Solo puede bajar.
 TECHO = {
-    "fetch_workspace_company_ids(conn": 45,
+    "fetch_workspace_company_ids(conn": 43,
     "fetch_workspace_operational_company_ids(conn": 1,
     "resolve_workspace_company_ids(conn": 18,
     "resolve_workspace_scope_empresa_ids(conn": 12,
